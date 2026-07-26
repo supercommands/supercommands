@@ -53,7 +53,7 @@ const ThemeSettings: React.FC = () => {
   const wallpapers = [
     { id: 'none', label: '', src: '' },
     ...(customWallpaperPreview ? [{ id: 'custom', label: 'Custom Image', src: customWallpaperPreview }] : []),
-    ...['Car Race.png', 'Evermist.png', 'sky.png'].map(filename => {
+    ...['car-race.png', 'Evermist.png', 'sky.png'].map(filename => {
       const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
       return {
         id: filename,

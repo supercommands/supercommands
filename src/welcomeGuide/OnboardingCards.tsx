@@ -2371,7 +2371,7 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
   // Wallpaper list static hardcoded to avoid duplicate bundle assets
   const wallpapers = [
     { id: 'none', label: 'None', src: '' },
-    ...['Car Race.png', 'Evermist.png', 'sky.png'].map(filename => {
+    ...['car-race.png', 'Evermist.png', 'sky.png'].map(filename => {
       const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
       return {
         id: filename,
