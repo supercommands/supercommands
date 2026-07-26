@@ -31,7 +31,6 @@ import {
 } from '../domSelector/engine';
 import { interactionEngine } from './index';
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Re-export the original types so nothing else needs to change
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,8 +180,6 @@ const updateAutomationStatus = async (status: any, tabId?: number) => {
     console.error('[AutomationExecutor] Failed to update storage status:', err);
   }
 };
-
-
 
 const getStepDescription = (step: BgAutomationStep) => {
   if (step.config?.name) return step.config.name;
@@ -805,7 +802,6 @@ export const executeAutomation = async (automation: BgSavedAutomation) => {
   try {
     // 0. Trigger credit usage API if it's a custom automation (not an installed module)
     if (!automation.id || !automation.id.startsWith('module-')) {
-
     }
 
     await updateAutomationStatus(

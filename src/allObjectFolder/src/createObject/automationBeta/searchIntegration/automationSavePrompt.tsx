@@ -7,7 +7,7 @@ import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { createAutomation } from '../automationData';
 import { DestinationPicker } from '../../../../../shared-components/editorToolbar/DestinationPicker';
 import useNotification from '../../../../../shared-components/notifications/useNotification';
-import { getFaviconUrl, appendCmdStatus } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl, appendCmdStatus } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 
 interface AutomationSavePromptProps {
   isOpen: boolean;

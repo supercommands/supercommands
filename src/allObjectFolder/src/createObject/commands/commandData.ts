@@ -14,6 +14,7 @@ import { db } from '../../../../storage/indexDB/dbConfig';
 
 import { generateEntityId } from '../../../../shared-components/utils';
 import { ALL_COMMANDS } from '../../../../shared-components/commands';
+import { normalizePrefix } from '../../../../shared-components/commands/utils';
 import type { CommandModule } from '../../../../shared-components/commands';
 import type {
   CommandRecord,
@@ -26,7 +27,7 @@ export async function createCommand(input: CreateCommandInput): Promise<CommandR
   const command: CommandRecord = {
     id: input.id || generateEntityId('command'),
     label: input.label.trim(),
-    prefix: input.prefix.trim(),
+    prefix: normalizePrefix(input.prefix),
     behavior: input.behavior,
     surface: input.surface,
     site: input.site,
@@ -52,7 +53,7 @@ export async function updateCommand(commandId: string, input: UpdateCommandInput
   const updated: CommandRecord = {
     ...existing,
     label: input.label !== undefined ? input.label.trim() : existing.label,
-    prefix: input.prefix !== undefined ? input.prefix.trim() : existing.prefix,
+    prefix: input.prefix !== undefined ? normalizePrefix(input.prefix) : existing.prefix,
     behavior: input.behavior ?? existing.behavior,
     surface: input.surface !== undefined ? input.surface : existing.surface,
     site: input.site !== undefined ? input.site : existing.site,
@@ -90,29 +91,22 @@ export async function deleteCommand(id: string): Promise<void> {
 }
 
 function toCommandRecord(command: CommandModule): CommandRecord {
-  const lowerId = String(command.id || '').toLowerCase();
-  const isGithubCommand = lowerId.startsWith('github_');
-  const site = isGithubCommand ? 'github' : undefined;
-  const pageType =
-    lowerId.includes('_org_') || lowerId.endsWith('_org_action')
-      ? 'organization'
-      : isGithubCommand
-        ? 'repository'
-        : undefined;
-
   return {
     id: command.id,
     label: command.label,
-    prefix: command.prefix,
+    prefix: normalizePrefix(command.prefix),
     behavior: command.behavior as CommandRecord['behavior'],
-    surface: command.category === 'thissite_action' || typeof command.isAvailable === 'function' ? 'website' : 'both',
-    site,
-    pageType,
+    surface:
+      command.surface ??
+      (command.category === 'page_action' || command.category === 'thissite_action' || typeof command.isAvailable === 'function'
+        ? 'website'
+        : 'both'),
     iconHost: command.iconHost,
     category: command.category,
     type: (command as any).type,
     urlTemplate: (command as any).urlTemplate,
     enabled: true,
+    showInDashboard: command.showInDashboard,
     updatedAt: Date.now(),
   };
 }
@@ -130,7 +124,19 @@ export async function syncCommandsFromSource(): Promise<CommandRecord[]> {
   // Important: we intentionally do not persist React icon values here because
   // IndexedDB uses structured clone and cannot reliably store React elements or
   // component references. The UI hydrates icons from the in-memory registry.
-  await db.commands.bulkPut(seedCommands);
+  const allowedIds = new Set(seedCommands.map(command => command.id));
+
+  await db.transaction('rw', db.commands, async () => {
+    await db.commands.bulkPut(seedCommands);
+
+    const staleIds = (await db.commands.toArray())
+      .filter(command => !allowedIds.has(command.id))
+      .map(command => command.id);
+
+    if (staleIds.length > 0) {
+      await db.commands.bulkDelete(staleIds);
+    }
+  });
 
   return db.commands.orderBy('label').toArray();
 }

@@ -14,7 +14,7 @@ import Dexie from 'dexie';
 
 import type { ChatAgentRecord, CreateChatAgentInput, UpdateChatAgentInput } from './chatAgentTypes';
 import { generateEntityId } from '../../../../shared-components/utils';
-import { db } from '../../../../storage/indexDB/dbConfig';
+import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 
 /**
@@ -171,6 +171,7 @@ export async function getChatAgentsForFolder(workspaceId: string, folderId: stri
  */
 export async function deleteChatAgent(agentId: string): Promise<void> {
   try {
+    await deleteItemAssociations(agentId);
     await db.chatAgents.delete(agentId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';

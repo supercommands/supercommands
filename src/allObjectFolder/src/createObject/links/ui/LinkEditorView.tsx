@@ -1,11 +1,16 @@
 import { createTodo } from '../../todos/todoData';
 import { AutoSaveIndicator } from '../../../../../shared-components/autoSaveEngine/autoSave';
 import { EditorContainer } from '../../../../../shared-components/editorContainer/EditorContainer';
+import { ExistingItemsTable } from '../../../../../shared-components/editorContainer/ExistingItemsTable';
+import { WorkspaceEditorLayout } from '../../../../../shared-components/editorContainer/WorkspaceEditorLayout';
+import { EditorTitleShortcutInput } from '../../../../../shared-components/editorContainer/EditorTitleShortcutInput';
 import { StorageManager } from '../../../../../storage/localStorage/storageManager';
 import { SharedPropertiesToolbar } from '../../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
+import { useShortcutValidation } from '../../../../../shared-components/shortcuts/hooks/useShortcutValidation';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Reorder } from 'framer-motion';
 import {
   FaPlus,
   FaTrash,
@@ -30,26 +35,28 @@ import {
   FaLock,
   FaUsers,
   FaStar,
+  FaKeyboard,
   FaRobot,
   FaList,
   FaCopy,
   FaDirections,
   FaLayerGroup,
 } from 'react-icons/fa';
-import { FiStar, FiChevronLeft, FiChevronRight, FiTag } from 'react-icons/fi';
+import { FiStar, FiChevronLeft, FiChevronRight, FiTag, FiCopy } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { formatDistanceToNow } from 'date-fns';
 import { saveHotkey as apiSaveHotkey, clearHotkey as apiClearHotkey } from '../../../../../shared-components/hotkeys';
 import { saveShortcut as apiSaveShortcut, clearShortcut as apiClearShortcut } from '../../../../../shared-components/shortcuts';
-import { getItemCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { getItemCompoundId, readAllHotkeys, readAllShortcuts } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 
-import { getFaviconUrl } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { clsx } from 'clsx';
 import { useFavorites } from '../../../../../shared-components/favorites/favoriteHooks';
 import { getUserId } from '../../../../../storage/API/core/api';
 import { deleteUserHotkeyByReference } from '../../../../../shared-components/hotkeys/core/hotkeyDbData';
-import { deleteUserShortcutByReference } from '../../../../../shared-components/shortcuts/core/shortcutDbData';
+import { saveShortcut } from '../../../../../shared-components/shortcuts';
+import { deleteUserShortcutByReference, normalizeShortcutTrigger } from '../../../../../shared-components/shortcuts/core/shortcutDbData';
 import type { BrowserTab, SelectedLink, ContentTab } from '../linkTypes';
 import { useChromeTabs } from './hooks/useChromeTabs';
 import { HighlightedInput } from './components/HighlightedInput';
@@ -57,6 +64,8 @@ import { useLinkEditor } from '../useLinkEditor';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import type { SnippetRecord } from '../../../../../allObjectFolder/src/createObject/snippets/snippetTypes';
 import { nowUtc } from '../../../../../shared-components/utils';
+import { deleteLink, updateLink } from '../linkData';
+import { createTag } from '../../tags/tagData';
 
 interface LinkEditorViewProps {
   isOpen: boolean;
@@ -66,8 +75,24 @@ interface LinkEditorViewProps {
   reload: () => void; // Kept for compatibility, though we use optimistic updates
 }
 
+const LinkDragHandle: React.FC = () => (
+  <div className="grid grid-cols-2 gap-[2px]">
+    {Array.from({ length: 6 }).map((_, index) => (
+      <span
+        key={index}
+        className="h-[2.5px] w-[2.5px] rounded-full bg-current opacity-80"
+      />
+    ))}
+  </div>
+);
+
 
 const EMPTY_INITIAL_URLS: any[] = [];
+
+const getLinkReorderKey = (item: { id?: string; url?: string }, index?: number): string => {
+  if (item.id) return item.id;
+  return `${item.url || 'link-item'}-${index ?? 0}`;
+};
 
 const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   isOpen,
@@ -85,6 +110,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
   const hasUserModifiedRef = useRef(false);
+  const [shortcutsMap, setShortcutsMap] = useState<Record<string, string>>({});
+  const [hotkeysMap, setHotkeysMap] = useState<Record<string, string>>({});
+  const [tableSearchQuery, setTableSearchQuery] = useState('');
 
   useEffect(() => {
     if (!isOpen) {
@@ -92,10 +120,16 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       setIsForceCreateNew(false);
       hasPrefilledEditModeRef.current = false;
       hasUserModifiedRef.current = false;
+      isShortcutManuallyEditedRef.current = false;
+      setLinkShortcut('');
     } else {
       hasUserModifiedRef.current = false;
+      isShortcutManuallyEditedRef.current = false;
+      if (!initialLinkProp && !localLinkOverride) {
+        setLinkShortcut('');
+      }
       if (!initialLinkProp) {
-        
+
       }
       setTimeout(() => {
         const input = titleInputRef.current;
@@ -106,13 +140,20 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         }
       }, 150);
     }
-  }, [isOpen, initialLinkProp]);
+  }, [isOpen, initialLinkProp, localLinkOverride]);
 
   const initialLink = isForceCreateNew ? null : localLinkOverride || initialLinkProp;
+
   const linkId = initialLink?.id || (initialLink as any)?.snippet_id || null;
+  const isFocusMode = useUIStore((s: any) => s.isFocusMode);
+  const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   const snippets = useDbStore(state => state.snippets);
   const automations = useDbStore(state => state.automations);
+  const links = useDbStore(state => state.links);
+  const workspaces = useDbStore(state => state.workspaces);
+  const folders = useDbStore(state => state.folders);
+  const tags = useDbStore(state => state.tags);
 
   // Legacy Redux team state removed - now using Dexie directly
 
@@ -123,6 +164,30 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const hasInitializedPrefill = useRef(false);
   const hasFetchedWorkspaces = useRef(false);
 
+  const workspaceNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    workspaces.forEach((w: any) => {
+      map[w.id] = w.workspaceName;
+    });
+    return map;
+  }, [workspaces]);
+
+  const folderNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    folders.forEach((f: any) => {
+      map[f.id] = f.folderName;
+    });
+    return map;
+  }, [folders]);
+
+  const tagNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    tags.forEach((t: any) => {
+      map[t.id] = t.name;
+    });
+    return map;
+  }, [tags]);
+
 
 
   const {
@@ -130,22 +195,137 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     setLinkTitle: setTitle,
     linkUrls: selectedLinks,
     setLinkUrls: setSelectedLinks,
+    linkShortcut,
+    setLinkShortcut,
+    isShortcutManuallyEditedRef,
     saveStatus,
+    setSaveStatus,
     saveError,
-    isDirty: hasUnsavedChanges,
     lastSavedAt,
+    setLastSavedAt,
+    lastSavedTitleRef,
+    lastSavedShortcutRef,
+    isDirty: hasUnsavedChanges,
     handleSave: executeSave,
     activeLinkId,
     liveLink,
     handlePropertiesChange,
     workspaceId,
     folderId,
+    tagIds,
     isLinkDeleted,
     conflictLink,
     resolveConflictWithRemote,
     keepLocalVersion,
     resetEditor,
+    isInitialized,
+    isShortcutInitialized,
   } = useLinkEditor({ linkId, initialDraftKey: prefill?.key, initialDraftUrls: EMPTY_INITIAL_URLS });
+
+  const tagIdsKey = useMemo(() => [...tagIds].sort().join('|'), [tagIds]);
+  const initialProperties = useMemo(() => {
+    return {
+      id: activeLinkId,
+      title: title,
+      workspaceId: workspaceId,
+      folderId: folderId,
+      tagIds: tagIds,
+      category: 'link',
+      tags: [...tagIds].sort().map((id: string) => {
+        const found = tags.find(t => t.id === id);
+        return found ? found : { id, name: '' };
+      }),
+      
+    };
+  }, [activeLinkId, title, workspaceId, folderId, tagIds, tagIdsKey, tags]);
+
+  const { validateShortcut } = useShortcutValidation();
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const [isShortcutOverrideable, setIsShortcutOverrideable] = useState<boolean>(false);
+  const [shortcutConflictId, setShortcutConflictId] = useState<string | null>(null);
+
+  // Clear validation errors when switching between active links/drafts
+  useEffect(() => {
+    setTitleError(null);
+    setShortcutError(null);
+  }, [activeLinkId]);
+
+  useEffect(() => {
+    let active = true;
+    const checkShortcut = async () => {
+      if (linkShortcut) {
+        const currentCompound = getItemCompoundId({
+          id: initialLink?.id || activeLinkId,
+          workspace_id: workspaceId || null,
+          folder_id: folderId || null,
+          snippet: { id: initialLink?.id || activeLinkId, category: 'link' },
+        });
+        if (shortcutsMap && shortcutsMap[currentCompound] === linkShortcut) {
+          if (active) {
+            setShortcutError(null);
+            setIsShortcutOverrideable(false);
+            setShortcutConflictId(null);
+          }
+          return;
+        }
+        const res = await validateShortcut(linkShortcut, initialLink?.id || activeLinkId || 'new');
+        if (active) {
+          if (!res.isValid) {
+            setShortcutError(res.errorMessage || 'This shortcut is already taken.');
+            setIsShortcutOverrideable(!!res.isOverrideable);
+            setShortcutConflictId(res.conflictId || null);
+          } else {
+            setShortcutError(null);
+            setIsShortcutOverrideable(false);
+            setShortcutConflictId(null);
+          }
+        }
+      } else {
+        if (active) {
+          setShortcutError(null);
+          setIsShortcutOverrideable(false);
+          setShortcutConflictId(null);
+        }
+      }
+    };
+    void checkShortcut();
+    return () => {
+      active = false;
+    };
+  }, [linkShortcut, activeLinkId, initialLink, shortcutsMap, workspaceId, folderId, validateShortcut]);
+
+  const handleOverrideShortcut = useCallback(async () => {
+    if (!linkShortcut) return;
+    console.log('[ShortcutDebug] Executing handleOverrideShortcut for linkShortcut:', linkShortcut);
+    let targetId = initialLink?.id || activeLinkId;
+    if (!targetId) {
+      console.log('[ShortcutDebug] Saving new link item to get real ID before shortcut reassignment...');
+      const saveSuccess = await executeSave(true);
+      if (!saveSuccess) return;
+      targetId = activeLinkId;
+    }
+    if (!targetId) return;
+
+    if (shortcutConflictId) {
+      console.log('[ShortcutDebug] Explicitly clearing conflicting shortcut reference:', shortcutConflictId);
+      await apiClearShortcut(shortcutConflictId, shortcutConflictId, 'link');
+    }
+
+    const currentCompound = getItemCompoundId({
+      id: targetId,
+      workspace_id: workspaceId || null,
+      folder_id: folderId || null,
+      snippet: { id: targetId, category: 'link' },
+    });
+    console.log(`[ShortcutDebug] Saving shortcut "${linkShortcut}" to target ID "${targetId}" (compound: ${currentCompound})...`);
+    await apiSaveShortcut(targetId, currentCompound, linkShortcut, title || 'Link', 'link');
+    console.log('[ShortcutDebug] Shortcut reassignment saved to DB. Clearing validation error.');
+    setShortcutError(null);
+    setIsShortcutOverrideable(false);
+    setShortcutConflictId(null);
+    await executeSave(true);
+  }, [linkShortcut, initialLink, activeLinkId, workspaceId, folderId, title, shortcutConflictId, executeSave]);
 
   // Determine mode based on whether a snippet is passed or has been saved
   const isEditMode = !!initialLink || !!activeLinkId;
@@ -159,6 +339,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       snippet: { id: activeLinkId, category: 'link' }
     });
   }, [activeLinkId, workspaceId, folderId]);
+
   const { tabsByWindow, allTabs, currentWindowId, collapsedWindows, setCollapsedWindows, hasFetchedTabs, fetchTabs } = useChromeTabs(isOpen);
   const hasPrefilledEditModeRef = useRef(false);
 
@@ -170,6 +351,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       selectedLinks: SelectedLink[];
     };
   } | null>(null);
+
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [linkToDeleteId, setLinkToDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialLink && initialLink.updated_at) {
@@ -204,8 +388,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   const getBackupKey = useCallback(() => {
     const currentSnippetId = (initialLink as any)?.id || (initialLink as any)?.snippet_id;
-    return currentSnippetId 
-      ? `unsaved_session_backup_${currentSnippetId}` 
+    return currentSnippetId
+      ? `unsaved_session_backup_${currentSnippetId}`
       : 'unsaved_session_backup_new';
   }, [initialLink]);
 
@@ -265,7 +449,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       window.clearTimeout(footerStatusTimeoutRef.current);
     }
     setFooterStatus({ type, message });
-    
+
     if (type === 'success' || type === 'error') {
       footerStatusTimeoutRef.current = window.setTimeout(() => {
         setFooterStatus({ type: 'idle', message: '' });
@@ -336,11 +520,11 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const [focusedSuggestionIndex, setFocusedSuggestionIndex] = useState(-1);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const shortcutInputRef = useRef<HTMLInputElement>(null);
   const favButtonRef = useRef<HTMLButtonElement>(null);
   const hotkeyButtonRef = useRef<HTMLButtonElement>(null);
   const locationHoverTimerRef = useRef<NodeJS.Timeout | null>(null);
   const tagHoverTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const customLinkUrlRef = useRef<HTMLInputElement>(null);
   const [editingUrlId, setEditingUrlId] = useState<string | null>(null);
   const [editingUrlValue, setEditingUrlValue] = useState<string>('');
@@ -423,7 +607,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const saveLinkEditPopup = useCallback(() => {
     if (!editingPopupLinkId) return;
     let newUrl = editingUrlParts ? assembleUrl(editingUrlParts) : localUrlValue;
-    
+
     newUrl = newUrl.trim();
     if (newUrl && !/^https?:\/\//i.test(newUrl)) {
       newUrl = `https://${newUrl}`;
@@ -479,23 +663,11 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const listContainerRef = useRef<HTMLDivElement>(null);
 
 
-  // Auto-select highlighted browser tabs when opening in create mode
   useEffect(() => {
-    if (isOpen && !isEditMode && !prefill && !hasAutoSelectedRef.current && availableItems.length > 0) {
-      const highlighted = availableItems.filter(
-        item =>
-          item.source === 'tab' && (item.originalData?.highlighted === true || item.originalData?.active === true),
-      );
-      if (highlighted.length > 0) {
-        setSelectedLinks(highlighted);
-        const activeTab = highlighted.find(h => h.originalData?.active === true) || highlighted[0];
-      }
-      hasAutoSelectedRef.current = true;
-    }
     if (!isOpen) {
       hasAutoSelectedRef.current = false;
     }
-  }, [isOpen, isEditMode, prefill, availableItems, isTitleManuallyModified]);
+  }, [isOpen]);
 
   useEffect(() => {
     if (showPathQueryDropdown) {
@@ -559,6 +731,21 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
 
   const { toggleFavorite } = useFavorites();
+  const { isFavorite } = useFavorites();
+
+  const fetchTableMaps = useCallback(async () => {
+    try {
+      const [hotkeys, shortcuts] = await Promise.all([readAllHotkeys(), readAllShortcuts()]);
+      setHotkeysMap(hotkeys);
+      setShortcutsMap(shortcuts);
+    } catch (error) {
+      console.error('[LinkEditorView] Failed to fetch table maps:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchTableMaps();
+  }, [fetchTableMaps, activeLinkId, saveStatus]);
 
   const toggleFavoriteLocal = async (item: any) => {
     try {
@@ -575,7 +762,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     if (initialLink) {
       toggleFavoriteLocal(initialLink);
     } else {
-      
+
     }
   };
 
@@ -585,14 +772,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   };
 
   const handleHotkeyChange = async (newHotkey: string) => {
-    
-
     if (initialLink?.id && !String(initialLink.id).startsWith('temp-')) {
       try {
-        const folderId = (initialLink as any).folder_id;
-        const workspaceId = (initialLink as any).workspace_id;
-        const compoundId = `${folderId || workspaceId || propertiesRef.current?.workspaceId || ''}-${initialLink.id}`;
-        
         if (!newHotkey) {
           await apiClearHotkey(initialLink.id, compoundId, 'link');
         } else {
@@ -607,14 +788,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   };
 
   const handleShortcutChange = async (newShortcut: string) => {
-    
-
     if (initialLink?.id && !String(initialLink.id).startsWith('temp-')) {
       try {
-        const folderId = (initialLink as any).folder_id;
-        const workspaceId = (initialLink as any).workspace_id;
-        const compoundId = `${folderId || workspaceId || propertiesRef.current?.workspaceId || ''}-${initialLink.id}`;
-
         if (!newShortcut) {
           await apiClearShortcut(initialLink.id, compoundId, 'link');
         } else {
@@ -633,6 +808,113 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       }
     }
   };
+
+  const sortedLinks = useMemo(() => {
+    const query = tableSearchQuery.trim().toLowerCase();
+    const sorted = [...links].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    if (!query) return sorted;
+    return sorted.filter(link => {
+      const compound = getItemCompoundId({
+        id: link.id,
+        workspace_id: link.workspaceId || null,
+        folder_id: link.folderId || null,
+        snippet: { id: link.id, category: 'link' },
+      });
+      const shortcut = shortcutsMap[compound] || '';
+      const titleMatch = (link.title || '').toLowerCase().includes(query);
+      const shortcutMatch = shortcut.toLowerCase().includes(query);
+      const previewMatch = (link.urls || [])
+        .some((item: any) => `${item.name || ''} ${item.url || ''}`.toLowerCase().includes(query));
+      return titleMatch || shortcutMatch || previewMatch;
+    });
+  }, [links, shortcutsMap, tableSearchQuery]);
+
+  const handleLoadLinkItem = useCallback((id: string) => {
+    const found = links.find(link => link.id === id);
+    if (!found) return;
+    setIsForceCreateNew(false);
+    setLocalLinkOverride(found);
+    hasInitializedPrefill.current = false;
+    hasPrefilledEditModeRef.current = false;
+  }, [links]);
+
+  const handleDeleteLinkItem = useCallback(async (id: string) => {
+    try {
+      await deleteLink(id);
+      if (id === activeLinkId) {
+        resetEditor();
+        setLocalLinkOverride(null);
+        setIsForceCreateNew(true);
+      }
+    } catch (error) {
+      console.error('[LinkEditorView] Failed to delete link item:', error);
+    }
+  }, [activeLinkId, resetEditor]);
+
+  const handleUpdateItemField = useCallback(async (id: string, field: 'title' | 'shortcut' | 'tags', value: string) => {
+    try {
+      const existing = links.find(link => link.id === id);
+      if (!existing) return;
+
+      if (field === 'title') {
+        const updatedTitle = value.trim() || 'Untitled Link';
+        await updateLink(id, { title: updatedTitle });
+        const compound = getItemCompoundId({
+          id,
+          workspace_id: existing.workspaceId || null,
+          folder_id: existing.folderId || null,
+          snippet: { id, category: 'link' },
+        });
+        const shortcut = shortcutsMap[compound] || '';
+        if (shortcut) {
+          await apiSaveShortcut(id, compound, shortcut.toLowerCase(), updatedTitle, 'link');
+        }
+        if (id === activeLinkId) {
+          setTitle(updatedTitle);
+          if (lastSavedTitleRef) lastSavedTitleRef.current = updatedTitle;
+        }
+      } else if (field === 'shortcut') {
+        const finalShortcut = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const compound = getItemCompoundId({
+          id,
+          workspace_id: existing.workspaceId || null,
+          folder_id: existing.folderId || null,
+          snippet: { id, category: 'link' },
+        });
+        if (finalShortcut) {
+          await apiSaveShortcut(id, compound, finalShortcut, existing.title, 'link');
+        } else {
+          await apiClearShortcut(id, compound, 'link');
+        }
+        if (id === activeLinkId) {
+          setLinkShortcut(finalShortcut);
+          if (lastSavedShortcutRef) lastSavedShortcutRef.current = finalShortcut;
+        }
+      } else if (field === 'tags') {
+        const tagNames = value.split(',').map(t => t.trim()).filter(Boolean);
+        const resolvedTags: any[] = [];
+        for (const name of tagNames) {
+          const matchedTag = tags.find((t: any) => t.name.toLowerCase() === name.toLowerCase() && t.workspaceId === existing.workspaceId);
+          if (matchedTag) {
+            resolvedTags.push(matchedTag);
+          } else if (existing.workspaceId) {
+            const newTag = await createTag(name, existing.workspaceId);
+            resolvedTags.push(newTag);
+          }
+        }
+        await updateLink(id, { tagIds: resolvedTags.map((t: any) => t.id) });
+      }
+
+      if (id === activeLinkId) {
+        if (setSaveStatus) setSaveStatus('saved');
+        if (setLastSavedAt) setLastSavedAt(new Date());
+      }
+
+      await fetchTableMaps();
+    } catch (error) {
+      console.error('[LinkEditorView] Failed to update item field:', error);
+    }
+  }, [links, shortcutsMap, activeLinkId, setTitle, setLinkShortcut, setSaveStatus, setLastSavedAt, lastSavedTitleRef, lastSavedShortcutRef, tags, fetchTableMaps]);
 
   useEffect(() => {
     if (showPathQueryDropdown) {
@@ -728,7 +1010,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         });
 
         const finalResults = Array.from(unique.values()).slice(0, 5);
-        
+
         setLinkSuggestions(finalResults);
         setFocusedSuggestionIndex(finalResults.length > 0 ? 0 : -1);
       } catch (e) {
@@ -752,14 +1034,14 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     const currentId = initialLink?.id || (initialLink as any)?.snippet_id;
     if (!isOpen || !isEditMode || !initialLink) return;
     if (hasPrefilledEditModeRef.current && lastPrefilledSnippetIdRef.current === currentId) return;
-    
+
     hasPrefilledEditModeRef.current = true;
     lastPrefilledSnippetIdRef.current = currentId;
     try {
       setTitle(initialLink.title || initialLink.key || initialLink.name || '');
-      
+
       if (initialLink.tags && initialLink.tags.length > 0) {
-        
+
       } else if (initialLink.searchtags) {
         const rawTags = initialLink.searchtags;
         rawSearchTagsRef.current = rawTags;
@@ -771,7 +1053,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
           firstTag = rawTags.split(',')[0].trim();
         }
         if (firstTag) {
-          
+
         }
       } else {
         // Local storage backup fallback for searchtags
@@ -789,13 +1071,13 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 firstTag = bTag.split(',')[0].trim();
               }
               if (firstTag) {
-                
+
               }
             }
           });
         }
       }
-      
+
       const category = String(initialLink.category || initialLink.kind || "link").toLowerCase();
 
       const isGroup = category === 'link' || category === 'snippet' || category === 'tabgroup';
@@ -805,13 +1087,13 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         if (initialLink.urls && Array.isArray(initialLink.urls)) {
           // Check if urls are string array or LinkItem array
           if (initialLink.urls.length > 0 && typeof initialLink.urls[0] === 'string') {
-             setSelectedLinks(initialLink.urls.map((u: string) => ({
-                url: u,
-                title: '',
-                id: (window as any).crypto?.randomUUID ? crypto.randomUUID() : `link-${Date.now()}`
-             })));
+            setSelectedLinks(initialLink.urls.map((u: string) => ({
+              url: u,
+              title: '',
+              id: (window as any).crypto?.randomUUID ? crypto.randomUUID() : `link-${Date.now()}`
+            })));
           } else {
-             setSelectedLinks(initialLink.urls);
+            setSelectedLinks(initialLink.urls);
           }
         } else {
           // Handle legacy snippet format (JSON value string)
@@ -916,10 +1198,6 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   // Auto-open custom link input if there are no open browser tabs on Current Tabs
   useEffect(() => {
     if (isOpen && activeContentTab === 'Current Tabs' && hasFetchedTabs && !hasAutoOpenedRef.current) {
-      const hasTabs = Object.values(tabsByWindow).some(group => group.length > 0);
-      if (!hasTabs) {
-        setIsLeftCustomLinkFormOpen(true);
-      }
       hasAutoOpenedRef.current = true;
     }
   }, [isOpen, activeContentTab, tabsByWindow, hasFetchedTabs]);
@@ -1130,9 +1408,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     const renderedActive = (activeContentTab === 'Selected tabs')
       ? []
       : filteredItems.filter(item => !checkIsAdded(item)).map(item => ({
-          item,
-          isAdded: false,
-        }));
+        item,
+        isAdded: false,
+      }));
 
     return [...renderedSelected, ...renderedActive];
   }, [selectedLinks, filteredItems, activeContentTab, checkIsAdded]);
@@ -1286,18 +1564,24 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     }));
   }, []);
 
-
-
   const handleSave = useCallback(
     async (isAutoSave: boolean = false, overrideLinks?: SelectedLink[], overrideTitle?: string) => {
+      if (shortcutError) {
+        if (!isAutoSave) {
+          showFooterStatus('error', shortcutError);
+        }
+        return false;
+      }
       if (overrideTitle !== undefined) setTitle(overrideTitle);
       if (overrideLinks !== undefined) setSelectedLinks(overrideLinks);
 
       const saved = await executeSave(isAutoSave);
+
       if (saved && !isAutoSave) {
         setTimeout(() => onClose(), 1500);
       }
-    }, [executeSave, setTitle, setSelectedLinks, onClose]);
+      return saved;
+    }, [executeSave, setTitle, setSelectedLinks, onClose, shortcutError]);
 
   const parseSnippetValue = useCallback((value: string): SelectedLink[] => {
     if (!value) return [];
@@ -1327,11 +1611,11 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const handleResolveConflictOverwrite = useCallback(async () => {
     if (!conflictModalData) return;
     const { cloudSnippet, localData } = conflictModalData;
-    
+
     // Set sync baseline to cloud timestamp so retry bypasses comparison check
     lastSyncTimeRef.current = cloudSnippet.updated_at;
     setConflictModalData(null);
-    
+
     // Retry saving
     await handleSave(false, localData.selectedLinks, localData.title);
   }, [conflictModalData, handleSave]);
@@ -1340,7 +1624,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     if (!conflictModalData) return;
     const { cloudSnippet, localData } = conflictModalData;
     const cloudLinks = parseSnippetValue(cloudSnippet.value);
-    
+
     const merged = [...localData.selectedLinks];
     cloudLinks.forEach(cl => {
       if (!merged.some(l => l.url === cl.url)) {
@@ -1350,7 +1634,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
     setTitle(cloudSnippet.key || localData.title);
     setSelectedLinks(merged);
-    
+
     lastSyncTimeRef.current = cloudSnippet.updated_at;
     setConflictModalData(null);
     showFooterStatus('success', 'Merged local and cloud edits');
@@ -1359,11 +1643,11 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const handleResolveConflictDiscard = useCallback(() => {
     if (!conflictModalData) return;
     const { cloudSnippet } = conflictModalData;
-    
+
     setTitle(cloudSnippet.key || '');
     const cloudLinks = parseSnippetValue(cloudSnippet.value);
     setSelectedLinks(cloudLinks);
-    
+
     lastSyncTimeRef.current = cloudSnippet.updated_at;
     setConflictModalData(null);
     showFooterStatus('success', 'Loaded cloud version');
@@ -1408,7 +1692,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       if (backup) {
         try {
           if (Date.now() - backup.timestamp < 24 * 60 * 60 * 1000) {
-            
+
             setTitle(backup.title || '');
             setSelectedLinks(backup.selectedLinks || []);
             if (backup.targetWorkspaceId) {
@@ -1450,7 +1734,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     setLocalLinkOverride(null);
     hasInitializedPrefill.current = false;
     hasSyncedInitialDataRef.current = false;
-        
+
     setCustomLinkUrl('');
     setCustomLinkName('');
     setIsCustomLinkFormOpen(false);
@@ -1462,10 +1746,13 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   const handleCloseAttempt = useCallback(async () => {
     // Explicitly force a final save before closing.
-    await handleSave(false);
-    
+    const saved = await handleSave(false);
+    if (!saved && shortcutError) {
+      return;
+    }
+
     onClose();
-  }, [handleSave, onClose]);
+  }, [handleSave, onClose, shortcutError]);
 
   // Register escape handler with uiStateManager
   useEffect(() => {
@@ -1529,25 +1816,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     handleCreateNew,
   ]);
 
-  // Browser-level warning for unsaved changes commented out per request
-  /*
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!isOpen) return undefined;
-      const hasUnsavedChanges = !isEditMode && (selectedLinks.length > 0 || title.trim().length > 0);
 
-      if (hasUnsavedChanges) {
-        event.preventDefault();
-        event.returnValue = '';
-        return '';
-      }
-      return undefined;
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isOpen, isEditMode, selectedLinks.length, title]);
-  */
 
 
   const [focusedTabIndex, setFocusedTabIndex] = useState(0);
@@ -1660,18 +1929,198 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   return (
     <>
-      <EditorContainer
-        className="flex flex-row flex-1 h-full relative text-left w-full custom-scrollbar min-h-[450px]"
-        innerClassName="flex flex-col gap-1 w-[800px] max-w-full flex-shrink h-full min-w-[350px] relative min-h-[450px]"
+      <WorkspaceEditorLayout
+        title={isForceCreateNew ? 'Create a link' : activeLinkId ? 'Edit link' : 'Create a link'}
+        isDirty={hasUnsavedChanges}
+        saveStatus={saveStatus === 'error' && saveError ? 'error' : saveStatus}
+        lastSavedAt={lastSavedAt}
+        activeId={activeLinkId}
+        hideRightColumnBorder={true}
+        onSave={async () => {
+          const saved = await handleSave(false);
+          return typeof saved === 'boolean' ? saved : !!saved;
+        }}
+        onDiscard={() => {
+          onClose();
+        }}
+        onCloseCallback={onClose}
+        searchQuery={tableSearchQuery}
+        setSearchQuery={setTableSearchQuery}
+        searchPlaceholder="Search links..."
+        deleteModalProps={{
+          isOpen: isDeleteDialogOpen,
+          onClose: () => {
+            setIsDeleteDialogOpen(false);
+            setLinkToDeleteId(null);
+          },
+          onConfirm: async () => {
+            if (linkToDeleteId) {
+              try {
+                const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
+                const fldObj = folderId ? { folder_id: folderId } : null;
+                const compoundId = getItemCompoundId({ snippet: { id: linkToDeleteId, category: 'link' }, workspace: wsObj, folder: fldObj });
+                await apiClearShortcut(linkToDeleteId, compoundId, 'link');
+                await handleDeleteLinkItem(linkToDeleteId);
+              } catch (err) {
+                console.error('Delete failed:', err);
+              }
+            }
+            setIsDeleteDialogOpen(false);
+            setLinkToDeleteId(null);
+          },
+          title: linkToDeleteId && links.find(s => s.id === linkToDeleteId)?.title ? `Delete "${links.find(s => s.id === linkToDeleteId)?.title}"?` : 'Delete this link list?',
+          description: "Are you sure you want to delete this link list? This action cannot be undone."
+        }}
+        headerActions={
+          <SharedPropertiesToolbar
+            key={activeLinkId || 'new-link'}
+            initialSnippet={initialProperties}
+            compoundId={compoundId}
+            defaultName={title || 'New Link List'}
+            onChange={handlePropertiesChange}
+            showTodo={true}
+            onCreateTodo={async (deadlineVal, isRecurring, recurringCycle) => {
+              if (!activeLinkId) return;
+              const scheduleTime = deadlineVal ? new Date(deadlineVal).getTime() : Date.now();
+              try {
+                const newTodo = await createTodo(
+                  title || 'New Link List',
+                  [{ type: 'link', id: activeLinkId }],
+                  isRecurring ? 'recurring' : 'one-time',
+                  scheduleTime,
+                  isRecurring ? recurringCycle as any : undefined
+                );
+
+                const chromeAny = (window as any).chrome;
+                if (chromeAny?.runtime?.sendMessage) {
+                  chromeAny.runtime.sendMessage({
+                    action: 'schedule_newtodo_alarm',
+                    todoId: newTodo.id,
+                    scheduleTime: scheduleTime
+                  });
+                }
+              } catch (err) {
+                console.error('Failed to create and schedule link todo', err);
+              }
+            }}
+            saveStatus={saveStatus}
+            openPopupsToBottom={true}
+            showShortcut={false}
+            layout="horizontal"
+          />
+        }
+        bottomListContent={
+          <ExistingItemsTable<any>
+            items={sortedLinks}
+            activeItemId={activeLinkId ?? null}
+            onLoadItem={handleLoadLinkItem}
+            onUpdateItemField={handleUpdateItemField}
+            getItemTitle={(item) => item.title || 'Untitled Link'}
+            getItemPreview={(item) =>
+              (item.urls || [])
+                .map((link: any) => {
+                  const text = link.name || link.title || link.url || '';
+                  return text.length > 45 ? text.substring(0, 45) + '...' : text;
+                })
+                .filter(Boolean)
+                .join(', ')
+            }
+            getItemCompoundId={(item) =>
+              getItemCompoundId({
+                id: item.id,
+                workspace_id: item.workspaceId || null,
+                folder_id: item.folderId || null,
+                snippet: { id: item.id, category: 'link' },
+              })
+            }
+            getItemType={() => 'link'}
+            shortcutsMap={shortcutsMap}
+            hotkeysMap={hotkeysMap}
+            isFavorite={isFavorite}
+            toggleFavorite={toggleFavorite}
+            onDeleteClick={(id) => {
+              setLinkToDeleteId(id);
+              setIsDeleteDialogOpen(true);
+            }}
+            onFavoriteToggled={fetchTableMaps}
+            folderNamesMap={folderNamesMap}
+            workspaceNamesMap={workspaceNamesMap}
+            tagNamesMap={tagNamesMap}
+            emptyStateMessage="No links found. Create your first link above!"
+            title=""
+          />
+        }
+        headerRightPaddingClass="pr-6"
+        containerMaxWidthClass="max-w-[940px]"
       >
-          <div className={clsx(
-            "flex-1 flex flex-col text-[#073642] dark:text-neutral-200 relative bg-transparent dark:bg-transparent border-none min-h-[450px]",
-            (isLeftCustomLinkFormOpen && linkSuggestions.length > 0) ? "overflow-visible" : "overflow-hidden"
-          )}>
-            
+        <div className="flex-1 flex flex-col min-h-0 relative">
+          <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2 overflow-hidden">
+
+            {/* Title & Shortcut Fields */}
+            <EditorTitleShortcutInput
+              title={title}
+              setTitle={(val) => {
+                setTitle(val);
+                if (val.trim()) setTitleError(null);
+                setIsTitleManuallyModified(true);
+                hasUserModifiedRef.current = true;
+              }}
+              titleError={titleError || saveError}
+              shortcutError={shortcutError}
+              isOverrideable={isShortcutOverrideable}
+              onOverrideShortcut={handleOverrideShortcut}
+              shortcut={linkShortcut}
+              setShortcut={(val) => {
+                setLinkShortcut(val);
+                isShortcutManuallyEditedRef.current = true;
+                hasUserModifiedRef.current = true;
+              }}
+              titleRef={titleInputRef}
+              shortcutRef={shortcutInputRef}
+              onTitleBlur={async () => {
+                if (!title.trim()) {
+                  setTitleError('Enter the title');
+                } else if (hasUnsavedChanges) {
+                  await handleSave(true);
+                }
+              }}
+              onShortcutBlur={async () => {
+                if (hasUnsavedChanges) {
+                  await handleSave(true);
+                }
+              }}
+              onCopyTitleToShortcut={(isInitialized && isShortcutInitialized) ? () => {
+                const val = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+                setLinkShortcut(val);
+                isShortcutManuallyEditedRef.current = true;
+                hasUserModifiedRef.current = true;
+              } : undefined}
+              onTitleEnter={async (shiftKey) => {
+                if (shiftKey) {
+                  const val = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+                  setLinkShortcut(val);
+                  isShortcutManuallyEditedRef.current = true;
+                  hasUserModifiedRef.current = true;
+                } else {
+                  if (!title.trim()) {
+                    setTitleError('Enter the title');
+                  } else if (hasUnsavedChanges) {
+                    await handleSave(true);
+                  }
+                }
+              }}
+              onShortcutEnter={async () => {
+                if (hasUnsavedChanges) {
+                  await handleSave(true);
+                }
+              }}
+              onArrowDownPress={() => {
+                savedFilesInputRef.current?.focus();
+              }}
+            />
             {/* Link Deleted Banner */}
             {isLinkDeleted && (
-              <div className="w-full flex items-center justify-between px-4 py-3 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800/50">
+              <div className="w-full flex items-center justify-between px-4 py-3 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800/50 -mx-2">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-red-100 dark:bg-red-800/50 flex items-center justify-center text-red-600 dark:text-red-400">
                     <FaTrash size={14} />
@@ -1688,7 +2137,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
             {/* Conflict Banner */}
             {saveStatus === 'conflict' && conflictLink && (
-              <div className="w-full flex flex-col gap-2 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/50">
+              <div className="w-full flex flex-col gap-2 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/50 -mx-2">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-800/50 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1720,571 +2169,513 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 </div>
               </div>
             )}
-            
+
             {/* Loading Overlay */}
             {activeLinkId && !liveLink && !isLinkDeleted && (
-               <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/50 dark:bg-black/50 backdrop-blur-sm">
-                 <div className="flex flex-col items-center gap-3">
-                   <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
-                   <div className="text-sm font-medium text-indigo-600 dark:text-indigo-400">Loading collection...</div>
-                 </div>
-               </div>
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/50 dark:bg-black/50 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
+                  <div className="text-sm font-medium text-indigo-600 dark:text-indigo-400">Loading collection...</div>
+                </div>
+              </div>
             )}
 
-            {/* Main Content Area (Centered) */}
-            <div className="w-full flex flex-col items-stretch justify-start flex-shrink-0">
-              <div className="w-full flex items-center py-2.5 px-2 border-b border-white/50 dark:border-white/10">
-                {/* Static Heading - Left */}
-                <div className="flex items-center flex-1 min-w-0 relative">
-                  <h3 className="text-lg font-bold text-neutral-800 dark:text-neutral-200 pl-2">Link</h3>
+            <div className={clsx(
+              "flex-1 flex flex-col min-w-0 relative h-full max-h-full mt-4",
+              (isLeftCustomLinkFormOpen && linkSuggestions.length > 0) ? "overflow-visible" : "overflow-hidden"
+            )}>
 
-                  {saveStatus === 'error' && saveError && (
-                    <span className="flex items-center gap-1.5 whitespace-nowrap text-[#ef4444] ml-4">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                      {saveError}
-                    </span>
-                  )}
-                </div>
-
-                {/* Auto-save indicator */}
-                {!saveError && (
-                  <AutoSaveIndicator
-                    saveStatus={saveStatus}
-                    lastSavedAt={lastSavedAt}
-                    className="ml-2"
-                  />
-                )}
-
-                <div className="flex items-center gap-3 ml-auto relative">
-                  {isDuplicateTitle && (
-                    <span className="text-xs text-red-500 font-medium whitespace-nowrap">
-                      Duplicate title exists
-                    </span>
-                  )}
-
-                  <button
-                    ref={closeButtonRef}
-                    onClick={handleCloseAttempt}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowLeft') {
-                        e.preventDefault();
-                        if (titleInputRef.current) {
-                          titleInputRef.current.focus();
-                          titleInputRef.current.selectionStart = titleInputRef.current.value.length;
-                          titleInputRef.current.selectionEnd = titleInputRef.current.value.length;
-                        }
-                      }
-                    }}
-                    className="p-2 transition-all rounded-lg text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 focus:outline-none z-50"
-                    title="Close (Esc)">
-                    <FaTimes size={14} />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Floating Cards Container */}
-            <div className="w-full flex-1 flex flex-col min-h-0 items-stretch px-5 pt-4">
-              {/* Collection Name Field */}
-              <div className="flex flex-col gap-1.5 mb-6">
-                <h4 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Link collection name</h4>
-                <div className="relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-4 py-2.5 flex items-center">
-                  <input
-                    ref={titleInputRef}
-                    value={title}
-                    onChange={event => {
-                      setTitle(event.target.value);
-                      setIsTitleManuallyModified(true);
-                      hasUserModifiedRef.current = true;
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowRight') {
-                        if (e.currentTarget.selectionStart === e.currentTarget.value.length) {
+              {/* Links section label */}
+              <h4 className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5 px-3.5">
+                Links ({allRenderedItems.length})
+              </h4>
+              {/* List */}
+              <div
+                ref={listContainerRef}
+                className={clsx(
+                  "flex-1 min-h-0 w-full relative",
+                  "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden",
+                  (isLeftCustomLinkFormOpen && linkSuggestions.length > 0)
+                    ? "overflow-visible"
+                    : "overflow-y-auto custom-scrollbar"
+                )}>
+                <div className="flex flex-col w-full divide-y divide-black/5 dark:divide-white/5 pb-2">
+                  {(() => {
+                    const renderItem = (item: any, isAdded: boolean, idx: number, globalIdx: number) => {
+                      const handleToggle = (e?: React.MouseEvent) => {
+                        if (e) {
+                          e.stopPropagation();
                           e.preventDefault();
-                          closeButtonRef.current?.focus();
                         }
-                      }
-                    }}
-                    placeholder="Give your link a name..."
-                    className="flex-1 text-sm font-medium text-black dark:text-white placeholder-[var(--color-textPlaceholder)]/70 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0"
-                  />
-                </div>
-              </div>
+                        if (isAdded) {
+                          removeLink(item.id);
+                        } else {
+                          addItemFromContentBar(item);
+                        }
+                      };
 
-              {/* MAIN LIST: Content Bar Source */}
-              <div className="w-full flex-1 flex flex-col min-w-0 relative">
-                <h4 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
-                  Links ({allRenderedItems.length})
-                </h4>
-                {/* List */}
-                <div
-                  ref={listContainerRef}
-                  className={clsx(
-                    "flex-1 min-h-0 w-full max-h-[min(480px,calc(100vh-280px))]",
-                    "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden",
-                    (isLeftCustomLinkFormOpen && linkSuggestions.length > 0)
-                      ? "overflow-visible"
-                      : "overflow-y-auto custom-scrollbar"
-                  )}>
-                  <div className="flex flex-col w-full divide-y divide-black/5 dark:divide-white/5 pb-2">
-                    {(() => {
-                      const renderItem = (item: any, isAdded: boolean, idx: number, globalIdx: number) => {
-                        const handleToggle = (e?: React.MouseEvent) => {
-                          if (e) {
-                            e.stopPropagation();
-                            e.preventDefault();
+                      const itemIcon = (() => {
+                        if (item.url === 'agent_chat') {
+                          const step = (item.originalData?.automation_steps || item.originalData?.steps)?.[0];
+                          let urls: string[] = [];
+                          if (step?.config?.allAiUrls) {
+                            urls = Object.values(step.config.allAiUrls as Record<string, string>)
+                              .map(u => String(u))
+                              .filter(u => !u.includes('cmd_select_status=false'));
+                          } else if (step?.config?.url) {
+                            urls = [step.config.url].filter(u => !u.includes('cmd_select_status=false'));
                           }
-                          if (isAdded) {
-                            removeLink(item.id);
-                          } else {
-                            addItemFromContentBar(item);
-                          }
-                        };
 
-                        const itemIcon = (() => {
-                          if (item.url === 'agent_chat') {
-                            const step = (item.originalData?.automation_steps || item.originalData?.steps)?.[0];
-                            let urls: string[] = [];
-                            if (step?.config?.allAiUrls) {
-                              urls = Object.values(step.config.allAiUrls as Record<string, string>)
-                                .map(u => String(u))
-                                .filter(u => !u.includes('cmd_select_status=false'));
-                            } else if (step?.config?.url) {
-                              urls = [step.config.url].filter(u => !u.includes('cmd_select_status=false'));
-                            }
-
-                            if (urls.length > 0) {
-                              return (
-                                <div className="flex -space-x-1.5 items-center w-8">
-                                  {urls.slice(0, 3).map((url, i) => (
-                                    <div
-                                      key={`agent-icon-${item.id}-${i}`}
-                                      className="w-4 h-4 rounded-full flex items-center justify-center ring-1 ring-white dark:ring-[#1C1C1E] overflow-hidden shadow-sm bg-white flex-shrink-0">
-                                      <img
-                                        src={getFaviconUrl(getHostname(url))}
-                                        alt=""
-                                        className="w-4 h-4 object-cover"
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            }
+                          if (urls.length > 0) {
                             return (
-                              <div className="w-5 h-5 rounded flex items-center justify-center bg-[#eee8d5] dark:bg-neutral-800 text-[#93a1a1]">
-                                <FaRobot size={12} />
+                              <div className="flex -space-x-1.5 items-center w-8">
+                                {urls.slice(0, 3).map((url, i) => (
+                                  <div
+                                    key={`agent-icon-${item.id}-${i}`}
+                                    className="w-4 h-4 rounded-full flex items-center justify-center ring-1 ring-white dark:ring-[#1C1C1E] overflow-hidden shadow-sm bg-white flex-shrink-0">
+                                    <img
+                                      src={getFaviconUrl(getHostname(url))}
+                                      alt=""
+                                      className="w-4 h-4 object-cover"
+                                    />
+                                  </div>
+                                ))}
                               </div>
                             );
                           }
-
-                          if (item.favIconUrl) {
-                            return <img src={item.favIconUrl} className="w-5 h-5 object-contain" alt="" />;
-                          }
-
                           return (
-                            <div className="w-5 h-5 rounded flex items-center justify-center bg-[#eee8d5] dark:bg-neutral-800 text-[#93a1a1]">
-                              {item.source === 'note' ? <FaFileAlt size={12} /> : <FaLink size={12} />}
+                            <div className="w-5 h-5 rounded flex items-center justify-center bg-black/5 dark:bg-neutral-800 text-neutral-500">
+                              <FaRobot size={12} />
                             </div>
                           );
-                        })();
+                        }
 
-                        const itemLabel = (() => {
-                          if (item.source === 'note' || item.url?.startsWith('note:')) {
-                            return 'Note';
-                          }
-                          if (item.url === 'agent_chat') {
-                            return 'AI Agent';
-                          }
-                          return (item.url || '').replace(/^https?:\/\/(www\.)?/i, '');
-                        })();
+                        if (item.favIconUrl) {
+                          return <img src={item.favIconUrl} className="w-5 h-5 object-contain" alt="" />;
+                        }
 
-                        return (
-                          <div
-                            key={item.id}
-                            ref={el => {
-                              tabItemRefs.current[globalIdx] = el;
-                            }}
-                            onClick={handleToggle}
-                            onDoubleClick={e => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              openLinkEditPopup(item);
-                            }}
-                            className={`group flex items-center gap-3 py-2 px-3 transition-all cursor-pointer focus:outline-none first:rounded-t-xl last:rounded-b-xl ${
-                              focusedTabIndex === globalIdx
-                                ? 'bg-white/10'
-                                : 'hover:bg-white/5'
-                            }`}>
-                            <div className="flex-shrink-0 relative">{itemIcon}</div>
-
-                             <div className="flex-1 min-w-0 flex items-center justify-between gap-4">
-                              <div
-                                className={clsx(
-                                  "text-[13px] font-medium tracking-tight truncate flex-shrink-0 max-w-[65%]",
-                                  isAdded ? "text-neutral-800 dark:text-neutral-100" : "text-neutral-500 dark:text-neutral-400"
-                                )}
-                                style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
-                                {item.name}
-                              </div>
-                              <div
-                                className={clsx(
-                                  'text-[11px] font-normal truncate transition-opacity duration-200 text-right min-w-0',
-                                  focusedTabIndex === globalIdx ? 'opacity-100' : 'opacity-50 group-hover:opacity-100',
-                                  'text-neutral-400 dark:text-neutral-500',
-                                )}>
-                                {itemLabel}
-                              </div>
+                        if (item.url && item.url.startsWith('http')) {
+                          return (
+                            <div className="w-5 h-5 rounded-full flex items-center justify-center overflow-hidden bg-white shadow-sm flex-shrink-0">
+                              <img
+                                src={getFaviconUrl(getHostname(item.url))}
+                                alt=""
+                                className="w-4 h-4 object-cover"
+                              />
                             </div>
-
-                            {/* Action Buttons & Add/Added indicator */}
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                               {/* Add / Added Text Visual Indicator */}
-                               <div
-                                 className={clsx(
-                                   "text-[12px] font-semibold transition-all duration-200 select-none shrink-0 flex items-center justify-center min-w-[50px]",
-                                   isAdded
-                                     ? "text-emerald-500 dark:text-emerald-400"
-                                     : "text-neutral-400 dark:text-neutral-500 group-hover:text-emerald-500 dark:group-hover:text-emerald-400"
-                                 )}
-                               >
-                                 {isAdded ? 'Added' : '+ Add'}
-                               </div>
-
-                               {/* Three Vertical Dots Dropdown for Added Items */}
-                               {isAdded && (
-                                 <div 
-                                   className="relative shrink-0 three-dots-container flex items-center"
-                                 >
-                                   <button
-                                     type="button"
-                                     onClick={e => {
-                                       e.stopPropagation();
-                                       e.preventDefault();
-                                       setActiveMenuLinkId(prev => prev === item.id ? null : item.id);
-                                     }}
-                                     className={clsx(
-                                       "p-1.5 rounded-lg text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors flex items-center justify-center focus:outline-none transition-opacity duration-200",
-                                       (activeMenuLinkId === item.id || focusedTabIndex === globalIdx)
-                                         ? "opacity-100"
-                                         : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
-                                     )}
-                                     title="More options"
-                                   >
-                                     <FaEllipsisV size={11} />
-                                   </button>
-                                   
-                                   {activeMenuLinkId === item.id && (
-                                     <div 
-                                       onClick={e => e.stopPropagation()}
-                                       className="absolute right-0 top-full mt-1 bg-[#fdf6e3] dark:bg-neutral-900 border border-[#eee8d5] dark:border-neutral-700 rounded-xl shadow-2xl z-[999] py-1 flex flex-col w-32 overflow-hidden"
-                                     >
-                                       <button
-                                         type="button"
-                                         onClick={e => {
-                                           e.stopPropagation();
-                                           e.preventDefault();
-                                           setActiveMenuLinkId(null);
-                                           openLinkEditPopup(item);
-                                         }}
-                                         className="flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors text-[#073642] dark:text-neutral-200 hover:bg-[#eee8d5] dark:hover:bg-neutral-800 hover:text-[#073642] dark:hover:text-white"
-                                       >
-                                         <FaLink size={10} className="opacity-70" />
-                                         <span>Params</span>
-                                       </button>
-                                       <button
-                                         type="button"
-                                         onClick={e => {
-                                           e.stopPropagation();
-                                           e.preventDefault();
-                                           setActiveMenuLinkId(null);
-                                           duplicateLink(item);
-                                         }}
-                                         className="flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors text-[#073642] dark:text-neutral-200 hover:bg-[#eee8d5] dark:hover:bg-neutral-800 hover:text-[#073642] dark:hover:text-white"
-                                       >
-                                         <FaCopy size={10} className="opacity-70" />
-                                         <span>Duplicate</span>
-                                       </button>
-                                     </div>
-                                   )}
-                                 </div>
-                               )}
-                             </div>
+                          );
+                        }
+                        return (
+                          <div className="w-5 h-5 rounded flex items-center justify-center bg-black/5 dark:bg-neutral-800 text-neutral-500">
+                            {item.source === 'note' ? <FaFileAlt size={12} /> : <FaLink size={12} />}
                           </div>
                         );
-                      };
+                      })();
 
-                      return (
+                      const itemLabel = (() => {
+                        if (item.source === 'note' || item.url?.startsWith('note:')) {
+                          return 'Note';
+                        }
+                        if (item.url === 'agent_chat') {
+                          return 'AI Agent';
+                        }
+                        return (item.url || '').replace(/^https?:\/\/(www\.)?/i, '');
+                      })();
+
+                      const itemContent = (
                         <>
-                          {/* All Items */}
-                          {allRenderedItems.map((wrap, idx) => renderItem(wrap.item, wrap.isAdded, idx, idx))}
+                          <div className="flex-shrink-0 relative flex items-center gap-2">
+                            {isAdded ? (
+                              <div
+                                onClick={e => e.stopPropagation()}
+                                className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-200 active:cursor-grabbing"
+                                style={{ willChange: 'transform' }}
+                                title="Drag to reorder links"
+                              >
+                                <LinkDragHandle />
+                              </div>
+                            ) : null}
+                            {itemIcon}
+                          </div>
 
-                          {/* Custom link form appended inside the card wrapper when input form is open */}
-                          {isLeftCustomLinkFormOpen && (
+                          <div
+                            className={clsx(
+                              "text-[13px] font-medium tracking-tight truncate min-w-0 w-[180px] md:w-[200px] lg:w-[220px] shrink",
+                              isAdded ? "text-neutral-800 dark:text-neutral-300" : "text-neutral-500 dark:text-neutral-400"
+                            )}
+                            style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
+                            {item.name || item.title || item.url}
+                          </div>
+
+                          <div
+                            className={clsx(
+                              'text-[11px] font-normal truncate transition-opacity duration-200 text-left min-w-0 flex-1 pr-3',
+                              focusedTabIndex === globalIdx ? 'opacity-100' : 'opacity-80 group-hover:opacity-100',
+                              'text-neutral-500 dark:text-neutral-400',
+                            )}>
+                            {itemLabel}
+                          </div>
+
+                          <div className="flex items-center justify-end gap-1.5 shrink-0 min-w-[112px] md:min-w-[132px]">
                             <div
-                              ref={el => {
-                                tabItemRefs.current[allRenderedItems.length] = el as any;
-                              }}
-                              className="flex items-center gap-3 py-2 px-3 transition-all focus:outline-none bg-transparent relative z-50 last:rounded-b-xl">
-                              
-                              {/* Inline Text Input */}
-                              <div className="flex-1 min-w-0 flex items-center gap-1.5 justify-start">
-                                {(allRenderedItems.length === 0 && !customLinkUrl) && (
-                                  <span className="text-red-500/50 text-[13.5px] font-bold select-none shrink-0">*</span>
-                                )}
-                                <input
-                                  ref={customLinkUrlRef}
-                                  value={customLinkUrl}
-                                  onChange={event => setCustomLinkUrl(event.target.value)}
-                                  onKeyDown={event => {
-                                    if (
-                                      linkSuggestions.length > 0 &&
-                                      (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-                                    ) {
-                                      event.preventDefault();
-                                      if (event.key === 'ArrowDown') {
-                                        setFocusedSuggestionIndex(prev =>
-                                          Math.min(prev + 1, linkSuggestions.length - 1),
-                                        );
-                                      } else {
-                                        setFocusedSuggestionIndex(prev => Math.max(prev - 1, -1));
-                                      }
-                                      return;
-                                    }
+                              className={clsx(
+                                "text-[12px] font-semibold transition-all duration-200 select-none shrink-0 flex items-center justify-center min-w-[52px]",
+                                "text-emerald-500 dark:text-emerald-400"
+                              )}
+                            >
+                              {isAdded ? 'Added' : '+ Add'}
+                            </div>
 
-                                    if (event.key === 'Enter') {
-                                      event.preventDefault();
-                                      event.stopPropagation();
+                            {isAdded && (
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  removeLink(item.id);
+                                }}
+                                className="p-1.5 rounded-lg text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center justify-center focus:outline-none"
+                                title="Remove"
+                              >
+                                <FaTrash size={11} />
+                              </button>
+                            )}
 
-                                      if (focusedSuggestionIndex >= 0 && linkSuggestions[focusedSuggestionIndex]) {
-                                        const item = linkSuggestions[focusedSuggestionIndex];
-                                        setSelectedLinks(prev => [
-                                          ...prev,
-                                          {
-                                            id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-                                            url: item.url,
-                                            name: item.title || getHostname(item.url),
-                                            source: 'custom',
-                                            favIconUrl: getFaviconUrl(getHostname(item.url)),
-                                          },
-                                        ]);
-                                        setCustomLinkUrl('');
-                                        setCustomLinkName('');
-                                        setLinkSuggestions([]);
-                                        setTimeout(() => {
-                                          customLinkUrlRef.current?.focus();
-                                        }, 50);
-                                        return;
-                                      }
-
-                                      handleAddCustomLink();
-                                    } else if (event.key === 'Escape') {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      setIsLeftCustomLinkFormOpen(false);
-                                      setCustomLinkUrl('');
-                                      setCustomLinkName('');
-                                    }
+                            {isAdded && (
+                              <div
+                                className="relative shrink-0 three-dots-container flex items-center min-w-[28px] justify-center"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    setActiveMenuLinkId(prev => prev === item.id ? null : item.id);
                                   }}
-                                  placeholder="Add a link URL..."
-                                  autoFocus
-                                  className="w-full bg-transparent border-none text-[13.5px] font-normal text-[#073642] dark:text-neutral-100 placeholder-[var(--color-textPlaceholder)]/50 focus:outline-none h-6"
-                                  style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}
-                                />
-                                {linkSuggestions.length > 0 && (
-                                  <div className="absolute top-full left-0 mt-2 w-full bg-white dark:bg-[#1C1C1E] border border-[#eee8d5] dark:border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[99] overflow-hidden max-h-[250px] flex flex-col">
-                                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#93a1a1] dark:text-neutral-500  tracking-wider bg-[#fdf6e3]/50 dark:bg-black/20 border-b border-[#eee8d5] dark:border-white/5">
-                                      Suggestions
-                                    </div>
-                                    <div className="overflow-y-auto custom-scrollbar">
-                                      {linkSuggestions.map((suggestion, idx) => (
-                                        <div
-                                          key={idx}
-                                          className={`px-3 py-2 cursor-pointer flex items-center gap-3 transition-colors ${
-                                            focusedSuggestionIndex === idx
-                                              ? 'bg-[#3B66AE] text-white'
-                                              : 'hover:bg-[#fdf6e3] dark:hover:bg-white/5 text-[#073642] dark:text-neutral-200'
-                                          }`}
-                                          onClick={() => {
-                                            const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-                                            setSelectedLinks(prev => [
-                                              ...prev,
-                                              {
-                                                id,
-                                                url: suggestion.url,
-                                                name: suggestion.title || getHostname(suggestion.url),
-                                                source: 'custom',
-                                                favIconUrl: getFaviconUrl(getHostname(suggestion.url)),
-                                              },
-                                            ]);
-                                            setCustomLinkUrl('');
-                                            setCustomLinkName('');
-                                            setLinkSuggestions([]);
-                                            setTimeout(() => {
-                                              customLinkUrlRef.current?.focus();
-                                            }, 50);
-                                          }}>
-                                          <div className="flex-shrink-0 relative">
-                                            <img
-                                              src={getFaviconUrl(getHostname(suggestion.url))}
-                                              alt=""
-                                              className="w-3.5 h-3.5 rounded-sm object-cover"
-                                              onError={(e) => {
-                                                e.currentTarget.style.display = 'none';
-                                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                                              }}
-                                            />
-                                            <div className="hidden w-3.5 h-3.5 rounded flex items-center justify-center text-[#93a1a1]">
-                                              {suggestion.source === 'bookmark' ? <FaBookmark size={10} /> : <FaHistory size={10} />}
-                                            </div>
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <div
-                                              className={`font-medium truncate ${focusedSuggestionIndex === idx ? 'text-white' : 'text-[#586e75] dark:text-neutral-200'}`}>
-                                              {suggestion.title}
-                                            </div>
-                                            <div
-                                              className={`truncate opacity-80 text-[10px] ${focusedSuggestionIndex === idx ? 'text-white/70' : 'text-[#93a1a1]'}`}>
-                                              {suggestion.url}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
+                                  className="p-1.5 rounded-lg text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors flex items-center justify-center focus:outline-none"
+                                  title="More options"
+                                >
+                                  <FaEllipsisV size={11} />
+                                </button>
+
+                                {activeMenuLinkId === item.id && (
+                                  <div
+                                    onClick={e => e.stopPropagation()}
+                                    className="absolute right-0 top-full mt-1 bg-white dark:bg-neutral-900 border border-black/5 dark:border-neutral-700 rounded-xl shadow-2xl z-[999] py-1 flex flex-col w-32 overflow-hidden"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        setActiveMenuLinkId(null);
+                                        openLinkEditPopup(item);
+                                      }}
+                                      className="flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors text-neutral-800 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-neutral-800 hover:text-neutral-800 dark:hover:text-white"
+                                    >
+                                      <FaLink size={10} className="opacity-70" />
+                                      <span>Params</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        setActiveMenuLinkId(null);
+                                        duplicateLink(item);
+                                      }}
+                                      className="flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors text-neutral-800 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-neutral-800 hover:text-neutral-800 dark:hover:text-white"
+                                    >
+                                      <FaCopy size={10} className="opacity-70" />
+                                      <span>Duplicate</span>
+                                    </button>
                                   </div>
                                 )}
                               </div>
-                            </div>
-                          )}
-
-                          {/* Empty State when no items are available */}
-                          {allRenderedItems.length === 0 && !isLeftCustomLinkFormOpen && (
-                            <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-                              <div className="w-12 h-12 rounded-full bg-[var(--color-containerBg)] flex items-center justify-center text-neutral-400 dark:text-neutral-500 mb-3">
-                                <FaLink size={20} />
-                              </div>
-                              <h4 className="text-sm font-semibold text-[var(--color-textPrimary)] mb-1">No tabs selected or open</h4>
-                              <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-[240px] mb-4">
-                                Start opening tabs in your browser or add a custom link manually.
-                              </p>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsLeftCustomLinkFormOpen(true);
-                                  setCustomLinkUrl('');
-                                }}
-                                className="px-4 py-2 text-xs font-semibold rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-white/5 dark:hover:bg-white/10 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-white/10 transition-all active:scale-95"
-                              >
-                                Add a custom link
-                              </button>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </>
                       );
-                    })()}
-                  </div>
+
+                      const commonProps = {
+                        ref: (el: HTMLDivElement | null) => {
+                          tabItemRefs.current[globalIdx] = el;
+                        },
+                        onClick: handleToggle,
+                        onDoubleClick: (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          openLinkEditPopup(item);
+                        },
+                        className: `group flex items-center gap-3 py-2 px-3 transition-all cursor-pointer focus:outline-none first:rounded-t-xl last:rounded-b-xl ${focusedTabIndex === globalIdx
+                          ? 'bg-white/10'
+                          : 'hover:bg-white/5'
+                          }`,
+                      };
+
+                      if (isAdded) {
+                        return (
+                          <Reorder.Item
+                            key={getLinkReorderKey(item, idx)}
+                            as="div"
+                            value={getLinkReorderKey(item, idx)}
+                            {...commonProps}
+                          >
+                            {itemContent}
+                          </Reorder.Item>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={getLinkReorderKey(item, idx)}
+                          {...commonProps}
+                        >
+                          {itemContent}
+                        </div>
+                      );
+                    };
+
+                    const renderedSelected = allRenderedItems.filter(wrap => wrap.isAdded);
+                    const renderedActive = allRenderedItems.filter(wrap => !wrap.isAdded);
+
+                    return (
+                      <>
+                        <Reorder.Group
+                          axis="y"
+                          values={selectedLinks.map(getLinkReorderKey)}
+                          onReorder={(nextOrder: string[]) => {
+                            hasUserModifiedRef.current = true;
+                            setSelectedLinks(currentLinks => {
+                              const linksByKey = new Map(
+                                currentLinks.map((link, index) => [getLinkReorderKey(link, index), link]),
+                              );
+                              const reordered = nextOrder
+                                .map(key => linksByKey.get(key))
+                                .filter((link): link is SelectedLink => Boolean(link));
+
+                              if (reordered.length !== currentLinks.length) return currentLinks;
+                              return reordered;
+                            });
+                          }}
+                          className="flex flex-col"
+                        >
+                          {renderedSelected.map((wrap, idx) => renderItem(wrap.item, wrap.isAdded, idx, idx))}
+                        </Reorder.Group>
+
+                        {renderedActive.map((wrap, idx) =>
+                          renderItem(wrap.item, wrap.isAdded, idx, renderedSelected.length + idx),
+                        )}
+
+                        {/* Custom link form appended inside the card wrapper when input form is open */}
+                        {isLeftCustomLinkFormOpen ? (
+                          <div
+                            ref={el => {
+                              tabItemRefs.current[allRenderedItems.length] = el as any;
+                            }}
+                            className="flex items-center gap-3 py-2 px-3 transition-all focus:outline-none bg-transparent relative z-50 last:rounded-b-xl">
+
+                            {/* Inline Text Input */}
+                            <div className="flex-1 min-w-0 flex items-center gap-1.5 justify-start">
+                              {(allRenderedItems.length === 0 && !customLinkUrl) && (
+                                <span className="text-red-500/50 text-[13.5px] font-bold select-none shrink-0">*</span>
+                              )}
+                              <input
+                                ref={customLinkUrlRef}
+                                value={customLinkUrl}
+                                onChange={event => setCustomLinkUrl(event.target.value)}
+                                onKeyDown={event => {
+                                  if (
+                                    linkSuggestions.length > 0 &&
+                                    (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+                                  ) {
+                                    event.preventDefault();
+                                    if (event.key === 'ArrowDown') {
+                                      setFocusedSuggestionIndex(prev =>
+                                        Math.min(prev + 1, linkSuggestions.length - 1),
+                                      );
+                                    } else {
+                                      setFocusedSuggestionIndex(prev => Math.max(prev - 1, -1));
+                                    }
+                                    return;
+                                  }
+
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+
+                                    if (focusedSuggestionIndex >= 0 && linkSuggestions[focusedSuggestionIndex]) {
+                                      const item = linkSuggestions[focusedSuggestionIndex];
+                                      setSelectedLinks(prev => [
+                                        ...prev,
+                                        {
+                                          id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                                          url: item.url,
+                                          name: item.title || getHostname(item.url),
+                                          source: 'custom',
+                                          favIconUrl: getFaviconUrl(getHostname(item.url)),
+                                        },
+                                      ]);
+                                      setCustomLinkUrl('');
+                                      setCustomLinkName('');
+                                      setLinkSuggestions([]);
+                                      setTimeout(() => {
+                                        customLinkUrlRef.current?.focus();
+                                      }, 50);
+                                      return;
+                                    }
+
+                                    handleAddCustomLink();
+                                  } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setIsLeftCustomLinkFormOpen(false);
+                                    setCustomLinkUrl('');
+                                    setCustomLinkName('');
+                                  }
+                                }}
+                                placeholder="Add a link URL..."
+                                autoFocus
+                                className="w-full bg-transparent border-none text-[13.5px] font-normal text-neutral-800 dark:text-neutral-100 placeholder-[var(--color-textPlaceholder)]/50 focus:outline-none h-6"
+                                style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}
+                              />
+                              {linkSuggestions.length > 0 && (
+                                <div className="absolute top-full left-0 mt-2 w-full bg-white dark:bg-[#1C1C1E] border border-black/5 dark:border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[99] overflow-hidden max-h-[250px] flex flex-col">
+                                  <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 dark:text-neutral-500  tracking-wider bg-white/50 dark:bg-black/20 border-b border-black/5 dark:border-white/5">
+                                    Suggestions
+                                  </div>
+                                  <div className="overflow-y-auto custom-scrollbar">
+                                    {linkSuggestions.map((suggestion, idx) => (
+                                      <div
+                                        key={idx}
+                                        className={`px-3 py-2 cursor-pointer flex items-center gap-3 transition-colors ${focusedSuggestionIndex === idx
+                                          ? 'bg-[#3B66AE] text-white'
+                                          : 'hover:bg-white dark:hover:bg-white/5 text-neutral-800 dark:text-neutral-200'
+                                          }`}
+                                        onClick={() => {
+                                          const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                                          setSelectedLinks(prev => [
+                                            ...prev,
+                                            {
+                                              id,
+                                              url: suggestion.url,
+                                              name: suggestion.title || getHostname(suggestion.url),
+                                              source: 'custom',
+                                              favIconUrl: getFaviconUrl(getHostname(suggestion.url)),
+                                            },
+                                          ]);
+                                          setCustomLinkUrl('');
+                                          setCustomLinkName('');
+                                          setLinkSuggestions([]);
+                                          setTimeout(() => {
+                                            customLinkUrlRef.current?.focus();
+                                          }, 50);
+                                        }}>
+                                        <div className="flex-shrink-0 relative">
+                                          <img
+                                            src={getFaviconUrl(getHostname(suggestion.url))}
+                                            alt=""
+                                            className="w-3.5 h-3.5 rounded-sm object-cover"
+                                            onError={(e) => {
+                                              e.currentTarget.style.display = 'none';
+                                              e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                            }}
+                                          />
+                                          <div className="hidden w-3.5 h-3.5 rounded flex items-center justify-center text-neutral-500">
+                                            {suggestion.source === 'bookmark' ? <FaBookmark size={10} /> : <FaHistory size={10} />}
+                                          </div>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div
+                                            className={`font-medium truncate ${focusedSuggestionIndex === idx ? 'text-white' : 'text-neutral-600 dark:text-neutral-200'}`}>
+                                            {suggestion.title}
+                                          </div>
+                                          <div
+                                            className={`truncate opacity-80 text-[10px] ${focusedSuggestionIndex === idx ? 'text-white/70' : 'text-neutral-500'}`}>
+                                            {suggestion.url}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            onClick={() => {
+                              setIsLeftCustomLinkFormOpen(true);
+                              setCustomLinkUrl('');
+                            }}
+                            className="group flex items-center justify-center gap-2.5 py-3 px-3 transition-all cursor-pointer focus:outline-none hover:bg-white/5 last:rounded-b-xl"
+                          >
+                            <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-200 transition-colors">
+                              <FaPlus size={11} />
+                            </div>
+                            <span className="text-[13.5px] font-semibold text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-200 transition-colors">Add a custom link</span>
+                          </div>
+                        )}
+
+                        {/* Empty State when no items are available */}
+                        {allRenderedItems.length === 0 && !isLeftCustomLinkFormOpen && (
+                          <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                            <div className="w-12 h-12 rounded-full bg-[var(--color-containerBg)] flex items-center justify-center text-neutral-400 dark:text-neutral-500 mb-3">
+                              <FaLink size={20} />
+                            </div>
+                            <h4 className="text-lg font-bold text-[var(--color-textPrimary)] mb-1">No active tabs open</h4>
+                            <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400 max-w-[280px] mb-4">
+                              Open a tab in your browser or add a link manually.
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
+                {isEditMode && !hasUnsavedChanges && (
+                  <button
+                    id="create-another-btn"
+                    type="button"
+                    onClick={handleCreateNew}
+                    onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setTooltipPos({
+                        top: rect.top + window.scrollY - 46,
+                        left: rect.left + window.scrollX - 40,
+                      });
+                      setShowTooltip(true);
+                    }}
+                    onMouseLeave={() => setShowTooltip(false)}
+                    className="absolute bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[10px] font-semibold shadow-sm transition-all active:scale-95 border-black/10 dark:border-white/20 bg-neutral-100 dark:bg-white/10 text-neutral-800 dark:text-white/90 hover:bg-neutral-200 dark:hover:bg-white/20 hover:text-neutral-900 dark:hover:text-white cursor-pointer select-none"
+                  >
+                    <span>Create another</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
-
-         
-          {/* Footer for Actions */}
-          <div className="relative flex flex-col w-full flex-shrink-0">
-            {/* Create New Floating Button */}
-            {isEditMode && !hasUnsavedChanges && (
-              <div className="w-full flex justify-end px-4 pb-4 pt-1 bg-transparent">
-                <button
-                  onClick={handleCreateNew}
-                  onMouseEnter={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setTooltipPos({
-                      top: rect.top + window.scrollY - 46,
-                      left: rect.left + window.scrollX - 40,
-                    });
-                    setShowTooltip(true);
-                  }}
-                  onMouseLeave={() => setShowTooltip(false)}
-                  className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 border-white/20 bg-white/10 text-white/90 hover:bg-white/20 hover:text-white cursor-pointer">
-                  Create new
-                </button>
-
-                {showTooltip && createPortal(
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: `${tooltipPos.top}px`,
-                      left: `${tooltipPos.left}px`,
-                    }}
-                    className="bg-[#1c1d27] border border-[#2f3142] rounded-xl px-3 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.6)] z-[999999] flex items-center gap-3 text-[12px] font-sans text-white pointer-events-none"
-                  >
-                    <div className="flex items-center gap-1">
-                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Ctrl</kbd>
-                      <span className="text-[10px] text-neutral-400 font-bold">+</span>
-                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Shift</kbd>
-                      <span className="text-[10px] text-neutral-400 font-bold">+</span>
-                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Enter</kbd>
-                    </div>
-                    <span className="text-neutral-400 text-left whitespace-nowrap">to save and create new</span>
-                  </div>,
-                  document.body
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* FLOATING CAPSULE TOOLBAR */}
-          <div className="absolute left-full top-1/2 -translate-y-1/2 z-50 select-none flex flex-col items-center gap-1 p-1 rounded-r-2xl rounded-l-none bg-[var(--color-editorBg)] border border-l-0 border-black/10 dark:border-white/15 shadow-lg">
-              <SharedPropertiesToolbar
-                initialSnippet={liveLink || initialLinkProp || { workspaceId, folderId }}
-                compoundId={compoundId}
-                defaultName={title || 'New Link List'}
-                onChange={handlePropertiesChange}
-                showTodo={true}
-                onCreateTodo={async (deadlineVal, isRecurring, recurringCycle) => {
-                  if (!activeLinkId) return;
-                  const scheduleTime = deadlineVal ? new Date(deadlineVal).getTime() : Date.now();
-                  try {
-                    const newTodo = await createTodo(
-                      title || 'New Link List',
-                      [{ type: 'link', id: activeLinkId }],
-                      isRecurring ? 'recurring' : 'one-time',
-                      scheduleTime,
-                      isRecurring ? recurringCycle as any : undefined
-                    );
-
-                    const chromeAny = (window as any).chrome;
-                    if (chromeAny?.runtime?.sendMessage) {
-                      chromeAny.runtime.sendMessage({
-                        action: 'schedule_newtodo_alarm',
-                        todoId: newTodo.id,
-                        scheduleTime: scheduleTime
-                      });
-                    }
-                  } catch (err) {
-                    console.error('Failed to create and schedule link todo', err);
-                  }
-                }}
-                saveStatus={saveStatus}
-                orgTeam={null}
-                personalWorkspaces={[]}
-                openPopupsToLeft={true}
-              />
-          </div>
-      </EditorContainer>
+        </div>
+      </WorkspaceEditorLayout>
 
       {/* Link Edit Popup */}
       {editingPopupLinkId && (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 backdrop-blur-[8px]"
           onClick={closeLinkEditPopup}>
           <div
-            className="bg-[var(--color-popupBg)] rounded-xl border border-[#eee8d5] dark:border-neutral-700 shadow-2xl p-4 min-w-[600px] max-w-[90%]"
+            style={{
+              backgroundColor: 'rgba(23, 24, 33, 0.75)',
+              backdropFilter: 'blur(24px)',
+              WebkitBackdropFilter: 'blur(24px)',
+            }}
+            className="rounded-xl border border-black/10 dark:border-white/10 shadow-2xl p-5 min-w-[600px] max-w-[90%] text-white"
             onClick={e => e.stopPropagation()}>
-            <div className="text-sm font-semibold text-[#073642] dark:text-neutral-200 mb-3">Edit Link</div>
+            <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-4">Edit Link</div>
             <table className="w-full text-sm">
               <tbody>
-                <tr className="border-b border-[#eee8d5] dark:border-neutral-700">
-                  <td className="py-2 pr-4 text-[#586e75] dark:text-neutral-400 font-medium">Link Name</td>
+                <tr className="border-b border-black/5 dark:border-neutral-700">
+                  <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-400 font-medium">Link Name</td>
                   <td className="py-2">
                     <input
                       ref={linkNameInputRef}
@@ -2298,12 +2689,12 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                         }
                       }}
                       placeholder="Enter display name for the link"
-                      className="w-full bg-[#eee8d5] dark:bg-neutral-800 border border-[#eee8d5] dark:border-neutral-700 rounded px-2 py-1 text-[#073642] dark:text-neutral-100 text-xs"
+                      className="w-full bg-black/5 dark:bg-neutral-800 border border-black/5 dark:border-neutral-700 rounded px-2 py-1 text-neutral-800 dark:text-neutral-100 text-xs"
                     />
                   </td>
                 </tr>
-                <tr className="border-b border-[#eee8d5] dark:border-neutral-700">
-                  <td className="py-2 pr-4 text-[#586e75] dark:text-neutral-400 font-medium">Full URL</td>
+                <tr className="border-b border-black/5 dark:border-neutral-700">
+                  <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-400 font-medium">Full URL</td>
                   <td className="py-2">
                     <input
                       ref={urlNameInputRef}
@@ -2312,7 +2703,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                         const cleaned = e.target.value.replace(/^https?:\/\/(www\.)?/i, '');
                         setLocalUrlValue(cleaned);
                         const parts = parseUrlParts(e.target.value);
-                          setLinkTodoStatus('idle');
+                        setLinkTodoStatus('idle');
                         if (parts) {
                           setEditingUrlParts(parts);
                         }
@@ -2324,7 +2715,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                           domainInputRef.current?.focus();
                         }
                       }}
-                      className="w-full bg-[#eee8d5] dark:bg-neutral-800 border border-[#eee8d5] dark:border-neutral-700 rounded px-2 py-1 text-[#073642] dark:text-neutral-100 text-xs truncate"
+                      className="w-full bg-black/5 dark:bg-neutral-800 border border-black/5 dark:border-neutral-700 rounded px-2 py-1 text-neutral-800 dark:text-neutral-100 text-xs truncate"
                     />
                   </td>
                 </tr>
@@ -2333,94 +2724,18 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                   const parts = editingUrlParts;
                   return (
                     <>
-                    <tr className="border-b border-[#eee8d5] dark:border-neutral-700">
-                      <td className="py-2 pr-4 text-[#586e75] dark:text-neutral-400 font-medium">Domain</td>
-                      <td className="py-2 relative">
-                        <HighlightedInput
-                          ref={domainInputRef}
-                          value={parts.domain}
-                          onChange={(e: any) =>
-                            setEditingUrlParts(prev => (prev ? { ...prev, domain: e.target.value } : prev))
-                          }
-                          onFocus={() => {
-                            setFocusedField('domain');
-                            setFocusedPathIndex(null);
-                          }}
-                          onBlur={(e: any) => {
-                            if (e.relatedTarget === dropdownButtonRef.current) return;
-                            setTimeout(() => setShowPathQueryDropdown(false), 150);
-                          }}
-                          onKeyDown={(e: any) => {
-                            e.stopPropagation();
-                            if (e.key === '@') {
-                              e.preventDefault();
-                              lastFocusedInputRef.current = e.currentTarget;
-                              setEditingUrlParts(prev => (prev ? { ...prev, domain: prev.domain + '@' } : prev));
-                              setShowPathQueryDropdown(true);
-                            } else if (showPathQueryDropdown) {
-                              setShowPathQueryDropdown(false);
-                            }
-                          }}
-                          className="w-full bg-[#eee8d5] dark:bg-neutral-800 border border-[#eee8d5] dark:border-neutral-700 rounded px-2 py-1 text-[#073642] dark:text-neutral-100 text-xs"
-                        />
-                        {showPathQueryDropdown && focusedField === 'domain' && (
-                          <div className="absolute left-0 top-full mt-1 w-56 bg-[#fdf6e3] dark:bg-neutral-900 rounded-lg border border-[#eee8d5] dark:border-neutral-700 shadow-lg z-[9999]">
-                            <div className="px-3 py-1.5 text-[10px] text-[#93a1a1] dark:text-neutral-400 border-b border-[#eee8d5] dark:border-neutral-700">
-                              Add Variable (Click to select)
-                            </div>
-                            <button
-                              ref={dropdownButtonRef}
-                              type="button"
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  const newDomain = parts.domain.replace(
-                                    /@$/,
-                                    parts.domain.endsWith('/') ? '{query}' : '/{query}',
-                                  );
-                                  setEditingUrlParts(prev => (prev ? { ...prev, domain: newDomain } : prev));
-                                  setShowPathQueryDropdown(false);
-                                  lastFocusedInputRef.current?.focus();
-                                } else if (e.key === 'Escape') {
-                                  setShowPathQueryDropdown(false);
-                                  lastFocusedInputRef.current?.focus();
-                                }
-                              }}
-                              onClick={e => {
-                                e.preventDefault();
-                                const newDomain = parts.domain.replace(
-                                  /@$/,
-                                  parts.domain.endsWith('/') ? '{query}' : '/{query}',
-                                );
-                                setEditingUrlParts(prev => (prev ? { ...prev, domain: newDomain } : prev));
-                                setShowPathQueryDropdown(false);
-                                lastFocusedInputRef.current?.focus();
-                              }}
-                              className="w-full text-left px-3 py-2 text-xs bg-[#eee8d5] dark:bg-neutral-800 text-[#073642] dark:text-neutral-200 hover:bg-[#eee8d5] dark:hover:bg-neutral-700 transition-colors focus:bg-[#eee8d5] dark:focus:bg-neutral-700 focus:outline-none">
-                              Insert {'{query}'}
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                    {parts.paths.map((path, idx) => (
-                      <tr key={idx} className="border-b border-[#eee8d5] dark:border-neutral-700">
-                        <td className="py-2 pr-4 text-[#586e75] dark:text-neutral-400 font-medium">Path {idx + 1}</td>
+                      <tr className="border-b border-black/5 dark:border-neutral-700">
+                        <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-400 font-medium">Domain</td>
                         <td className="py-2 relative">
                           <HighlightedInput
-                            value={path}
-                            onChange={(e: any) => {
-                              const newPaths = [...parts.paths];
-                              newPaths[idx] = e.target.value;
-                              setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
-                              if (showPathQueryDropdown) {
-                                setShowPathQueryDropdown(false);
-                              }
-                            }}
+                            ref={domainInputRef}
+                            value={parts.domain}
+                            onChange={(e: any) =>
+                              setEditingUrlParts(prev => (prev ? { ...prev, domain: e.target.value } : prev))
+                            }
                             onFocus={() => {
-                              setFocusedField('path');
-                              setFocusedPathIndex(idx);
+                              setFocusedField('domain');
+                              setFocusedPathIndex(null);
                             }}
                             onBlur={(e: any) => {
                               if (e.relatedTarget === dropdownButtonRef.current) return;
@@ -2431,24 +2746,17 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                               if (e.key === '@') {
                                 e.preventDefault();
                                 lastFocusedInputRef.current = e.currentTarget;
-                                const newPaths = [...parts.paths];
-                                newPaths[idx] = path + '@';
-                                setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+                                setEditingUrlParts(prev => (prev ? { ...prev, domain: prev.domain + '@' } : prev));
                                 setShowPathQueryDropdown(true);
                               } else if (showPathQueryDropdown) {
                                 setShowPathQueryDropdown(false);
-                              } else if (e.key === 'Enter' && !/{query}|\[query\]/i.test(path)) {
-                                e.preventDefault();
-                                const newPaths = [...parts.paths];
-                                newPaths[idx] = path + '{query}';
-                                setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
                               }
                             }}
-                            className="w-full bg-[#eee8d5] dark:bg-neutral-800 border border-[#eee8d5] dark:border-neutral-700 rounded px-2 py-1 text-[#073642] dark:text-neutral-100 text-xs"
+                            className="w-full bg-black/5 dark:bg-neutral-800 border border-black/5 dark:border-neutral-700 rounded px-2 py-1 text-neutral-800 dark:text-neutral-100 text-xs"
                           />
-                          {showPathQueryDropdown && focusedPathIndex === idx && focusedField === 'path' && (
-                            <div className="absolute left-0 top-full mt-1 w-56 bg-[#fdf6e3] dark:bg-neutral-900 rounded-lg border border-[#eee8d5] dark:border-neutral-700 shadow-lg z-[9999]">
-                              <div className="px-3 py-1.5 text-[10px] text-[#93a1a1] dark:text-neutral-400 border-b border-[#eee8d5] dark:border-neutral-700">
+                          {showPathQueryDropdown && focusedField === 'domain' && (
+                            <div className="absolute left-0 top-full mt-1 w-56 bg-white dark:bg-neutral-900 rounded-lg border border-black/5 dark:border-neutral-700 shadow-lg z-[9999]">
+                              <div className="px-3 py-1.5 text-[10px] text-neutral-500 dark:text-neutral-400 border-b border-black/5 dark:border-neutral-700">
                                 Add Variable (Click to select)
                               </div>
                               <button
@@ -2458,10 +2766,11 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                                   if (e.key === 'Enter') {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    const newPaths = [...parts.paths];
-                                    const suffix = path.endsWith('/') ? '{query}' : '/{query}';
-                                    newPaths[idx] = path.replace(/@$/, suffix);
-                                    setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+                                    const newDomain = parts.domain.replace(
+                                      /@$/,
+                                      parts.domain.endsWith('/') ? '{query}' : '/{query}',
+                                    );
+                                    setEditingUrlParts(prev => (prev ? { ...prev, domain: newDomain } : prev));
                                     setShowPathQueryDropdown(false);
                                     lastFocusedInputRef.current?.focus();
                                   } else if (e.key === 'Escape') {
@@ -2469,24 +2778,106 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                                     lastFocusedInputRef.current?.focus();
                                   }
                                 }}
-                                onMouseDown={e => {
+                                onClick={e => {
                                   e.preventDefault();
-                                  const newPaths = [...parts.paths];
-                                  const suffix = path.endsWith('/') ? '{query}' : '/{query}';
-                                  newPaths[idx] = path.replace(/@$/, suffix);
-                                  setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+                                  const newDomain = parts.domain.replace(
+                                    /@$/,
+                                    parts.domain.endsWith('/') ? '{query}' : '/{query}',
+                                  );
+                                  setEditingUrlParts(prev => (prev ? { ...prev, domain: newDomain } : prev));
                                   setShowPathQueryDropdown(false);
                                   lastFocusedInputRef.current?.focus();
                                 }}
-                                className="w-full text-left px-3 py-2 text-xs bg-[#eee8d5] dark:bg-neutral-800 text-[#073642] dark:text-neutral-200 hover:bg-[#eee8d5] dark:hover:bg-neutral-700 transition-colors focus:bg-[#eee8d5] dark:focus:bg-neutral-700 focus:outline-none">
+                                className="w-full text-left px-3 py-2 text-xs bg-black/5 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-neutral-700 transition-colors focus:bg-black/5 dark:focus:bg-neutral-700 focus:outline-none">
                                 Insert {'{query}'}
                               </button>
                             </div>
                           )}
                         </td>
                       </tr>
-                    ))}
-                  </>
+                      {parts.paths.map((path, idx) => (
+                        <tr key={idx} className="border-b border-black/5 dark:border-neutral-700">
+                          <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-400 font-medium">Path {idx + 1}</td>
+                          <td className="py-2 relative">
+                            <HighlightedInput
+                              value={path}
+                              onChange={(e: any) => {
+                                const newPaths = [...parts.paths];
+                                newPaths[idx] = e.target.value;
+                                setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+                                if (showPathQueryDropdown) {
+                                  setShowPathQueryDropdown(false);
+                                }
+                              }}
+                              onFocus={() => {
+                                setFocusedField('path');
+                                setFocusedPathIndex(idx);
+                              }}
+                              onBlur={(e: any) => {
+                                if (e.relatedTarget === dropdownButtonRef.current) return;
+                                setTimeout(() => setShowPathQueryDropdown(false), 150);
+                              }}
+                              onKeyDown={(e: any) => {
+                                e.stopPropagation();
+                                if (e.key === '@') {
+                                  e.preventDefault();
+                                  lastFocusedInputRef.current = e.currentTarget;
+                                  const newPaths = [...parts.paths];
+                                  newPaths[idx] = path + '@';
+                                  setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+                                  setShowPathQueryDropdown(true);
+                                } else if (showPathQueryDropdown) {
+                                  setShowPathQueryDropdown(false);
+                                } else if (e.key === 'Enter' && !/{query}|\[query\]/i.test(path)) {
+                                  e.preventDefault();
+                                  const newPaths = [...parts.paths];
+                                  newPaths[idx] = path + '{query}';
+                                  setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+                                }
+                              }}
+                              className="w-full bg-black/5 dark:bg-neutral-800 border border-black/5 dark:border-neutral-700 rounded px-2 py-1 text-neutral-800 dark:text-neutral-100 text-xs"
+                            />
+                            {showPathQueryDropdown && focusedPathIndex === idx && focusedField === 'path' && (
+                              <div className="absolute left-0 top-full mt-1 w-56 bg-white dark:bg-neutral-900 rounded-lg border border-black/5 dark:border-neutral-700 shadow-lg z-[9999]">
+                                <div className="px-3 py-1.5 text-[10px] text-neutral-500 dark:text-neutral-400 border-b border-black/5 dark:border-neutral-700">
+                                  Add Variable (Click to select)
+                                </div>
+                                <button
+                                  ref={dropdownButtonRef}
+                                  type="button"
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      const newPaths = [...parts.paths];
+                                      const suffix = path.endsWith('/') ? '{query}' : '/{query}';
+                                      newPaths[idx] = path.replace(/@$/, suffix);
+                                      setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+                                      setShowPathQueryDropdown(false);
+                                      lastFocusedInputRef.current?.focus();
+                                    } else if (e.key === 'Escape') {
+                                      setShowPathQueryDropdown(false);
+                                      lastFocusedInputRef.current?.focus();
+                                    }
+                                  }}
+                                  onMouseDown={e => {
+                                    e.preventDefault();
+                                    const newPaths = [...parts.paths];
+                                    const suffix = path.endsWith('/') ? '{query}' : '/{query}';
+                                    newPaths[idx] = path.replace(/@$/, suffix);
+                                    setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+                                    setShowPathQueryDropdown(false);
+                                    lastFocusedInputRef.current?.focus();
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-xs bg-black/5 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-neutral-700 transition-colors focus:bg-black/5 dark:focus:bg-neutral-700 focus:outline-none">
+                                  Insert {'{query}'}
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </>
                   );
                 })()}
               </tbody>
@@ -2496,9 +2887,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 <button
                   type="button"
                   onClick={insertCustomVariable}
-                  className="px-3 py-1 text-xs font-medium text-[#586e75] dark:text-neutral-300 bg-[#eee8d5] dark:bg-neutral-800 rounded-lg hover:bg-[#eee8d5] dark:hover:bg-neutral-700 transition-colors">
+                  className="px-3 py-1 text-xs font-medium text-neutral-600 dark:text-neutral-300 bg-black/5 dark:bg-neutral-800 rounded-lg hover:bg-black/5 dark:hover:bg-neutral-700 transition-colors">
                   {'{ }'} Insert Param{' '}
-                  <span className="ml-1.5 px-1 rounded border border-[#eee8d5] dark:border-neutral-600 bg-[#fdf6e3] dark:bg-white/5 text-[9px] font-bold text-[#93a1a1] dark:text-neutral-400">
+                  <span className="ml-1.5 px-1 rounded border border-black/5 dark:border-neutral-600 bg-white dark:bg-white/5 text-[9px] font-bold text-neutral-500 dark:text-neutral-400">
                     @
                   </span>
                 </button>
@@ -2508,7 +2899,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 <button
                   type="button"
                   onClick={closeLinkEditPopup}
-                  className="px-3 py-1 text-xs font-medium text-[#586e75] dark:text-neutral-300 bg-[#eee8d5] dark:bg-neutral-800 rounded-lg hover:bg-[#eee8d5] dark:hover:bg-neutral-700 transition-colors">
+                  className="px-3 py-1 text-xs font-medium text-neutral-600 dark:text-neutral-300 bg-black/5 dark:bg-neutral-800 rounded-lg hover:bg-black/5 dark:hover:bg-neutral-700 transition-colors">
                   Cancel
                 </button>
                 <button

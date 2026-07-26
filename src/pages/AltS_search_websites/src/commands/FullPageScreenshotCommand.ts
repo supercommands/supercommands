@@ -11,7 +11,7 @@ import type { PageActionCommand } from './types';
 export const FullPageScreenshotCommand: PageActionCommand = {
   id: 'capture_full_screenshot',
   label: 'Capture Full Page',
-  prefix: '/fullscreenshot',
+  prefix: 'fullscreenshot',
   keywords: ['capture', 'full', 'page', 'scroll', 'screenshot', 'whole', 'entire', 'png'],
   description: 'Scroll and stitch the entire page into a single PNG',
   action: 'CAPTURE_FULL_PAGE',

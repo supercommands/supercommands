@@ -9,6 +9,12 @@
  * ```
  */
 
+export interface CustomModelConfig {
+  id: string;
+  name: string;
+  host: string;
+}
+
 export interface AiPromptRecord {
 
   id: string;
@@ -23,6 +29,7 @@ export interface AiPromptRecord {
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;
+  customModels?: CustomModelConfig[];
 }
 
 export interface CreateAiPromptInput {
@@ -34,6 +41,7 @@ export interface CreateAiPromptInput {
   modelUrls: Record<string, string>;
   favIconUrl?: string;
   tagIds?: string[];
+  customModels?: CustomModelConfig[];
 }
 
 export interface UpdateAiPromptInput {
@@ -45,4 +53,5 @@ export interface UpdateAiPromptInput {
   workspaceId?: string;
   folderId?: string | null;
   tagIds?: string[];
+  customModels?: CustomModelConfig[];
 }

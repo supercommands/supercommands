@@ -1,20 +1,30 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAppearance } from '@extension/ui';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
-import {
-  FiZap,
-} from 'react-icons/fi';
+import { FiZap, FiCommand, FiFolder, FiBriefcase, FiArrowLeft, FiChevronUp, FiChevronDown } from 'react-icons/fi';
+import { useDbStore } from '../../../../../storage/store/useDbStore';
+import { useSpreadsheetStore } from '../../../../../shared-components/spreadsheetUi/logic/spreadsheetStateStore';
 import { FaCode, FaLink, FaRobot, FaLayerGroup } from 'react-icons/fa';
 import { BsCalendarCheck } from 'react-icons/bs';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
+import {
+  getSidebarStorageData,
+  setSidebarStorageData,
+} from '../../../../../storage/localStorage/sidebarCustomizationStorage';
 
 interface ViewMenuPanelProps {
   searchbarRef?: React.RefObject<any>;
+  openSpreadsheetView?: (section?: string) => void;
 }
 
-export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef }) => {
+export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, openSpreadsheetView }) => {
   const { theme } = useAppearance();
   const isDark = theme.isDark;
+
+  const [expandedCategory, setExpandedCategory] = useState<'folders' | 'organizations' | null>(null);
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const workspaces = useDbStore(state => state.workspaces) || [];
+  const folders = useDbStore(state => state.folders) || [];
 
   const [visibleViewItems, setVisibleViewItems] = useState<Record<string, boolean>>({
     all: true,
@@ -25,7 +35,13 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef }) =>
     todos: true,
     automations: true,
     sessions: true,
+    folders: true,
+    organizations: true,
+    all_shortcuts: true,
   });
+
+  const [customGroupNames, setCustomGroupNames] = useState<Record<string, string>>({});
+
   const [viewItemsOrder, setViewItemsOrder] = useState<string[]>([
     'all',
     'sessions',
@@ -35,42 +51,79 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef }) =>
     'chat_agents',
     'snippets',
     'automations',
+    'folders',
+    'organizations',
+    'all_shortcuts',
   ]);
 
   // Load preferences from local storage and listen to changes
   useEffect(() => {
-    const loadPreferences = () => {
-      chrome.storage.local.get(['sidebar_view_visible_items', 'sidebar_view_items_order'], (result) => {
-        if (result.sidebar_view_items_order && result.sidebar_view_items_order.length < 8) {
-          const newOrder = [
-            'all',
-            'sessions',
-            'notes',
-            'todos',
-            'links',
-            'chat_agents',
-            'snippets',
-            'automations',
-          ];
-          setViewItemsOrder(newOrder);
-          chrome.storage.local.set({ sidebar_view_items_order: newOrder });
+    const loadPreferences = async () => {
+      const result = await getSidebarStorageData([
+        'sidebar_view_visible_items',
+        'sidebar_view_items_order',
+        'customGroupNames',
+        'viewGroupsOrder',
+      ]);
 
-          const newVisible = {
-            ...result.sidebar_view_visible_items,
-            sessions: true,
-            chat_agents: true,
-          };
-          setVisibleViewItems(newVisible);
-          chrome.storage.local.set({ sidebar_view_visible_items: newVisible });
-        } else {
-          if (result.sidebar_view_visible_items) {
-            setVisibleViewItems(result.sidebar_view_visible_items);
-          }
-          if (result.sidebar_view_items_order) {
-            setViewItemsOrder(result.sidebar_view_items_order);
-          }
+      if (result.customGroupNames) {
+        setCustomGroupNames(result.customGroupNames);
+      }
+      const hasFolders = result.sidebar_view_items_order?.includes('folders');
+      const hasAllShortcuts = result.sidebar_view_items_order?.includes('all_shortcuts');
+      const isOldDefault = result.sidebar_view_items_order?.[1] === 'notes';
+
+      if (
+        !result.sidebar_view_items_order ||
+        result.sidebar_view_items_order.length < 9 ||
+        !hasAllShortcuts ||
+        isOldDefault ||
+        !hasFolders
+      ) {
+        const newOrder = [
+          'all',
+          'sessions',
+          'notes',
+          'todos',
+          'links',
+          'chat_agents',
+          'snippets',
+          'automations',
+          'folders',
+          'organizations',
+          'all_shortcuts',
+        ];
+        setViewItemsOrder(newOrder);
+        setSidebarStorageData({ sidebar_view_items_order: newOrder });
+
+        const newVisible = {
+          ...result.sidebar_view_visible_items,
+          sessions: result.sidebar_view_visible_items?.sessions ?? true,
+          chat_agents: result.sidebar_view_visible_items?.chat_agents ?? true,
+          folders: true,
+          organizations: true,
+          all_shortcuts: true,
+        };
+        setVisibleViewItems(newVisible);
+        setSidebarStorageData({ sidebar_view_visible_items: newVisible });
+      } else {
+        if (result.sidebar_view_visible_items) {
+          const stored = result.sidebar_view_visible_items;
+          setVisibleViewItems({
+            ...stored,
+            'header-workflows': stored['header-workflows'] ?? false,
+            'header-shortcuts': stored['header-shortcuts'] ?? false,
+            'header-others': stored['header-others'] ?? false,
+          });
         }
-      });
+        if (result.sidebar_view_items_order) {
+          let order = result.sidebar_view_items_order;
+          if (!order.some((id: string) => id.startsWith('header-'))) {
+            order = [...order, 'header-workflows', 'header-shortcuts', 'header-others'];
+          }
+          setViewItemsOrder(order);
+        }
+      }
     };
 
     loadPreferences();
@@ -82,6 +135,9 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef }) =>
       if (changes.sidebar_view_items_order) {
         setViewItemsOrder(changes.sidebar_view_items_order.newValue);
       }
+      if (changes.customGroupNames) {
+        setCustomGroupNames(changes.customGroupNames.newValue);
+      }
     };
 
     chrome.storage.onChanged.addListener(handleStorageChange);
@@ -92,45 +148,118 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef }) =>
 
   const [isViewExpanded, setIsViewExpanded] = useState<boolean>(false);
 
-  const rawOptions = useMemo(() => [
-    {
-      id: 'all',
-      label: 'All',
-      slash: '/a ',
-      icon: (
-        <svg className="w-3.5 h-3.5 shrink-0 text-[var(--color-iconDefault)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <rect x="3" y="3" width="7" height="7" rx="1" />
-          <rect x="14" y="3" width="7" height="7" rx="1" />
-          <rect x="14" y="14" width="7" height="7" rx="1" />
-          <rect x="3" y="14" width="7" height="7" rx="1" />
-        </svg>
-      )
-    },
-    { id: 'notes', label: 'Notes', slash: '/n ', icon: <NotesIcon size={14} className="shrink-0 text-amber-400" /> },
-    { id: 'snippets', label: 'Snippets', slash: '/s ', icon: <FaCode size={14} className="text-[var(--color-iconDefault)] shrink-0" /> },
-    { id: 'links', label: 'Links', slash: '/l ', icon: <FaLink size={14} className="text-blue-400 shrink-0" /> },
-    { id: 'chat_agents', label: 'Chat Agents', slash: '/ca ', icon: <FaRobot size={14} className="text-indigo-400 shrink-0" /> },
-    { id: 'todos', label: 'Todos', slash: '/t ', icon: <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)] shrink-0" /> },
-    { id: 'automations', label: 'Automations', slash: '/au ', icon: <FiZap size={14} className="text-amber-400 shrink-0" /> },
-    { id: 'sessions', label: 'Tab groups', slash: '/se ', icon: <FaLayerGroup size={14} className="text-purple-400 shrink-0" /> },
-  ], []);
+  const rawOptions = useMemo(
+    () => [
+      {
+        id: 'all',
+        label: 'All',
+        slash: '/a ',
+        icon: (
+          <svg
+            className="w-3.5 h-3.5 shrink-0 text-[var(--color-iconDefault)]"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5">
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+          </svg>
+        ),
+      },
+      {
+        id: 'sessions',
+        label: 'Tab Sessions',
+        slash: '/se ',
+        icon: <FaLayerGroup size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+      },
+      {
+        id: 'notes',
+        label: 'Notes',
+        slash: '/n ',
+        icon: <NotesIcon size={14} className="shrink-0 text-[var(--color-iconDefault)]" />,
+      },
+      {
+        id: 'todos',
+        label: 'Todos',
+        slash: '/t ',
+        icon: <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+      },
+      {
+        id: 'links',
+        label: 'Links',
+        slash: '/l ',
+        icon: <FaLink size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+      },
+      {
+        id: 'chat_agents',
+        label: 'Chat Agents',
+        slash: '/ca ',
+        icon: <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+      },
+      {
+        id: 'snippets',
+        label: 'Text Expanders',
+        slash: '/s ',
+        icon: <FaCode size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+      },
+
+      {
+        id: 'folders',
+        label: 'Folders',
+        slash: '/f ',
+        icon: <FiFolder size={14} className="text-gray-400 shrink-0" />,
+      },
+      {
+        id: 'organizations',
+        label: 'Organizations',
+        slash: '/org ',
+        icon: <FiBriefcase size={14} className="text-gray-400 shrink-0" />,
+      },
+      {
+        id: 'all_shortcuts',
+        label: 'All Shortcuts',
+        slash: '',
+        icon: <FiCommand size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+      },
+    ],
+    [],
+  );
 
   const mainItems = useMemo(() => {
     return viewItemsOrder
-      .filter((id) => visibleViewItems[id])
-      .map((id) => rawOptions.find((o) => o.id === id))
+      .filter(id => visibleViewItems[id])
+      .map(id => rawOptions.find(o => o.id === id))
       .filter(Boolean) as any[];
   }, [viewItemsOrder, visibleViewItems, rawOptions]);
 
   const collapsedItems = useMemo(() => {
     return viewItemsOrder
-      .filter((id) => !visibleViewItems[id])
-      .map((id) => rawOptions.find((o) => o.id === id))
+      .filter(id => !visibleViewItems[id])
+      .map(id => rawOptions.find(o => o.id === id))
       .filter(Boolean) as any[];
   }, [viewItemsOrder, visibleViewItems, rawOptions]);
 
-  const handleViewClick = (slash: string) => {
+  const handleViewClick = (slash: string, optionId?: string) => {
+    if (optionId === 'folders') {
+      setExpandedCategory(prev => (prev === 'folders' ? null : 'folders'));
+      return;
+    }
+    if (optionId === 'organizations') {
+      setExpandedCategory(prev => (prev === 'organizations' ? null : 'organizations'));
+      return;
+    }
+
+    setExpandedCategory(null);
+
+    if (optionId === 'all_shortcuts') {
+      openSpreadsheetView?.('collections');
+      return;
+    }
+
     useUIStore.getState().closeEditor();
+    useUIStore.getState().closeSheet();
 
     // Clear workspace and folder filter so clicking "All" or other views resets to global search results
     useUIStore.getState().setSelectedWorkspaceId(null);
@@ -150,80 +279,161 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef }) =>
     }
   };
 
-  const renderViewOptionItem = (opt: any) => {
-    return (
-      <div
-        key={opt.id}
-        className="flex items-center cursor-pointer group py-[4px] pl-[12px] gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150"
-        onClick={(e) => {
-          e.stopPropagation();
-          handleViewClick(opt.slash);
-        }}
-      >
-        <div className="w-4 h-4 flex items-center justify-center shrink-0">
-          {opt.icon}
-        </div>
-        <span
-          className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${isDark
-              ? 'text-neutral-400 group-hover:text-neutral-200'
-              : 'text-neutral-500 group-hover:text-neutral-800'
-            }`}
-        >
-          {opt.label}
-        </span>
+  const renderFolderItem = (folder: any) => (
+    <div
+      key={folder.id}
+      className="flex items-center cursor-pointer group py-[4px] pl-[34px] gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
+      onClick={e => {
+        e.stopPropagation();
+        if (openSpreadsheetView) {
+          openSpreadsheetView();
+        } else {
+          useUIStore.getState().openSheet();
+        }
+        setTimeout(() => {
+          useSpreadsheetStore.getState().setSearchTerm(folder.folderName || '');
+        }, 100);
+      }}>
+      <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+        <FiFolder size={12} className="text-gray-400 opacity-80" />
       </div>
+      <span className="text-[12px] font-medium tracking-tight text-neutral-500 group-hover:text-neutral-800 dark:text-neutral-400 dark:group-hover:text-neutral-200 truncate">
+        {folder.folderName || 'Untitled'}
+      </span>
+    </div>
+  );
+
+  const renderWorkspaceItem = (ws: any) => (
+    <div
+      key={ws.id}
+      className="flex items-center cursor-pointer group py-[4px] pl-[34px] gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
+      onClick={e => {
+        e.stopPropagation();
+        useUIStore.getState().setView({
+          type: 'settings',
+          section: 'allWorkspaces',
+        });
+      }}>
+      <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+        <FiBriefcase size={12} className="text-gray-400 opacity-80" />
+      </div>
+      <span className="text-[12px] font-medium tracking-tight text-neutral-500 group-hover:text-neutral-800 dark:text-neutral-400 dark:group-hover:text-neutral-200 truncate">
+        {ws.workspaceName || 'Untitled'}
+      </span>
+    </div>
+  );
+
+  const renderViewOptionItem = (opt: any, isIndented: boolean = false) => {
+    const paddingClass = isIndented ? 'pl-[28px]' : 'pl-[12px]';
+    return (
+      <React.Fragment key={opt.id}>
+        <div
+          className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5`}
+          onClick={e => {
+            e.stopPropagation();
+            handleViewClick(opt.slash, opt.id);
+          }}>
+          <div className="w-4 h-4 flex items-center justify-center shrink-0">{opt.icon}</div>
+          <span
+            className={`text-[12px] font-semibold tracking-tight ${
+              isDark ? 'text-neutral-400 group-hover:text-neutral-200' : 'text-neutral-500 group-hover:text-neutral-800'
+            }`}>
+            {opt.label}
+          </span>
+        </div>
+
+        {opt.id === 'folders' && expandedCategory === 'folders' && (
+          <div className="flex flex-col mt-0.5 mb-1 max-h-[300px] overflow-y-auto">
+            {folders.length > 0 ? (
+              folders.map(renderFolderItem)
+            ) : (
+              <div className="pl-[34px] py-1 text-[11px] text-neutral-400">No folders found</div>
+            )}
+          </div>
+        )}
+
+        {opt.id === 'organizations' && expandedCategory === 'organizations' && (
+          <div className="flex flex-col mt-0.5 mb-1 max-h-[300px] overflow-y-auto">
+            {workspaces.length > 0 ? (
+              workspaces.map(renderWorkspaceItem)
+            ) : (
+              <div className="pl-[34px] py-1 text-[11px] text-neutral-400">No organizations found</div>
+            )}
+          </div>
+        )}
+      </React.Fragment>
     );
   };
 
   return (
     <div className="flex flex-col select-none">
       {/* Header */}
-      <div className="px-3 pt-2.5 pb-0 flex items-center justify-between gap-2 group/header relative">
-        <div className="flex-1 flex items-center gap-2 pr-[56px]">
-          <div className="flex items-center gap-1.5">
-            <span
-              className={`text-[12px] font-bold tracking-wider ${isDark ? 'text-neutral-400' : 'text-neutral-500'
-                }`}
-            >
-              MY LIBRARY
-            </span>
-          </div>
-          <div
-            className={`flex-1 border-t ${isDark ? 'border-white/10' : 'border-[#eee8d5]'
-              }`}
-          />
+      <div className="px-3 pt-2.5 pb-1">
+        <div
+          className={`flex items-center justify-between px-3 py-1.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+          <span className="text-[11px] font-bold tracking-wider capitalize text-neutral-500 dark:text-neutral-400">
+            My Library
+          </span>
         </div>
       </div>
 
       {/* Items list */}
       <div className="flex flex-col px-3 pt-1 pb-2 gap-0.5">
-        {mainItems.map((opt) => renderViewOptionItem(opt))}
+        {(() => {
+          let hasSeenHeader = false;
+          return viewItemsOrder.map((id, index) => {
+            if (id.startsWith('header-')) {
+              // A header is visible if any of its children are visible
+              let isVisible = false;
+              for (let i = index + 1; i < viewItemsOrder.length; i++) {
+                if (viewItemsOrder[i].startsWith('header-')) break;
+                if (visibleViewItems[viewItemsOrder[i]] || isExpanded) {
+                  isVisible = true;
+                  break;
+                }
+              }
 
-        {isViewExpanded && collapsedItems.length > 0 && (
-          <div className="flex flex-col gap-0.5">
-            {collapsedItems.map((opt) => renderViewOptionItem(opt))}
-          </div>
-        )}
+              if (isVisible) {
+                hasSeenHeader = true;
+                const groupId = id.replace('header-', '');
+                const title = customGroupNames[groupId] || groupId;
+                return (
+                  <div key={id} className="flex items-center gap-2 mt-2 mb-1 px-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    <span
+                      className={`text-[11px] font-bold tracking-wider capitalize ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                      {title}
+                    </span>
+                  </div>
+                );
+              }
+              return null;
+            } else {
+              const isBeforeFirstHeader = !viewItemsOrder.slice(0, index).some(x => x.startsWith('header-'));
+              const isVisible = isBeforeFirstHeader ? true : visibleViewItems[id];
+              if (!isVisible && !isExpanded) return null;
+              const opt = rawOptions.find(o => o.id === id);
+              if (!opt) return null;
+              return renderViewOptionItem(opt, hasSeenHeader);
+            }
+          });
+        })()}
 
-        {collapsedItems.length > 0 && (
-          <div
-            className="flex items-center justify-center cursor-pointer py-1 px-1.5 group select-none relative"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsViewExpanded(!isViewExpanded);
-            }}
-          >
-            <div className="shrink-0 transition-colors text-[var(--color-iconDefault)] hover:text-neutral-300 dark:hover:text-neutral-600">
-              {isViewExpanded ? (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-                </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              )}
-            </div>
+        {viewItemsOrder.some((id, index) => {
+          if (id.startsWith('header-')) return false;
+          const isBeforeFirstHeader = !viewItemsOrder.slice(0, index).some(x => x.startsWith('header-'));
+          const isVisible = isBeforeFirstHeader ? true : visibleViewItems[id];
+          return !isVisible;
+        }) && (
+          <div className="flex justify-center mt-1">
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                setIsExpanded(!isExpanded);
+              }}
+              className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${isDark ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'}`}>
+              {isExpanded ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+            </button>
           </div>
         )}
       </div>
@@ -232,4 +442,3 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef }) =>
 };
 
 export default ViewMenuPanel;
-

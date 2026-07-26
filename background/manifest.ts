@@ -9,7 +9,10 @@ const packageJsonPath = new URL('./package.json', import.meta.url);
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
 // Vite loads .env before importing this file, so process.env has all VITE_* vars
 const GOOGLE_CLIENT_ID = process.env.VITE_GOOGLE_CLIENT_ID ?? '';
-const PUBLIC_KEY = process.env.VITE_ENABLE_SHARING === 'false' ? (process.env.VITE_EXTENSION_PUBLIC_KEY ?? '') : '';
+const PUBLIC_KEY =
+  process.env.VITE_ENABLE_SHARING === 'false' || process.env.VITE_ENABLE_SHARING === 'true'
+    ? (process.env.VITE_EXTENSION_PUBLIC_KEY ?? '')
+    : '';
 const manifest = {
   manifest_version: 3,
   default_locale: 'en',
@@ -103,11 +106,6 @@ const manifest = {
     {
       matches: ['http://*/*', 'https://*/*', '<all_urls>'],
       js: ['content-ui/index.iife.js'],
-    },
-    {
-      matches: ['http://*/*', 'https://*/*', '<all_urls>'],
-      js: ['AltS_search_websites/index.iife.js'],
-      run_at: 'document_start',
     },
   ],
 

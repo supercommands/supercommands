@@ -15,7 +15,8 @@ export function isLocalEntityId(id: any): boolean {
 /**
  * Extracts the raw snippet ID from a compound ID.
  */
-export const extractSnippetIdFromCompoundId = (compoundId: string): string => {
+export const extractSnippetIdFromCompoundId = (compoundId: any): string => {
+  if (!compoundId || typeof compoundId !== 'string') return String(compoundId || '');
   if (!compoundId.includes('-')) return compoundId;
   const parts = compoundId.split('-');
   return parts.slice(-1)[0].length > 8 ? parts.slice(-5).join('-') : compoundId;
@@ -34,7 +35,7 @@ export const getItemCompoundId = (item: any): string => {
     item._kind === 'automation' ||
     item.kind === 'automation' ||
     item.type === 'automation' ||
-    item.category === 'automation'
+    item.category === 'automation' 
   )
     return item.automation?.id || item.id;
 

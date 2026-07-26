@@ -18,6 +18,7 @@ export interface PendingAiSession {
   tabIds: number[];
   urls: Record<string, string>;
   timestamp: number;
+  aiPromptId?: string;
 }
 
 export const pendingAiSessions = new Map<string, PendingAiSession>();

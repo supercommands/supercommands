@@ -17,10 +17,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { FaCheck, FaTimes, FaPencilAlt, FaPlus } from 'react-icons/fa';
 import { useDispatch } from 'react-redux';
-import { getFaviconUrl, stripCmdStatus } from '../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl, stripCmdStatus } from '../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { useUIStore } from '../../../../shared-components/uiStateManager';
 import useNotification from '../../../../shared-components/notifications/useNotification';
-import type { SuggestionState } from '../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/userInterfaceComponents/searchBar';
+import type { SuggestionState } from '../../../../shared-components/searchBarMain/userInterfaceComponents/searchBar';
 
 interface ModelSelectorProps {
   state: SuggestionState;

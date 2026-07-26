@@ -15,7 +15,7 @@ import type React from 'react';
 
 import { useAppearance } from '@extension/ui';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import type { SuggestionState } from '../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/userInterfaceComponents/searchBar';
+import type { SuggestionState } from '../../../../shared-components/searchBarMain/userInterfaceComponents/searchBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FaCheck,
@@ -25,6 +25,7 @@ import {
 } from 'react-icons/fa';
 import { LuSave } from 'react-icons/lu';
 import { DestinationPicker } from '../../../../shared-components/editorToolbar/DestinationPicker';
+import { SharedPropertiesToolbar } from '../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
 
 import useNotification from '../../../../shared-components/notifications/useNotification';
 import MyAutomationsList from '../automationBeta/searchIntegration/myAutomationsList';
@@ -45,7 +46,7 @@ import { RenderLogPrompt } from './components/RenderLogPrompt';
 import { useChatLogs } from './hooks/useChatLogs';
 import { useChatAgentEditor } from './useChatAgentEditor';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { getAllChatAgents } from './chatAgentData';
+import { getAllChatAgents, updateChatAgent } from './chatAgentData';
 
 type TabType = 'agents' | 'automations' | 'skills';
 
@@ -147,8 +148,7 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [targetWorkspaceId, setTargetWorkspaceId] = useState<string | null>(null);
   const [targetFolderId, setTargetFolderId] = useState<string | null>(null);
-  
-
+  const [targetTagIds, setTargetTagIds] = useState<string[]>([]);
   
   // Keep track of our local chats
   const myChats = useLiveQuery(() => getAllChatAgents()) || [];
@@ -159,7 +159,7 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
   }, [activeAiSession, myChats]);
 
   const handleManualSave = async () => {
-    const savedId = await handleSave(targetWorkspaceId || undefined, targetFolderId);
+    const savedId = await handleSave(targetWorkspaceId || undefined, targetFolderId, targetTagIds);
     if (savedId) {
       triggerNotification('Agent saved successfully!', 'success');
       updateActiveSessionMetadata?.({ id: savedId, name: agentTitle });
@@ -317,7 +317,6 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
                           }
                           try {
                             if (agent.id !== 'active-session') {
-                              const { updateChatAgent } = await import('./chatAgentData');
                               await updateChatAgent(String(agent.id), { title: editingAgentName.trim() });
                             }
 
@@ -457,7 +456,7 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
         <div className={`relative flex flex-1 min-w-0 flex-col ${isDark ? 'bg-black' : 'bg-[#fdf6e3]'}`}>
           <button
             onClick={onClose}
-            className="absolute top-2 right-2 z-[90] p-1.5 rounded-full hover:bg-white/10 text-red-500 transition-all active:scale-95 group focus:outline-none"
+            className="absolute top-2 right-2 z-[90] p-1.5 rounded-full hover:bg-white/10 text-neutral-500 hover:text-neutral-300 transition-all active:scale-95 group focus:outline-none"
             title="Exit AI Mode">
             <FaTimes
               size={16}
@@ -497,24 +496,21 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
                 className={`w-full mb-3 rounded px-3 py-2 text-xs border ${isDark ? 'bg-neutral-900 border-white/10 text-white' : 'bg-white border-[#d8d2bf]'}`}
                 placeholder="Agent Name"
               />
-              <div className="relative mb-4">
-                <button 
-                  onClick={() => setIsLocationPickerOpen(!isLocationPickerOpen)}
-                  className={`w-full text-left rounded px-3 py-2 text-xs border flex items-center gap-2 ${isDark ? 'bg-neutral-900 border-white/10 text-white/80' : 'bg-white border-[#d8d2bf] text-[#586e75]'}`}
-                >
-                  <FaFolder size={12} /> {targetWorkspaceId ? 'Destination Selected' : 'Select Destination'}
-                </button>
-                {isLocationPickerOpen && (
-                   <div className="absolute bottom-full mb-1 left-0 w-[300px] z-[100]">
-                     <DestinationPicker
-                       selectedWorkspaceId={targetWorkspaceId}
-                       selectedFolderId={targetFolderId}
-                       onSelectWorkspace={(wsId) => { setTargetWorkspaceId(wsId); setTargetFolderId(null); setIsLocationPickerOpen(false); }}
-                       onSelectFolder={(wsId, fId) => { setTargetWorkspaceId(wsId); setTargetFolderId(fId); setIsLocationPickerOpen(false); }}
-                       onClose={() => setIsLocationPickerOpen(false)}
-                     />
-                   </div>
-                )}
+              <div className="relative mb-4 overflow-visible">
+                <SharedPropertiesToolbar
+                  initialSnippet={{ workspaceId: targetWorkspaceId, folderId: targetFolderId, tagIds: targetTagIds, category: 'chatAgent' }}
+                  compoundId={activeSessionId || 'new'}
+                  defaultName={agentTitle}
+                  showShortcut={false}
+                  showTodo={false}
+                  onChange={(props: any) => {
+                    if (props.workspaceId !== undefined) setTargetWorkspaceId(props.workspaceId);
+                    if (props.folderId !== undefined) setTargetFolderId(props.folderId);
+                    if (props.selectedTags !== undefined) setTargetTagIds(props.selectedTags.map((t: any) => t.id));
+                  }}
+                  layout="horizontal"
+                  openPopupsToBottom={true}
+                />
               </div>
               <div className="flex justify-end">
                 <button onClick={handleManualSave} className={`px-4 py-1.5 rounded text-xs font-bold ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-[#eee8d5] text-[#073642] hover:bg-[#d8d2bf]'}`}>

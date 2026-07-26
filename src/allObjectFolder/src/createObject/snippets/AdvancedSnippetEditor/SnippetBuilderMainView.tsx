@@ -128,14 +128,14 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
       setConfigAlias(textModalState.initialAlias || '');
       setConfigDefaultValue(String((textModalState.initialData as any)?.defaultValue ?? ''));
       setConfigRequired((textModalState.initialData as any)?.required ?? false);
-      
+
       if (textModalState.fieldType === 'dropdown' && 'options' in (textModalState.initialData || {})) {
         // @ts-ignore
         setConfigOptions((textModalState.initialData?.options || []).join('\n'));
       } else {
         setConfigOptions('');
       }
-      
+
       if (textModalState.fieldType === 'toggle') {
         // @ts-ignore
         setConfigTrueLabel(textModalState.initialData?.trueLabel || 'Yes');
@@ -156,7 +156,7 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
   const handleSaveField = () => {
     const configToSave: any = { required: configRequired };
     if (configLabel.trim()) configToSave.label = configLabel.trim();
-    
+
     if (textModalState.fieldType === 'toggle') {
       configToSave.defaultValue = configDefaultValue === 'true';
       configToSave.trueLabel = configTrueLabel || 'Yes';
@@ -168,7 +168,7 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
     } else if (configDefaultValue.trim()) {
       configToSave.defaultValue = configDefaultValue;
     }
-    
+
     if (textModalState.fieldType === 'dropdown') {
       const opts = configOptions.split('\n').map(opt => opt.trim()).filter(opt => opt.length > 0);
       const uniqueOpts = Array.from(new Set(opts));
@@ -178,7 +178,7 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
       }
       configToSave.options = uniqueOpts;
     }
-    
+
     if (textModalState.onSave) {
       textModalState.onSave(configToSave, configAlias.trim() || undefined);
     }
@@ -235,7 +235,7 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
       if (match) {
         const queryText = match[1];
         const triggerPosition = $from.pos - match[0].length;
-        
+
         try {
           const coords = editor.view.coordsAtPos(triggerPosition);
           const containerRect = containerRef.current?.getBoundingClientRect();
@@ -322,11 +322,12 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
   if (!editor) return null;
 
   return (
-    <div 
+    <div
       ref={containerRef}
       style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-      
-      <style dangerouslySetInnerHTML={{__html: `
+
+      <style dangerouslySetInnerHTML={{
+        __html: `
         .no-scrollbar::-webkit-scrollbar {
           display: none !important;
         }
@@ -369,17 +370,17 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
       )}
 
       {textModalState.isOpen && (
-        <div 
+        <div
           onKeyDown={handleModalKeyDown}
           className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50 backdrop-blur-[2px] animate-in fade-in duration-200"
           onClick={closeModals}
         >
-          <div 
+          <div
             className="bg-[#171821] border border-neutral-200 dark:border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-200 text-left"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-3 border-b border-neutral-200 dark:border-white/10 pb-4 flex-shrink-0">
-              <button 
+              <button
                 onClick={closeModals}
                 className="p-1.5 -ml-1.5 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white rounded-lg hover:bg-neutral-100 dark:hover:bg-white/5 transition-colors"
               >
@@ -395,9 +396,9 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
             <div className="flex flex-col gap-4 overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 flex-1">
               <div className="flex flex-col gap-1.5">
                 <label className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">Field Label</label>
-                <input 
+                <input
                   autoFocus
-                  type="text" 
+                  type="text"
                   value={configLabel}
                   onChange={(e) => setConfigLabel(e.target.value)}
                   placeholder="e.g., First Name"
@@ -408,7 +409,7 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
               {textModalState.fieldType === 'dropdown' && (
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">Options (One per line)</label>
-                  <textarea 
+                  <textarea
                     rows={4}
                     value={configOptions}
                     onChange={(e) => setConfigOptions(e.target.value)}
@@ -422,8 +423,8 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
                 <div className="flex gap-3">
                   <div className="flex flex-col gap-1.5 flex-1">
                     <label className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">True Label</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={configTrueLabel}
                       onChange={(e) => setConfigTrueLabel(e.target.value)}
                       placeholder="Yes"
@@ -432,8 +433,8 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
                   </div>
                   <div className="flex flex-col gap-1.5 flex-1">
                     <label className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">False Label</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={configFalseLabel}
                       onChange={(e) => setConfigFalseLabel(e.target.value)}
                       placeholder="No"
@@ -496,8 +497,8 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
                       ))}
                     </select>
                   ) : (
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={configDefaultValue}
                       onChange={(e) => setConfigDefaultValue(e.target.value)}
                       placeholder="e.g., John"
@@ -508,8 +509,8 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
               )}
               {textModalState.fieldType !== 'toggle' && textModalState.fieldType !== 'date' && (
                 <div className="flex items-center gap-2 mt-2">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     id="modal-req-checkbox"
                     checked={configRequired}
                     onChange={(e) => setConfigRequired(e.target.checked)}
@@ -523,13 +524,13 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
             </div>
 
             <div className="flex gap-3 pt-4 border-t border-neutral-200 dark:border-white/10 mt-auto flex-shrink-0">
-              <button 
+              <button
                 onClick={closeModals}
                 className="flex-1 px-4 py-2 text-sm font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={handleSaveField}
                 className="flex-1 px-4 py-2 flex items-center justify-center gap-2 text-sm font-medium bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors shadow-sm"
               >

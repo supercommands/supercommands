@@ -29,15 +29,52 @@ eslint.config.js
 # AI agent instruction and area guidance files (do not send to cloud)
 instructions/
 
+# dependencies
+**/node_modules
+
+# testing
+**/coverage
+
+# build
+**/dist
+**/build
+**/dist-zip
+chrome-extension/manifest.js
+chrome-extension/pre-build.tsconfig.tsbuildinfo
+tsconfig.tsbuildinfo
+eslint.config.js
+extension-artifacts/
+
+
+# env
+**/.env.*
+**/.env
+
+# etc
+.DS_Store
+.idea
+**/.turbo
+
+# compiled
+**/tailwind-output.css
+
+# AI agent instruction and area guidance files (do not send to cloud)
+instructions/
+
 # Agents
 .agent/
 .agents/
 skills-lock.json
-
-
-
 docs/
-
-
-
 **/.manifest-out
+.wxt/
+.output/
+
+
+# WXT browser profile
+.wxt/chrome-data/
+
+# Logs & audit reports
+logs/
+*.log
+

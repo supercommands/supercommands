@@ -4,7 +4,13 @@ import type { CommandModule } from './types';
 export const filterWebsiteOnlyCommands = <T extends Pick<CommandModule, 'category' | 'isAvailable'>>(
   commands: T[],
 ): T[] => {
-  return commands.filter(command => command.category !== 'thissite_action' && typeof command.isAvailable !== 'function');
+  return commands.filter(
+    command =>
+      ((command as unknown as CommandModule).surface !== 'website') &&
+      command.category !== 'thissite_action' &&
+      command.category !== 'page_action' &&
+      typeof command.isAvailable !== 'function',
+  );
 };
 
 export const SHARED_ALL_COMMANDS: CommandModule[] = ALL_COMMANDS;

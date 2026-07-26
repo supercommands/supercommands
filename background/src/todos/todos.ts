@@ -220,10 +220,10 @@ export async function updateLocalTodo(todoId: string, updates: any) {
 export async function findTodoById(todoId: string): Promise<any | null> {
   try {
     const actualId = extractSnippetId(todoId);
-    
+
     // Check Dexie database
-    const todo = await db.todos.get(actualId) || await db.todos.get(todoId);
-    
+    const todo = (await db.todos.get(actualId)) || (await db.todos.get(todoId));
+
     if (todo) {
       return {
         ...todo,
@@ -239,10 +239,10 @@ export async function findTodoById(todoId: string): Promise<any | null> {
         recurring_cycle: todo.recurringType || null,
         event_deadline: new Date(todo.scheduleTime).toISOString(),
         created_at: new Date(todo.createdAt).toISOString(),
-        updated_at: new Date(todo.updatedAt).toISOString()
+        updated_at: new Date(todo.updatedAt).toISOString(),
       };
     }
-  } catch(e) {
+  } catch (e) {
     console.error('[Background] Failed to pull from dexie', e);
   }
   return null;
@@ -345,7 +345,7 @@ export async function executeTodoAction(todoId: string) {
           const itemId = matched.id || matched.snippet_id;
 
           if (
-            ['link', 'tabgroup', 'tab group', 'links', 'quicklink', 'collection', 'agent_collection'].includes(
+            ['link', 'tabgroup', 'Tab Session', 'links', 'quicklink', 'collection', 'agent_collection'].includes(
               matchedCat,
             )
           ) {
@@ -398,7 +398,9 @@ export async function executeTodoAction(todoId: string) {
     const category = (todo.category || todo.snippet_category || 'note').toLowerCase();
     const value = todo.value;
     const snippetId = todo.snippet_id || todo.id;
-    if (['link', 'tabgroup', 'tab group', 'links', 'quicklink', 'collection', 'agent_collection'].includes(category)) {
+    if (
+      ['link', 'tabgroup', 'Tab Session', 'links', 'quicklink', 'collection', 'agent_collection'].includes(category)
+    ) {
       // Handle URLs
       let urls: string[] = [];
       try {
@@ -723,7 +725,7 @@ export function handleTodoMessage(
               await db.todos.update(todoId, {
                 scheduleTime: nextRun.getTime(),
                 isDone: false,
-                updatedAt: Date.now()
+                updatedAt: Date.now(),
               });
             }
           }
@@ -869,7 +871,7 @@ export async function handleTodoAlarm(alarm: chrome.alarms.Alarm) {
       await db.todos.update(todoId, {
         scheduleTime: nextRunTime,
         isDone: false,
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
 
       // API logic removed

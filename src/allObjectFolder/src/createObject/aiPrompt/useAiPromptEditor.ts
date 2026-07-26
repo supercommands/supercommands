@@ -14,8 +14,13 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 
-import { createAiPrompt, updateAiPrompt } from './aiPromptData';
-import type { AiPromptRecord, CreateAiPromptInput, UpdateAiPromptInput } from './aiPromptTypes';
+import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { saveShortcut, clearShortcut } from '../../../../shared-components/shortcuts';
+import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
+
+import { createAiPrompt, updateAiPrompt, deleteAiPrompt } from './aiPromptData';
+import { useShortcutValidation } from '../../../../shared-components/shortcuts/hooks/useShortcutValidation';
+import type { AiPromptRecord, CreateAiPromptInput, UpdateAiPromptInput, CustomModelConfig } from './aiPromptTypes';
 import { useAiPrompt } from './aiPromptHooks';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
@@ -60,6 +65,13 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+const defaultModelUrls = {
+  gpt: 'https://chatgpt.com',
+  claude: 'https://claude.ai/new',
+  gemini: 'https://gemini.google.com/app',
+  perplexity: 'https://www.perplexity.ai',
+};
+
 export function useAiPromptEditor(props: AiPromptEditorProps) {
   const { aiPromptId, onBack, initialTitle, initialPrompt } = props;
 
@@ -73,7 +85,69 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [customModels, setCustomModels] = useState<CustomModelConfig[]>([]);
   const [isInitialized, setIsInitialized] = useState<boolean>(!aiPromptId);
+  const [isShortcutInitialized, setIsShortcutInitialized] = useState<boolean>(!aiPromptId);
+
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
+
+  const [promptShortcut, setPromptShortcut] = useState<string>('');
+  const lastSavedShortcutRef = useRef<string>('');
+  const isShortcutManuallyEditedRef = useRef<boolean>(false);
+
+  const { validateShortcut } = useShortcutValidation();
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const [isShortcutOverrideable, setIsShortcutOverrideable] = useState<boolean>(false);
+  const [shortcutConflictId, setShortcutConflictId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const checkShortcut = async () => {
+      if (promptShortcut) {
+        const targetCompoundId = getItemCompoundId({
+          id: aiPromptId || activeAiPromptId,
+          workspace_id: workspaceId || null,
+          folder_id: folderId || null,
+          snippet: { id: aiPromptId || activeAiPromptId, category: 'aiPrompt' }
+        });
+        const currentShortcuts = await readAllShortcuts();
+        if (currentShortcuts[targetCompoundId] === promptShortcut) {
+          if (active) {
+            setShortcutError(null);
+            setIsShortcutOverrideable(false);
+            setShortcutConflictId(null);
+          }
+          return;
+        }
+        const res = await validateShortcut(promptShortcut, aiPromptId || activeAiPromptId || 'new');
+        if (active) {
+          if (!res.isValid) {
+            setShortcutError(res.errorMessage || 'This shortcut is already taken.');
+            setIsShortcutOverrideable(!!res.isOverrideable);
+            setShortcutConflictId(res.conflictId || null);
+          } else {
+            setShortcutError(null);
+            setIsShortcutOverrideable(false);
+            setShortcutConflictId(null);
+          }
+        }
+      } else {
+        if (active) {
+          setShortcutError(null);
+          setIsShortcutOverrideable(false);
+          setShortcutConflictId(null);
+        }
+      }
+    };
+    void checkShortcut();
+    return () => {
+      active = false;
+    };
+  }, [promptShortcut, aiPromptId, activeAiPromptId, workspaceId, folderId, validateShortcut]);
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -99,13 +173,30 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   const lastSavedTitleRef = useRef<string>(initialTitle || '');
   const lastSavedPromptRef = useRef<string>(initialPrompt || '');
   const lastSavedRulesRef = useRef<string>('');
-  const lastSavedModelUrlsRef = useRef<Record<string, string>>({});
+  const lastSavedModelUrlsRef = useRef<Record<string, string>>(aiPromptId ? {} : defaultModelUrls);
   const lastSavedWorkspaceIdRef = useRef<string | null>(null);
   const lastSavedFolderIdRef = useRef<string | null>(null);
   const lastSavedTagIdsRef = useRef<string[]>([]);
+  const lastSavedCustomModelsRef = useRef<CustomModelConfig[]>([]);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const initDefaults = useCallback(async () => {
+    const smartWs = await getSmartDefaultWorkspace();
+    if (smartWs) {
+      setWorkspaceId(smartWs.id);
+      lastSavedWorkspaceIdRef.current = smartWs.id;
+      const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
+      setFolderId(savedFolderId || null);
+      lastSavedFolderIdRef.current = savedFolderId || null;
+    } else {
+      setWorkspaceId(null);
+      lastSavedWorkspaceIdRef.current = null;
+      setFolderId(null);
+      lastSavedFolderIdRef.current = null;
+    }
+  }, []);
 
   // Initialize defaults for new prompt
   useEffect(() => {
@@ -114,6 +205,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       activeAiPromptIdRef.current = aiPromptId;
       setActiveAiPromptId(aiPromptId);
       setIsInitialized(false);
+      setIsShortcutInitialized(false);
       return;
     }
 
@@ -124,29 +216,24 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     setPromptRules('');
     setSelectedModel(null);
 
-    const initDefaults = async () => {
-      const smartWs = await getSmartDefaultWorkspace();
-      if (smartWs) {
-        setWorkspaceId(smartWs.id);
-        const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
-        setFolderId(savedFolderId || null);
-      } else {
-        setWorkspaceId(null);
-        setFolderId(null);
-      }
-    };
     void initDefaults();
 
     setTagIds([]);
+    setCustomModels([]);
     lastSavedTitleRef.current = initialTitle || '';
     lastSavedPromptRef.current = initialPrompt || '';
     lastSavedRulesRef.current = '';
-    lastSavedModelUrlsRef.current = {};
+    lastSavedModelUrlsRef.current = defaultModelUrls;
     lastSavedWorkspaceIdRef.current = null;
     lastSavedFolderIdRef.current = null;
     lastSavedTagIdsRef.current = [];
+    lastSavedCustomModelsRef.current = [];
+    lastSavedShortcutRef.current = '';
+    isShortcutManuallyEditedRef.current = false;
+    setPromptShortcut('');
     setSaveStatus('idle');
     setIsInitialized(true);
+    setIsShortcutInitialized(true);
 
     // Restore previous draft from sessionStorage if available
     const draft = loadDraft();
@@ -162,7 +249,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   const liveAiPrompt = useAiPrompt(activeAiPromptId);
 
   const isDirty = useMemo(() => {
-    if (!isInitialized) return false;
+    if (!isInitialized || !isShortcutInitialized) return false;
     const titleChanged = promptTitle !== lastSavedTitleRef.current;
     const promptChanged = promptBody !== lastSavedPromptRef.current;
     const rulesChanged = promptRules !== lastSavedRulesRef.current;
@@ -170,14 +257,53 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     const workspaceChanged = workspaceId !== lastSavedWorkspaceIdRef.current;
     const folderChanged = folderId !== lastSavedFolderIdRef.current;
     const tagsChanged = [...tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
+    const customModelsChanged = JSON.stringify(customModels) !== JSON.stringify(lastSavedCustomModelsRef.current);
+    const shortcutChanged = isShortcutInitialized && promptShortcut !== lastSavedShortcutRef.current;
 
-    return titleChanged || promptChanged || rulesChanged || modelUrlsChanged || workspaceChanged || folderChanged || tagsChanged;
-  }, [promptTitle, promptBody, promptRules, modelUrls, workspaceId, folderId, tagIds, isInitialized]);
+    return titleChanged || promptChanged || rulesChanged || modelUrlsChanged || workspaceChanged || folderChanged || tagsChanged || customModelsChanged || shortcutChanged;
+  }, [promptTitle, promptBody, promptRules, modelUrls, workspaceId, folderId, tagIds, customModels, promptShortcut, isInitialized, isShortcutInitialized]);
+
+
+  // Synchronize shortcut from DB on load or activeAiPromptId changes
+  useEffect(() => {
+    if (activeAiPromptId) {
+      setIsShortcutInitialized(false);
+      const loadSavedShortcut = async () => {
+        try {
+          const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
+          const fldObj = folderId ? { folder_id: folderId } : null;
+          const targetCompoundId = getItemCompoundId({
+            id: activeAiPromptId,
+            workspace_id: wsObj?.workspace_id || null,
+            folder_id: fldObj?.folder_id || null,
+            snippet: { id: activeAiPromptId, category: 'aiPrompt' }
+          });
+          const shortcutsMap = await readAllShortcuts();
+          const sc = normalizeShortcutTrigger(shortcutsMap[targetCompoundId] || '');
+          if (isMounted.current) {
+            if (!isShortcutManuallyEditedRef.current) {
+              setPromptShortcut(sc);
+            }
+            lastSavedShortcutRef.current = sc;
+            setIsShortcutInitialized(true);
+          }
+        } catch (err) {
+          console.error('Failed to load shortcut:', err);
+          if (isMounted.current) {
+            setIsShortcutInitialized(true);
+          }
+        }
+      };
+      void loadSavedShortcut();
+    } else {
+      setIsShortcutInitialized(true);
+    }
+  }, [activeAiPromptId, workspaceId, folderId]);
 
   useEffect(() => {
     if (!liveAiPrompt) return;
 
-    if (!isInitialized || !isDirty) {
+    if (!isInitialized) {
       setPromptTitle(liveAiPrompt.title);
       setPromptBody(liveAiPrompt.prompt);
       setPromptRules(liveAiPrompt.rules || '');
@@ -187,6 +313,11 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       setWorkspaceId(liveAiPrompt.workspaceId);
       setFolderId(liveAiPrompt.folderId);
       setTagIds(liveAiPrompt.tagIds);
+      if (liveAiPrompt.customModels) {
+        setCustomModels(liveAiPrompt.customModels);
+      } else {
+        setCustomModels([]);
+      }
 
       lastSavedTitleRef.current = liveAiPrompt.title;
       lastSavedPromptRef.current = liveAiPrompt.prompt;
@@ -195,12 +326,13 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       lastSavedWorkspaceIdRef.current = liveAiPrompt.workspaceId;
       lastSavedFolderIdRef.current = liveAiPrompt.folderId;
       lastSavedTagIdsRef.current = liveAiPrompt.tagIds;
+      lastSavedCustomModelsRef.current = liveAiPrompt.customModels || [];
 
       setLastSavedAt(new Date(liveAiPrompt.updatedAt));
       setSaveStatus('saved');
       setIsInitialized(true);
     }
-  }, [liveAiPrompt, isDirty, isInitialized]);
+  }, [liveAiPrompt, isInitialized]);
 
   // Sync refs with state
   useEffect(() => {
@@ -230,7 +362,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
           // This gives the AI provider time to fully create the chat on their end
           if (message.tabId) {
             setTimeout(() => {
-              chrome.tabs.remove(message.tabId).catch(() => {});
+              chrome.tabs.remove(message.tabId).catch(() => { });
             }, 2500);
           }
         }
@@ -248,78 +380,96 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     perplexity: 'perplexity',
   };
 
-  const handleGenerateLink = useCallback(async (modelId: string, customPrompt?: string) => {
+  const handleGenerateLink = useCallback(async (modelIds: string | string[], customPrompt?: string) => {
+    const ids = Array.isArray(modelIds) ? modelIds : [modelIds];
     const basePrompt = stripHtml(promptBody).trim();
     const rules = stripHtml(promptRules).trim();
-    
+
     let combinedPrompt = basePrompt;
     if (rules) {
-      combinedPrompt = combinedPrompt 
+      combinedPrompt = combinedPrompt
         ? `${combinedPrompt}\n\nInstructions:\n${rules}`
         : `Instructions:\n${rules}`;
     }
-    
-    const cleanPrompt = customPrompt ? customPrompt.trim() : combinedPrompt;
-    
-    if (!modelId || !cleanPrompt.trim()) return;
 
-    generatingModelRef.current = modelId;
-    setSelectedModel(modelId);
+    const cleanPrompt = customPrompt ? customPrompt.trim() : combinedPrompt;
+
+    if (ids.length === 0 || !cleanPrompt.trim()) return;
+
+    const firstModelId = ids[0];
+    generatingModelRef.current = firstModelId;
+    setSelectedModel(firstModelId);
     setIsGenerating(true);
     isGeneratingRef.current = true;
     setGenerationError(null);
     setGeneratedUrl(null);
 
     try {
-      const targetUrl = modelUrls[modelId] || 'https://chatgpt.com';
-      const kind = MODEL_KIND[modelId] || 'chatgpt';
+      const tabIds: number[] = [];
+      const trackingModels: string[] = [];
 
-      // Send message to background to open tab and auto-submit
-      const response = await new Promise<any>((resolve, reject) => {
-        chrome.runtime.sendMessage(
-          {
-            action: 'open_tab_with_auto_submit',
-            url: targetUrl,
-            autoSubmit: { kind, prompt: cleanPrompt },
-            forceNewTab: true,
-            active: true,
-          },
-          res => {
-            if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-            else resolve(res);
-          },
-        );
-      });
+      for (const mId of ids) {
+        const targetUrl = mId.includes('gpt') ? 'https://chatgpt.com' : mId.includes('claude') ? 'https://claude.ai/new' : mId.includes('gemini') ? 'https://gemini.google.com/app' : 'https://www.perplexity.ai';
 
-      // Register session for URL capture
-      if (response?.tabId) {
+        let kind = 'chatgpt';
+        if (mId.includes('claude')) kind = 'claude';
+        else if (mId.includes('gemini')) kind = 'gemini';
+        else if (mId.includes('perplexity')) kind = 'perplexity';
+
+        const response = await new Promise<any>((resolve, reject) => {
+          chrome.runtime.sendMessage(
+            {
+              action: 'open_tab_with_auto_submit',
+              url: targetUrl,
+              autoSubmit: { kind, prompt: cleanPrompt },
+              forceNewTab: true,
+              active: true,
+            },
+            res => {
+              if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+              else resolve(res);
+            },
+          );
+        });
+
+        if (response?.tabId) {
+          tabIds.push(response.tabId);
+          trackingModels.push(mId);
+        }
+      }
+
+      if (tabIds.length > 0) {
         chrome.runtime.sendMessage({
           action: 'track_ai_session',
           prompt: cleanPrompt,
-          tabIds: [response.tabId],
-          models: [modelId],
+          tabIds,
+          models: trackingModels,
+          aiPromptId: activeAiPromptIdRef.current || undefined,
         });
       }
 
-      // Set a timeout for generation
       setTimeout(() => {
         if (isGeneratingRef.current) {
           setIsGenerating(false);
           isGeneratingRef.current = false;
           generatingModelRef.current = null;
-          setGenerationError('Generation timed out. The AI may not have responded.');
         }
-      }, 120000); // 2 minute timeout
+      }, 120000);
     } catch (err) {
       setIsGenerating(false);
       isGeneratingRef.current = false;
       generatingModelRef.current = null;
       setGenerationError('Failed to trigger AI. Please try again.');
     }
-  }, [promptBody]);
+  }, [promptBody, promptRules, modelUrls]);
 
   const handleSave = useCallback(async (): Promise<boolean> => {
     const currentPromptId = activeAiPromptIdRef.current;
+
+    if (shortcutError) {
+      setSaveStatus('error');
+      return false;
+    }
 
     if (!promptTitle.trim()) {
       return false;
@@ -333,7 +483,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     setSaveStatus('saving');
     try {
       let savedRecord: AiPromptRecord;
-      
+
       if (currentPromptId) {
         const input: UpdateAiPromptInput = {
           workspaceId: workspaceId || undefined,
@@ -343,8 +493,9 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
           rules: promptRules,
           modelUrls: modelUrls,
           tagIds: tagIds,
+          customModels: customModels,
         };
-        savedRecord = await updateAiPrompt(currentPromptId, input);
+        savedRecord = await updateAiPrompt(currentPromptId!, input);
       } else {
         const input: CreateAiPromptInput = {
           workspaceId: workspaceId || undefined,
@@ -354,6 +505,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
           rules: promptRules,
           modelUrls: modelUrls,
           tagIds: tagIds,
+          customModels: customModels,
         };
         savedRecord = await createAiPrompt(input);
       }
@@ -364,6 +516,9 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       setWorkspaceId(savedRecord.workspaceId);
       setFolderId(savedRecord.folderId);
       setTagIds(savedRecord.tagIds);
+      if (savedRecord.customModels) {
+        setCustomModels(savedRecord.customModels);
+      }
 
       clearDraft();
       lastSavedTitleRef.current = savedRecord.title;
@@ -373,9 +528,35 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       lastSavedWorkspaceIdRef.current = savedRecord.workspaceId;
       lastSavedFolderIdRef.current = savedRecord.folderId;
       lastSavedTagIdsRef.current = savedRecord.tagIds;
+      lastSavedCustomModelsRef.current = savedRecord.customModels || [];
 
       const wId = savedRecord.workspaceId;
       const fId = savedRecord.folderId;
+
+      const targetCompoundId = getItemCompoundId({
+        id: savedRecord.id,
+        workspace_id: wId || null,
+        folder_id: fId || null,
+        snippet: { id: savedRecord.id, category: 'aiPrompt' }
+      });
+
+      const finalShortcut = promptShortcut.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (finalShortcut) {
+        const valRes = await validateShortcut(finalShortcut, savedRecord.id);
+        if (valRes.isValid) {
+          console.log(`[ShortcutDebug][AiPromptEditor] handleSave: Valid shortcut "${finalShortcut}", saving to DB for prompt "${savedRecord.id}"...`);
+          await saveShortcut(savedRecord.id, targetCompoundId, finalShortcut, savedRecord.title, 'aiPrompt');
+        } else {
+          console.warn(`[ShortcutDebug][AiPromptEditor] handleSave: Shortcut "${finalShortcut}" has validation error "${valRes.errorMessage}". SKIPPING DB save on background autosave.`);
+        }
+        // Always update the ref to prevent infinite autosave loops
+        lastSavedShortcutRef.current = finalShortcut;
+      } else {
+        console.log(`[ShortcutDebug][AiPromptEditor] handleSave: Clearing shortcut for prompt "${savedRecord.id}"...`);
+        await clearShortcut(savedRecord.id, targetCompoundId, 'aiPrompt');
+        lastSavedShortcutRef.current = '';
+      }
+
       if (wId) void StorageManager.setItem('lastUsedWorkspaceId', wId);
       if (fId) void StorageManager.setItem('lastUsedFolderId', fId);
       else void StorageManager.removeItem('lastUsedFolderId');
@@ -388,11 +569,111 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       setSaveStatus('error');
       return false;
     }
-  }, [promptTitle, promptBody, promptRules, modelUrls, selectedModel, generatedUrl, workspaceId, folderId, tagIds]);
+  }, [promptTitle, promptBody, promptRules, modelUrls, selectedModel, generatedUrl, workspaceId, folderId, tagIds, customModels, shortcutError, promptShortcut]);
+
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState<boolean>(false);
+  const [isUnsavedChangesDialogOpen, setIsUnsavedChangesDialogOpen] = useState<boolean>(false);
+
+  const handleDelete = useCallback(async () => {
+    const currentId = activeAiPromptIdRef.current;
+    if (!currentId) {
+      if (onBack) onBack();
+      return;
+    }
+    setIsDeleteDialogOpen(false);
+    try {
+      const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
+      const fldObj = folderId ? { folder_id: folderId } : null;
+      const compoundId = getItemCompoundId({
+        id: currentId,
+        workspace_id: workspaceId || null,
+        folder_id: folderId || null,
+        snippet: { id: currentId, category: 'aiPrompt' }
+      });
+      await clearShortcut(currentId, compoundId, 'aiPrompt');
+      await deleteAiPrompt(currentId);
+      if (onBack) onBack();
+    } catch (msg) {
+      console.error('Delete failed:', msg);
+    }
+  }, [onBack, workspaceId, folderId]);
 
   const handleClose = useCallback(() => {
-    if (onBack) onBack();
-  }, [onBack]);
+    if (isDirty) {
+      setIsUnsavedChangesDialogOpen(true);
+    } else {
+      if (onBack) onBack();
+    }
+  }, [isDirty, onBack]);
+
+  const loadPrompt = useCallback((promptRecord: AiPromptRecord | null) => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+    setSaveStatus('idle');
+    setLastSavedAt(null);
+
+    if (!promptRecord) {
+      activeAiPromptIdRef.current = null;
+      setActiveAiPromptId(null);
+      setPromptTitle('');
+      setPromptBody('');
+      setPromptRules('');
+      setTagIds([]);
+      setCustomModels([]);
+      setModelUrls({
+        gpt: 'https://chatgpt.com',
+        claude: 'https://claude.ai/new',
+        gemini: 'https://gemini.google.com/app',
+        perplexity: 'https://www.perplexity.ai',
+      });
+      lastSavedTitleRef.current = '';
+      lastSavedPromptRef.current = '';
+      lastSavedRulesRef.current = '';
+      lastSavedModelUrlsRef.current = defaultModelUrls;
+      void initDefaults();
+      lastSavedTagIdsRef.current = [];
+      lastSavedCustomModelsRef.current = [];
+      setPromptShortcut('');
+      lastSavedShortcutRef.current = '';
+      isShortcutManuallyEditedRef.current = false;
+      setIsInitialized(true);
+    } else {
+      activeAiPromptIdRef.current = promptRecord.id;
+      setActiveAiPromptId(promptRecord.id);
+      setPromptTitle(promptRecord.title);
+      setPromptBody(promptRecord.prompt);
+      setPromptRules(promptRecord.rules || '');
+      setWorkspaceId(promptRecord.workspaceId);
+      setFolderId(promptRecord.folderId);
+      setTagIds(promptRecord.tagIds);
+      setCustomModels(promptRecord.customModels || []);
+      setModelUrls(promptRecord.modelUrls || {});
+
+      lastSavedTitleRef.current = promptRecord.title;
+      lastSavedPromptRef.current = promptRecord.prompt;
+      lastSavedRulesRef.current = promptRecord.rules || '';
+      lastSavedModelUrlsRef.current = promptRecord.modelUrls || {};
+      lastSavedWorkspaceIdRef.current = promptRecord.workspaceId;
+      lastSavedFolderIdRef.current = promptRecord.folderId;
+      lastSavedTagIdsRef.current = promptRecord.tagIds;
+      lastSavedCustomModelsRef.current = promptRecord.customModels || [];
+
+      const compoundId = getItemCompoundId({
+        id: promptRecord.id,
+        workspace_id: promptRecord.workspaceId || null,
+        folder_id: promptRecord.folderId || null,
+        snippet: { id: promptRecord.id, category: 'aiPrompt' }
+      });
+      readAllShortcuts().then(shortcutsMap => {
+        const sc = normalizeShortcutTrigger(shortcutsMap[compoundId] || '');
+        setPromptShortcut(sc);
+        lastSavedShortcutRef.current = sc;
+      }).catch(() => { });
+
+      setIsInitialized(false);
+    }
+  }, []);
 
   // Autosave effect triggered by input changes
   useEffect(() => {
@@ -400,7 +681,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
     }
-    const delay = 1000;
+    const delay = 400;
     autosaveTimerRef.current = setTimeout(() => {
       handleSave();
     }, delay);
@@ -409,7 +690,102 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
         clearTimeout(autosaveTimerRef.current);
       }
     };
-  }, [promptTitle, promptBody, promptRules, modelUrls, workspaceId, folderId, tagIds, handleSave, isDirty]);
+  }, [promptTitle, promptBody, promptRules, modelUrls, workspaceId, folderId, tagIds, promptShortcut, handleSave, isDirty]);
+
+  // Sync loaded state when liveAiPrompt changes from db
+  useEffect(() => {
+    if (!liveAiPrompt) return;
+
+    const fetchShortcut = async () => {
+      try {
+        const wsObj = liveAiPrompt.workspaceId ? { workspace_id: liveAiPrompt.workspaceId } : null;
+        const fldObj = liveAiPrompt.folderId ? { folder_id: liveAiPrompt.folderId } : null;
+        const compoundId = getItemCompoundId({
+          id: liveAiPrompt.id,
+          workspace_id: liveAiPrompt.workspaceId || null,
+          folder_id: liveAiPrompt.folderId || null,
+          snippet: { id: liveAiPrompt.id, category: 'aiPrompt' }
+        });
+        const shortcutsMap = await readAllShortcuts();
+        const sc = normalizeShortcutTrigger(shortcutsMap[compoundId] || '');
+        setPromptShortcut(sc);
+        lastSavedShortcutRef.current = sc;
+      } catch (err) {
+        console.warn('Failed to fetch shortcut for prompt:', err);
+      }
+    };
+
+    if (!isInitialized || !isDirty) {
+      setPromptTitle(liveAiPrompt.title);
+      setPromptBody(liveAiPrompt.prompt);
+      setPromptRules(liveAiPrompt.rules || '');
+      setWorkspaceId(liveAiPrompt.workspaceId);
+      setFolderId(liveAiPrompt.folderId);
+      setTagIds(liveAiPrompt.tagIds);
+      setCustomModels(liveAiPrompt.customModels || []);
+      setModelUrls(liveAiPrompt.modelUrls || {});
+
+      lastSavedTitleRef.current = liveAiPrompt.title;
+      lastSavedPromptRef.current = liveAiPrompt.prompt;
+      lastSavedRulesRef.current = liveAiPrompt.rules || '';
+      lastSavedModelUrlsRef.current = liveAiPrompt.modelUrls || {};
+      lastSavedWorkspaceIdRef.current = liveAiPrompt.workspaceId;
+      lastSavedFolderIdRef.current = liveAiPrompt.folderId;
+      lastSavedTagIdsRef.current = liveAiPrompt.tagIds;
+      lastSavedCustomModelsRef.current = liveAiPrompt.customModels || [];
+
+      setLastSavedAt(new Date(liveAiPrompt.updatedAt));
+      setSaveStatus('saved');
+      void fetchShortcut();
+      setIsInitialized(true);
+    }
+  }, [liveAiPrompt, isDirty, isInitialized]);
+
+  const handlePropertiesChange = useCallback((props: any) => {
+    if (props.workspaceId !== undefined && props.workspaceId !== workspaceId) {
+      setWorkspaceId(props.workspaceId);
+    }
+    if (props.folderId !== undefined && props.folderId !== folderId) {
+      setFolderId(props.folderId);
+    }
+    if (props.selectedTags !== undefined) {
+      const newTIds = props.selectedTags.map((t: any) => t.id);
+      if ([...newTIds].sort().join(',') !== [...tagIds].sort().join(',')) {
+        setTagIds(newTIds);
+      }
+    }
+  }, [workspaceId, folderId, tagIds]);
+
+  const handleOverrideShortcut = useCallback(async () => {
+    if (!promptShortcut) return;
+    console.log('[ShortcutDebug][AiPromptEditor] Executing handleOverrideShortcut for promptShortcut:', promptShortcut);
+    let targetId = aiPromptId || activeAiPromptId;
+    if (!targetId) {
+      console.log('[ShortcutDebug][AiPromptEditor] Saving new AI prompt to get real ID before shortcut reassignment...');
+      await handleSave();
+      targetId = aiPromptId || activeAiPromptId;
+    }
+    if (!targetId) return;
+
+    if (shortcutConflictId) {
+      console.log('[ShortcutDebug][AiPromptEditor] Explicitly clearing conflicting shortcut reference:', shortcutConflictId);
+      await clearShortcut(shortcutConflictId, shortcutConflictId, 'aiPrompt');
+    }
+
+    const targetCompoundId = getItemCompoundId({
+      id: targetId,
+      workspace_id: workspaceId || null,
+      folder_id: folderId || null,
+      snippet: { id: targetId, category: 'aiPrompt' }
+    });
+    console.log(`[ShortcutDebug][AiPromptEditor] Saving shortcut "${promptShortcut}" to target ID "${targetId}" (compound: ${targetCompoundId})...`);
+    await saveShortcut(targetId, targetCompoundId, promptShortcut, promptTitle || 'AI Prompt', 'aiPrompt');
+    console.log('[ShortcutDebug][AiPromptEditor] Shortcut reassignment saved to DB. Clearing validation error.');
+    setShortcutError(null);
+    setIsShortcutOverrideable(false);
+    setShortcutConflictId(null);
+    await handleSave();
+  }, [promptShortcut, aiPromptId, activeAiPromptId, workspaceId, folderId, promptTitle, shortcutConflictId, handleSave]);
 
   return {
     promptTitle,
@@ -418,17 +794,35 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     selectedModel,
     modelUrls,
     setModelUrl,
-    activeAiPromptId,
+    activeAiPromptId: aiPromptId || activeAiPromptId,
+    customModels,
+    setCustomModels,
+    promptShortcut,
+    setPromptShortcut,
+    shortcutError,
+    isShortcutOverrideable,
+    handleOverrideShortcut,
+    isShortcutManuallyEditedRef,
     workspaceId,
     folderId,
     tagIds,
     saveStatus,
+    setSaveStatus,
     lastSavedAt,
+    setLastSavedAt,
+    lastSavedTitleRef,
+    lastSavedShortcutRef,
     isDirty,
+    isInitialized: isInitialized && (aiPromptId === activeAiPromptId),
+    isShortcutInitialized,
     isGenerating,
     generationError,
     generatedUrl,
     titleInputRef,
+    isDeleteDialogOpen,
+    setIsDeleteDialogOpen,
+    isUnsavedChangesDialogOpen,
+    setIsUnsavedChangesDialogOpen,
     setPromptTitle,
     setPromptBody,
     setPromptRules,
@@ -438,6 +832,9 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     setTagIds,
     handleGenerateLink,
     handleSave,
+    handleDelete,
     handleClose,
+    loadPrompt,
+    handlePropertiesChange,
   };
 }

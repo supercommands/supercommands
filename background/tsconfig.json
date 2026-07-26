@@ -3,6 +3,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
+      "@extension/browser": ["../packages/browser/index.ts"],
       "@src/*": ["src/*"],
       "@private-providers/*": ["../src/storage/API/storage/providers/*"],
       "@private-services/*": ["../src/storage/API/services/*"],

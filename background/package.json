@@ -1,6 +1,6 @@
 {
   "name": "background",
-  "version": "0.3.55",
+  "version": "0.3.57",
   "description": "chrome extension - core settings",
   "type": "module",
   "private": true,
@@ -10,7 +10,7 @@
     "clean:turbo": "rimraf .turbo",
     "clean": "pnpm clean:turbo && pnpm clean:node_modules",
     "build": "vite build",
-    "dev": "vite build --mode development",
+    "dev": "vite build --watch --mode development",
     "test": "vitest run",
     "lint": "eslint .",
     "lint:fix": "pnpm lint --fix",

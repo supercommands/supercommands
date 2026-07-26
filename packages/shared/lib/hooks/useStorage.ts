@@ -25,7 +25,7 @@ export const useStorage = <
   return (_data ?? storageMap.get(storage)!.read()) as Exclude<Data, PromiseLike<unknown>>;
 };
 
-const wrapPromise = <R,>(promise: Promise<R>) => {
+const wrapPromise = <R>(promise: Promise<R>) => {
   let status = 'pending';
   let result: R;
   const suspender = promise.then(

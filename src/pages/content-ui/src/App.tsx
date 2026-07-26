@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import AutomationStatusOverlay from '@src/components/AutomationStatusOverlay';
+import AutomationStatusOverlay from './components/AutomationStatusOverlay';
 import { GlobalAltCPopup } from '../../../allObjectFolder/src/altcPopup/globalAltCPopup';
 import { SnippetPopupIframeWindow } from './snippet-popup/SnippetPopupIframeWindow';
 

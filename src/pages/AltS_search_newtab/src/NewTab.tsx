@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { getUserId, CMDOS_SIGN_UP_URL } from '../../../storage/API/core/api';
 import { CMDOS_REDIRECT_URL } from '../../../storage/API/core/apiConfig';
 
-
 import App from './landingPage/App';
 import FullScreenNoteView from '../../../shared-components/editorViews/fullScreenNoteView';
 import { useUIStore } from '../../../shared-components/uiStateManager';
@@ -59,7 +58,9 @@ const AltS_search_newtab = () => {
   useEffect(() => {
     const handleGlobalEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        useUIStore.getState().handleEscape();
+        const state = useUIStore.getState();
+        console.log('[ESCAPE][NewTab] Escape pressed. activeView:', state.activeView, '| activeEditor:', state.activeEditor, '| isSheetOpen:', state.isSheetOpen, '| interceptors count:', state.escapeInterceptors.length);
+        state.handleEscape();
       }
     };
 
@@ -110,8 +111,4 @@ const AltS_search_newtab = () => {
   return <App />;
 };
 
-export default withErrorBoundary(
-  withSuspense(AltS_search_newtab, <></>),
-  <ErrorFallback />,
-);
-
+export default withErrorBoundary(withSuspense(AltS_search_newtab, <></>), <ErrorFallback />);

@@ -20,13 +20,14 @@ import {
   FiLink,
   FiTerminal,
 } from 'react-icons/fi';
-import { FaUser, FaPalette } from 'react-icons/fa';
-import { FiCreditCard, FiSearch } from 'react-icons/fi';
+import { FaUser, FaPalette, FaGithub } from 'react-icons/fa';
+import { FiCreditCard, FiSearch, FiPlus } from 'react-icons/fi';
 import CreateWorkspacePanel from './workspaces/ui/CreateWorkspacePanel';
 import type { WorkspaceData } from './workspaces/workspaceTypes';
 
-import { getFaviconUrl } from '../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 import { FEATURE_FLAGS } from '../../pages/AltS_search_newtab/src/utils/featureFlags';
+import { CMDOS_SIGN_UP_URL } from '../../storage/API/core/api';
 
 interface AllWorkspacesPanelProps {
   onClose: () => void;
@@ -339,7 +340,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
 
       {showCreateOrg && (
         <div
-          className="absolute inset-0 z-50 flex items-center justify-center  backdrop-blur-sm"
+          className="absolute inset-0 z-50 flex items-start pt-[15vh] justify-center  backdrop-blur-sm"
           onClick={() => setShowCreateOrg(false)}
         >
           <div
@@ -379,7 +380,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
             {/* Table Header */}
             <div className="grid grid-cols-[1.4fr_1.8fr] border-b border-[var(--color-borderDefault)] bg-[var(--color-hoverBg)] py-3 px-4 text-xs font-semibold text-[var(--color-textMuted)] select-none">
               <div>Workspace</div>
-              <div>Location / Source</div>
+              <div>Location  / Source</div>
             </div>
 
             {/* Table Body */}
@@ -510,15 +511,18 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
             )}
 
           </div>
-        </div>
-        {/* Bottom Action Footer */}
-        <div className="p-4 bg-neutral-900/10 flex justify-end shrink-0">
-          <button
-            onClick={() => setShowCreateOrg(true)}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-md active:scale-95 cursor-pointer"
-          >
-            <span>+ Create Organization</span>
-          </button>
+
+          {/* Centered Create Organization Action Row (OUTSIDE table container) */}
+          <div className="w-full flex justify-center pt-2">
+            <button
+              onClick={() => setShowCreateOrg(true)}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-200 hover:text-white transition-all shadow-sm active:scale-95 cursor-pointer"
+            >
+              <FiPlus size={14} className="text-indigo-400" />
+              <span>Create Organization</span>
+            </button>
+          </div>
+
         </div>
       </div>
     );
@@ -530,15 +534,15 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
 
       {/* LEFT SIDEBAR */}
       {!hideSidebar && (
-        <div className="w-[175px] shrink-0 border-r border-[var(--color-borderDefault)] bg-[var(--color-sidebarBg)]/40 px-3 py-5 flex flex-col justify-between">
-          <div className="space-y-6">
-            <nav className="space-y-6">
+        <div className="w-[175px] shrink-0 border-r border-[var(--color-borderDefault)] bg-[var(--color-sidebarBg)]/40 px-3 py-3.5 flex flex-col justify-between">
+          <div className="space-y-4">
+            <nav className="space-y-4">
               {sidebarSections.map(section => (
-                <div key={section.title} className="space-y-2">
+                <div key={section.title} className="space-y-1.5">
                   <div className="px-3 text-[9px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase select-none opacity-80">
                     {section.title}
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {section.items.map(item => {
                       const Icon = item.icon;
                       const isDanger = 'isDanger' in item && item.isDanger;
@@ -546,7 +550,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                         <div
                           key={item.id}
                           onClick={item.onClick ?? undefined}
-                          className={`w-full flex items-center gap-2 px-2 py-2 rounded-xl text-left text-xs font-semibold transition-all relative cursor-pointer ${item.active
+                          className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left text-xs font-semibold transition-all relative cursor-pointer ${item.active
                             ? 'text-[var(--color-textPrimary)] bg-[var(--color-selectedBg)] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]'
                             : isDanger
                               ? 'text-red-500 hover:bg-red-500/10 hover:text-red-600'
@@ -564,31 +568,76 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
             </nav>
           </div>
 
-          <div className="flex flex-col gap-3 w-full mt-auto pt-4">
+          <div className="flex flex-col gap-2.5 w-full mt-auto pt-2">
 
-            {/* Profile Card */}
-            <div className="flex items-center gap-2 p-2 rounded-xl bg-white/5 border border-white/5 w-full text-left">
-              <div className="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center font-bold text-xs text-white shrink-0 overflow-hidden">
-                {userInfo?.image_url ? (
-                  <img src={userInfo.image_url} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <span>{userInitials}</span>
-                )}
+            {/* Unified Login & GitHub Card Container */}
+            {isCloudUser ? (
+              <div className="flex items-center gap-2 p-2 rounded-xl bg-white/5 border border-white/5 w-full text-left">
+                <div className="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center font-bold text-xs text-white shrink-0 overflow-hidden">
+                  {userInfo?.image_url ? (
+                    <img src={userInfo.image_url} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <span>{userInitials}</span>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-[var(--color-textPrimary)] truncate">
+                    {userInfo?.name || 'User'}
+                  </div>
+                </div>
+                <FiChevronDown size={14} className="text-[var(--color-textMuted)] shrink-0" />
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-[var(--color-textPrimary)] truncate">
-                  {userInfo?.name || 'User'}
+            ) : (
+              <div className="flex flex-col gap-2 w-full">
+                <div className="border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)] rounded-xl p-2 flex flex-col gap-1 shadow-sm">
+                  {/* 1. Login Row */}
+                  {FEATURE_FLAGS.ENABLE_SHARING && (
+                    <>
+                      <div 
+                        onClick={() => {
+                          const chromeAny = (window as any)?.chrome;
+                          if (chromeAny?.tabs?.create) {
+                            chromeAny.tabs.create({ url: CMDOS_SIGN_UP_URL });
+                          } else {
+                            window.open(CMDOS_SIGN_UP_URL, '_blank');
+                          }
+                        }}
+                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer group hover:bg-[var(--color-hoverBg)] transition-colors text-left w-full"
+                      >
+                        <FaUser size={14} className="text-neutral-500 shrink-0" />
+                        <div className="min-w-0 flex-grow">
+                          <div className="text-xs font-semibold text-[var(--color-textPrimary)]">Login</div>
+                        </div>
+                        <FiChevronRight size={14} className="text-[var(--color-textMuted)] shrink-0" />
+                      </div>
+
+                      {/* Divider */}
+                      <div className="border-t border-[var(--color-borderDefault)] my-0.5" />
+                    </>
+                  )}
+
+                  {/* 2. GitHub Row */}
+                  <a
+                    href="https://github.com/cmdOS-App/cmdOS"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer group hover:bg-[var(--color-hoverBg)] transition-colors text-left w-full"
+                  >
+                    <FaGithub size={14} className="text-neutral-500 shrink-0" />
+                    <div className="min-w-0 flex-grow">
+                      <div className="text-xs font-semibold text-[var(--color-textPrimary)]">GitHub</div>
+                    </div>
+                  </a>
                 </div>
               </div>
-              <FiChevronDown size={14} className="text-[var(--color-textMuted)] shrink-0" />
-            </div>
+            )}
 
             {/* Social Icons Connect Section */}
-            <div className="flex flex-col gap-1.5 w-full shrink-0 border-t border-white/5 pt-3">
+            <div className="flex flex-col gap-1 w-full shrink-0 border-t border-white/5 pt-2">
               <div className="text-[9px] font-bold text-neutral-400 tracking-wider text-left uppercase opacity-80 px-0.5">
                 Connect
               </div>
-              <div className="flex flex-nowrap items-center justify-start gap-2.5 w-full mt-1 px-0.5">
+              <div className="flex flex-nowrap items-center justify-start gap-2.5 w-full mt-0.5 px-0.5">
                 <a
                   href="https://cmdos.slack.com/join/shared_invite/zt-3mycapoa9-afKNhqrFiGXAb7GS7zsOhA"
                   target="_blank"
@@ -639,7 +688,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
         </div>
 
         {/* Workspaces List/Table */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pt-2">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pt-2 space-y-5">
           <div className="w-full border border-[var(--color-borderDefault)] bg-[var(--color-containerBg)] rounded-xl overflow-hidden">
 
             {/* Table Header */}
@@ -776,15 +825,18 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
             )}
 
           </div>
-        </div>
-        {/* Bottom Action Footer */}
-        <div className="p-4 bg-neutral-900/10 flex justify-end shrink-0">
-          <button
-            onClick={() => setShowCreateOrg(true)}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-md active:scale-95 cursor-pointer"
-          >
-            <span>+ Create Organization</span>
-          </button>
+
+          {/* Centered Create Organization Action Row (OUTSIDE table container) */}
+          <div className="w-full flex justify-center pt-2">
+            <button
+              onClick={() => setShowCreateOrg(true)}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-200 hover:text-white transition-all shadow-sm active:scale-95 cursor-pointer"
+            >
+              <FiPlus size={14} className="text-indigo-400" />
+              <span>Create Organization</span>
+            </button>
+          </div>
+
         </div>
       </div>
 

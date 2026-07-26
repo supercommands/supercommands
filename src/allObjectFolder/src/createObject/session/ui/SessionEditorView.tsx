@@ -1,12 +1,16 @@
 import { createTodo } from '../../todos/todoData';
-import { EditorContainer } from '../../../../../shared-components/editorContainer/EditorContainer';
+import { WorkspaceEditorLayout } from '../../../../../shared-components/editorContainer/WorkspaceEditorLayout';
+import { EditorTitleShortcutInput } from '../../../../../shared-components/editorContainer/EditorTitleShortcutInput';
 import { StorageManager } from '../../../../../storage/localStorage/storageManager';
 import { SharedPropertiesToolbar } from '../../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
+import { ExistingItemsTable } from '../../../../../shared-components/editorContainer/ExistingItemsTable';
+import { useShortcutValidation } from '../../../../../shared-components/shortcuts/hooks/useShortcutValidation';
 
 import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Reorder } from 'framer-motion';
 import {
   FaPlus,
   FaTrash,
@@ -26,18 +30,18 @@ import {
   FaHistory,
   FaBookmark,
   FaFolder,
-  FaEllipsisV,
   FaGlobe,
   FaLock,
   FaUsers,
   FaStar,
+  FaKeyboard,
   FaRobot,
   FaList,
   FaCopy,
   FaDirections,
   FaLayerGroup,
 } from 'react-icons/fa';
-import { FiStar, FiChevronLeft, FiChevronRight, FiTag, FiSettings } from 'react-icons/fi';
+import { FiStar, FiChevronLeft, FiChevronRight, FiTag, FiSettings, FiCopy } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -48,18 +52,18 @@ import type { WorkspaceData } from '../../../../../settings/allWorkspaceManager/
 import type { FolderData } from '../../../../../settings/allWorkspaceManager/folders/folderTypes';
 import type { SnippetRecord } from '../../snippets/snippetTypes';
 
-import { getFaviconUrl } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
-import UnsavedChangesDialog from '../../../../../shared-components/modals/unsavedChangesDialog';
+import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { clsx } from 'clsx';
 import { formatSaveDestinationPath, getDestinationPathDetails } from '../../../../../shared-components/pathUtils';
 import { readAllHotkeys, readAllShortcuts, getItemCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { useFavorites } from '../../../../../shared-components/favorites/favoriteHooks';
 import { HotkeyAssignButton } from '../../../../../shared-components/hotkeys';
-import { ShortcutAssignButton } from '../../../../../shared-components/shortcuts';
 import { getUserId } from '../../../../../storage/API/core/api';
 import { deleteUserHotkeyByReference } from '../../../../../shared-components/hotkeys/core/hotkeyDbData';
 import { deleteUserShortcutByReference } from '../../../../../shared-components/shortcuts/core/shortcutDbData';
+import { createTag } from '../../tags/tagData';
+import { deleteSession, updateSession } from '../sessionData';
 
 import type { BrowserTab, SelectedLink, ContentTab } from '../../links/linkTypes';
 import { useChromeTabs } from '../../links/ui/hooks/useChromeTabs';
@@ -70,8 +74,6 @@ import { useSessionEditor } from '../useSessionEditor';
 import {
   type SessionOpenSettings,
   DEFAULT_SESSION_SETTINGS,
-  loadSessionSettings,
-  saveSessionSettings,
 } from '../sessionSettings';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import { nowUtc } from '../../../../../shared-components/utils';
@@ -85,8 +87,133 @@ interface SessionEditorViewProps {
   reload: () => void; // Kept for compatibility, though we use optimistic updates
 }
 
+interface SessionSettingsRowProps {
+  title: string;
+  description: string;
+  enabled: boolean;
+  onClick: () => void;
+  isLast?: boolean;
+}
+
+const SessionSettingsRow: React.FC<SessionSettingsRowProps> = ({
+  title,
+  description,
+  enabled,
+  onClick,
+  isLast = false,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={clsx(
+      'w-full flex items-center justify-between gap-3 text-left py-2.5 px-3 rounded-lg transition-colors hover:bg-black/5 dark:hover:bg-white/5',
+      !isLast && 'border-b border-black/5 dark:border-white/5',
+    )}
+  > 
+    <div className="min-w-0 flex-1">
+      <div className="text-[12.5px] font-medium text-neutral-900 dark:text-neutral-100">{title}</div>
+      <div className="mt-0.5 text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">{description}</div>
+    </div>
+    <div
+      className={clsx(
+        'relative h-5 w-9 shrink-0 rounded-full transition-all duration-200',
+        enabled
+          ? 'bg-indigo-600 shadow-sm'
+          : 'bg-neutral-300 dark:bg-neutral-700',
+      )}
+      aria-hidden="true"
+    >
+      <span
+        className={clsx(
+          'absolute top-[2px] h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-200',
+          enabled ? 'left-[18px]' : 'left-[2px]',
+        )}
+      />
+    </div>
+  </button>
+);
+
+const SessionDragHandle: React.FC = () => (
+  <div className="grid grid-cols-2 gap-[2px]">
+    {Array.from({ length: 6 }).map((_, index) => (
+      <span
+        key={index}
+        className="h-[2.5px] w-[2.5px] rounded-full bg-current opacity-80"
+      />
+    ))}
+  </div>
+);
+
 
 const EMPTY_INITIAL_URLS: any[] = [];
+
+const getSessionReorderKey = (item: { id?: string; url?: string }, index?: number): string => {
+  if (item.id) return item.id;
+  return `${item.url || 'session-item'}-${index ?? 0}`;
+};
+
+const normalizeSessionTabUrl = (url?: string): string => {
+  if (!url) return '';
+  try {
+    let value = String(url).toLowerCase().trim();
+    value = value.replace(/^https?:\/\//, '');
+    value = value.replace(/^www\./, '');
+    value = value.replace(/\/$/, '');
+    return value;
+  } catch {
+    return String(url || '').toLowerCase().trim();
+  }
+};
+
+const getTabInstanceKey = (item: { id?: string; source?: string; originalData?: any } | null | undefined): string | null => {
+  if (!item || item.source !== 'tab') return null;
+
+  const runtimeTabId = item.originalData?.id;
+  if (runtimeTabId !== undefined && runtimeTabId !== null && runtimeTabId !== '') {
+    return `tab:${String(runtimeTabId)}`;
+  }
+
+  if (typeof item.id === 'string' && item.id.startsWith('tab-')) {
+    const suffix = item.id.slice(4);
+    const parsedTabId = suffix.split('-')[0];
+    if (parsedTabId) {
+      return `tab:${parsedTabId}`;
+    }
+  }
+
+  return null;
+};
+
+const areSameSessionItems = (
+  left: { id?: string; url?: string; source?: string; originalData?: any },
+  right: { id?: string; url?: string; source?: string; originalData?: any },
+): boolean => {
+  const leftTabKey = getTabInstanceKey(left);
+  const rightTabKey = getTabInstanceKey(right);
+  if (leftTabKey && rightTabKey) {
+    if (leftTabKey === rightTabKey) return true;
+  }
+
+  if (left.source === right.source && left.originalData && right.originalData) {
+    const leftOriginalId = left.originalData?.id || left.originalData?.snippet_id;
+    const rightOriginalId = right.originalData?.id || right.originalData?.snippet_id;
+    if (leftOriginalId && rightOriginalId) {
+      if (leftOriginalId === rightOriginalId) return true;
+    }
+  }
+
+  const leftSource = left.source || 'tab';
+  const rightSource = right.source || 'tab';
+  const sameUrl = normalizeSessionTabUrl(left.url) === normalizeSessionTabUrl(right.url);
+
+  // Tab rows can rehydrate without a stable source label, so URL identity is
+  // the reliable match for live-tab vs saved-tab comparisons.
+  if (leftSource === 'tab' || rightSource === 'tab') {
+    return sameUrl;
+  }
+
+  return sameUrl && leftSource === rightSource;
+};
 
 const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   isOpen,
@@ -102,7 +229,24 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
   const handleTabCaptured = useCallback((newLink: SelectedLink) => {
     setSelectedLinks((prev: SelectedLink[]) => {
-      if (prev.some((l: SelectedLink) => l.url === newLink.url)) return prev;
+      if (!newLink.url) return prev;
+      
+      const newTabId = newLink.originalData?.id;
+      if (newTabId) {
+        const existingIndex = prev.findIndex(link => link.originalData?.id === newTabId);
+        if (existingIndex !== -1) {
+          const existing = prev[existingIndex];
+          if (existing.url === newLink.url && existing.name === newLink.name) {
+            return prev;
+          }
+          
+          const updated = [...prev];
+          updated[existingIndex] = { ...existing, url: newLink.url, name: newLink.name || existing.name };
+          return updated;
+        }
+      }
+
+      if (prev.some((link: SelectedLink) => areSameSessionItems(link, newLink))) return prev;
       return [...prev, newLink];
     });
   }, []);
@@ -136,9 +280,54 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     }
   }, [isOpen, initialSessionProp]);
 
+  const isFocusMode = useUIStore((s: any) => s.isFocusMode);
+  const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const sessions = useDbStore(state => state.sessions);
   const snippets = useDbStore(state => state.snippets);
   const automations = useDbStore(state => state.automations);
+  const workspaces = useDbStore(state => state.workspaces);
+  const folders = useDbStore(state => state.folders);
+  const tags = useDbStore(state => state.tags);
+
+  const workspaceNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    workspaces.forEach((w: any) => {
+      map[w.id] = w.workspaceName;
+    });
+    return map;
+  }, [workspaces]);
+
+  const folderNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    folders.forEach((f: any) => {
+      map[f.id] = f.folderName;
+    });
+    return map;
+  }, [folders]);
+
+  const tagNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    tags.forEach((t: any) => {
+      map[t.id] = t.name;
+    });
+    return map;
+  }, [tags]);
+
+  const [tableSearchQuery, setTableSearchQuery] = useState('');
+
+  const sortedSessions = useMemo(() => {
+    const query = tableSearchQuery.trim().toLowerCase();
+    const sorted = [...(sessions || [])].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    if (!query) return sorted;
+    return sorted.filter(session => {
+      const titleMatch = (session.title || (session as any).name || '').toLowerCase().includes(query);
+      const previewMatch = (session.urls || (session as any).tabs || [])
+        .some((item: any) => `${item.name || ''} ${item.url || ''}`.toLowerCase().includes(query));
+      return titleMatch || previewMatch;
+    });
+  }, [sessions, tableSearchQuery]);
+
   const resolvedActiveSession = useMemo(() => {
     if (!activeSessionId) return null;
     const found = sessions.find(
@@ -147,39 +336,133 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     return found || null;
   }, [activeSessionId, sessions]);
 
-  const initialSession = isForceCreateNew ? null : localSessionOverride || initialSessionProp || resolvedActiveSession;
-  const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
+  const initialSession = isForceCreateNew ? null : resolvedActiveSession || localSessionOverride || initialSessionProp;
+  const currentSessionId = isForceCreateNew ? null : (initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null);
+  const persistedSessionRecord = useMemo(() => {
+    if (!currentSessionId) return null;
+    return (
+      sessions.find(session => String(session.id) === String(currentSessionId)) ||
+      null
+    );
+  }, [currentSessionId, sessions]);
   const isMac = navigator.userAgent.includes('Mac');
-
-  // Legacy Redux team state removed - now using Dexie directly
-
-  // const triggerNotification = useNotification(); // Removed toast usage
-
-  // Legacy orgTeam logic removed
-
   const hasInitializedPrefill = useRef(false);
   const hasFetchedWorkspaces = useRef(false);
 
-
+  const initialUrls = useMemo(() => {
+    if (!prefill) return EMPTY_INITIAL_URLS;
+    if (prefill.category === 'TabGroup') return EMPTY_INITIAL_URLS;
+    return [
+      {
+        id: prefill.id || (prefill as any).snippet_id || `temp-${Date.now()}`,
+        url: typeof prefill.value === 'string' ? prefill.value : '',
+        name: prefill.key || '',
+        source: 'link',
+      }
+    ];
+  }, [prefill]);
 
   const {
     sessionTitle: title,
     setSessionTitle: setTitle,
     sessionUrls: selectedLinks,
     setSessionUrls: setSelectedLinks,
+    sessionShortcut,
+    setSessionShortcut,
+    isSessionShortcutManuallyEditedRef,
     saveStatus,
+    setSaveStatus,
     saveError,
-    isDirty: hasUnsavedChanges,
+    setSaveError,
     lastSavedAt,
+    setLastSavedAt,
+    lastSavedShortcutRef,
+    lastSavedTitleRef,
+    isDirty: hasUnsavedChanges,
     handleSave: executeSave,
     activeSessionId: liveSessionId,
     resetEditor,
+    isInitialized,
+    workspaceId,
+    setWorkspaceId,
+    folderId,
+    setFolderId,
+    tagIds,
+    setTagIds,
+    openSettings: sessionOpenSettings,
+    setOpenSettings: setSessionOpenSettings,
+    isShortcutInitialized,
   } = useSessionEditor({ sessionId: currentSessionId || undefined, initialDraftKey: prefill?.key || '', initialDraftUrls: EMPTY_INITIAL_URLS });
+
+  const { validateShortcut } = useShortcutValidation();
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
+
+  // Clear validation errors when switching between active sessions/drafts
+  useEffect(() => {
+    if (setSessionError) setSessionError(null);
+    setShortcutError(null);
+  }, [liveSessionId, setSessionError]);
+
+  const sessionCompoundId = useMemo(() => {
+    if (!currentSessionId) return '';
+
+    return getItemCompoundId({
+      id: currentSessionId,
+      workspace_id: workspaceId || undefined,
+      folder_id: folderId || undefined,
+      snippet: {
+        id: currentSessionId,
+        category: 'session',
+      },
+    });
+  }, [currentSessionId, workspaceId, folderId]);
+
+  useEffect(() => {
+    if (liveSessionId && liveSessionId !== activeSessionId) {
+      setActiveSessionId(liveSessionId);
+    }
+  }, [liveSessionId, activeSessionId, setActiveSessionId]);
+
+  useEffect(() => {
+    hasUserModifiedRef.current = false;
+  }, [activeSessionId]);
+
+  const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
 
   // Determine mode based on whether a snippet is passed or has been saved
   const isEditMode = !!initialSession || !!liveSessionId;
 
   const { tabsByWindow, allTabs, currentWindowId, collapsedWindows, setCollapsedWindows, hasFetchedTabs, fetchTabs } = useChromeTabs(isOpen);
+
+  useEffect(() => {
+    const chromeAny = (window as any).chrome;
+    let handleStorageChange: any = null;
+
+    if (chromeAny?.storage?.local && currentWindowId !== null && currentWindowId !== undefined) {
+      const checkRunningSession = () => {
+        chromeAny.storage.local.get('active_sessions', (result: any) => {
+          const sessionsList = result.active_sessions || [];
+          const matched = sessionsList.find((s: any) => s.windowId === currentWindowId);
+          setRunningSessionId(matched ? matched.sessionId : null);
+        });
+      };
+      
+      checkRunningSession();
+      handleStorageChange = (changes: any, areaName: string) => {
+        if (areaName === 'local' && changes.active_sessions) {
+          checkRunningSession();
+        }
+      };
+      chromeAny.storage.onChanged.addListener(handleStorageChange);
+    }
+
+    return () => {
+      if (chromeAny?.storage?.onChanged && handleStorageChange) {
+        chromeAny.storage.onChanged.removeListener(handleStorageChange);
+      }
+    };
+  }, [currentWindowId]);
+
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
   const [hasAutoPinned, setHasAutoPinned] = useState(false);
 
@@ -199,43 +482,34 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
   // Session open-behavior settings state
   const [isSettingsPopupOpen, setIsSettingsPopupOpen] = useState(false);
-  const [sessionOpenSettings, setSessionOpenSettings] = useState<SessionOpenSettings>(DEFAULT_SESSION_SETTINGS);
   const settingsPopupRef = useRef<HTMLDivElement | null>(null);
-
-  // Load session settings on mount or when liveSessionId loads
-  useEffect(() => {
-    const liveSess = useDbStore.getState().getSessionById(liveSessionId);
-    if (liveSess?.sessionOpenSettings) {
-      setSessionOpenSettings(liveSess.sessionOpenSettings);
-    } else if (!isEditMode) {
-      loadSessionSettings().then(setSessionOpenSettings);
-    }
-  }, [liveSessionId, isEditMode]);
-
-  // Persist settings whenever they change (skip initial load)
-  const hasLoadedSettingsRef = useRef(false);
-  useEffect(() => {
-    if (!hasLoadedSettingsRef.current) {
-      hasLoadedSettingsRef.current = true;
-      return;
-    }
-    saveSessionSettings(sessionOpenSettings);
-  }, [sessionOpenSettings]);
+  const normalizeSessionShortcut = useCallback((value: string) => {
+    return value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  }, []);
+  const hasPendingSessionChanges = hasUnsavedChanges;
 
   const hasPrefilledEditModeRef = useRef(false);
 
   useEffect(() => {
-    const trimmedName = sessionName.trim();
+    if (!isInitialized) {
+      setSessionError(null);
+      return;
+    }
+    const trimmedName = title.trim();
     if (!trimmedName) {
       setSessionError(null);
       return;
     }
+    const currentSessionId = (initialSession as any)?.id || (initialSession as any)?.snippet_id || liveSessionId;
 
     // 1. Check duplicate session names in local snippet records
-    const exists = sessions.some((s: any) => (s.title || '').trim().toLowerCase() === trimmedName.toLowerCase());
+    const exists = sessions.some((s: any) =>
+      (s.title || '').trim().toLowerCase() === trimmedName.toLowerCase() &&
+      String(s.id || s.snippet_id || '') !== String(currentSessionId || '')
+    );
 
     if (exists) {
-      setSessionError('A tab group with this name already exists.');
+      setSessionError('A Tab Session with this name already exists.');
       return;
     }
 
@@ -245,9 +519,12 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       if (chromeAny?.storage?.local) {
         chromeAny.storage.local.get('active_sessions', (res: any) => {
           const activeSessions = res.active_sessions || [];
-          const duplicateActive = activeSessions.some((s: any) => s.sessionName?.toLowerCase() === trimmedName.toLowerCase());
+          const duplicateActive = activeSessions.some((s: any) =>
+            s.sessionName?.toLowerCase() === trimmedName.toLowerCase() &&
+            String(s.sessionId || '') !== String(currentSessionId || '')
+          );
           if (duplicateActive) {
-            setSessionError('A tab group with this name is currently active.');
+            setSessionError('A Tab Session with this name is currently active.');
           } else {
             setSessionError(null);
           }
@@ -258,7 +535,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     };
 
     checkActiveSessions();
-  }, [sessionName, snippets]);
+  }, [title, snippets, initialSession, liveSessionId, isInitialized]);
 
   const lastSyncTimeRef = useRef<string | null>(null);
   const [conflictModalData, setConflictModalData] = useState<{
@@ -286,8 +563,10 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
   const handleOverwriteShortcut = async (conflictId: string, newValue: string) => {
     try {
+      console.log(`[ShortcutDebug][SessionEditor] Executing handleOverwriteShortcut for value "${newValue}", deleting conflictId "${conflictId}"...`);
       await deleteUserShortcutByReference(conflictId);
-      await handleShortcutChange(newValue);
+      await handleShortcutChange(newValue, initialSession?.id || liveSessionId || currentSessionId || undefined);
+      console.log('[ShortcutDebug][SessionEditor] Overwrite completed successfully.');
     } catch (err) {
       console.error('Overwrite shortcut failed:', err);
     }
@@ -312,7 +591,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
         if (Array.isArray(session.capturedUrls) && Array.isArray(session.capturedNames)) {
           const preloaded: SelectedLink[] = session.capturedUrls.map((url: string, index: number) => ({
             id: String(Date.now() + index + Math.random()),
-            name: session.capturedNames[index] || url,
+            name: session.capturedNames[index]?.trim() || getHostname(url) || url,
             url: url,
             source: 'tab',
             favIconUrl: getFaviconUrl(getHostname(url))
@@ -328,22 +607,11 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     });
   }, [activeSessionId]);
 
-  const getBackupKey = useCallback(() => {
-    const currentSessionId = (initialSession as any)?.id || (initialSession as any)?.snippet_id;
-    return currentSessionId 
-      ? `unsaved_session_backup_${currentSessionId}` 
-      : 'unsaved_session_backup_new';
-  }, [initialSession]);
-
-  const clearStashedBackup = useCallback(() => {
-    void StorageManager.removeItem(getBackupKey());
-  }, [getBackupKey]);
-
-
 
 
 
   // Handle prefill data (e.g. from history/bookmarks/session)
+
   useEffect(() => {
     if (isOpen && !isEditMode && prefill && !hasInitializedPrefill.current) {
       setTitle(prefill.key || '');
@@ -403,6 +671,8 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   const [isAltEnterPickerOpen, setIsAltEnterPickerOpen] = useState(false);
   const [isCustomLinkFormOpen, setIsCustomLinkFormOpen] = useState(false);
   const [isLeftCustomLinkFormOpen, setIsLeftCustomLinkFormOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [sessionToDeleteId, setSessionToDeleteId] = useState<string | null>(null);
   const [customLinkUrl, setCustomLinkUrl] = useState('');
   const [customLinkName, setCustomLinkName] = useState('');
   const [showVariableDropdown, setShowVariableDropdown] = useState(false);
@@ -468,6 +738,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   const [focusedSuggestionIndex, setFocusedSuggestionIndex] = useState(-1);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const shortcutInputRef = useRef<HTMLInputElement>(null);
   const favButtonRef = useRef<HTMLButtonElement>(null);
   const hotkeyButtonRef = useRef<HTMLButtonElement>(null);
   const locationHoverTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -554,6 +825,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
   const saveLinkEditPopup = useCallback(() => {
     if (!editingPopupLinkId) return;
+    hasUserModifiedRef.current = true;
     let newUrl = editingUrlParts ? assembleUrl(editingUrlParts) : localUrlValue;
     
     newUrl = newUrl.trim();
@@ -626,7 +898,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
           const tabId = tab.originalData?.id || tab.url;
           if (tabId && !seenAutoSelectedTabsRef.current.has(String(tabId))) {
             seenAutoSelectedTabsRef.current.add(String(tabId));
-            if (!newLinks.some(l => l.url === tab.url)) {
+            if (!newLinks.some(link => areSameSessionItems(link, tab))) {
               newLinks.push(tab);
               addedAny = true;
             }
@@ -634,60 +906,183 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
         }
         return addedAny ? newLinks : prevLinks;
       });
-    }
-    if (!isOpen) {
-      seenAutoSelectedTabsRef.current.clear();
+
+      if (addedAny) {
+        seenAutoSelectedTabsRef.current.clear();
+      }
     }
   }, [isOpen, isEditMode, prefill, availableItems, isTitleManuallyModified]);
 
   // Live-tracking: sync selectedLinks with currently open tabs (add opened, remove closed)
-  const previousOpenTabsRef = useRef<Set<string> | null>(null);
+  const previousOpenTabsRef = useRef<Map<string, string> | null>(null);
+  const liveTrackingTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!isOpen) {
+    const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
+    const isLiveSyncingSession = currentSessionId && runningSessionId && String(currentSessionId) === String(runningSessionId);
+
+    if (!isOpen || sessionOpenSettings.autoSaveMode === 'dont_save' || !hasFetchedTabs || !isLiveSyncingSession) {
       previousOpenTabsRef.current = null;
+      if (liveTrackingTimeoutRef.current !== null) {
+        window.clearTimeout(liveTrackingTimeoutRef.current);
+        liveTrackingTimeoutRef.current = null;
+      }
       return;
     }
     
     const allTabsItems = availableItems.filter(item => item.source === 'tab');
-    const currentOpenUrls = new Set(allTabsItems.map(t => t.url));
+    const currentOpenTabState = new Map(
+      allTabsItems
+        .map(item => {
+          const key = getTabInstanceKey(item);
+          if (!key) return null;
+          const signature = JSON.stringify({
+            url: item.url,
+            name: item.name,
+            favIconUrl: item.favIconUrl || '',
+          });
+          return [key, signature] as const;
+        })
+        .filter((entry): entry is readonly [string, string] => Boolean(entry)),
+    );
+    const currentOpenItemsByKey = new Map(
+      allTabsItems
+        .map(item => {
+          const key = getTabInstanceKey(item);
+          return key ? [key, item] as const : null;
+        })
+        .filter((entry): entry is readonly [string, SelectedLink] => Boolean(entry)),
+    );
     
     if (previousOpenTabsRef.current === null) {
-      previousOpenTabsRef.current = currentOpenUrls;
+      previousOpenTabsRef.current = currentOpenTabState;
       return;
     }
 
-    const previousOpenUrls = previousOpenTabsRef.current;
-    const addedUrls = [...currentOpenUrls].filter(url => !previousOpenUrls.has(url));
-    const removedUrls = [...previousOpenUrls].filter(url => !currentOpenUrls.has(url));
+    const previousOpenTabState = previousOpenTabsRef.current;
+    const addedTabKeys = [...currentOpenTabState.keys()].filter(tabKey => !previousOpenTabState.has(tabKey));
+    const removedTabKeys = [...previousOpenTabState.keys()].filter(tabKey => !currentOpenTabState.has(tabKey));
+    const changedTabKeys = [...currentOpenTabState.entries()]
+      .filter(([tabKey, signature]) => previousOpenTabState.get(tabKey) !== undefined && previousOpenTabState.get(tabKey) !== signature)
+      .map(([tabKey]) => tabKey);
 
-    if (addedUrls.length > 0 || removedUrls.length > 0) {
-      setSelectedLinks(prevLinks => {
-        let newLinks = [...prevLinks];
-        let changed = false;
+    if (addedTabKeys.length > 0 || removedTabKeys.length > 0 || changedTabKeys.length > 0) {
+      if (liveTrackingTimeoutRef.current !== null) {
+        window.clearTimeout(liveTrackingTimeoutRef.current);
+      }
+      liveTrackingTimeoutRef.current = window.setTimeout(() => {
+        setSelectedLinks(prevLinks => {
+          let newLinks = [...prevLinks];
+          let changed = false;
 
-        if (removedUrls.length > 0) {
-          const beforeCount = newLinks.length;
-          newLinks = newLinks.filter(link => !removedUrls.includes(link.url));
-          if (newLinks.length !== beforeCount) changed = true;
-        }
+          if (removedTabKeys.length > 0) {
+            const beforeCount = newLinks.length;
+            newLinks = newLinks.filter(link => {
+              if (link.source !== 'tab') return true;
+              const tabKey = getTabInstanceKey(link);
+              if (!tabKey) return true;
+              return !removedTabKeys.includes(tabKey);
+            });
+            if (newLinks.length !== beforeCount) changed = true;
+          }
 
-        for (const url of addedUrls) {
-          if (!newLinks.some(l => l.url === url)) {
-            const tabItem = allTabsItems.find(t => t.url === url);
-            if (tabItem) {
-              newLinks.push(tabItem);
+          if (changedTabKeys.length > 0) {
+            newLinks = newLinks.map(link => {
+              if (link.source !== 'tab') return link;
+              const tabKey = getTabInstanceKey(link);
+              if (!tabKey || !changedTabKeys.includes(tabKey)) return link;
+
+              const updatedItem = currentOpenItemsByKey.get(tabKey);
+              if (!updatedItem) return link;
               changed = true;
+              return {
+                ...link,
+                url: updatedItem.url,
+                name: updatedItem.name,
+                favIconUrl: updatedItem.favIconUrl,
+                originalData: updatedItem.originalData,
+              };
+            });
+          }
+
+          for (const tabKey of addedTabKeys) {
+            if (!newLinks.some(link => getTabInstanceKey(link) === tabKey)) {
+              const tabItem = currentOpenItemsByKey.get(tabKey);
+              if (tabItem) {
+                newLinks.push(tabItem);
+                changed = true;
+              }
             }
           }
-        }
 
-        return changed ? newLinks : prevLinks;
-      });
+          if (changed) {
+            hasUserModifiedRef.current = true;
+          }
+          return changed ? newLinks : prevLinks;
+        });
+        liveTrackingTimeoutRef.current = null;
+      }, 800);
     }
 
-    previousOpenTabsRef.current = currentOpenUrls;
-  }, [isOpen, availableItems]);
+    previousOpenTabsRef.current = currentOpenTabState;
+    return () => {
+      if (liveTrackingTimeoutRef.current !== null) {
+        window.clearTimeout(liveTrackingTimeoutRef.current);
+        liveTrackingTimeoutRef.current = null;
+      }
+    };
+  }, [isOpen, availableItems, sessionOpenSettings.autoSaveMode, setSelectedLinks, hasFetchedTabs, activeSessionId, runningSessionId, initialSession]);
+
+  useEffect(() => {
+    const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
+    const isLiveSyncingSession = currentSessionId && runningSessionId && String(currentSessionId) === String(runningSessionId);
+
+    if (!isOpen || sessionOpenSettings.autoSaveMode === 'dont_save' || !hasFetchedTabs || !isLiveSyncingSession) return;
+
+    const currentTabItems = availableItems.filter(item => item.source === 'tab');
+    if (currentTabItems.length === 0) return;
+
+    setSelectedLinks(prevLinks => {
+      const currentTabQueuesByUrl = new Map<string, SelectedLink[]>();
+      currentTabItems.forEach(item => {
+        const normalizedUrl = normalizeSessionTabUrl(item.url);
+        const queueKey = `url:${normalizedUrl}`;
+        const existingQueue = currentTabQueuesByUrl.get(queueKey) || [];
+        existingQueue.push(item);
+        currentTabQueuesByUrl.set(queueKey, existingQueue);
+      });
+
+      let changed = false;
+      const nextLinks = prevLinks.map(link => {
+        if (link.source !== 'tab' || getTabInstanceKey(link)) {
+          return link;
+        }
+
+        const normalizedUrl = normalizeSessionTabUrl(link.url);
+        const fallbackKey = `url:${normalizedUrl}`;
+        const queue = currentTabQueuesByUrl.get(fallbackKey);
+        const matchedLiveTab = queue?.shift();
+
+        if (!matchedLiveTab) {
+          return link;
+        }
+
+        changed = true;
+        return {
+          ...link,
+          url: matchedLiveTab.url,
+          name: link.name || matchedLiveTab.name,
+          favIconUrl: link.favIconUrl || matchedLiveTab.favIconUrl,
+          originalData: matchedLiveTab.originalData,
+        };
+      });
+
+      if (changed) {
+        hasUserModifiedRef.current = true;
+      }
+      return changed ? nextLinks : prevLinks;
+    });
+  }, [availableItems, isOpen, sessionOpenSettings.autoSaveMode, setSelectedLinks, hasFetchedTabs, activeSessionId, runningSessionId, initialSession]);
 
   useEffect(() => {
     if (showPathQueryDropdown) {
@@ -700,6 +1095,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   // Manual location overrides (for changing folder via picker)
   const [manualWorkspaceId, setManualWorkspaceId] = useState<string | null>(null);
   const [manualFolderId, setManualFolderId] = useState<string | null>(null);
+  const lastAutoSaveSignatureRef = useRef<string | null>(null);
 
   // If manualWorkspaceId is set, it means the user explicitly used the picker.
   // We should trust the manual state fully (even if folder is null) to allow moving to root.
@@ -720,6 +1116,30 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     return isDuplicateName(title);
   }, [title, isDuplicateName]);
 
+  const autoSaveSignature = useMemo(
+    () =>
+      JSON.stringify({
+        title: title.trim(),
+        urls: selectedLinks.map(link => link.url),
+        shortcut: normalizeSessionShortcut(sessionShortcut),
+        openSettings: sessionOpenSettings,
+        tagIds: tagIds || [],
+        workspaceId: workspaceId || null,
+        folderId: folderId || null,
+      }),
+    [title, selectedLinks, sessionOpenSettings, normalizeSessionShortcut, sessionShortcut, tagIds, workspaceId, folderId],
+  );
+  const hasPersistedCurrentSignature =
+    saveStatus !== 'saving' && lastAutoSaveSignatureRef.current === autoSaveSignature;
+  const shouldShowUnsavedIndicator =
+    hasPendingSessionChanges &&
+    !hasPersistedCurrentSignature &&
+    (
+      sessionOpenSettings.autoSaveMode !== 'dont_save' ||
+      hasUserModifiedRef.current ||
+      saveStatus === 'saving'
+    );
+
   // Load user ID on mount
   useEffect(() => {
     const fetchUserId = async () => {
@@ -728,6 +1148,8 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     };
     fetchUserId();
   }, []);
+
+
 
   // Sync Favorite, Hotkey and Shortcut state using unified utilities for 100% parity
   useEffect(() => {
@@ -743,14 +1165,35 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   }, [initialSession, isOpen, userId]);
 
 
-  const { toggleFavorite } = useFavorites();
+  const { toggleFavorite, isFavorite } = useFavorites();
+
+  const [shortcutsMap, setShortcutsMap] = useState<Record<string, string>>({});
+  const [hotkeysMap, setHotkeysMap] = useState<Record<string, string>>({});
+
+  const fetchTableMaps = useCallback(async () => {
+    try {
+      const [shortcuts, hotkeys] = await Promise.all([
+        readAllShortcuts(),
+        readAllHotkeys()
+      ]);
+      setShortcutsMap(shortcuts);
+      setHotkeysMap(hotkeys);
+    } catch (err) {
+      console.error('Failed to fetch table maps', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      void fetchTableMaps();
+    }
+  }, [isOpen, fetchTableMaps, activeSessionId, saveStatus]);
 
   const toggleFavoriteLocal = async (item: any) => {
     if (!userId) return;
     try {
       const targetId = item.id || (item as any).snippet_id;
-      const category = (item.category || '').toLowerCase();
-      const type = category.includes('link') || category.includes('tabgroup') ? 'link' : 'note';
+      const type = 'session';
       await toggleFavorite(targetId, type, item.key);
     } catch (error) {
       console.error('Toggle favorite error:', error);
@@ -771,18 +1214,12 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   };
 
   const handleHotkeyChange = async (newHotkey: string) => {
-    
-
     if (initialSession?.id && !String(initialSession.id).startsWith('temp-')) {
       try {
-        const folderId = (initialSession as any).folder_id;
-        const workspaceId = (initialSession as any).workspace_id;
-        const compoundId = `${folderId || workspaceId || propertiesRef.current?.workspaceId || ''}-${initialSession.id}`;
-        
         if (!newHotkey) {
-          await apiClearHotkey(initialSession.id, compoundId, 'link');
+          await apiClearHotkey(initialSession.id, sessionCompoundId, 'session');
         } else {
-          await apiSaveHotkey(initialSession.id, compoundId, newHotkey, 'link');
+          await apiSaveHotkey(initialSession.id, sessionCompoundId, newHotkey, 'session');
         }
         showFooterStatus('success', newHotkey ? 'Hotkey updated' : 'Hotkey cleared');
       } catch (error) {
@@ -792,24 +1229,28 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     }
   };
 
-  const handleShortcutChange = async (newShortcut: string) => {
-    
-
-    if (initialSession?.id && !String(initialSession.id).startsWith('temp-')) {
+  const handleShortcutChange = async (newShortcut: string, targetSessionId?: string) => {
+    const sessionIdForShortcut = targetSessionId || initialSession?.id || liveSessionId;
+    if (sessionIdForShortcut && !String(sessionIdForShortcut).startsWith('temp-')) {
+      const compoundIdForShortcut = getItemCompoundId({
+        id: sessionIdForShortcut,
+        workspace_id: propertiesRef.current?.workspaceId || (initialSession as any)?.workspace_id || (initialSession as any)?.workspaceId || undefined,
+        folder_id: propertiesRef.current?.folderId || (initialSession as any)?.folder_id || (initialSession as any)?.folderId || undefined,
+        snippet: {
+          id: sessionIdForShortcut,
+          category: 'session',
+        },
+      });
       try {
-        const folderId = (initialSession as any).folder_id;
-        const workspaceId = (initialSession as any).workspace_id;
-        const compoundId = `${folderId || workspaceId || propertiesRef.current?.workspaceId || ''}-${initialSession.id}`;
-
         if (!newShortcut) {
-          await apiClearShortcut(initialSession.id, compoundId, 'link');
+          await apiClearShortcut(sessionIdForShortcut, compoundIdForShortcut, 'session');
         } else {
           await apiSaveShortcut(
-            initialSession.id,
-            compoundId,
+            sessionIdForShortcut,
+            compoundIdForShortcut,
             newShortcut,
-            title.trim() || initialSession.title || '',
-            'link',
+            title.trim() || initialSession?.title || '',
+            'session',
           );
         }
         showFooterStatus('success', 'Shortcut updated');
@@ -861,6 +1302,12 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       return url;
     }
   }, []);
+
+  const getResolvedLinkFavicon = useCallback((link?: { url?: string; favIconUrl?: string }) => {
+    if (link?.favIconUrl) return link.favIconUrl;
+    if (!link?.url || !/^https?:\/\//i.test(link.url)) return '';
+    return getFaviconUrl(getHostname(link.url));
+  }, [getHostname]);
 
 
   useEffect(() => {
@@ -925,6 +1372,19 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     performSearch();
   }, [customLinkUrl, isLeftCustomLinkFormOpen, getHostname]);
 
+  // Focus title input on mount/open
+  useEffect(() => {
+    let timer: number | undefined;
+    if (isOpen) {
+      timer = window.setTimeout(() => {
+        titleInputRef.current?.focus();
+      }, 60);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [isOpen]);
+
   const handleTodoPopupToggle = () => {
     setIsTodoPopupOpen(prev => !prev);
     setIsLocationPickerOpen(false);
@@ -958,13 +1418,9 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   // Auto-open custom link input if there are no open browser tabs on Current Tabs
   useEffect(() => {
     if (isOpen && activeContentTab === 'Current Tabs' && hasFetchedTabs && !hasAutoOpenedRef.current && !activeSessionId) {
-      const hasTabs = Object.values(tabsByWindow).some(group => group.length > 0);
-      if (!hasTabs) {
-        setIsLeftCustomLinkFormOpen(true);
-      }
       hasAutoOpenedRef.current = true;
     }
-  }, [isOpen, activeContentTab, tabsByWindow, hasFetchedTabs, activeSessionId]);
+  }, [isOpen, activeContentTab, tabsByWindow, hasFetchedTabs, activeSessionId, currentWindowId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -986,34 +1442,26 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     const loadItems = async () => {
       const items: SelectedLink[] = [];
 
-      // 1. Current Tabs from tabsByWindow
-      const seenNormalizedUrls = new Set<string>();
-      Object.entries(tabsByWindow).forEach(([windowIdStr, tabs]) => {
-        const winId = Number(windowIdStr);
-        // If we are in an active session, skip showing tabs from the session window itself under 'Current Tabs'
-        if (activeSessionId && currentWindowId !== null && winId === currentWindowId) {
-          return;
+      // 1. Current Tabs from the active window only.
+      // The session editor should not mix tabs from other browser windows into the
+      // current session view, because that makes unrelated windows appear captured.
+      const activeWindowTabs =
+        tabsByWindow && currentWindowId !== null && currentWindowId !== undefined
+          ? tabsByWindow[currentWindowId] || []
+          : [];
+
+      activeWindowTabs.forEach(t => {
+        if (t.url && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('chrome://')) {
+          items.push({
+            id: `tab-${t.id}`,
+            url: t.url,
+            name: t.title || 'Untitled Tab',
+            favIconUrl: t.favIconUrl || getFaviconUrl(getHostname(t.url)),
+
+            source: 'tab',
+            originalData: t,
+          });
         }
-
-        tabs.forEach(t => {
-          if (t.url && !t.url.startsWith('chrome-extension://') && !t.url.startsWith('chrome://')) {
-            const norm = String(t.url || "").toLowerCase().trim().replace(/\/$/, '');
-            if (seenNormalizedUrls.has(norm)) {
-              return; // Skip duplicate tab in "Current Tabs" UI list
-            }
-            seenNormalizedUrls.add(norm);
-
-            items.push({
-              id: `tab-${t.id}`,
-              url: t.url,
-              name: t.title || 'Untitled Tab',
-              favIconUrl: t.favIconUrl || getFaviconUrl(getHostname(t.url)),
-
-              source: 'tab',
-              originalData: t,
-            });
-          }
-        });
       });
 
       // 2. Links & Notes from Redux (allData)
@@ -1121,7 +1569,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     };
 
     loadItems();
-  }, [isOpen, snippets, automations, tabsByWindow, currentWindowId, activeSessionId]);
+  }, [isOpen, snippets, automations, tabsByWindow, activeSessionId, currentWindowId]);
 
   // Scroll to top when active tab changes
   useEffect(() => {
@@ -1140,13 +1588,9 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
     // Tab Filter
     if (activeContentTab === 'Current Tabs') {
-      const addedLinks = selectedLinks;
       const notAddedCurrentTabs = availableItems.filter(item => {
         if (item.source !== 'tab') return false;
-        return !selectedLinks.some(selected => {
-          if (selected.source === 'tab' && selected.originalData?.id === item.originalData?.id) return true;
-          return selected.url === item.url;
-        });
+        return !selectedLinks.some(selected => areSameSessionItems(selected, item));
       });
       list = notAddedCurrentTabs;
     } else if (contentSearchQuery.trim() && activeContentTab === 'All saved files') {
@@ -1158,15 +1602,23 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   }, [availableItems, activeContentTab, contentSearchQuery, selectedLinks]);
 
   const checkIsAdded = useCallback((item: SelectedLink) => {
-    return selectedLinks.some(selected => {
-      if (item.source === selected.source && item.originalData && selected.originalData) {
-        const id1 = selected.originalData?.id || selected.originalData?.snippet_id;
-        const id2 = item.originalData?.id || item.originalData?.snippet_id;
-        return id1 && id2 && id1 === id2;
-      }
-      return selected.url === item.url;
-    });
+    return selectedLinks.some(selected => areSameSessionItems(selected, item));
   }, [selectedLinks]);
+
+  const liveTabTitleByUrl = useMemo(() => {
+    const titles = new Map<string, string>();
+
+    availableItems.forEach(item => {
+      if (item.source !== 'tab') return;
+      const normalizedUrl = normalizeSessionTabUrl(item.url);
+      const title = String(item.title || item.name || '').trim();
+      if (normalizedUrl && title) {
+        titles.set(normalizedUrl, title);
+      }
+    });
+
+    return titles;
+  }, [availableItems]);
 
   const allRenderedItems = useMemo(() => {
     const renderedSelected = selectedLinks.map(item => ({
@@ -1226,6 +1678,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
             favIconUrl: tab.favIconUrl,
             windowId: tab.windowId,
             source: 'tab' as const,
+            originalData: tab,
           },
         ];
       });
@@ -1324,17 +1777,26 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
     const name = customLinkName.trim() || getHostname(normalizedUrl);
     const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const customLink: SelectedLink = {
+      id,
+      url: normalizedUrl,
+      name,
+      source: 'custom',
+      favIconUrl: getFaviconUrl(getHostname(normalizedUrl)),
+    };
+    const nextSelectedLinks = [...selectedLinks, customLink];
 
-    setSelectedLinks(prev => [
-      ...prev,
-      {
-        id,
-        url: normalizedUrl,
-        name,
-        source: 'custom',
-        favIconUrl: getFaviconUrl(getHostname(normalizedUrl)),
-      },
-    ]);
+    setSelectedLinks(nextSelectedLinks);
+
+    if (sessionOpenSettings.autoSaveMode === 'auto_save') {
+      void executeSave(true, {
+        openSettings: sessionOpenSettings,
+        workspaceId: propertiesRef.current?.workspaceId,
+        folderId: propertiesRef.current?.folderId,
+        tagIds: propertiesRef.current?.tagIds,
+        urls: nextSelectedLinks,
+      });
+    }
 
     if (activeSessionId) {
       chrome.runtime.sendMessage({
@@ -1348,7 +1810,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     setIsCustomLinkFormOpen(false);
     setIsLeftCustomLinkFormOpen(false);
     setActiveContentTab('Current Tabs');
-  }, [customLinkName, customLinkUrl, getHostname, activeSessionId]);
+  }, [customLinkName, customLinkUrl, getHostname, selectedLinks, executeSave, sessionOpenSettings, propertiesRef, activeSessionId]);
 
   const toggleWindowCollapse = useCallback((windowId: number) => {
     setCollapsedWindows(prev => ({
@@ -1374,7 +1836,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       );
 
       if (exists) {
-        showFooterStatus('error', 'A tab group with this name already exists.');
+        showFooterStatus('error', 'A Tab Session with this name already exists.');
         setIsStartingSession(false);
         return;
       }
@@ -1388,9 +1850,13 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
           resolve([]);
         }
       });
-      const duplicateActive = activeSessionsResult.some((s: any) => s.sessionName?.toLowerCase() === trimmedName.toLowerCase());
+      const currentSessionId = (initialSession as any)?.id || (initialSession as any)?.snippet_id || liveSessionId;
+      const duplicateActive = activeSessionsResult.some((s: any) =>
+        s.sessionName?.toLowerCase() === trimmedName.toLowerCase() &&
+        String(s.sessionId || '') !== String(currentSessionId || '')
+      );
       if (duplicateActive) {
-        showFooterStatus('error', 'A tab group with this name is currently active.');
+        showFooterStatus('error', 'A Tab Session with this name is currently active.');
         setIsStartingSession(false);
         return;
       }
@@ -1410,16 +1876,6 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
       const initialUrls = selectedLinks.map(l => l.url);
       const initialNames = selectedLinks.map(l => l.name);
-
-      // Save prefill to local storage
-      await new Promise<void>((resolve) => {
-        chrome.storage.local.set({
-          pending_session_prefill: {
-            title: name.trim(),
-            sessionId: sessionId,
-          }
-        }, () => resolve());
-      });
 
       await new Promise<void>((resolve, reject) => {
         chrome.runtime.sendMessage({
@@ -1443,7 +1899,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       });
       setSessionDialogOpen(false);
       setSessionName('');
-      showFooterStatus('success', 'Tab group started!');
+      showFooterStatus('success', 'Tab Session started!');
       onClose(); // Return to home view since session is running in a separate window
     } catch (e: any) {
       showFooterStatus('error', e.message || 'Failed to start session');
@@ -1452,29 +1908,184 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     }
   };
 
+  const handleCopyTitleToShortcut = useCallback(() => {
+    const normalizedShortcut = normalizeSessionShortcut(title);
+    if (!normalizedShortcut) return;
+    isSessionShortcutManuallyEditedRef.current = true;
+    setSessionShortcut(normalizedShortcut);
+    hasUserModifiedRef.current = true;
+  }, [isSessionShortcutManuallyEditedRef, normalizeSessionShortcut, setSessionShortcut, title]);
+
+  useEffect(() => {
+    let active = true;
+    const checkShortcut = async () => {
+      if (sessionShortcut) {
+        const sessionCompoundId = getItemCompoundId({
+          id: currentSessionId,
+          workspace_id: workspaceId || undefined,
+          folder_id: folderId || undefined,
+          snippet: {
+            id: currentSessionId,
+            category: 'session',
+          },
+        });
+        if (shortcutsMap && shortcutsMap[sessionCompoundId] === sessionShortcut) {
+          if (active) setShortcutError(null);
+          return;
+        }
+        const res = await validateShortcut(sessionShortcut, currentSessionId || 'new');
+        if (active) {
+          if (!res.isValid) {
+            setShortcutError(res.errorMessage || 'This shortcut is already taken.');
+          } else {
+            setShortcutError(null);
+          }
+        }
+      } else {
+        if (active) setShortcutError(null);
+      }
+    };
+    void checkShortcut();
+    return () => {
+      active = false;
+    };
+  }, [sessionShortcut, currentSessionId, shortcutsMap, workspaceId, folderId, validateShortcut]);
+
   const handleSave = useCallback(
-    async (isAutoSave: boolean = false, overrideLinks?: SelectedLink[], overrideTitle?: string) => {
+    async (
+      isAutoSave: boolean = false,
+      overrideLinks?: SelectedLink[],
+      overrideTitle?: string,
+      overrideSettings?: SessionOpenSettings,
+      overrideProps?: { workspaceId?: string | null; folderId?: string | null; tagIds?: string[] }
+    ) => {
+      if (shortcutError) {
+        if (!isAutoSave) {
+          showFooterStatus('error', shortcutError);
+        }
+        return false;
+      }
+      if (!hasUnsavedChanges && !overrideProps && !overrideLinks && !overrideTitle && !overrideSettings) {
+        return true;
+      }
       if (overrideTitle !== undefined) setTitle(overrideTitle);
       if (overrideLinks !== undefined) setSelectedLinks(overrideLinks);
 
       const saved = await executeSave(isAutoSave, { 
-        openSettings: sessionOpenSettings,
-        workspaceId: propertiesRef.current?.workspaceId,
-        folderId: propertiesRef.current?.folderId,
-        tagIds: propertiesRef.current?.tagIds,
+        openSettings: overrideSettings || sessionOpenSettings,
+        workspaceId: overrideProps?.workspaceId,
+        folderId: overrideProps?.folderId,
+        tagIds: overrideProps?.tagIds,
+        title: overrideTitle,
+        urls: overrideLinks,
       });
+
+      if (saved) {
+        setIsForceCreateNew(false);
+      }
+
       if (saved && !isAutoSave) {
         setTimeout(() => onClose(), 1500);
       }
-    }, [executeSave, setTitle, setSelectedLinks, onClose, sessionOpenSettings]);
+      return saved;
+    }, [executeSave, setTitle, setSelectedLinks, onClose, sessionOpenSettings, shortcutError, hasUnsavedChanges]);
+
+  const handlePropertiesChange = useCallback((properties: any) => {
+    let newTagIds: string[] | undefined = undefined;
+    
+    // Extract tagIds from selectedTags (array of {id, name}) if provided
+    if (properties.selectedTags !== undefined) {
+      newTagIds = properties.selectedTags.map((tag: any) => tag.id) as string[];
+      setTagIds(newTagIds);
+    } else if (properties.tagIds !== undefined) {
+      newTagIds = properties.tagIds as string[];
+      setTagIds(newTagIds);
+    }
+
+    propertiesRef.current = {
+      ...properties,
+      tagIds: newTagIds !== undefined ? newTagIds : propertiesRef.current?.tagIds
+    };
+
+    if (properties.workspaceId !== undefined) {
+      setWorkspaceId(properties.workspaceId);
+    }
+    if (properties.folderId !== undefined) {
+      setFolderId(properties.folderId);
+    }
+    
+    // Only trigger autosave if this was a user-initiated change
+    if (properties.workspaceId !== undefined || properties.folderId !== undefined || properties.selectedTags !== undefined) {
+      hasUserModifiedRef.current = true;
+      void handleSave(true, undefined, undefined, undefined, {
+        workspaceId: properties.workspaceId,
+        folderId: properties.folderId,
+        tagIds: newTagIds !== undefined ? newTagIds : propertiesRef.current?.tagIds
+      });
+    }
+  }, [setWorkspaceId, setFolderId, setTagIds, tagIds, handleSave]);
+
+
+  const updateSessionSettings = useCallback(
+    (patch: Partial<SessionOpenSettings>) => {
+      const hasChanges = Object.keys(patch).some(
+        key => patch[key as keyof SessionOpenSettings] !== sessionOpenSettings[key as keyof SessionOpenSettings]
+      );
+      if (!hasChanges) return;
+
+      const nextSettings = { ...sessionOpenSettings, ...patch }; 
+      setSessionOpenSettings(nextSettings);
+
+      const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
+      const isLiveSyncing = currentSessionId && runningSessionId && String(currentSessionId) === String(runningSessionId);
+
+      const shouldAutosave = Boolean(
+        (activeSessionId && isLiveSyncing) || 
+        (!activeSessionId && title.trim() && selectedLinks.length > 0)
+      );
+      if (shouldAutosave) {
+        const shouldPreservePersistedContentOnly =
+          nextSettings.autoSaveMode === 'dont_save' && !!persistedSessionRecord;
+
+        void handleSave(
+          true,
+          shouldPreservePersistedContentOnly ? persistedSessionRecord.urls : undefined,
+          shouldPreservePersistedContentOnly ? persistedSessionRecord.title : undefined,
+          nextSettings,
+        );
+      }
+    },
+    [activeSessionId, handleSave, persistedSessionRecord, selectedLinks.length, sessionOpenSettings, title, runningSessionId, initialSession],
+  );
 
   useEffect(() => {
-    if (!hasUnsavedChanges || !isOpen) return;
+    if (!isOpen || sessionOpenSettings.autoSaveMode !== 'auto_save') return;
+    const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
+    const isLiveSyncingSession = currentSessionId && runningSessionId && String(currentSessionId) === String(runningSessionId);
+
+    const shouldBlockAutoSave = !hasUserModifiedRef.current;
+    if (shouldBlockAutoSave) {
+      return;
+    }
+    if (!hasPendingSessionChanges) {
+      lastAutoSaveSignatureRef.current = autoSaveSignature;
+      return;
+    }
+    if (lastAutoSaveSignatureRef.current === autoSaveSignature) {
+      return;
+    }
     const timer = setTimeout(() => {
-      void handleSave(true);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [hasUnsavedChanges, handleSave, isOpen]);
+      void handleSave(true).then(saved => {
+        if (saved) {
+          lastAutoSaveSignatureRef.current = autoSaveSignature;
+          hasUserModifiedRef.current = false;
+        }
+      });
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [autoSaveSignature, handleSave, hasPendingSessionChanges, isOpen, sessionOpenSettings.autoSaveMode, activeSessionId, runningSessionId, initialSession]);
 
   const parseSnippetValue = useCallback((value: string): SelectedLink[] => {
     if (!value) return [];
@@ -1554,61 +2165,6 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     }
   }, [isOpen]);
 
-
-  // Unload event listener to stash unsaved edits
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (hasUnsavedChanges) {
-        const backupData = {
-          title,
-          selectedLinks,
-          activeSessionId,
-          workspaceId: propertiesRef.current?.workspaceId || null,
-          folderIdForSave: propertiesRef.current?.folderId || null,
-          teamId,
-          timestamp: Date.now()
-        };
-        void StorageManager.setItem(getBackupKey(), backupData);
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [hasUnsavedChanges, getBackupKey, title, selectedLinks, activeSessionId, teamId]);
-
-  // Mount effect to restore stashed backup
-  useEffect(() => {
-    if (!isOpen) return;
-
-    StorageManager.getItem(getBackupKey()).then((backup: any) => {
-      if (backup) {
-        try {
-          if (Date.now() - backup.timestamp < 24 * 60 * 60 * 1000) {
-            
-            setTitle(backup.title || '');
-            setSelectedLinks(backup.selectedLinks || []);
-            if (backup.activeSessionId) {
-              setActiveSessionId(backup.activeSessionId);
-            }
-            if (backup.targetWorkspaceId) {
-              setManualWorkspaceId(backup.targetWorkspaceId);
-            }
-            if (backup.folderIdForSave) {
-              setManualFolderId(backup.folderIdForSave);
-            }
-            // Clear backup after successful restoration so it doesn't loop
-            void StorageManager.removeItem(getBackupKey());
-            showFooterStatus('success', 'Restored unsaved changes');
-          }
-        } catch (err) {
-          console.error('[LinkEditModal] Failed to restore stashed backup:', err);
-        }
-      }
-    });
-  }, [isOpen, getBackupKey]);
-
   useEffect(() => {
     if (isEditMode && isOpen && !hasSyncedInitialDataRef.current) {
       if (title.trim() !== '' && selectedLinks.length > 0) {
@@ -1632,11 +2188,28 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     setLocalSessionOverride(null);
     hasInitializedPrefill.current = false;
     hasSyncedInitialDataRef.current = false;
-        
+
+    // Keep last workspace/folder for convenience, but clear session-specific tags
+    propertiesRef.current = { 
+      workspaceId: propertiesRef.current?.workspaceId ?? null, 
+      folderId: propertiesRef.current?.folderId ?? null, 
+      tagIds: [] 
+    };
+
+    // Reset all UI state
     setCustomLinkUrl('');
     setCustomLinkName('');
     setIsCustomLinkFormOpen(false);
     setIsLeftCustomLinkFormOpen(false);
+    setIsSettingsPopupOpen(false);
+    setIsLocationPickerOpen(false);
+    setIsTitleManuallyModified(false);
+    setHasAutoPinned(false);
+    setFooterStatus({ type: 'idle', message: '' });
+    setEditingUrlId(null);
+    setEditingUrlValue('');
+    isSessionShortcutManuallyEditedRef.current = false;
+    setSessionShortcut('');
     if (titleInputRef.current) {
       titleInputRef.current.focus();
     }
@@ -1661,11 +2234,14 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     };
     
     // Explicitly force a final save before closing.
-    await handleSave(false);
+    const saved = await handleSave(false);
+    if (!saved && shortcutError) {
+      return;
+    }
     
     onClose();
     endSessionIfActive();
-  }, [activeSessionId, handleSave, onClose]);
+  }, [activeSessionId, handleSave, onClose, hasPendingSessionChanges, shortcutError]);
 
   // Register escape handler with uiStateManager
   useEffect(() => {
@@ -1858,722 +2434,131 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
   const globalTabRenderIndex = 0;
 
+  const handleUpdateItemField = useCallback(async (id: string, field: string, value: string) => {
+    try {
+      const existing = sortedSessions.find((s: any) => s.id === id);
+      if (!existing) return;
+
+      const currentActiveId = liveSessionId || currentSessionId || activeSessionId;
+      const isEditingActiveItem = String(id) === String(currentActiveId);
+
+      if (field === 'title') {
+        const updatedTitle = value.trim() || 'Untitled Session';
+        await updateSession(id, { title: updatedTitle });
+        const compound = getItemCompoundId({
+          id,
+          workspace_id: existing.workspaceId || null,
+          folder_id: existing.folderId || null,
+          snippet: { id, category: 'session' },
+        });
+        const shortcut = shortcutsMap[compound] || '';
+        if (shortcut) {
+          await apiSaveShortcut(id, compound, shortcut.toLowerCase(), updatedTitle, 'session');
+        }
+        if (isEditingActiveItem) {
+          setTitle(updatedTitle);
+          if (lastSavedTitleRef) lastSavedTitleRef.current = updatedTitle;
+          if (setSaveError) setSaveError(null);
+          if (setSessionError) setSessionError(null);
+        }
+      } else if (field === 'shortcut') {
+        const finalShortcut = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const compound = getItemCompoundId({
+          id,
+          workspace_id: existing.workspaceId || null,
+          folder_id: existing.folderId || null,
+          snippet: { id, category: 'session' },
+        });
+        if (finalShortcut) {
+          await apiSaveShortcut(id, compound, finalShortcut, existing.title || 'Untitled Session', 'session');
+        } else {
+          await apiClearShortcut(id, compound, 'session');
+        }
+        if (isEditingActiveItem) {
+          setSessionShortcut(finalShortcut);
+          if (lastSavedShortcutRef) lastSavedShortcutRef.current = finalShortcut;
+        }
+      } else if (field === 'tags') {
+        const tagNames = value.split(',').map(t => t.trim()).filter(Boolean);
+        const resolvedTags: any[] = [];
+        const allTags = useDbStore.getState().tags;
+        for (const name of tagNames) {
+          const matchedTag = allTags.find((t: any) => t.name.toLowerCase() === name.toLowerCase() && t.workspaceId === existing.workspaceId);
+          if (matchedTag) {
+            resolvedTags.push(matchedTag);
+          } else if (existing.workspaceId) {
+            const newTag = await createTag(name, existing.workspaceId);
+            resolvedTags.push(newTag);
+          }
+        }
+        await updateSession(id, { tagIds: resolvedTags.map((t: any) => t.id) });
+      }
+
+      if (isEditingActiveItem) {
+        if (setSaveStatus) setSaveStatus('saved');
+        if (setLastSavedAt) setLastSavedAt(new Date());
+      }
+
+      await fetchTableMaps();
+    } catch (error) {
+      console.error('[SessionEditorView] Failed to update item field:', error);
+    }
+  }, [sortedSessions, shortcutsMap, activeSessionId, liveSessionId, currentSessionId, setTitle, setSessionShortcut, setSaveStatus, setSaveError, setLastSavedAt, lastSavedTitleRef, lastSavedShortcutRef, fetchTableMaps]);
   return (
     <>
-      <EditorContainer
-        className="flex flex-row flex-1 h-full relative text-left w-full custom-scrollbar min-h-[450px]"
-        innerClassName="flex flex-col gap-1 w-[800px] max-w-full flex-shrink h-full min-w-[350px] relative min-h-[450px]"
-      >
-          <div className={clsx(
-            "flex-1 flex flex-col text-[#073642] dark:text-neutral-200 relative bg-transparent dark:bg-transparent border-none min-h-[450px]",
-            ((isLeftCustomLinkFormOpen && linkSuggestions.length > 0) || isSettingsPopupOpen) ? "overflow-visible" : "overflow-hidden",
-            isSettingsPopupOpen && "z-[60]"
-          )}>
-            {/* Main Content Area (Centered) */}
-            <div className="w-full flex flex-col items-stretch justify-start flex-shrink-0">
-              <div className="w-full flex items-center py-2.5 px-2 border-b border-white/50 dark:border-white/10">
-                {/* Static Heading - Left */}
-                <div className="flex items-center flex-1 min-w-0 relative">
-                  <h3 className="text-lg font-bold text-neutral-800 dark:text-neutral-200 pl-2">Tab Group</h3>
-
-                  {saveStatus === 'error' && saveError && (
-                    <span className="flex items-center gap-1.5 whitespace-nowrap text-[#ef4444] ml-4">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                      {saveError}
-                    </span>
-                  )}
-                </div>
-
-                {/* Auto-save indicator */}
-                {!saveError && (
-                  <AutoSaveIndicator
-                    saveStatus={saveStatus}
-                    lastSavedAt={lastSavedAt}
-                    isDirty={hasUnsavedChanges}
-                    className="ml-2"
-                  />
-                )}
-
-                <div className="flex items-center gap-3 ml-auto relative">
-                  {isDuplicateTitle && (
-                    <span className="text-xs text-red-500 font-medium whitespace-nowrap">
-                      Duplicate title exists
-                    </span>
-                  )}
-                  {/* Settings Gear Button */}
-                  <div className="relative inline-block">
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        setIsSettingsPopupOpen(prev => !prev);
-                      }}
-                      className="p-2 transition-all rounded-lg text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 focus:outline-none z-50 settings-btn"
-                      title="Tab group settings">
-                      <FiSettings size={14} />
-                    </button>
-
-                    {isSettingsPopupOpen && (
-                      <div
-                        ref={settingsPopupRef}
-                        className="absolute left-0 top-full mt-2 bg-[var(--color-editorBg)] border border-black/10 dark:border-white/10 rounded-2xl p-5 shadow-2xl w-[320px] z-[100]"
-                        onClick={e => e.stopPropagation()}
-                      >
-                        {/* Header */}
-                        <div className="flex items-center justify-between mb-4">
-                          <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-200">Tab group settings</span>
-                          <button
-                            type="button"
-                            onClick={() => setIsSettingsPopupOpen(false)}
-                            className="p-1 rounded-md text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                          >
-                            <FaTimes size={10} />
-                          </button>
-                        </div>
-
-                        {/* Open tabs in */}
-                        <div className="mb-4">
-                          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-2 block">Open tabs in</span>
-                          <div className="flex flex-col gap-2">
-                            {/* Same window */}
-                            <label
-                              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                                sessionOpenSettings.openMode === 'same_window'
-                                  ? 'border-[var(--color-primary,#6366f1)]/40 bg-[var(--color-primary,#6366f1)]/5 dark:bg-[var(--color-primary,#6366f1)]/10'
-                                  : 'border-black/8 dark:border-white/8 hover:bg-black/3 dark:hover:bg-white/3'
-                              }`}
-                              onClick={() => setSessionOpenSettings(prev => ({ ...prev, openMode: 'same_window' }))}
-                            >
-                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                                sessionOpenSettings.openMode === 'same_window'
-                                  ? 'border-[var(--color-primary,#6366f1)]'
-                                  : 'border-neutral-400 dark:border-neutral-500'
-                              }`}>
-                                {sessionOpenSettings.openMode === 'same_window' && (
-                                  <div className="w-2 h-2 rounded-full bg-[var(--color-primary,#6366f1)]" />
-                                )}
-                              </div>
-                              <div className={`shrink-0 p-1.5 rounded-lg ${
-                                sessionOpenSettings.openMode === 'same_window'
-                                  ? 'bg-[var(--color-primary,#6366f1)]/15 text-[var(--color-primary,#6366f1)]'
-                                  : 'bg-black/5 dark:bg-white/5 text-neutral-500 dark:text-neutral-400'
-                              }`}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <rect x="3" y="3" width="18" height="18" rx="2"/>
-                                  <line x1="3" y1="8" x2="21" y2="8"/>
-                                </svg>
-                              </div>
-                              <div className="flex flex-col min-w-0">
-                                <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">Same window</span>
-                                <span className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-tight">Replace current tabs</span>
-                              </div>
-                            </label>
-
-                            {/* New window */}
-                            <label
-                              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                                sessionOpenSettings.openMode === 'new_window'
-                                  ? 'border-[var(--color-primary,#6366f1)]/40 bg-[var(--color-primary,#6366f1)]/5 dark:bg-[var(--color-primary,#6366f1)]/10'
-                                  : 'border-black/8 dark:border-white/8 hover:bg-black/3 dark:hover:bg-white/3'
-                              }`}
-                              onClick={() => setSessionOpenSettings(prev => ({ ...prev, openMode: 'new_window' }))}
-                            >
-                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                                sessionOpenSettings.openMode === 'new_window'
-                                  ? 'border-[var(--color-primary,#6366f1)]'
-                                  : 'border-neutral-400 dark:border-neutral-500'
-                              }`}>
-                                {sessionOpenSettings.openMode === 'new_window' && (
-                                  <div className="w-2 h-2 rounded-full bg-[var(--color-primary,#6366f1)]" />
-                                )}
-                              </div>
-                              <div className={`shrink-0 p-1.5 rounded-lg ${
-                                sessionOpenSettings.openMode === 'new_window'
-                                  ? 'bg-[var(--color-primary,#6366f1)]/15 text-[var(--color-primary,#6366f1)]'
-                                  : 'bg-black/5 dark:bg-white/5 text-neutral-500 dark:text-neutral-400'
-                              }`}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <rect x="3" y="3" width="18" height="18" rx="2"/>
-                                  <line x1="3" y1="8" x2="21" y2="8"/>
-                                  <line x1="9" y1="8" x2="9" y2="21"/>
-                                </svg>
-                              </div>
-                              <div className="flex flex-col min-w-0">
-                                <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">New window</span>
-                                <span className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-tight">Open in a new window</span>
-                              </div>
-                            </label>
-                          </div>
-                        </div>
-
-                        {/* Auto-save behavior */}
-                        <div className="pt-3 border-t border-black/5 dark:border-white/5">
-                          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-2 block">Auto-save behavior</span>
-                          <div className="flex flex-col gap-2">
-                            {/* Auto-save (Live Sync) */}
-                            <label
-                              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                                sessionOpenSettings.autoSaveMode === 'auto_save'
-                                  ? 'border-[var(--color-primary,#6366f1)]/40 bg-[var(--color-primary,#6366f1)]/5 dark:bg-[var(--color-primary,#6366f1)]/10'
-                                  : 'border-black/8 dark:border-white/8 hover:bg-black/3 dark:hover:bg-white/3'
-                              }`}
-                              onClick={() => setSessionOpenSettings(prev => ({ ...prev, autoSaveMode: 'auto_save' }))}
-                            >
-                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                                sessionOpenSettings.autoSaveMode === 'auto_save'
-                                  ? 'border-[var(--color-primary,#6366f1)]'
-                                  : 'border-neutral-400 dark:border-neutral-500'
-                              }`}>
-                                {sessionOpenSettings.autoSaveMode === 'auto_save' && (
-                                  <div className="w-2 h-2 rounded-full bg-[var(--color-primary,#6366f1)]" />
-                                )}
-                              </div>
-                              <div className={`shrink-0 p-1.5 rounded-lg ${
-                                sessionOpenSettings.autoSaveMode === 'auto_save'
-                                  ? 'bg-[var(--color-primary,#6366f1)]/15 text-[var(--color-primary,#6366f1)]'
-                                  : 'bg-black/5 dark:bg-white/5 text-neutral-500 dark:text-neutral-400'
-                              }`}>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M19 16.9A5 5 0 0 0 18 7h-1.26a8 8 0 1 0-11.62 9" />
-                                  <path d="M13 22a5 5 0 1 0-4.54-2.82" />
-                                  <path d="M13 22v-4h4" />
-                                </svg>
-                              </div>
-                              <div className="flex flex-col min-w-0">
-                                <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">Auto-save</span>
-                                <span className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-tight">Capture exact window state, remove closed tabs.</span>
-                              </div>
-                            </label>
-
-                            {/* Don't auto-save */}
-                            <label
-                              className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                                sessionOpenSettings.autoSaveMode === 'dont_save'
-                                  ? 'border-[var(--color-primary,#6366f1)]/40 bg-[var(--color-primary,#6366f1)]/5 dark:bg-[var(--color-primary,#6366f1)]/10'
-                                  : 'border-black/8 dark:border-white/8 hover:bg-black/3 dark:hover:bg-white/3'
-                              }`}
-                              onClick={() => setSessionOpenSettings(prev => ({ ...prev, autoSaveMode: 'dont_save' }))}
-                            >
-                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                                sessionOpenSettings.autoSaveMode === 'dont_save'
-                                  ? 'border-[var(--color-primary,#6366f1)]'
-                                  : 'border-neutral-400 dark:border-neutral-500'
-                              }`}>
-                                {sessionOpenSettings.autoSaveMode === 'dont_save' && (
-                                  <div className="w-2 h-2 rounded-full bg-[var(--color-primary,#6366f1)]" />
-                                )}
-                              </div>
-                              <div className={`shrink-0 p-1.5 rounded-lg ${
-                                sessionOpenSettings.autoSaveMode === 'dont_save'
-                                  ? 'bg-[var(--color-primary,#6366f1)]/15 text-[var(--color-primary,#6366f1)]'
-                                  : 'bg-black/5 dark:bg-white/5 text-neutral-500 dark:text-neutral-400'
-                              }`}>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3" />
-                                  <line x1="2" x2="22" y1="2" y2="22" />
-                                </svg>
-                              </div>
-                              <div className="flex flex-col min-w-0">
-                                <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">Don't auto-save</span>
-                                <span className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-tight">Add or remove tabs manually.</span>
-                              </div>
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    ref={closeButtonRef}
-                    onClick={handleCloseAttempt}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowLeft') {
-                        e.preventDefault();
-                        if (titleInputRef.current) {
-                          titleInputRef.current.focus();
-                          titleInputRef.current.selectionStart = titleInputRef.current.value.length;
-                          titleInputRef.current.selectionEnd = titleInputRef.current.value.length;
-                        }
-                      }
-                    }}
-                    className="p-2 transition-all rounded-lg text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 focus:outline-none z-50"
-                    title="Close (Esc)">
-                    <FaTimes size={14} />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Floating Cards Container */}
-            <div className="w-full flex-1 flex flex-col min-h-0 items-stretch px-5 pt-4">
-              {/* Session Name Field */}
-              <div className="flex flex-col gap-1.5 mb-6">
-                <h4 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Session name</h4>
-                <div className="relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-4 py-2.5 flex items-center">
-                  <input
-                    ref={titleInputRef}
-                    value={title}
-                    onChange={event => {
-                      setTitle(event.target.value);
-                      setIsTitleManuallyModified(true);
-                      hasUserModifiedRef.current = true;
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && !activeSessionId) {
-                        e.preventDefault();
-                        const trimmedTitle = title.trim();
-                        if (!trimmedTitle) {
-                          setSessionError('Enter the title for this link collection');
-                        } else {
-                          setSessionError(null);
-                          handleCreateSession(trimmedTitle);
-                        }
-                      } else if (e.key === 'ArrowRight') {
-                        if (e.currentTarget.selectionStart === e.currentTarget.value.length) {
-                          e.preventDefault();
-                          closeButtonRef.current?.focus();
-                        }
-                      }
-                    }}
-                    placeholder="Give your session a name..."
-                    className="flex-1 text-sm font-medium text-black dark:text-white placeholder-[var(--color-textPlaceholder)]/70 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0"
-                  />
-                </div>
-              </div>
-
-              {/* MAIN LIST: Content Bar Source */}
-              <div className="w-full flex-1 flex flex-col min-w-0 relative">
-                <h4 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
-                  Tabs ({allRenderedItems.length})
-                </h4>
-                {/* List */}
-                <div
-                  ref={listContainerRef}
-                  className={clsx(
-                    "flex-1 min-h-0 w-full max-h-[min(480px,calc(100vh-280px))]",
-                    "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden",
-                    (isLeftCustomLinkFormOpen && linkSuggestions.length > 0)
-                      ? "overflow-visible"
-                      : "overflow-y-auto custom-scrollbar"
-                  )}>
-                  <div className="flex flex-col w-full divide-y divide-black/5 dark:divide-white/5 pb-2">
-                    {(() => {
-                      const renderedSelected = allRenderedItems.filter(i => i.isAdded);
-                      const renderedActive = allRenderedItems.filter(i => !i.isAdded);
-
-                      const renderItem = (item: any, isAdded: boolean, idx: number, globalIdx: number) => {
-                        const handleToggle = (e?: React.MouseEvent) => {
-                          if (e) {
-                            e.stopPropagation();
-                            e.preventDefault();
-                          }
-                          if (isAdded) {
-                            removeLink(item.id);
-                          } else {
-                            addItemFromContentBar(item);
-                          }
-                        };
-
-                        const itemIcon = (() => {
-                          if (item.url === 'agent_chat') {
-                            const step = (item.originalData?.automation_steps || item.originalData?.steps)?.[0];
-                            let urls: string[] = [];
-                            if (step?.config?.allAiUrls) {
-                              urls = Object.values(step.config.allAiUrls as Record<string, string>)
-                                .map(u => String(u))
-                                .filter(u => !u.includes('cmd_select_status=false'));
-                            } else if (step?.config?.url) {
-                              urls = [step.config.url].filter(u => !u.includes('cmd_select_status=false'));
-                            }
-
-                            if (urls.length > 0) {
-                              return (
-                                <div className="flex -space-x-1.5 items-center w-8">
-                                  {urls.slice(0, 3).map((url, i) => (
-                                    <div
-                                      key={`agent-icon-${item.id}-${i}`}
-                                      className="w-4 h-4 rounded-full flex items-center justify-center ring-1 ring-white dark:ring-[#1C1C1E] overflow-hidden shadow-sm bg-white flex-shrink-0">
-                                      <img
-                                        src={getFaviconUrl(getHostname(url))}
-                                        alt=""
-                                        className="w-4 h-4 object-cover"
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            }
-                            return (
-                              <div className="w-5 h-5 rounded flex items-center justify-center bg-[#eee8d5] dark:bg-neutral-800 text-[#93a1a1]">
-                                <FaRobot size={12} />
-                              </div>
-                            );
-                          }
-
-                          if (item.favIconUrl) {
-                            return <img src={item.favIconUrl} className="w-5 h-5 object-contain" alt="" />;
-                          }
-
-                          return (
-                            <div className="w-5 h-5 rounded flex items-center justify-center bg-[#eee8d5] dark:bg-neutral-800 text-[#93a1a1]">
-                              {item.source === 'note' ? <FaFileAlt size={12} /> : <FaLink size={12} />}
-                            </div>
-                          );
-                        })();
-
-                        const itemLabel = (() => {
-                          if (item.source === 'note' || item.url?.startsWith('note:')) {
-                            return 'Note';
-                          }
-                          if (item.url === 'agent_chat') {
-                            return 'AI Agent';
-                          }
-                          return (item.url || '').replace(/^https?:\/\/(www\.)?/i, '');
-                        })();
-
-                        return (
-                          <div
-                            key={item.id}
-                            ref={el => {
-                              tabItemRefs.current[globalIdx] = el;
-                            }}
-                            onClick={handleToggle}
-                            onDoubleClick={e => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              openLinkEditPopup(item);
-                            }}
-                            className={`group flex items-center gap-3 py-2 px-3 transition-all cursor-pointer focus:outline-none first:rounded-t-xl last:rounded-b-xl ${
-                              focusedTabIndex === globalIdx
-                                ? 'bg-white/10'
-                                : 'hover:bg-white/5'
-                            }`}>
-                            <div className="flex-shrink-0 relative">{itemIcon}</div>
-
-                            <div className="flex-1 min-w-0 flex items-center justify-between gap-4">
-                              <div
-                                className={clsx(
-                                  "text-[13px] font-medium tracking-tight truncate flex-shrink-0 max-w-[65%]",
-                                  isAdded ? "text-neutral-800 dark:text-neutral-100" : "text-neutral-500 dark:text-neutral-400"
-                                )}
-                                style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
-                                {item.name}
-                              </div>
-                              <div
-                                className={clsx(
-                                  'text-[11px] font-normal truncate transition-opacity duration-200 text-right min-w-0',
-                                  focusedTabIndex === globalIdx ? 'opacity-100' : 'opacity-50 group-hover:opacity-100',
-                                  'text-neutral-400 dark:text-neutral-500',
-                                )}>
-                                {itemLabel}
-                              </div>
-                            </div>
-
-                            {/* Action Buttons & Add/Added indicator */}
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                               {/* Add / Added Text Visual Indicator */}
-                               <div
-                                 className={clsx(
-                                   "text-[12px] font-semibold transition-all duration-200 select-none shrink-0 flex items-center justify-center min-w-[50px]",
-                                   isAdded
-                                     ? "text-emerald-500 dark:text-emerald-400"
-                                     : "text-neutral-400 dark:text-neutral-500 group-hover:text-emerald-500 dark:group-hover:text-emerald-400"
-                                 )}
-                               >
-                                 {isAdded ? 'Added' : '+ Add'}
-                               </div>
-
-                               {/* Three Vertical Dots Dropdown for Added Items */}
-                               {isAdded && (
-                                 <div 
-                                   className="relative shrink-0 three-dots-container flex items-center"
-                                 >
-                                   <button
-                                     type="button"
-                                     onClick={e => {
-                                       e.stopPropagation();
-                                       e.preventDefault();
-                                       setActiveMenuLinkId(prev => prev === item.id ? null : item.id);
-                                     }}
-                                     className={clsx(
-                                       "p-1.5 rounded-lg text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors flex items-center justify-center focus:outline-none transition-opacity duration-200",
-                                       (activeMenuLinkId === item.id || focusedTabIndex === globalIdx)
-                                         ? "opacity-100"
-                                         : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
-                                     )}
-                                     title="More options"
-                                   >
-                                     <FaEllipsisV size={11} />
-                                   </button>
-                                   
-                                   {activeMenuLinkId === item.id && (
-                                     <div 
-                                       onClick={e => e.stopPropagation()}
-                                       className="absolute right-0 top-full mt-1 bg-[#fdf6e3] dark:bg-neutral-900 border border-[#eee8d5] dark:border-neutral-700 rounded-xl shadow-2xl z-[999] py-1 flex flex-col w-32 overflow-hidden"
-                                     >
-                                       <button
-                                         type="button"
-                                         onClick={e => {
-                                           e.stopPropagation();
-                                           e.preventDefault();
-                                           setActiveMenuLinkId(null);
-                                           removeLink(item.id);
-                                         }}
-                                         className="flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors text-red-600 dark:text-red-400 hover:bg-[#eee8d5] dark:hover:bg-neutral-800"
-                                       >
-                                         <FaTrash size={10} className="opacity-70" />
-                                         <span>Remove</span>
-                                       </button>
-                                       <button
-                                         type="button"
-                                         onClick={e => {
-                                           e.stopPropagation();
-                                           e.preventDefault();
-                                           setActiveMenuLinkId(null);
-                                           setIsLeftCustomLinkFormOpen(true);
-                                           setCustomLinkUrl('');
-                                         }}
-                                         className="flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors text-[#073642] dark:text-neutral-200 hover:bg-[#eee8d5] dark:hover:bg-neutral-800 hover:text-[#073642] dark:hover:text-white"
-                                       >
-                                         <FaPlus size={10} className="opacity-70" />
-                                         <span>Add custom link</span>
-                                       </button>
-                                     </div>
-                                   )}
-                                 </div>
-                               )}
-                             </div>
-                          </div>
-                        );
-                      };
-
-                      return (
-                        <>
-                          {/* All Items */}
-                          {allRenderedItems.map((wrap, idx) => renderItem(wrap.item, wrap.isAdded, idx, idx))}
-
-                          {/* Custom link form appended inside the card wrapper when input form is open */}
-                          {isLeftCustomLinkFormOpen ? (
-                            <div
-                              ref={el => {
-                                tabItemRefs.current[allRenderedItems.length] = el as any;
-                              }}
-                              className="flex items-center gap-3 py-2 px-3 transition-all focus:outline-none bg-transparent relative z-50 last:rounded-b-xl">
-                              
-                              {/* Inline Text Input */}
-                              <div className="flex-1 min-w-0 flex items-center gap-1.5 justify-start">
-                                {(allRenderedItems.length === 0 && !customLinkUrl) && (
-                                  <span className="text-red-500/50 text-[13.5px] font-bold select-none shrink-0">*</span>
-                                )}
-                                <input
-                                  ref={customLinkUrlRef}
-                                  value={customLinkUrl}
-                                  onChange={event => setCustomLinkUrl(event.target.value)}
-                                  onKeyDown={event => {
-                                    if (
-                                      linkSuggestions.length > 0 &&
-                                      (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-                                    ) {
-                                      event.preventDefault();
-                                      if (event.key === 'ArrowDown') {
-                                        setFocusedSuggestionIndex(prev =>
-                                          Math.min(prev + 1, linkSuggestions.length - 1),
-                                        );
-                                      } else {
-                                        setFocusedSuggestionIndex(prev => Math.max(prev - 1, -1));
-                                      }
-                                      return;
-                                    }
-
-                                    if (event.key === 'Enter') {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-
-                                      if (focusedSuggestionIndex >= 0 && linkSuggestions[focusedSuggestionIndex]) {
-                                        const item = linkSuggestions[focusedSuggestionIndex];
-                                        setSelectedLinks(prev => [
-                                          ...prev,
-                                          {
-                                            id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-                                            url: item.url,
-                                            name: item.title || getHostname(item.url),
-                                            source: 'custom',
-                                            favIconUrl: getFaviconUrl(getHostname(item.url)),
-                                          },
-                                        ]);
-                                        setCustomLinkUrl('');
-                                        setCustomLinkName('');
-                                        setIsLeftCustomLinkFormOpen(false);
-                                        setLinkSuggestions([]);
-                                        setActiveContentTab('Current Tabs');
-                                        return;
-                                      }
-
-                                      handleAddCustomLink();
-                                    } else if (event.key === 'Escape') {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      setIsLeftCustomLinkFormOpen(false);
-                                      setCustomLinkUrl('');
-                                      setCustomLinkName('');
-                                    }
-                                  }}
-                                  placeholder="Type or paste a URL..."
-                                  autoFocus
-                                  className="w-full bg-transparent border-none text-[13.5px] font-normal text-[#073642] dark:text-neutral-100 placeholder-[var(--color-textPlaceholder)]/50 focus:outline-none h-6"
-                                  style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}
-                                />
-                                {linkSuggestions.length > 0 && (
-                                  <div className="absolute top-full left-0 mt-2 w-full bg-white dark:bg-[#1C1C1E] border border-[#eee8d5] dark:border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[99] overflow-hidden max-h-[250px] flex flex-col">
-                                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#93a1a1] dark:text-neutral-500 tracking-wider bg-[#fdf6e3]/50 dark:bg-black/20 border-b border-[#eee8d5] dark:border-white/5">
-                                      Suggestions
-                                    </div>
-                                    <div className="overflow-y-auto custom-scrollbar">
-                                      {linkSuggestions.map((suggestion, idx) => (
-                                        <div
-                                          key={idx}
-                                          className={`px-3 py-2 cursor-pointer flex items-center gap-3 transition-colors ${
-                                            focusedSuggestionIndex === idx
-                                              ? 'bg-[#3B66AE] text-white'
-                                              : 'hover:bg-[#fdf6e3] dark:hover:bg-white/5 text-[#073642] dark:text-neutral-200'
-                                          }`}
-                                          onClick={() => {
-                                            const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-                                            setSelectedLinks(prev => [
-                                              ...prev,
-                                              {
-                                                id,
-                                                url: suggestion.url,
-                                                name: suggestion.title || getHostname(suggestion.url),
-                                                source: 'custom',
-                                                favIconUrl: getFaviconUrl(getHostname(suggestion.url)),
-                                              },
-                                            ]);
-                                            setCustomLinkUrl('');
-                                            setCustomLinkName('');
-                                            setIsLeftCustomLinkFormOpen(false);
-                                            setLinkSuggestions([]);
-                                            setActiveContentTab('Current Tabs');
-                                          }}>
-                                          <div className="flex-shrink-0 relative">
-                                            <img
-                                              src={getFaviconUrl(getHostname(suggestion.url))}
-                                              alt=""
-                                              className="w-3.5 h-3.5 rounded-sm object-cover"
-                                              onError={(e) => {
-                                                e.currentTarget.style.display = 'none';
-                                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                                              }}
-                                            />
-                                            <div className="hidden w-3.5 h-3.5 rounded flex items-center justify-center text-[#93a1a1]">
-                                              {suggestion.source === 'bookmark' ? <FaBookmark size={10} /> : <FaHistory size={10} />}
-                                            </div>
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <div
-                                              className={`font-medium truncate ${focusedSuggestionIndex === idx ? 'text-white' : 'text-[#586e75] dark:text-neutral-200'}`}>
-                                              {suggestion.title}
-                                            </div>
-                                            <div
-                                              className={`truncate opacity-80 text-[10px] ${focusedSuggestionIndex === idx ? 'text-white/70' : 'text-[#93a1a1]'}`}>
-                                              {suggestion.url}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <div 
-                              onClick={() => {
-                                setIsLeftCustomLinkFormOpen(true);
-                                setCustomLinkUrl('');
-                              }}
-                              className="group flex items-center gap-3 py-3 px-3 transition-all cursor-pointer focus:outline-none hover:bg-white/5 last:rounded-b-xl"
-                            >
-                              <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-[var(--color-primary,#6366f1)] opacity-70 group-hover:opacity-100">
-                                <FaPlus size={12} />
-                              </div>
-                              <span className="text-[13.5px] font-medium text-[var(--color-primary,#6366f1)] opacity-90 group-hover:opacity-100">Add current tab</span>
-                            </div>
-                          )}
-
-                          {/* Empty State when no items are available */}
-                          {allRenderedItems.length === 0 && !isLeftCustomLinkFormOpen && (
-                            <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-                              <div className="w-12 h-12 rounded-full bg-[var(--color-containerBg)] flex items-center justify-center text-neutral-400 dark:text-neutral-500 mb-3">
-                                <FaLink size={20} />
-                              </div>
-                              <h4 className="text-sm font-semibold text-[var(--color-textPrimary)] mb-1">No tabs selected or open</h4>
-                              <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-[240px] mb-4">
-                                Start opening tabs in your browser or add a custom link manually.
-                              </p>
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-         
-          {/* Footer for Actions */}
-          <div className="relative flex flex-col w-full flex-shrink-0">
-            {/* Create New Floating Button */}
-            {isEditMode && !activeSessionId && !hasUnsavedChanges && (
-              <div className="w-full flex justify-end px-4 pb-4 pt-1 bg-transparent">
-                <button
-                  onClick={handleCreateNew}
-                  onMouseEnter={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setTooltipPos({
-                      top: rect.top + window.scrollY - 46,
-                      left: rect.left + window.scrollX - 40,
-                    });
-                    setShowTooltip(true);
-                  }}
-                  onMouseLeave={() => setShowTooltip(false)}
-                  className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 border-white/20 bg-white/10 text-white/90 hover:bg-white/20 hover:text-white cursor-pointer">
-                  Create new
-                </button>
-
-                {showTooltip && createPortal(
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: `${tooltipPos.top}px`,
-                      left: `${tooltipPos.left}px`,
-                    }}
-                    className="bg-[#1c1d27] border border-[#2f3142] rounded-xl px-3 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.6)] z-[999999] flex items-center gap-3 text-[12px] font-sans text-white pointer-events-none"
-                  >
-                    <div className="flex items-center gap-1">
-                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Ctrl</kbd>
-                      <span className="text-[10px] text-neutral-400 font-bold">+</span>
-                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Shift</kbd>
-                      <span className="text-[10px] text-neutral-400 font-bold">+</span>
-                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Enter</kbd>
-                    </div>
-                    <span className="text-neutral-400 text-left whitespace-nowrap">to save and create new</span>
-                  </div>,
-                  document.body
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* FLOATING CAPSULE TOOLBAR */}
-          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-1 z-50 select-none flex flex-col items-center gap-1 p-1 rounded-2xl bg-[var(--color-editorBg)] border border-black/10 dark:border-white/15 shadow-lg">
+      <WorkspaceEditorLayout
+        title={isEditMode ? 'Tab Sessions' : 'Create a Tab Session'}
+        isDirty={hasUnsavedChanges && hasUserModifiedRef.current && (isEditMode || !!title.trim())}
+        saveStatus={saveStatus}
+        lastSavedAt={lastSavedAt}
+        activeId={currentSessionId}
+        hideRightColumnBorder={!(isEditMode || activeSessionId || currentSessionId)}
+        onSave={async () => {
+          const res = await executeSave(false);
+          return !!res;
+        }}
+        onDiscard={resetEditor}
+        onCloseCallback={onClose}
+        searchQuery={tableSearchQuery}
+        setSearchQuery={setTableSearchQuery}
+        searchPlaceholder="Search sessions..."
+        deleteModalProps={{
+          isOpen: isDeleteDialogOpen,
+          onClose: () => {
+            setIsDeleteDialogOpen(false);
+            setSessionToDeleteId(null);
+          },
+          onConfirm: async () => {
+            if (sessionToDeleteId) {
+              try {
+                const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
+                const fldObj = folderId ? { folder_id: folderId } : null;
+                const compoundId = getItemCompoundId({ snippet: { id: sessionToDeleteId, category: 'session' }, workspace: wsObj, folder: fldObj });
+                await apiClearShortcut(sessionToDeleteId, compoundId, 'session');
+                await deleteSession(sessionToDeleteId);
+                if (sessionToDeleteId === activeSessionId) {
+                  resetEditor();
+                }
+                void fetchTableMaps();
+              } catch (err) {
+                console.error('Delete failed:', err);
+              }
+            }
+            setIsDeleteDialogOpen(false);
+            setSessionToDeleteId(null);
+          },
+          title: sessionToDeleteId && sessions.find(s => s.id === sessionToDeleteId)?.title ? `Delete "${sessions.find(s => s.id === sessionToDeleteId)?.title}"?` : 'Delete this session?',
+          description: "Are you sure you want to delete this session? This action cannot be undone."
+        }}
+        headerActions={
+          <div className="flex items-center gap-3">
             <SharedPropertiesToolbar
-              initialSnippet={initialSessionProp}
-              compoundId={activeSessionId || ''}
-              defaultName={sessionName || 'New Link List'}
-              onChange={(properties) => { propertiesRef.current = properties; }}
+              key={currentSessionId || 'new-session'}
+              initialSnippet={{ ...initialSession, ...initialSessionProp, workspaceId, folderId, tagIds: tagIds, category: 'session' }}
+              compoundId={sessionCompoundId}
+              defaultName={title || 'New Session'}
+              onChange={handlePropertiesChange}
+              showShortcut={false}
               showTodo={true}
               onCreateTodo={async (deadlineVal, isRecurring, recurringCycle) => {
                 if (!activeSessionId) return;
@@ -2585,7 +2570,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                   }));
                   
                   const newTodo = await createTodo(
-                    sessionName || 'New Session',
+                    title || 'New Session',
                     references.length > 0 ? references : [{ type: 'session', id: activeSessionId }],
                     isRecurring ? 'recurring' : 'one-time',
                     scheduleTime,
@@ -2605,21 +2590,686 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                 }
               }}
               saveStatus={saveStatus}
-              orgTeam={null}
-              personalWorkspaces={[]}
+              openPopupsToBottom={true}
+              layout="horizontal"
             />
+            <div className="relative inline-block z-[9999]"> 
+              <button
+                type="button"
+                onClick={e => {
+                  e.stopPropagation();
+                  setIsSettingsPopupOpen(prev => !prev);
+                }}
+                className="p-2 transition-all rounded-lg text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 focus:outline-none z-50 settings-btn"
+                title="Tab Session settings">
+                <FiSettings size={14} />
+              </button>
+              {isSettingsPopupOpen && (
+                <div
+                  ref={settingsPopupRef}
+                  className="absolute right-0 top-full mt-1.5 w-[285px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-[#18181c] text-neutral-600 dark:text-neutral-300 shadow-2xl shadow-black/80 opacity-100 z-[99999]"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="px-4 pt-3 pb-2 border-b border-black/5 dark:border-white/5 flex items-center justify-between gap-3">
+                    <span className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-100">
+                      Tab Session settings
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsPopupOpen(false)}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-black/5 hover:text-neutral-600 dark:hover:bg-white/5 dark:hover:text-neutral-200"
+                    >
+                      <FaTimes size={10} />
+                    </button>
+                  </div>
+
+                  <div className="p-1.5">
+                    <SessionSettingsRow
+                      title="Open in a new window"
+                      description="Open this tab session in a separate browser window."
+                      enabled={sessionOpenSettings.openMode === 'new_window'}
+                      onClick={() =>
+                        updateSessionSettings({
+                          openMode:
+                            sessionOpenSettings.openMode === 'new_window'
+                              ? 'same_window'
+                              : 'new_window',
+                        })
+                      }
+                    />
+                    <SessionSettingsRow
+                      title="Focus this window"
+                      description="When opening in the same window, close existing tabs and start fresh."
+                      enabled={sessionOpenSettings.focusWindow === true}
+                      onClick={() =>
+                        updateSessionSettings({
+                          focusWindow: !sessionOpenSettings.focusWindow,
+                        })
+                      }
+                    />
+                    <SessionSettingsRow
+                      title="Auto-save behavior"
+                      description="Automatically update the session when tabs are added or removed."
+                      enabled={sessionOpenSettings.autoSaveMode === 'auto_save'}
+                      onClick={() => {
+                        hasUserModifiedRef.current = true;
+                        updateSessionSettings({
+                          autoSaveMode:
+                            sessionOpenSettings.autoSaveMode === 'auto_save'
+                              ? 'dont_save'
+                              : 'auto_save',
+                        });
+                      }}
+                      isLast
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-      </EditorContainer>
+        }
+        rightColumnContent={
+          (isEditMode || currentSessionId) ? (
+            <div className="flex flex-col gap-3">
+              <div className="mt-2 pt-2">
+                <SessionSettingsRow
+                  title="Auto-save behavior"
+                  description="Automatically update the session when tabs are added or removed."
+                  enabled={sessionOpenSettings.autoSaveMode === 'auto_save'}
+                  onClick={() => {
+                    hasUserModifiedRef.current = true;
+                    updateSessionSettings({
+                      autoSaveMode:
+                        sessionOpenSettings.autoSaveMode === 'auto_save'
+                          ? 'dont_save'
+                          : 'auto_save',
+                    });
+                  }}
+                  isLast
+                />
+              </div>
+            </div>
+          ) : undefined
+        }
+        bottomListContent={
+          <ExistingItemsTable<any>
+            items={sortedSessions}
+            activeItemId={activeSessionId ?? null}
+            onLoadItem={async (id) => {
+              if (hasUnsavedChanges && (activeSessionId || title.trim().length > 0)) {
+                setSessionNotice('Saving current session...');
+                const saved = await executeSave(true);
+                if (!saved) {
+                  setSessionError('Please save your current session before switching.');
+                  setSessionNotice(null);
+                  return;
+                }
+                setSessionNotice(null);
+              }
+              
+              const chromeAny = (window as any).chrome;
+              if (activeSessionId && chromeAny?.storage?.local) {
+                chromeAny.storage.local.get('active_sessions', (result: any) => {
+                  const activeSessions: any[] = result.active_sessions || [];
+                  const isCurrentlyTracking = activeSessions.some(
+                    (s) => String(s.sessionId) === String(activeSessionId)
+                  );
+                  if (isCurrentlyTracking) {
+                    try {
+                      if (chromeAny.runtime?.sendMessage) {
+                        chromeAny.runtime.sendMessage({ action: 'end_session', sessionId: activeSessionId });
+                      }
+                    } catch (err) {
+                      console.error('Failed to stop session tracking', err);
+                    }
+                    setSessionNotice('Background tracking stopped. Edit normally.');
+                    setTimeout(() => setSessionNotice(null), 6000);
+                  }
+                  if (setSaveError) setSaveError(null);
+                  if (setSessionError) setSessionError(null);
+                  setActiveSessionId(id);
+                });
+              } else {
+                if (setSaveError) setSaveError(null);
+                if (setSessionError) setSessionError(null);
+                setActiveSessionId(id);
+              }
+            }}
+            onUpdateItemField={handleUpdateItemField}
+            getItemTitle={(item) => item.name || item.title || 'Untitled Session'}
+            getItemPreview={(item) =>
+              (item.urls || item.tabs || [])
+                .map((t: any) => {
+                  const text = t.name || t.title || t.url || '';
+                  return text.length > 45 ? text.substring(0, 45) + '...' : text;
+                })
+                .filter(Boolean)
+                .join(', ')
+            }
+            getItemCompoundId={(item) =>
+              getItemCompoundId({
+                id: item.id,
+                workspace_id: item.workspaceId || null,
+                folder_id: item.folderId || null,
+                snippet: { id: item.id, category: 'session' },
+              })
+            }
+            getItemType={() => 'session'}
+            shortcutsMap={shortcutsMap}
+            hotkeysMap={hotkeysMap}
+            isFavorite={isFavorite}
+            toggleFavorite={toggleFavorite}
+            onFavoriteToggled={fetchTableMaps}
+            onDeleteClick={(id) => {
+              setSessionToDeleteId(id);
+              setIsDeleteDialogOpen(true);
+            }}
+            title=""
+            emptyStateMessage="No sessions found"
+            folderNamesMap={folderNamesMap}
+            workspaceNamesMap={workspaceNamesMap}
+            tagNamesMap={tagNamesMap}
+          />
+        }
+        containerMaxWidthClass={(isEditMode || currentSessionId) ? "max-w-[1200px]" : "max-w-[940px]"}
+      >
+        <div className="flex-1 flex flex-col min-h-0 relative">
+          <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2 overflow-hidden">
+            {/* Error notifications */}
+            <EditorTitleShortcutInput
+              titleError={sessionError || saveError}
+              title={title}
+              setTitle={(val) => {
+                hasUserModifiedRef.current = true;
+                if (val.trim()) {
+                  if (setSaveError) setSaveError(null);
+                  if (setSessionError) setSessionError(null);
+                }
+                setTitle(val);
+              }}
+              shortcut={sessionShortcut}
+              setShortcut={(val) => {
+                hasUserModifiedRef.current = true;
+                setSessionShortcut(val);
+              }}
+              titlePlaceholder="Title"
+              shortcutPlaceholder="Shortcut"
+              onTitleBlur={() => {
+                if (sessionOpenSettings.autoSaveMode === 'auto_save') {
+                  void handleSave(true);
+                }
+              }}
+              onShortcutBlur={async () => {
+                if (sessionOpenSettings.autoSaveMode === 'auto_save' && hasUnsavedChanges) {
+                  void handleSave(true);
+                }
+              }}
+              onTitleEnter={(shiftKey) => {
+                if (shiftKey) {
+                  handleCopyTitleToShortcut();
+                  return;
+                }
+                const trimmedTitle = title.trim();
+                if (!activeSessionId && !isEditMode) {
+                  if (!trimmedTitle) {
+                    setSessionError('Enter the title');
+                  } else {
+                    setSessionError(null);
+                    handleCreateSession(trimmedTitle);
+                  }
+                } else {
+                  void handleSave(false);
+                }
+              }}
+              onShortcutEnter={() => {
+                if (hasUnsavedChanges) {
+                  void handleSave(false);
+                }
+              }}
+              onCopyTitleToShortcut={(isInitialized && isShortcutInitialized) ? handleCopyTitleToShortcut : undefined}
+              titleRef={titleInputRef}
+              shortcutRef={shortcutInputRef}
+            />
+            {sessionNotice && (
+              <span className="flex items-center gap-1.5 whitespace-nowrap text-amber-600 dark:text-amber-400 mt-1 text-[12px] font-medium bg-amber-500/10 px-4 py-1 rounded-lg border border-amber-500/25 mx-4">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                {sessionNotice}
+              </span>
+            )}
+
+            {/* Main Workspace Inner content */}
+            <div className={clsx(
+              "flex-1 flex flex-col min-w-0 relative h-full max-h-full mt-4",
+              ((isLeftCustomLinkFormOpen && linkSuggestions.length > 0) || isSettingsPopupOpen) ? "overflow-visible" : "overflow-hidden"
+            )}>
+              <h4 className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5 px-3.5">
+                Tabs ({allRenderedItems.length})
+              </h4>
+              <div
+                ref={listContainerRef}
+                className={clsx(
+                  "flex-1 min-h-0 w-full",
+                  "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden",
+                  (isLeftCustomLinkFormOpen && linkSuggestions.length > 0)
+                    ? "overflow-visible"
+                    : "overflow-y-auto custom-scrollbar"
+                )}>
+                <div className="flex flex-col w-full divide-y divide-black/5 dark:divide-white/5 pb-2">
+                  {(() => {
+                    const renderedSelected = allRenderedItems.filter(i => i.isAdded);
+                    const renderedActive = allRenderedItems.filter(i => !i.isAdded);
+
+                    const renderItem = (item: any, isAdded: boolean, idx: number, globalIdx: number) => {
+                      const handleToggle = (e?: React.MouseEvent) => {
+                        if (e) {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }
+                        if (isAdded) {
+                          removeLink(item.id);
+                        } else {
+                          addItemFromContentBar(item);
+                        }
+                      };
+
+                      const itemIcon = (() => {
+                        if (item.url === 'agent_chat') {
+                          const step = (item.originalData?.automation_steps || item.originalData?.steps)?.[0];
+                          let urls: string[] = [];
+                          if (step?.config?.allAiUrls) {
+                            urls = Object.values(step.config.allAiUrls as Record<string, string>)
+                              .map(u => String(u))
+                              .filter(u => !u.includes('cmd_select_status=false'));
+                          } else if (step?.config?.url) {
+                            urls = [step.config.url].filter(u => !u.includes('cmd_select_status=false'));
+                          }
+
+                          if (urls.length > 0) {
+                            return (
+                              <div className="flex -space-x-1.5 items-center w-8">
+                                {urls.slice(0, 3).map((url, i) => (
+                                  <div
+                                    key={`agent-icon-${item.id}-${i}`}
+                                    className="w-4 h-4 rounded-full flex items-center justify-center ring-1 ring-white dark:ring-[#1C1C1E] overflow-hidden shadow-sm bg-white flex-shrink-0">
+                                    <img
+                                      src={getFaviconUrl(getHostname(url))}
+                                      alt=""
+                                      className="w-4 h-4 object-cover"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="w-5 h-5 rounded flex items-center justify-center bg-[#eee8d5] dark:bg-neutral-800 text-[#93a1a1]">
+                              <FaRobot size={12} />
+                            </div>
+                          );
+                        }
+
+                        const resolvedIcon = getResolvedLinkFavicon(item);
+                        if (resolvedIcon) {
+                          return <img src={resolvedIcon} className="w-5 h-5 object-contain" alt="" />;
+                        }
+
+                        return (
+                          <div className="w-5 h-5 rounded flex items-center justify-center bg-[#eee8d5] dark:bg-neutral-800 text-[#93a1a1]">
+                            {item.source === 'note' ? <FaFileAlt size={12} /> : <FaLink size={12} />}
+                          </div>
+                        );
+                      })();
+
+                      const itemLabel = (() => {
+                        if (item.source === 'note' || item.url?.startsWith('note:')) {
+                          return 'Note';
+                        }
+                        if (item.url === 'agent_chat') {
+                          return 'AI Agent';
+                        }
+                        return (item.url || '').replace(/^https?:\/\/(www\.)?/i, '');
+                      })();
+                      const liveTabTitle =
+                        item.source === 'tab'
+                          ? liveTabTitleByUrl.get(normalizeSessionTabUrl(item.url))
+                          : '';
+                      const itemTitle =
+                        liveTabTitle ||
+                        String(item.title || item.name || '').trim() ||
+                        getHostname(item.url) ||
+                        itemLabel;
+
+                      const itemContent = (
+                        <>
+                          <div className="flex-shrink-0 relative flex items-center gap-2">
+                            {isAdded ? (
+                              <div
+                                onClick={e => e.stopPropagation()}
+                                className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-200 active:cursor-grabbing"
+                                style={{ willChange: 'transform' }}
+                                title="Drag to reorder tabs"
+                              >
+                                <SessionDragHandle />
+                              </div>
+                            ) : null}
+                            {itemIcon}
+                          </div>
+
+                          <div
+                            className={clsx(
+                              "text-[13px] font-medium tracking-tight truncate w-[280px] shrink-0",
+                              isAdded ? "text-neutral-800 dark:text-neutral-300" : "text-neutral-500 dark:text-neutral-400"
+                            )}
+                            style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
+                            {itemTitle}
+                          </div>
+
+                          <div
+                            className={clsx(
+                              'text-[11px] font-normal truncate transition-opacity duration-200 text-left w-[260px] shrink-0 pr-4',
+                              focusedTabIndex === globalIdx ? 'opacity-100' : 'opacity-80 group-hover:opacity-100',
+                              'text-neutral-500 dark:text-neutral-400',
+                            )}>
+                            {itemLabel}
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                             <div
+                               className={clsx(
+                                 "text-[12px] font-semibold transition-all duration-200 select-none shrink-0 flex items-center justify-center min-w-[50px]",
+                                 "text-emerald-500 dark:text-emerald-400"
+                               )}
+                             >
+                               {isAdded ? 'Added' : '+ Add'}
+                             </div>
+
+                             {isAdded && (
+                               <div className="relative shrink-0 flex items-center">
+                                 <button
+                                   type="button"
+                                   onClick={e => {
+                                     e.stopPropagation();
+                                     e.preventDefault();
+                                     removeLink(item.id);
+                                   }}
+                                   className="p-1.5 rounded-lg text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center justify-center focus:outline-none"
+                                   title="Remove link"
+                                 >
+                                   <FaTrash size={11} />
+                                 </button>
+                               </div>
+                             )}
+                           </div>
+                        </>
+                      );
+
+                      const commonProps = {
+                        ref: (el: HTMLDivElement | null) => {
+                          tabItemRefs.current[globalIdx] = el;
+                        },
+                        onClick: handleToggle,
+                        onDoubleClick: (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          openLinkEditPopup(item);
+                        },
+                        className: `group flex items-center gap-3 py-2 px-3 transition-all cursor-pointer focus:outline-none first:rounded-t-xl last:rounded-b-xl ${
+                          focusedTabIndex === globalIdx
+                            ? 'bg-white/10'
+                            : 'hover:bg-white/5'
+                        }`,
+                      };
+
+                      if (isAdded) {
+                        return (
+                          <Reorder.Item
+                            key={getSessionReorderKey(item, idx)}
+                            as="div"
+                            value={getSessionReorderKey(item, idx)}
+                            {...commonProps}
+                          >
+                            {itemContent}
+                          </Reorder.Item>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={getSessionReorderKey(item, idx)}
+                          {...commonProps}
+                        >
+                          {itemContent}
+                        </div>
+                      );
+                    };
+
+                    return (
+                      <>
+                        <Reorder.Group
+                          axis="y"
+                          values={selectedLinks.map(getSessionReorderKey)}
+                          onReorder={(nextOrder: string[]) => {
+                            hasUserModifiedRef.current = true;
+                            setSelectedLinks(currentLinks => {
+                              const linksByKey = new Map(
+                                currentLinks.map((link, index) => [getSessionReorderKey(link, index), link]),
+                              );
+                              const reordered = nextOrder
+                                .map(key => linksByKey.get(key))
+                                .filter((link): link is SelectedLink => Boolean(link));
+
+                              if (reordered.length !== currentLinks.length) return currentLinks;
+                              return reordered;
+                            });
+                          }}
+                          className="flex flex-col"
+                        >
+                          {renderedSelected.map((wrap, idx) => renderItem(wrap.item, wrap.isAdded, idx, idx))}
+                        </Reorder.Group>
+
+                        {renderedActive.map((wrap, idx) =>
+                          renderItem(wrap.item, wrap.isAdded, idx, renderedSelected.length + idx),
+                        )}
+
+                        {/* Custom link form appended inside the card wrapper when input form is open */}
+                        {isLeftCustomLinkFormOpen ? (
+                          <div
+                            ref={el => {
+                              tabItemRefs.current[allRenderedItems.length] = el as any;
+                            }}
+                            className="flex items-center gap-3 py-2 px-3 transition-all focus:outline-none bg-transparent relative z-50 last:rounded-b-xl">
+                            
+                            {/* Inline Text Input */}
+                            <div className="flex-1 min-w-0 flex items-center gap-1.5 justify-start">
+                              {(allRenderedItems.length === 0 && !customLinkUrl) && (
+                                <span className="text-red-500/50 text-[13.5px] font-bold select-none shrink-0">*</span>
+                              )}
+                              <input
+                                ref={customLinkUrlRef}
+                                value={customLinkUrl}
+                                onChange={event => setCustomLinkUrl(event.target.value)}
+                                onKeyDown={event => {
+                                  if (
+                                    linkSuggestions.length > 0 &&
+                                    (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+                                  ) {
+                                    event.preventDefault();
+                                    if (event.key === 'ArrowDown') {
+                                      setFocusedSuggestionIndex(prev =>
+                                        Math.min(prev + 1, linkSuggestions.length - 1),
+                                      );
+                                    } else {
+                                      setFocusedSuggestionIndex(prev => Math.max(prev - 1, -1));
+                                    }
+                                    return;
+                                  }
+
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+
+                                    if (focusedSuggestionIndex >= 0 && linkSuggestions[focusedSuggestionIndex]) {
+                                      const item = linkSuggestions[focusedSuggestionIndex];
+                                      setSelectedLinks(prev => [
+                                        ...prev,
+                                        {
+                                          id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                                          url: item.url,
+                                          name: item.title || getHostname(item.url),
+                                          source: 'custom',
+                                          favIconUrl: getFaviconUrl(getHostname(item.url)),
+                                        },
+                                      ]);
+                                      setCustomLinkUrl('');
+                                      setCustomLinkName('');
+                                      setIsLeftCustomLinkFormOpen(false);
+                                      setLinkSuggestions([]);
+                                      setActiveContentTab('Current Tabs');
+                                      return;
+                                    }
+
+                                    handleAddCustomLink();
+                                  } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setIsLeftCustomLinkFormOpen(false);
+                                    setCustomLinkUrl('');
+                                    setCustomLinkName('');
+                                  }
+                                }}
+                                placeholder="Type or paste a URL..."
+                                autoFocus
+                                className="w-full bg-transparent border-none text-[13.5px] font-normal text-[#073642] dark:text-neutral-100 placeholder-[var(--color-textPlaceholder)]/50 focus:outline-none h-6"
+                                style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}
+                              />
+                              {linkSuggestions.length > 0 && (
+                                <div className="absolute top-full left-0 mt-2 w-full bg-white dark:bg-[#1C1C1E] border border-[#eee8d5] dark:border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[99] overflow-hidden max-h-[250px] flex flex-col">
+                                  <div className="px-3 py-1.5 text-[10px] font-bold text-[#93a1a1] dark:text-neutral-500 tracking-wider bg-[#fdf6e3]/50 dark:bg-black/20 border-b border-[#eee8d5] dark:border-white/5">
+                                    Suggestions
+                                  </div>
+                                  <div className="overflow-y-auto custom-scrollbar">
+                                    {linkSuggestions.map((suggestion, idx) => (
+                                      <div
+                                        key={idx}
+                                        className={`px-3 py-2 cursor-pointer flex items-center gap-3 transition-colors ${
+                                          focusedSuggestionIndex === idx
+                                            ? 'bg-[#3B66AE] text-white'
+                                            : 'hover:bg-[#fdf6e3] dark:hover:bg-white/5 text-[#073642] dark:text-neutral-200'
+                                        }`}
+                                        onClick={() => {
+                                          const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                                          setSelectedLinks(prev => [
+                                            ...prev,
+                                            {
+                                              id,
+                                              url: suggestion.url,
+                                              name: suggestion.title || getHostname(suggestion.url),
+                                              source: 'custom',
+                                              favIconUrl: getFaviconUrl(getHostname(suggestion.url)),
+                                            },
+                                          ]);
+                                          setCustomLinkUrl('');
+                                          setCustomLinkName('');
+                                          setIsLeftCustomLinkFormOpen(false);
+                                          setLinkSuggestions([]);
+                                          setActiveContentTab('Current Tabs');
+                                        }}>
+                                        <div className="flex-shrink-0 relative">
+                                          <img
+                                            src={getFaviconUrl(getHostname(suggestion.url))}
+                                            alt=""
+                                            className="w-3.5 h-3.5 rounded-sm object-cover"
+                                            onError={(e) => {
+                                              e.currentTarget.style.display = 'none';
+                                              e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                            }}
+                                          />
+                                          <div className="hidden w-3.5 h-3.5 rounded flex items-center justify-center text-[#93a1a1]">
+                                            {suggestion.source === 'bookmark' ? <FaBookmark size={10} /> : <FaHistory size={10} />}
+                                          </div>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div
+                                            className={`font-medium truncate ${focusedSuggestionIndex === idx ? 'text-white' : 'text-[#586e75] dark:text-neutral-200'}`}>
+                                            {suggestion.title}
+                                          </div>
+                                          <div
+                                            className={`truncate opacity-80 text-[10px] ${focusedSuggestionIndex === idx ? 'text-white/70' : 'text-[#93a1a1]'}`}>
+                                            {suggestion.url}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div 
+                            onClick={() => {
+                              setIsLeftCustomLinkFormOpen(true);
+                              setCustomLinkUrl('');
+                            }}
+                            className="group flex items-center justify-center gap-2.5 py-4 px-3 transition-all cursor-pointer focus:outline-none hover:bg-white/5 last:rounded-b-xl"
+                          >
+                            <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-200 transition-colors">
+                              <FaPlus size={13} className="text-emerald-500 dark:text-emerald-400" />
+                            </div>
+                            <span className="text-base font-semibold text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-200 transition-colors">Add a custom link</span>
+                          </div>
+                        )}
+
+                        {/* Empty State when no items are available */}
+                        {allRenderedItems.length === 0 && !isLeftCustomLinkFormOpen && (
+                          <div className="flex items-center justify-center gap-2 py-3 px-4 mx-4 mb-4 mt-2 border border-black/10 dark:border-white/10 rounded-lg">
+                            <FaLink size={12} className="text-neutral-400 dark:text-neutral-500" />
+                            <span className="text-xs font-medium text-neutral-400 dark:text-neutral-500">No active tabs open</span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+              {isEditMode && !hasPendingSessionChanges && (
+                <button
+                  id="create-another-btn"
+                  type="button"
+                  onClick={handleCreateNew}
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTooltipPos({
+                      top: rect.top + window.scrollY - 46,
+                      left: rect.left + window.scrollX - 40,
+                    });
+                    setShowTooltip(true);
+                  }}
+                  onMouseLeave={() => setShowTooltip(false)}
+                  className="absolute bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[10px] font-semibold shadow-sm transition-all active:scale-95 border-black/10 dark:border-white/20 bg-neutral-100 dark:bg-white/10 text-neutral-800 dark:text-white/90 hover:bg-neutral-200 dark:hover:bg-white/20 hover:text-neutral-900 dark:hover:text-white cursor-pointer select-none"
+                >
+                  <span>Create another</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </WorkspaceEditorLayout>
 
       {/* Link Edit Popup */}
       {editingPopupLinkId && (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 backdrop-blur-[8px]"
           onClick={closeLinkEditPopup}>
           <div
-            className="bg-[var(--color-popupBg)] rounded-xl border border-[#eee8d5] dark:border-neutral-700 shadow-2xl p-4 min-w-[600px] max-w-[90%]"
+            style={{
+              backgroundColor: 'rgba(23, 24, 33, 0.75)',
+              backdropFilter: 'blur(24px)',
+              WebkitBackdropFilter: 'blur(24px)',
+            }}
+            className="rounded-xl border border-black/10 dark:border-white/10 shadow-2xl p-5 min-w-[600px] max-w-[90%] text-white"
             onClick={e => e.stopPropagation()}>
-            <div className="text-sm font-semibold text-[#073642] dark:text-neutral-200 mb-3">Edit Link</div>
+            <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-4">Edit Link</div>
             <table className="w-full text-sm">
               <tbody>
                 <tr className="border-b border-[#eee8d5] dark:border-neutral-700">
@@ -2710,20 +3360,20 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                               ref={dropdownButtonRef}
                               type="button"
                               onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  const newDomain = parts.domain.replace(
-                                    /@$/,
-                                    parts.domain.endsWith('/') ? '{query}' : '/{query}',
-                                  );
-                                  setEditingUrlParts(prev => (prev ? { ...prev, domain: newDomain } : prev));
-                                  setShowPathQueryDropdown(false);
-                                  lastFocusedInputRef.current?.focus();
-                                } else if (e.key === 'Escape') {
-                                  setShowPathQueryDropdown(false);
-                                  lastFocusedInputRef.current?.focus();
-                                }
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const newDomain = parts.domain.replace(
+                                      /@$/,
+                                      parts.domain.endsWith('/') ? '{query}' : '/{query}',
+                                    );
+                                    setEditingUrlParts(prev => (prev ? { ...prev, domain: newDomain } : prev));
+                                    setShowPathQueryDropdown(false);
+                                    lastFocusedInputRef.current?.focus();
+                                  } else if (e.key === 'Escape') {
+                                    setShowPathQueryDropdown(false);
+                                    lastFocusedInputRef.current?.focus();
+                                  }
                               }}
                               onClick={e => {
                                 e.preventDefault();
@@ -2867,7 +3517,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
               Sync Conflict Detected
             </h3>
             <p className="text-sm text-neutral-600 dark:text-neutral-300 mb-4 leading-relaxed">
-              This tab group was modified on another device/window since you opened it. How would you like to resolve the conflict?
+              This Tab Session was modified on another device/window since you opened it. How would you like to resolve the conflict?
             </p>
             <div className="flex flex-col gap-3">
               <button
@@ -2906,8 +3556,8 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                   className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/5 group relative"
                 >
                   <div className="w-5 h-5 flex items-center justify-center shrink-0 rounded-md overflow-hidden bg-white/50 dark:bg-black/20 shadow-sm border border-black/5 dark:border-white/5 group-hover:scale-105 transition-transform">
-                    {link.favIconUrl ? (
-                      <img src={link.favIconUrl} className="w-3.5 h-3.5 object-contain" alt="" />
+                    {getResolvedLinkFavicon(link) ? (
+                      <img src={getResolvedLinkFavicon(link)} className="w-3.5 h-3.5 object-contain" alt="" />
                     ) : (
                       <FaLink size={10} className="text-neutral-400 dark:text-neutral-500" />
                     )}
@@ -2932,4 +3582,3 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 };
 
 export default SessionEditorView;
-

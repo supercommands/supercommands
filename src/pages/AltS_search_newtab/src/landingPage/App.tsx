@@ -11,17 +11,26 @@ import { CMDOS_DOCS_URL } from '../../../../storage/API/core/apiConfig';
 import { AppTodoSidebar } from './AppTodoSidebar';
 import Branding from '../../../../shared-components/Branding';
 import { HeaderControls, getDefaultSettingsView } from '../../../../settings';
-import { TutorialCard, TutorialDashboard } from '../../../../welcomeGuide/TutorialCards';
 import { isOnboardingCompleted } from '../../../../storage/localStorage/onboardingStorage';
-import { useSpreadsheetStore } from '@src/components/spreadsheetUi/logic/spreadsheetStateStore';
+import { TutorialOverlay } from '../../../../welcomeGuide/TutorialOverlay';
+import { useSpreadsheetStore } from '../../../../shared-components/spreadsheetUi/logic/spreadsheetStateStore';
 
-import { type SearchbarHandle, type SuggestionState } from '@src/components/searchSystemComponents/searchBarMain/userInterfaceComponents/searchBar';
-type Workspace = any; type SavedAutomation = any;
-import { useUIStore } from '../../../../shared-components/uiStateManager';
+import {
+  type SearchbarHandle,
+  type SuggestionState,
+} from '../../../../shared-components/searchBarMain/userInterfaceComponents/searchBar';
+type Workspace = any;
+type SavedAutomation = any;
+import {
+  useUIStore,
+  useIsFullScreenModalOpen,
+  useShowTodosView,
+  useTodoCreatePrefill,
+  useIsLinkEditModalOpen,
+} from '../../../../shared-components/uiStateManager';
 import { detectOS } from '../../../../shared-components/utils/osUtils';
 import { useChromeStorage } from '@extension/shared/lib/hooks';
 import { useDbStore } from '../../../../storage/store/useDbStore';
-
 
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
@@ -30,27 +39,21 @@ import { getUserId } from '../../../../storage/API/core/api';
 import WallpaperLayer from '../../../../settings/uiPersonalization/WallpaperLayer';
 import { useAppearance } from '@extension/ui';
 
-
-
 import { useAuthSync } from './hooks/useAuthSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUrlTriggers } from './hooks/useUrlTriggers';
-import { useIsFullScreenModalOpen, useShowTodosView, useTodoCreatePrefill, useIsLinkEditModalOpen } from '../../../../shared-components/uiStateManager';
+
 import {
   useSelectedWorkspace,
   useSelectedFolder,
   useSelectedSnippet,
 } from '../../../../shared-components/localEntitySelectors';
 
-
 const App: React.FC = () => {
   const { theme, themeId } = useAppearance();
 
-
-
   const { isKeystrokeRecordingActive } = useKeystrokeRecording();
   const triggerNotification = useNotification();
-
 
   const [isInitialAltSFocus, setIsInitialAltSFocus] = useState(false);
 
@@ -59,12 +62,19 @@ const App: React.FC = () => {
   const viewDropdownRef = useRef<HTMLDivElement | null>(null);
   const [suggestionState, setSuggestionState] = useState<SuggestionState | null>(null);
 
-
   const hasLoadedThemeRef = useRef(false);
   const { authChecked, userId, isLoggedIn } = useAuthSync();
-  const [isSpreadsheetViewOpen, setIsSpreadsheetViewOpen] = useState(false);
+  const isSpreadsheetViewOpen = useUIStore((s: any) => s.isSheetOpen);
   const activeLockedCommand = useUIStore((s: any) => s.lockedCommand);
   const [isAutomationActive, setIsAutomationActive] = useState(false);
+  const setIsSpreadsheetViewOpen = useCallback((open: boolean) => {
+    if (open) {
+      useUIStore.getState().openSheet();
+      return;
+    }
+    console.trace('[ESCAPE][setIsSpreadsheetViewOpen] CLOSING SHEET - called from:');
+    useUIStore.getState().closeSheet();
+  }, []);
 
 
   useEffect(() => {
@@ -80,13 +90,10 @@ const App: React.FC = () => {
     };
   }, [isViewDropdownOpen]);
 
-
-
   const activeView = useUIStore((s: any) => s.activeView);
 
   // Focus the searchbar reactively when entering search/columns layout
   useEffect(() => {
-
     if (!isSpreadsheetViewOpen && isInitialAltSFocus) {
       searchbarRef.current?.focus();
     }
@@ -120,22 +127,16 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const isAnyEditorOpen =
-    isLinkEditModalOpen ||
-    activeEditor?.type === 'todo' ||
-    !!todoCreatePrefill;
+  const isAnyEditorOpen = isLinkEditModalOpen || activeEditor?.type === 'todo' || !!todoCreatePrefill;
 
   useEffect(() => {
     if (!isEmbedded) return;
 
-
     if (isAnyEditorOpen) {
       if (!hasOpenedCreator) {
-
         setHasOpenedCreator(true);
       }
     } else if (hasOpenedCreator) {
-
       window.parent.postMessage({ type: 'tasklabs:close-embed-creator' }, '*');
       setHasOpenedCreator(false);
     }
@@ -158,10 +159,7 @@ const App: React.FC = () => {
 
   // Auto-close Sheet UI when navigating to specific views to prevent UI overlaps
   useEffect(() => {
-    if (
-      isSpreadsheetViewOpen &&
-      (showTodosView || activeEditor?.type === 'note' || activeEditor?.type === 'link')
-    ) {
+    if (isSpreadsheetViewOpen && (showTodosView || (activeEditor?.type === 'note' && !activeEditor?.props?.isOverlay) || (activeEditor?.type === 'link' && !activeEditor?.props?.isOverlay))) {
       setIsSpreadsheetViewOpen(false);
     }
   }, [activeView?.type, isSpreadsheetViewOpen]);
@@ -177,10 +175,8 @@ const App: React.FC = () => {
     return urlParams.get('focus_sheet_ui_first_column') === 'true';
   }, []);
 
-  const backgroundRefresh = useCallback(() => { }, []);
+  const backgroundRefresh = useCallback(() => {}, []);
   const dexieWorkspaces = useDbStore(state => state.workspaces);
-
-
 
   // Tutorial button visibility is driven by the Dexie workspace list.
   useEffect(() => {
@@ -192,50 +188,14 @@ const App: React.FC = () => {
   const hasEvaluatedCloudData = useRef(false);
 
   useEffect(() => {
-    if (authChecked && isLoggedIn && !hasEvaluatedCloudData.current) {
-      chrome.storage.local.get(['pull_cloud_data'], (result) => {
-        const pullCloudDataDone = result.pull_cloud_data === true;
-        
-        if (!pullCloudDataDone) {
-          setIsOnboardCompleted(true);
-          setShowTutorial(false);
-          hasEvaluatedCloudData.current = true;
-          // Disabled auto-redirect to settings on startup/refresh
-        } else {
-          if (dexieWorkspaces.length === 0) {
-            setTimeout(() => {
-              const currentWorkspaces = useDbStore.getState().workspaces;
-              if (currentWorkspaces.length === 0) {
-                setIsOnboardCompleted(false);
-                setShowTutorial(true);
-              } else {
-                isOnboardingCompleted().then(completed => {
-                  setIsOnboardCompleted(completed);
-                  setShowTutorial(!completed);
-                });
-              }
-            }, 500);
-          } else {
-            isOnboardingCompleted().then(completed => {
-              setIsOnboardCompleted(completed);
-              setShowTutorial(!completed);
-            });
-          }
-          hasEvaluatedCloudData.current = true;
-        }
-      });
-    } else if (authChecked && !isLoggedIn && !hasEvaluatedCloudData.current) {
-      isOnboardingCompleted().then(completed => {
+    if (authChecked && !hasEvaluatedCloudData.current) {
+      isOnboardingCompleted().then((completed: boolean) => {
         setIsOnboardCompleted(completed);
         setShowTutorial(!completed);
       });
       hasEvaluatedCloudData.current = true;
     }
-  }, [authChecked, isLoggedIn, dexieWorkspaces.length]);
-
-
-
-
+  }, [authChecked]);
 
   // Detect OS
   useEffect(() => {
@@ -243,8 +203,6 @@ const App: React.FC = () => {
       useUIStore.getState().setOS(os);
     });
   }, []);
-
-
 
   const selectedTeam = useUIStore((s: any) => s.selectedTeam);
   const teamList = useMemo(() => (selectedTeam ? [selectedTeam] : []), [selectedTeam]);
@@ -341,7 +299,6 @@ const App: React.FC = () => {
     return map;
   }, [teamList]);
 
-
   useEffect(() => {
     const handleSetViewMode = (e: Event) => {
       const mode = (e as CustomEvent).detail;
@@ -357,8 +314,24 @@ const App: React.FC = () => {
     };
     window.addEventListener('setViewMode', handleSetViewMode);
 
+    // Fired by ViewMenuPanel when user clicks "All" in the sidebar
+    const handleOpenBoardViewAll = () => {
+      // Set isInitialAltSFocus FIRST so Board View stays alive even when value is cleared
+      setIsSpreadsheetViewOpen(false);
+      setIsInitialAltSFocus(true);
+      // Clear value after the flag is set — Board View stays open via isInitialAltSFocus
+      setTimeout(() => {
+        if (searchbarRef.current) {
+          searchbarRef.current.clear?.();
+          searchbarRef.current.focus?.();
+        }
+      }, 20);
+    };
+    window.addEventListener('alts:open-board-view-all', handleOpenBoardViewAll);
+
     return () => {
       window.removeEventListener('setViewMode', handleSetViewMode);
+      window.removeEventListener('alts:open-board-view-all', handleOpenBoardViewAll);
     };
   }, [isLoggedIn]);
 
@@ -368,11 +341,9 @@ const App: React.FC = () => {
     return () => window.removeEventListener('openTutorial', handleOpenTutorial);
   }, []);
 
-
-
   const openSpreadsheetView = useCallback(
     (section?: string) => {
-      setIsSpreadsheetViewOpen(true);
+      useUIStore.getState().openSheet(section ?? null);
 
       if (section === 'saved-automation') {
         useSpreadsheetStore.getState().setCategoryFilter(['automation', 'agent', 'module']);
@@ -390,7 +361,7 @@ const App: React.FC = () => {
         }
       }
     },
-    [activeView?.type],
+    [activeView?.type, isSpreadsheetViewOpen],
   );
 
   const selectedSnippet = useSelectedSnippet();
@@ -410,9 +381,7 @@ const App: React.FC = () => {
 
   const isDark = theme.isDark;
 
-
   // Filter panel state (managed by SideBar, shown on right side)
-
 
   // Ensure Focus Mode is always off on initial load/refresh and return to Home
   useEffect(() => {
@@ -421,10 +390,6 @@ const App: React.FC = () => {
     useUIStore.getState().setSelectedSnippetId(null);
     // Removed closeEditor() to prevent race conditions with useUrlTriggers which opens the editor on load
   }, []);
-
-
-
-
 
   // Searchbar ref and handlers - shared between SideBar and Container
   const searchbarRef = useRef<SearchbarHandle | null>(null);
@@ -449,7 +414,6 @@ const App: React.FC = () => {
       setIsSpreadsheetViewOpen(false);
       setOrgPanelState({ isOpen: false });
       setIsGlobalCreateMenuOpen(false);
-
     },
     [setIsSpreadsheetViewOpen, setOrgPanelState, setIsGlobalCreateMenuOpen],
   );
@@ -709,9 +673,7 @@ const App: React.FC = () => {
 
   const handleCreateWorkspace = useCallback(() => {
     setIsSpreadsheetViewOpen(false); // Close Sheet UI if open
-  },
-    [],
-  );
+  }, []);
 
   // Load UI persistence states
   useEffect(() => {
@@ -787,7 +749,6 @@ const App: React.FC = () => {
         new_tab_collapsed_folders: collapsedFolders,
         new_tab_collapsed_sections: collapsedSections,
       });
-
     }
   }, [
     showFavorites,
@@ -812,14 +773,14 @@ const App: React.FC = () => {
       chromeAny.storage.onChanged.addListener(handleStorageChange);
       return () => chromeAny.storage.onChanged.removeListener(handleStorageChange);
     }
-    return () => { };
+    return () => {};
   }, []);
 
   const { isModalOpen } = useKeyboardShortcuts({
     isKeystrokeRecordingActive,
     searchbarRef,
     setIsViewDropdownOpen,
-    setIsGlobalCreateMenuOpen
+    setIsGlobalCreateMenuOpen,
   });
 
   // Handle global chrome command for focus
@@ -980,7 +941,6 @@ const App: React.FC = () => {
     if (!hasUrlTrigger) {
       useUIStore.getState().clearEditorStates();
     }
-
   }, [authChecked]);
   const [commandListCategory, setCommandListCategory] = useState<string>('commands');
   const [activeCommandSection, setActiveCommandSection] = useState<string>('local');
@@ -989,8 +949,6 @@ const App: React.FC = () => {
     onCreateOrganization: () => void;
     onWorkspaceShare: (workspaceId: string, workspaceName: string, orgId: string, workspaceType?: string) => void;
   } | null>(null);
-
-
 
   const closeSpreadsheetView = useCallback(() => {
     setIsSpreadsheetViewOpen(false);
@@ -1011,6 +969,7 @@ const App: React.FC = () => {
       if (isUserInitiated) {
         useUIStore.getState().setSidebar('todoSidebar', { open: false });
         if (activeLockedCommand !== 'saved-automation') {
+          console.log('[ESCAPE][handleSearchbarFocus] isUserInitiated=true, closing spreadsheet. activeLockedCommand:', activeLockedCommand);
           setIsSpreadsheetViewOpen(false);
         }
       }
@@ -1021,26 +980,23 @@ const App: React.FC = () => {
     [activeLockedCommand, handleAltSInitialization, activeView?.type],
   );
 
-  const handleOrganizationHandlersReady = useCallback(
-    (handlers: any) => {
-      setOrganizationHandlers({
-        onOrganizationSettings: (orgId, orgName) => {
-          setIsSpreadsheetViewOpen(false);
-          handlers.onOrganizationSettings(orgId, orgName);
-        },
-        onCreateOrganization: () => {
-          setIsSpreadsheetViewOpen(false);
-          handlers.onCreateOrganization();
-        },
-        onWorkspaceShare: (wsId, wsName, orgId, wsType) => {
-          setIsSpreadsheetViewOpen(false);
-          handlers.onWorkspaceShare(wsId, wsName, orgId, wsType);
-        },
-      });
-    },
-    [],
-  );
 
+  const handleOrganizationHandlersReady = useCallback((handlers: any) => {
+    setOrganizationHandlers({
+      onOrganizationSettings: (orgId, orgName) => {
+        setIsSpreadsheetViewOpen(false);
+        handlers.onOrganizationSettings(orgId, orgName);
+      },
+      onCreateOrganization: () => {
+        setIsSpreadsheetViewOpen(false);
+        handlers.onCreateOrganization();
+      },
+      onWorkspaceShare: (wsId, wsName, orgId, wsType) => {
+        setIsSpreadsheetViewOpen(false);
+        handlers.onWorkspaceShare(wsId, wsName, orgId, wsType);
+      },
+    });
+  }, []);
 
   const handleToggleFavorites = useCallback(() => {
     useUIStore.getState().setShowFavorites(!showFavorites);
@@ -1067,21 +1023,16 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Handle edit link/tab group/prompt from FavoritesPanel (same flow as Container.handleHomeLinkEdit)
-  const handleFavoriteLinkEdit = useCallback(
-    (item: { snippet: any; workspace: any; folder: any }) => {
-      const { snippet, workspace, folder } = item;
-      if (!snippet) return;
+  // Handle edit link/Tab Session/prompt from FavoritesPanel (same flow as Container.handleHomeLinkEdit)
+  const handleFavoriteLinkEdit = useCallback((item: { snippet: any; workspace: any; folder: any }) => {
+    const { snippet, workspace, folder } = item;
+    if (!snippet) return;
 
-      const category = (snippet.category || '').toLowerCase();
+    const category = (snippet.category || '').toLowerCase();
 
-
-
-      // Links and tab groups: open LinkEditModal
-      useUIStore.getState().openEditor({ type: 'link', id: 'edit', props: { editMode: true, snippet } });
-    },
-    [],
-  );
+    // Links and Tab Sessions: open LinkEditModal
+    useUIStore.getState().openEditor({ type: 'link', id: 'edit', props: { editMode: true, snippet } });
+  }, []);
 
   // Ref for the main container to capture keyboard focus
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -1129,13 +1080,19 @@ const App: React.FC = () => {
         activeEditor?.type === 'todo' ||
         activeEditor?.type === 'agent' ||
         activeEditor?.type === 'ai' ||
-        activeEditor?.type === 'link' ||
-        isLinkEditModalOpen
+        (activeEditor?.type === 'link' && !activeEditor?.props?.isOverlay)
       ) {
         setIsSpreadsheetViewOpen(false);
       }
     }
-  }, [activeView?.type, isLinkEditModalOpen, isSpreadsheetViewOpen, selectedSnippet?.id, isCreatingNewItem, activeEditor?.type]);
+  }, [
+    activeView?.type,
+    isLinkEditModalOpen,
+    isSpreadsheetViewOpen,
+    selectedSnippet?.id,
+    isCreatingNewItem,
+    activeEditor?.type,
+  ]);
 
   // Escape key handler to close organization/billing panels and return to Home
   useEffect(() => {
@@ -1162,7 +1119,6 @@ const App: React.FC = () => {
 
   const getDocumentationUrl = useCallback(
     (lockedCommand: string | null, currentView: any, linkModalOpen: boolean): string => {
-
       // Priority 1: Check locked command (Searchbar explicit lock)
       const docMap: Record<string, string> = {
         note: '/notes',
@@ -1212,10 +1168,7 @@ const App: React.FC = () => {
     useUIStore.getState().setLockedCommand(commandId);
   }, []);
 
-  const [todoDisplayMode] = useChromeStorage<'collapse' | 'data-blur' | 'pin'>(
-    'todo_display_mode',
-    'collapse',
-  );
+  const [todoDisplayMode] = useChromeStorage<'collapse' | 'data-blur' | 'pin'>('todo_display_mode', 'collapse');
 
   const handleOpenSubscriptions = useCallback(() => {
     useUIStore.getState().setView({ type: 'subscriptions' });
@@ -1267,10 +1220,10 @@ const App: React.FC = () => {
         {!isEmbedded && <WallpaperLayer />}
         <div id="ai-history-anchor" />
         {/* Global Branding & Controls - Always visible in top left */}
-        {!isEmbedded && !showTutorial && (
+        {!isEmbedded && !showTutorial && !isSpreadsheetViewOpen && (
           <div className="absolute top-0 left-0 w-[280px] p-2.5 z-[10000] pointer-events-auto flex items-center justify-between">
             <Branding
-              className="!p-0 !gap-1.5"
+              className="!p-0 !gap-0"
               showAvatar={false}
               onClick={() => {
                 if (isSpreadsheetViewOpen) setIsSpreadsheetViewOpen(false);
@@ -1305,20 +1258,15 @@ const App: React.FC = () => {
             <button
               onClick={() => setShowTutorial(true)}
               className="w-8 h-8 flex items-center justify-center rounded-lg bg-neutral-900/50 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-all backdrop-blur-sm border border-white/5 shadow-sm"
-              title="Show Tutorial"
-            >
+              title="Show Tutorial">
               <FiHelpCircle size={18} />
             </button>
           </div>
         )}
 
-        {showTutorial && isOnboardCompleted && (
-          <TutorialDashboard
-            onClose={() => setShowTutorial(false)}
-          />
-        )}
+        {showTutorial && isOnboardCompleted && <TutorialOverlay onClose={() => setShowTutorial(false)} />}
 
-        <div className={showTutorial ? 'hidden' : 'contents'}>
+        <div className={showTutorial || isSpreadsheetViewOpen ? 'hidden' : 'contents'}>
           <AppLeftSidebar
             showSidebarColumn={showSidebarColumn}
             hasActivePopup={hasActivePopup}
@@ -1338,7 +1286,6 @@ const App: React.FC = () => {
           theme={theme}
           hasActivePopup={hasActivePopup}
           isLinkEditModalOpen={isLinkEditModalOpen}
-
           setSuggestionState={setSuggestionState}
           isLoggedIn={isLoggedIn}
           teams={teamList}
@@ -1376,8 +1323,6 @@ const App: React.FC = () => {
           showSidebarColumn={showSidebarColumn}
         />
 
-
-
         {/* TodoFloatingPreview is now rendered inside CreateTodoSelectionView for perfect vertical alignment */}
       </div>
 
@@ -1411,5 +1356,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-
-

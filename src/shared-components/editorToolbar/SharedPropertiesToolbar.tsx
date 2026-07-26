@@ -1,15 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FaStar, FaFolder } from 'react-icons/fa';
-import { FiStar, FiTag } from 'react-icons/fi';
+import { FiStar, FiTag, FiZapOff } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { useFavorites } from '../favorites';
 
 import { HotkeyAssignButton, saveHotkey, clearHotkey } from '../hotkeys';
 import { ShortcutAssignButton, saveShortcut, clearShortcut } from '../shortcuts';
+import { normalizeShortcutTrigger } from '../shortcuts/core/shortcutDbData';
+import { deleteUserShortcutByReference } from '../shortcuts/core/shortcutDbData';
+import { AltSlashPopup } from './AltSlashPopup';
 import { DestinationPicker } from './DestinationPicker';
+import { NewDueDateDropdown } from '../../allObjectFolder/src/createObject/todos/ui/newDueDateDropdown';
 import InlineTimeInput from '../inputs/InlineTimeInput';
 import CustomTimePicker from '../inputs/CustomTimePicker';
-import { getItemCompoundId, readAllHotkeys, readAllShortcuts, extractSnippetIdFromCompoundId } from '../hotkeys/utils/hotkeyUtils';
+import { FavoriteCategoryManager } from '../favoriteCategories';
+import {
+  getItemCompoundId,
+  readAllHotkeys,
+  readAllShortcuts,
+  extractSnippetIdFromCompoundId,
+} from '../hotkeys/utils/hotkeyUtils';
 import type { TagRecord } from '../../allObjectFolder/src/createObject/tags';
 import type { WorkspaceData } from '../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 import type { FolderData } from '../../settings/allWorkspaceManager/folders/folderTypes';
@@ -17,6 +27,27 @@ import { useTags, createTag } from '../../allObjectFolder/src/createObject/tags'
 import { useDbStore } from '../../storage/store/useDbStore';
 
 import type { SharedPropertiesToolbarProps, SharedProperties } from './types';
+
+const getTagColor = (tagName: string) => {
+  const colors = [
+    '#3b82f6', // blue
+    '#10b981', // emerald
+    '#f59e0b', // amber
+    '#8b5cf6', // violet
+    '#ec4899', // pink
+    '#06b6d4', // cyan
+    '#f43f5e', // rose
+    '#14b8a6', // teal
+  ];
+  const nameStr = String(tagName || '');
+  if (!nameStr) return colors[0];
+  let sum = 0;
+  for (let i = 0; i < nameStr.length; i++) {
+    sum += nameStr.charCodeAt(i) * (i + 1);
+  }
+  const index = sum % colors.length;
+  return colors[index];
+};
 
 export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPropertiesToolbarProps>((props, ref) => {
   const {
@@ -29,22 +60,31 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     onCreateTodo,
     snippetBreadCrum,
     saveStatus,
-    orgTeam,
-    personalWorkspaces,
     orgTags = [],
     setOrgTags,
     openPopupsToLeft = false,
+    openPopupsToBottom = false,
+    showShortcut = true,
+    showLocationPicker = true,
+    layout = 'vertical',
   } = props;
 
-  const { isFavorite, toggleFavorite } = useFavorites();
+  const { isFavorite, toggleFavorite, addFavorite, removeFavorite, setFavoriteCategory, getFavoriteRecord } = useFavorites();
 
   // --- Internally Managed State for Shared Properties ---
   const [isFav, setIsFav] = useState<boolean>(false);
   const [pendingHotkey, setPendingHotkey] = useState<string>('');
   const [pendingShortcut, setPendingShortcut] = useState<string>('');
-  
+  const [isAltSlashOpen, setIsAltSlashOpen] = useState<boolean>(false);
+  const [isFavoriteCategoryOpen, setIsFavoriteCategoryOpen] = useState<boolean>(false);
+  const [selectedFavoriteCategoryId, setSelectedFavoriteCategoryId] = useState<string | null>(null);
+
+
+
   const [selectedTags, setSelectedTags] = useState<TagRecord[]>([]);
   const [availableTags, setAvailableTags] = useState<TagRecord[]>([]);
+
+  const lastToggleTimeRef = useRef(0);
 
   const [reminderDate, setReminderDate] = useState<string>('');
   const [reminderTime, setReminderTime] = useState<string>('');
@@ -55,41 +95,128 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   const [folderId, setFolderId] = useState<string | null>(null);
 
   const dbTags = useTags(workspaceId || undefined) || [];
-  
+
   const hotkeysMap = useDbStore(state => state.hotkeysMap);
   const shortcutsMap = useDbStore(state => state.shortcutsMap);
+  const workspaces = useDbStore(state => state.workspaces);
+  const folders = useDbStore(state => state.folders);
+
+  const workspaceNamesMap = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    workspaces.forEach(w => {
+      if (w.id) map[w.id] = w.workspaceName || (w as any).name || '';
+    });
+    return map;
+  }, [workspaces]);
+
+  const folderNamesMap = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    folders.forEach(f => {
+      if (f.id) map[f.id] = f.folderName || (f as any).name || '';
+    });
+    return map;
+  }, [folders]);
 
   // Sync isFav with IndexedDB
   useEffect(() => {
     if (compoundId && compoundId !== 'new') {
-      setIsFav(isFavorite(compoundId));
+      const dbFav = isFavorite(compoundId);
+      const timeSinceToggle = Date.now() - lastToggleTimeRef.current;
+      if (!dbFav && isFav && timeSinceToggle < 1500) {
+        return;
+      }
+      setIsFav(dbFav);
     }
-  }, [compoundId, isFavorite]);
+  }, [compoundId, isFavorite, isFav]);
+
+  useEffect(() => {
+    const handleAltSlashKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === '/' || e.code === 'Slash')) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsAltSlashOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleAltSlashKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleAltSlashKeyDown, { capture: true });
+  }, []);
 
   const prevCompoundIdRef = useRef<string>(compoundId);
-  const lastProcessedTagIdsStrRef = useRef<string>('');
+  const prevIncomingRef = useRef({
+    workspaceId: undefined as any,
+    folderId: undefined as any,
+    tagIdsStr: undefined as any,
+    reminderDate: undefined as any,
+    reminderTime: undefined as any,
+    isRecurring: undefined as any,
+    recurringCycle: undefined as any,
+  });
+
+  // Reset tracking state when compoundId changes to force full re-sync
+  useEffect(() => {
+    prevIncomingRef.current = {
+      workspaceId: undefined,
+      folderId: undefined,
+      tagIdsStr: undefined,
+      reminderDate: undefined,
+      reminderTime: undefined,
+      isRecurring: undefined,
+      recurringCycle: undefined,
+    };
+    isFirstBubbleRef.current = true;
+  }, [compoundId]);
 
   // Fetch Hotkey and Shortcut on mount or when compoundId changes
   useEffect(() => {
     if (!compoundId || compoundId === 'new') {
-      prevCompoundIdRef.current = compoundId;
+      const isTransitioningToNew = prevCompoundIdRef.current !== 'new' && prevCompoundIdRef.current !== '';
+      if (isTransitioningToNew) {
+        setIsFav(false);
+        setPendingHotkey('');
+        setPendingShortcut('');
+        setSelectedTags([]);
+        setWorkspaceId(null);
+        setFolderId(null);
+        setReminderDate('');
+        setReminderTime('');
+        setIsRecurring(false);
+        setRecurringCycle(null);
+        if (onChange) {
+          onChange({
+            isFav: false,
+            pendingHotkey: '',
+            pendingShortcut: showShortcut ? '' : undefined,
+            selectedTags: [],
+            workspaceId: undefined,
+            folderId: undefined,
+          } as any);
+        }
+      }
+      prevCompoundIdRef.current = compoundId || 'new';
       return;
     }
 
-    const wasUnsaved = !prevCompoundIdRef.current || prevCompoundIdRef.current === 'new';
+    const wasUnsaved =
+      (!prevCompoundIdRef.current || prevCompoundIdRef.current === 'new') && !!compoundId && compoundId !== 'new';
     prevCompoundIdRef.current = compoundId;
 
     let isMounted = true;
 
     if (wasUnsaved) {
       // The item was just saved and received a valid compoundId!
-      // If there are pending hotkey/shortcut entered by the user, save them now.
+      // If there are pending hotkey/shortcut/favorite entered by the user, save them now.
       const savePendingKeys = async () => {
-        const snippetId = initialSnippet?.id || initialSnippet?.snippet_id || '';
+        const snippetId =
+          initialSnippet?.id || initialSnippet?.snippet_id || extractSnippetIdFromCompoundId(compoundId);
         let itemType: any = 'note';
-        if (initialSnippet?.urls || initialSnippet?.category === 'link') itemType = 'link';
-        else if (initialSnippet?.category === 'snippet') itemType = 'snippet';
-        else if (initialSnippet?.category === 'automation') itemType = 'automation';
+        const cat = String(initialSnippet?.category || '').toLowerCase();
+        if (['session', 'sessions', 'tab session'].includes(cat)) itemType = 'session';
+        else if (initialSnippet?.urls || ['link', 'links', 'tabgroup'].includes(cat)) itemType = 'link';
+        else if (['snippet', 'snippets'].includes(cat)) itemType = 'snippet';
+        else if (['automation', 'automations'].includes(cat)) itemType = 'automation';
+        else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat))
+          itemType = 'aiPrompt';
+        else if (['todo', 'todos'].includes(cat)) itemType = 'todo';
 
         if (pendingHotkey && isMounted) {
           try {
@@ -106,67 +233,108 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
             console.error('Failed to save pending shortcut on creation:', err);
           }
         }
+        if (isFav && isMounted) {
+          try {
+            const label = initialSnippet?.title || initialSnippet?.name || defaultName || '';
+            await addFavorite(compoundId, itemType, label);
+          } catch (err) {
+            console.error('Failed to save pending favorite on creation:', err);
+          }
+        }
       };
       void savePendingKeys();
     } else {
       // Use reactive hotkeys from useDbStore
       const snippetIdPart = extractSnippetIdFromCompoundId(compoundId);
       const hotkey = hotkeysMap[compoundId] || (snippetIdPart !== compoundId ? hotkeysMap[snippetIdPart] : '') || '';
-      const shortcut = shortcutsMap[compoundId] || (snippetIdPart !== compoundId ? shortcutsMap[snippetIdPart] : '') || '';
+      const shortcut = normalizeShortcutTrigger(
+        shortcutsMap[compoundId] || (snippetIdPart !== compoundId ? shortcutsMap[snippetIdPart] : '') || '',
+      );
       setPendingHotkey(hotkey);
       setPendingShortcut(shortcut);
     }
     return () => {
       isMounted = false;
     };
-  }, [compoundId, initialSnippet, defaultName, hotkeysMap, shortcutsMap]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compoundId, hotkeysMap, shortcutsMap]);
 
   // Initialize state from existing object
   useEffect(() => {
-    if (initialSnippet) {
-      const incomingTagIds = initialSnippet.tagIds || (initialSnippet.tags ? initialSnippet.tags.map((t: any) => t.id) : []);
+    if (initialSnippet && compoundId && compoundId !== 'new') {
+      const incomingTagIds =
+        initialSnippet.tagIds || (initialSnippet.tags ? initialSnippet.tags.map((t: any) => t.id) : []);
       const incomingTagIdsStr = [...incomingTagIds].sort().join(',');
 
-      const resolvedTags = incomingTagIds.map((id: string) => {
-        const found = dbTags.find(t => t.id === id);
-        return found ? { id: found.id, name: found.name } : { id: id, name: '...' };
-      });
-      
+      const resolvedTags = Array.isArray(initialSnippet.tags) && initialSnippet.tags.length > 0
+        ? initialSnippet.tags.map((t: any) => {
+            const found = dbTags.find(dbT => dbT.id === t.id);
+            const name = (t.name && t.name !== '...' && t.name !== t.id) ? t.name : (found ? found.name : (t.name || t.id));
+            return { id: t.id || t.name, name };
+          })
+        : incomingTagIds.map((id: string) => {
+            const found = dbTags.find(t => t.id === id);
+            return found ? { id: found.id, name: found.name } : { id: id, name: id.startsWith('temp_') ? id.replace('temp_', '') : id };
+          });
+
       const hasMissingNames = selectedTags.some((t: any) => t.name === '...');
       const canResolveNow = resolvedTags.some((rt: any) => {
         const st = selectedTags.find((s: any) => s.id === rt.id);
         return st?.name === '...' && rt.name !== '...';
       });
-      
-      if (incomingTagIdsStr !== lastProcessedTagIdsStrRef.current || (hasMissingNames && canResolveNow)) {
-        lastProcessedTagIdsStrRef.current = incomingTagIdsStr;
+
+      if (incomingTagIdsStr !== prevIncomingRef.current.tagIdsStr || (hasMissingNames && canResolveNow)) {
+        prevIncomingRef.current.tagIdsStr = incomingTagIdsStr;
         setSelectedTags(resolvedTags);
       }
-      
+
+      let newDate = '';
+      let newTime = '';
       if (initialSnippet.event_deadline) {
         try {
           const dt = new Date(initialSnippet.event_deadline);
-          const newDate = dt.toISOString().split('T')[0];
-          const newTime = dt.toTimeString().substring(0, 5);
-          if (reminderDate !== newDate) setReminderDate(newDate);
-          if (reminderTime !== newTime) setReminderTime(newTime);
-        } catch { /* ignore */ }
+          newDate = dt.toISOString().split('T')[0];
+          newTime = dt.toTimeString().substring(0, 5);
+        } catch {
+          /* ignore */
+        }
       }
+
+      if (prevIncomingRef.current.reminderDate !== newDate || prevIncomingRef.current.reminderTime !== newTime) {
+        prevIncomingRef.current.reminderDate = newDate;
+        prevIncomingRef.current.reminderTime = newTime;
+        setReminderDate(newDate);
+        setReminderTime(newTime);
+      }
+
       const newRecurring = !!initialSnippet.is_recurring;
-      if (isRecurring !== newRecurring) setIsRecurring(newRecurring);
-      
+      if (prevIncomingRef.current.isRecurring !== newRecurring) {
+        prevIncomingRef.current.isRecurring = newRecurring;
+        setIsRecurring(newRecurring);
+      }
+
       const newCycle = initialSnippet.recurring_cycle || null;
-      if (recurringCycle !== newCycle) setRecurringCycle(newCycle);
- 
+      if (prevIncomingRef.current.recurringCycle !== newCycle) {
+        prevIncomingRef.current.recurringCycle = newCycle;
+        setRecurringCycle(newCycle);
+      }
+
       const newWs = initialSnippet.workspaceId || initialSnippet.workspace_id || null;
-      if (workspaceId !== newWs) setWorkspaceId(newWs);
-      
+      if (prevIncomingRef.current.workspaceId !== newWs) {
+        prevIncomingRef.current.workspaceId = newWs;
+        setWorkspaceId(newWs);
+      }
+
       const newFolder = initialSnippet.folderId || initialSnippet.folder_id || null;
-      if (folderId !== newFolder) setFolderId(newFolder);
+      if (prevIncomingRef.current.folderId !== newFolder) {
+        prevIncomingRef.current.folderId = newFolder;
+        setFolderId(newFolder);
+      }
     }
-  }, [initialSnippet, dbTags]);
+  }, [initialSnippet, dbTags, selectedTags, compoundId]);
 
   const isFirstBubbleRef = useRef(true);
+  const isUserChangeRef = useRef(false);
 
   // Bubble editable note properties up whenever they change.
   // Favorite state is handled separately so a star toggle does not trigger note autosave UI.
@@ -176,46 +344,162 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
       return;
     }
     if (onChange) {
-      onChange({
+      const initWs = initialSnippet?.workspaceId || initialSnippet?.workspace_id || null;
+      const initFolder = initialSnippet?.folderId || initialSnippet?.folder_id || null;
+
+      const payload = {
         isFav,
         pendingHotkey,
-        pendingShortcut,
-        selectedTags,
+        pendingShortcut: showShortcut ? pendingShortcut : undefined,
+        selectedTags: selectedTags,
         availableTags,
         reminderDate,
         reminderTime,
         isRecurring,
         recurringCycle,
-        workspaceId,
-        folderId
-      });
+        workspaceId: workspaceId,
+        folderId: folderId,
+      };
+      console.log('[SharedPropertiesToolbar] Bubbling up changes. Payload:', payload, 'showShortcut:', showShortcut);
+      onChange(payload as any);
+      isUserChangeRef.current = false;
     }
-  }, [pendingHotkey, pendingShortcut, selectedTags, availableTags, reminderDate, reminderTime, isRecurring, recurringCycle, workspaceId, folderId, onChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isFav,
+    pendingHotkey,
+    pendingShortcut,
+    selectedTags,
+    availableTags,
+    reminderDate,
+    reminderTime,
+    isRecurring,
+    recurringCycle,
+    workspaceId,
+    folderId,
+    showShortcut,
+  ]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const path = event.composedPath();
+      if (todoPopupRef.current && !path.includes(todoPopupRef.current)) {
+        setIsTodoPopupOpen(false);
+      }
+      if (locationPopupRef.current && !path.includes(locationPopupRef.current)) {
+        setIsLocationPickerOpen(false);
+      }
+      if (popupRef.current && !path.includes(popupRef.current)) {
+        setTagPopupOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const onToggleFavorite = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+
+    // Close other popups
+    setIsTodoPopupOpen(false);
+    setIsLocationPickerOpen(false);
+    setTagPopupOpen(false);
+
+    isUserChangeRef.current = true;
+    lastToggleTimeRef.current = Date.now();
+
+    if (!compoundId || compoundId === 'new') {
+      setIsFav(prev => !prev);
+      return;
+    }
+
+    if (isFav) {
+      setIsFav(false);
+      await removeFavorite(compoundId);
+    } else {
+      setIsFav(true);
+      let type = 'note';
+      const catVal = String(initialSnippet?.category || '').toLowerCase();
+      if (['session', 'sessions', 'tab session'].includes(catVal)) type = 'session';
+      else if (initialSnippet?.urls || ['link', 'links', 'tabgroup'].includes(catVal)) type = 'link';
+      else if (['snippet', 'snippets'].includes(catVal)) type = 'snippet';
+      else if (['automation', 'automations'].includes(catVal)) type = 'automation';
+      else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(catVal))
+        type = 'aiPrompt';
+      else if (['todo', 'todos'].includes(catVal)) type = 'todo';
+
+      const label = initialSnippet?.title || initialSnippet?.name || defaultName || '';
+      await addFavorite(compoundId, type, label);
+    }
+  };
+
+  const handleFavoriteStarClick = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+
+    setIsTodoPopupOpen(false);
+    setIsLocationPickerOpen(false);
+    setTagPopupOpen(false);
+    setSelectedFavoriteCategoryId(getFavoriteRecord(compoundId || '')?.favoriteCategoryId ?? null);
+    setIsFavoriteCategoryOpen(true);
+
+    if (!isFav) {
+      await onToggleFavorite(e);
+    }
+  };
+
+  const handleRemoveFavorite = async () => {
+    if (!compoundId || compoundId === 'new') {
+      setIsFav(false);
+      setIsFavoriteCategoryOpen(false);
+      return;
+    }
+
+    isUserChangeRef.current = true;
+    lastToggleTimeRef.current = Date.now();
+    setIsFav(false);
+    await removeFavorite(compoundId);
+    setIsFavoriteCategoryOpen(false);
+  };
+
+  const handleFavoriteCategorySelect = async (categoryId: string) => {
     if (!compoundId || compoundId === 'new') return;
+    setSelectedFavoriteCategoryId(categoryId);
+    if (isFav) {
+      await setFavoriteCategory(compoundId, categoryId);
+      return;
+    }
 
     let type = 'note';
-    if (initialSnippet?.urls || initialSnippet?.category === 'link') type = 'link';
-   
-    else if (initialSnippet?.category === 'snippet') type = 'snippet';
+    const catVal = String(initialSnippet?.category || '').toLowerCase();
+    if (['session', 'sessions', 'tab session'].includes(catVal)) type = 'session';
+    else if (initialSnippet?.urls || ['link', 'links', 'tabgroup'].includes(catVal)) type = 'link';
+    else if (['snippet', 'snippets'].includes(catVal)) type = 'snippet';
+    else if (['automation', 'automations'].includes(catVal)) type = 'automation';
+    else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(catVal))
+      type = 'aiPrompt';
+    else if (['todo', 'todos'].includes(catVal)) type = 'todo';
 
     const label = initialSnippet?.title || initialSnippet?.name || defaultName || '';
-    await toggleFavorite(compoundId, type, label);
+    await addFavorite(compoundId, type, label, categoryId);
+    setIsFav(true);
   };
-  
+
   const onHotkeyChange = async (hotkey: string) => {
+    isUserChangeRef.current = true;
     setPendingHotkey(hotkey);
     if (compoundId && compoundId !== 'new') {
       try {
         const snippetId = initialSnippet?.id || initialSnippet?.snippet_id || '';
         let itemType: any = 'note';
-        if (initialSnippet?.urls || initialSnippet?.category === 'link') itemType = 'link';
-       
-        else if (initialSnippet?.category === 'snippet') itemType = 'snippet';
-        else if (initialSnippet?.category === 'automation') itemType = 'automation';
-        
+        const cat = String(initialSnippet?.category || '').toLowerCase();
+        if (['session', 'sessions', 'tab session'].includes(cat)) itemType = 'session';
+        else if (initialSnippet?.urls || ['link', 'links', 'tabgroup'].includes(cat)) itemType = 'link';
+        else if (['snippet', 'snippets'].includes(cat)) itemType = 'snippet';
+        else if (['automation', 'automations'].includes(cat)) itemType = 'automation';
+        else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat))
+          itemType = 'aiPrompt';
+        else if (['todo', 'todos'].includes(cat)) itemType = 'todo';
+
         if (!hotkey) await clearHotkey(snippetId || compoundId, compoundId, itemType);
         else await saveHotkey(snippetId || compoundId, compoundId, hotkey, itemType);
       } catch (err) {
@@ -223,40 +507,72 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
       }
     }
   };
-  
+
   const onShortcutChange = async (shortcut: string) => {
-    setPendingShortcut(shortcut);
+    isUserChangeRef.current = true;
+    const normalizedShortcut = normalizeShortcutTrigger(shortcut);
+    setPendingShortcut(normalizedShortcut);
     if (compoundId && compoundId !== 'new') {
       try {
         const snippetId = initialSnippet?.id || initialSnippet?.snippet_id || '';
         let itemType: any = 'note';
-        if (initialSnippet?.urls || initialSnippet?.category === 'link') itemType = 'link';
-        
-        else if (initialSnippet?.category === 'snippet') itemType = 'snippet';
-        else if (initialSnippet?.category === 'automation') itemType = 'automation';
+        const cat = String(initialSnippet?.category || '').toLowerCase();
+        if (['session', 'sessions', 'tab session'].includes(cat)) itemType = 'session';
+        else if (initialSnippet?.urls || ['link', 'links', 'tabgroup'].includes(cat)) itemType = 'link';
+        else if (['snippet', 'snippets'].includes(cat)) itemType = 'snippet';
+        else if (['automation', 'automations'].includes(cat)) itemType = 'automation';
+        else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat))
+          itemType = 'aiPrompt';
+        else if (['todo', 'todos'].includes(cat)) itemType = 'todo';
         const itemName = initialSnippet?.title || initialSnippet?.name || defaultName || 'Untitled';
 
-        if (!shortcut) await clearShortcut(snippetId || compoundId, compoundId, itemType);
-        else await saveShortcut(snippetId || compoundId, compoundId, shortcut, itemName, itemType);
+        if (!normalizedShortcut) await clearShortcut(snippetId || compoundId, compoundId, itemType);
+        else await saveShortcut(snippetId || compoundId, compoundId, normalizedShortcut, itemName, itemType);
       } catch (err) {
         console.error('Auto-save shortcut failed', err);
       }
     }
   };
-  const onTagSelect = (tag: any) => handleTagSelect(tag);
 
+  const onShortcutOverwrite = async (conflictId: string, shortcutValue: string) => {
+    if (!compoundId || compoundId === 'new') return;
+
+    try {
+      const snippetId = initialSnippet?.id || initialSnippet?.snippet_id || '';
+      let itemType: any = 'note';
+      const cat = String(initialSnippet?.category || '').toLowerCase();
+      if (['session', 'sessions', 'tab session'].includes(cat)) itemType = 'session';
+      else if (initialSnippet?.urls || ['link', 'links', 'tabgroup'].includes(cat)) itemType = 'link';
+      else if (['snippet', 'snippets'].includes(cat)) itemType = 'snippet';
+      else if (['automation', 'automations'].includes(cat)) itemType = 'automation';
+      else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat))
+        itemType = 'aiPrompt';
+      else if (['todo', 'todos'].includes(cat)) itemType = 'todo';
+      const itemName = initialSnippet?.title || initialSnippet?.name || defaultName || 'Untitled';
+
+      await deleteUserShortcutByReference(conflictId);
+      const normalizedShortcut = normalizeShortcutTrigger(shortcutValue);
+      await saveShortcut(snippetId || compoundId, compoundId, normalizedShortcut, itemName, itemType);
+      setPendingShortcut(normalizedShortcut);
+    } catch (err) {
+      console.error('Failed to overwrite shortcut', err);
+    }
+  };
+  const onTagSelect = (tag: any) => handleTagSelect(tag);
 
   // --- Hover & Popup State ---
   const [isTodoPopupOpen, setIsTodoPopupOpen] = useState(false);
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [tagPopupOpen, setTagPopupOpen] = useState(false);
-  
+
   const todoHoverTimerRef = useRef<NodeJS.Timeout | null>(null);
   const locationHoverTimerRef = useRef<NodeJS.Timeout | null>(null);
   const tagHoverTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   const hotkeyButtonRef = useRef<HTMLButtonElement>(null);
+  const shortcutButtonRef = useRef<HTMLButtonElement>(null);
   const todoPopupRef = useRef<HTMLDivElement>(null);
+  const locationPopupRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null); // Tag popup ref
 
   // --- Todo State ---
@@ -294,7 +610,7 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
       let deadlineVal = '';
       if (!isAnytime && reminderDate && reminderTime) {
         try {
-          deadlineVal = new Date(reminderDate + "T" + reminderTime).toISOString();
+          deadlineVal = new Date(reminderDate + 'T' + reminderTime).toISOString();
         } catch (e) {
           deadlineVal = '';
         }
@@ -305,410 +621,397 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   };
 
   const handleWorkspaceDestination = (wsId: string) => {
+    isUserChangeRef.current = true;
     setWorkspaceId(wsId);
     setFolderId(null);
   };
 
   const handleFolderDestination = (wsId: string, folderId: string) => {
+    isUserChangeRef.current = true;
     setWorkspaceId(wsId);
     setFolderId(folderId);
   };
 
   const handleTagSelect = (tag: any) => {
+    isUserChangeRef.current = true;
     setSelectedTags(prev => {
       const exists = prev.find(t => t.id === tag.id);
       const nextTags = exists ? prev.filter(t => t.id !== tag.id) : [...prev, tag];
-      lastProcessedTagIdsStrRef.current = nextTags.map(t => t.id).sort().join(',');
       return nextTags;
     });
   };
 
   return (
     <>
-            <div className="flex flex-col items-center gap-1">
-              {/* Favorites (Star) */}
-              <button
-                type="button"
-                onClick={onToggleFavorite}
-                disabled={!compoundId || compoundId === 'new'}
-                className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed"
-                title={!compoundId || compoundId === 'new' ? "Save item first to favorite" : "Favorite"}
-              >
-                {isFav ? (
-                  <FaStar size={20} className="text-yellow-500 fill-yellow-500" />
-                ) : (
-                  <FiStar size={20} />
-                )}
-              </button>
+      <div
+        data-shared-toolbar="true"
+        className={
+          layout === 'horizontal'
+            ? 'flex items-center gap-1.5 relative z-10 w-full pr-2'
+            : 'flex flex-col items-center gap-1 relative z-10'
+        }>
+        {/* Favorites (Star) */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={e => {
+              void handleFavoriteStarClick(e);
+            }}
+            className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Favorite (Alt+/)">
+            {isFav ? <FaStar size={20} className="text-yellow-500 fill-yellow-500" /> : <FiStar size={20} />}
+          </button>
+          <FavoriteCategoryManager
+            isOpen={isFavoriteCategoryOpen}
+            onOpenChange={setIsFavoriteCategoryOpen}
+            showTrigger={false}
+            popoverClassName={`absolute ${
+              openPopupsToBottom
+                ? 'right-0 top-full mt-2'
+                : openPopupsToLeft
+                  ? 'right-full top-0 mr-3'
+                  : 'left-full top-0 ml-3'
+            }`}
+            isFavorite={isFav}
+            selectedCategoryId={selectedFavoriteCategoryId}
+            onSelectCategory={categoryId => {
+              void handleFavoriteCategorySelect(categoryId);
+            }}
+            onRemoveFavorite={() => {
+              void handleRemoveFavorite();
+            }}
+          />
+        </div>
 
-              {/* Hotkeys */}
-              <div className="relative">
-                <div className="flex flex-col items-center gap-1">
-                  <HotkeyAssignButton
-                    ref={hotkeyButtonRef}
-                    itemId={compoundId}
-                    currentHotkey={pendingHotkey}
-                    onHotkeyChange={onHotkeyChange}
-                    isFavorite={isFav}
-                    onToggleFavorite={onToggleFavorite}
-                    showFavorite={false}
-                    disabled={!compoundId || compoundId === 'new'}
-                    isFavLoading={false}
-                    isHotkeyLoading={false}
-                    sidebarMode={true}
-                    openToLeft={openPopupsToLeft}
-                    className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer border-none bg-transparent shadow-none disabled:opacity-30 disabled:cursor-not-allowed"
-                  />
-                  <ShortcutAssignButton
-                    ref={hotkeyButtonRef}
-                    itemId={compoundId}
-                    currentShortcut={pendingShortcut}
-                    onShortcutChange={(shortcut: string) => {
-                      if (onShortcutChange) onShortcutChange(shortcut);
-                    }}
-                    defaultName={defaultName}
-                    disabled={!compoundId || compoundId === 'new'}
-                    isShortcutLoading={false}
-                    sidebarMode={true}
-                    openToLeft={openPopupsToLeft}
-                    className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer border-none bg-transparent shadow-none disabled:opacity-30 disabled:cursor-not-allowed"
-                  />
-                </div>
-              </div>
-              {/* Create To-Do */}
-              {showTodo && (
+        {/* Hotkeys */}
+        <div className="relative">
+          <div className={layout === 'horizontal' ? 'flex items-center gap-1.5' : 'flex flex-col items-center gap-1'}>
+            <HotkeyAssignButton
+              ref={hotkeyButtonRef}
+              itemId={compoundId}
+              currentHotkey={pendingHotkey}
+              onHotkeyChange={onHotkeyChange}
+              isFavorite={isFav}
+              onToggleFavorite={onToggleFavorite}
+              showFavorite={false}
+              isFavLoading={false}
+              isHotkeyLoading={false}
+              sidebarMode={true}
+              openToLeft={openPopupsToLeft}
+              openToBottom={openPopupsToBottom}
+              title="Hotkey (Alt+/)"
+              className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer border-none bg-transparent shadow-none disabled:opacity-30 disabled:cursor-not-allowed"
+            />
+            {showShortcut && (
+              <ShortcutAssignButton
+                ref={shortcutButtonRef}
+                itemId={compoundId}
+                currentShortcut={pendingShortcut}
+                onShortcutChange={(shortcut: string) => {
+                  if (onShortcutChange) onShortcutChange(shortcut);
+                }}
+                onOverwriteShortcut={onShortcutOverwrite}
+                defaultName={defaultName}
+                isShortcutLoading={false}
+                sidebarMode={true}
+                openToLeft={openPopupsToLeft}
+                openToBottom={openPopupsToBottom}
+                title="Shortcut (Alt+/)"
+                className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer border-none bg-transparent shadow-none disabled:opacity-30 disabled:cursor-not-allowed"
+              />
+            )}
+          </div>
+        </div>
+        {/* Create To-Do */}
+        {showTodo && (
+          <div
+            ref={todoPopupRef}>
+            <button
+              type="button"
+              onClick={handleTodoPopupToggle}
+              className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isTodoPopupOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
+              title="Create Todo (Alt+/)">
+              <BsCalendarCheck size={20} />
+            </button>
+            {isTodoPopupOpen && (
+              <NewDueDateDropdown
+                isOpen={isTodoPopupOpen}
+                onClose={() => setIsTodoPopupOpen(false)}
+                positionClassName={`absolute ${openPopupsToBottom ? 'right-0 top-full mt-2' : openPopupsToLeft ? 'right-full top-0 mr-3' : 'left-full top-0 ml-3'}`}
+                onSelect={({ date, time }) => {
+                  isUserChangeRef.current = true;
+                  setReminderDate(date);
+                  setReminderTime(time || '');
+                  setIsTodoPopupOpen(false);
+                }}
+                currentDate={reminderDate}
+                currentTime={reminderTime}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Location (Folder) */}
+        {showLocationPicker && (
+          <div
+            ref={locationPopupRef}>
+            <button
+              type="button"
+              onClick={e => {
+                e.stopPropagation();
+                handleLocationPickerToggle();
+              }}
+              disabled={saveStatus === 'saving'}
+              className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isLocationPickerOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
+              title={`${snippetBreadCrum?.folder_name || snippetBreadCrum?.workspace_name || 'Folders'} (Alt+/)`}>
+              <FaFolder size={20} />
+            </button>
+            {isLocationPickerOpen && (
               <div
-                className="relative"
-                ref={todoPopupRef}
-                onMouseEnter={() => {
-                  if (todoHoverTimerRef.current) clearTimeout(todoHoverTimerRef.current);
-                  todoHoverTimerRef.current = setTimeout(() => {
-                    setIsTodoPopupOpen(true);
-                    setIsLocationPickerOpen(false);
-                    setTagPopupOpen(false);
-                  }, 150);
-                }}
-                onMouseLeave={() => {
-                  if (todoHoverTimerRef.current) clearTimeout(todoHoverTimerRef.current);
-                  todoHoverTimerRef.current = setTimeout(() => {
-                    setIsTodoPopupOpen(false);
-                  }, 200);
-                }}
-              >
-                <button
-                  type="button"
-                  disabled={!compoundId || compoundId === 'new'}
-                  onClick={handleTodoPopupToggle}
-                  className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isTodoPopupOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
-                  title={!compoundId || compoundId === 'new' ? "Save item first to create a Todo" : "Create Todo"}
-                >
-                  <BsCalendarCheck size={20} />
-                </button>
-                {isTodoPopupOpen && (
-                  <div className={`absolute ${openPopupsToLeft ? 'right-full top-0 mr-3' : 'left-full top-0 ml-3'} w-[270px] bg-[var(--color-editorBg)] border border-black/10 dark:border-white/10 rounded-xl p-3.5 shadow-xl z-50 flex flex-col gap-3`}>
-                    <h3 className="text-[11px] font-semibold text-neutral-400 dark:text-white/40 uppercase tracking-wider px-1 pb-0.5 pt-0.5">
-                      Reminder & Schedule
-                    </h3>
-                    <div className="flex p-0.5 bg-black/5 dark:bg-white/5 rounded-lg border border-black/5 dark:border-white/5">
-                      <button
-                        type="button"
-                        onClick={() => { setIsRecurring(false); setIsAnytime(false); setIsTimeDropdownOpen(false); }}
-                        className={`flex-1 text-xs font-medium py-1 rounded-md transition-colors ${!isRecurring ? 'bg-white shadow-sm dark:bg-white/10 text-neutral-900 dark:text-white/80' : 'text-neutral-500 dark:text-white/40 hover:text-neutral-900 dark:hover:text-white/70'}`}
-                      >
-                        One-Time
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setIsRecurring(true); setIsAnytime(true); setIsTimeDropdownOpen(true); setIsTimePickerOpen(false); }}
-                        className={`flex-1 text-xs font-medium py-1 rounded-md transition-colors ${isRecurring ? 'bg-white shadow-sm dark:bg-white/10 text-neutral-900 dark:text-white/80' : 'text-neutral-500 dark:text-white/40 hover:text-neutral-900 dark:hover:text-white/70'}`}
-                      >
-                        Recurring
-                      </button>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <div className="relative flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer" onClick={() => {
-                        if (isRecurring) {
-                          setIsTimeDropdownOpen(prev => !prev);
-                          setIsTimePickerOpen(false);
-                        } else {
-                          setIsTimePickerOpen(prev => !prev);
-                          setIsTimeDropdownOpen(false);
-                        }
-                      }}>
-                        <div className="flex items-center gap-2.5">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-400 dark:text-neutral-500"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                          <span className="text-[13px] font-medium text-neutral-600 dark:text-white/60">Time</span>
-                        </div>
-
-                        <div className="flex items-center" onClick={(e) => {
-                          if (!isAnytime) {
-                            e.stopPropagation();
-                            setIsTimePickerOpen(prev => !prev);
-                            setIsTimeDropdownOpen(false);
-                          }
-                        }}>
-                          {(isRecurring && isAnytime) ? (
-                            <span className="text-[13px] text-neutral-500 dark:text-neutral-400 font-medium">Anytime</span>
-                          ) : (
-                            <div className="px-1.5 py-0.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors">
-                              <InlineTimeInput
-                                value={reminderTime}
-                                onChange={setReminderTime}
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {(isRecurring && isTimeDropdownOpen) && (
-                          <div ref={timePopupRef} className="absolute left-0 top-full mt-2 w-[160px] rounded-xl shadow-2xl z-[150] bg-[#1B1B1C] border border-[#2D2E30] overflow-hidden py-1">
-                            <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setIsAnytime(true); setIsTimeDropdownOpen(false); setIsTimePickerOpen(false); }}
-                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs transition-colors text-left hover:bg-white/5 text-neutral-300 hover:text-white`}
-                            >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-400 dark:text-neutral-500"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                              <span className="font-medium">Anytime of the day</span>
-                            </button>
-                            <div className="h-px bg-[#2D2E30] my-0.5"></div>
-                            <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setIsAnytime(false); setIsTimeDropdownOpen(false); setIsTimePickerOpen(true); }}
-                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs transition-colors text-left hover:bg-white/5 text-neutral-300 hover:text-white`}
-                            >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-400 dark:text-neutral-500"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                              <span className="font-medium">Specific Time</span>
-                            </button>
-                          </div>
-                        )}
-
-                        <CustomTimePicker
-                          value={reminderTime}
-                          onChange={setReminderTime}
-                          isOpen={isTimePickerOpen && (!isRecurring || !isAnytime)}
-                          setIsOpen={setIsTimePickerOpen}
-                        />
-                      </div>
-                      <div
-                        className="flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                        onClick={(e) => {
-                          const input = e.currentTarget.querySelector('input[type="date"]');
-                          if (input) {
-                            try {
-                              (input as HTMLInputElement).showPicker();
-                            } catch {
-                              (input as HTMLInputElement).focus();
-                            }
-                          }
-                        }}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-400 dark:text-neutral-500"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                          <span className="text-[13px] font-medium text-neutral-600 dark:text-white/60">Date</span>
-                        </div>
-                        <input
-                          type="date"
-                          value={reminderDate}
-                          onChange={(e) => setReminderDate(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="bg-transparent border-none outline-none text-[13px] text-neutral-500 dark:text-white/50 p-0 text-right w-[105px] focus:ring-0 cursor-pointer dark:color-scheme-dark"
-                        />
-                      </div>
-                      {isRecurring && (
-                        <div
-                          className="relative flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                          ref={cyclePopupRef}
-                          onClick={() => setIsCycleDropdownOpen(prev => !prev)}
-                        >
-                          <span className="text-[13px] font-medium text-neutral-600 dark:text-white/60">Cycle</span>
-                          <button
-                            type="button"
-                            className="text-[13px] text-neutral-500 dark:text-white/50 font-medium hover:text-neutral-800 dark:hover:text-white/80 transition-colors flex items-center gap-1.5"
-                          >
-                            <span className="capitalize">{recurringCycle || 'daily'}</span>
-                            <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 24 24" className="w-3.5 h-3.5 opacity-60" height="1em" width="1em"><path d="M16.293 9.293 12 13.586 7.707 9.293l-1.414 1.414L12 16.414l5.707-5.707z"></path></svg>
-                          </button>
-                          {isCycleDropdownOpen && (
-                            <div className="absolute right-0 top-full mt-1 w-[110px] bg-[#141414] border border-white/10 rounded-xl p-1 shadow-lg z-50 flex flex-col gap-0.5">
-                              {['daily', 'weekly', 'monthly'].map((cycle) => (
-                                <button
-                                  key={cycle}
-                                  type="button"
-                                  onClick={() => {
-                                    setRecurringCycle(cycle);
-                                    setIsCycleDropdownOpen(false);
-                                  }}
-                                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors capitalize ${recurringCycle === cycle ? 'bg-white/15 text-white font-medium' : 'text-neutral-400 hover:bg-white/5 hover:text-white'}`}
-                                >
-                                  {cycle}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={handleCreateTodoFromNote}
-                        disabled={todoStatus === 'creating'}
-                        className={`mt-2.5 ml-auto w-full flex items-center justify-center gap-2 py-1.5 px-3 text-xs font-semibold rounded-xl border transition-all ${
-                          todoStatus === 'success'
-                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 cursor-default'
-                            : todoStatus === 'creating'
-                              ? 'border-white/5 bg-white/5 text-neutral-500 cursor-not-allowed opacity-70'
-                              : 'border-black/10 dark:border-white/10 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 text-neutral-600 dark:text-white/50 hover:text-neutral-900 dark:hover:text-white/80 cursor-pointer'
-                        }`}
-                      >
-                        {todoStatus === 'creating' ? (
-                          <>
-                            <svg className="animate-spin text-neutral-500" width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10" strokeOpacity="0.25" /><path d="M12 2a10 10 0 0 1 10 10" /></svg>
-                            <span>Creating…</span>
-                          </>
-                        ) : todoStatus === 'success' ? (
-                          <>
-                            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="text-emerald-400"><polyline points="20 6 9 17 4 12" /></svg>
-                            <span>Todo Created!</span>
-                          </>
-                        ) : (
-                          <>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-400 dark:text-neutral-500"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"/></svg>
-                            <span>Create Todo</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                className={`absolute ${openPopupsToBottom ? 'right-0 top-full mt-2' : openPopupsToLeft ? 'right-full top-0 pr-3' : 'left-full top-0 pl-3'} z-[9999] w-[260px]`}>
+                <DestinationPicker
+                  selectedWorkspaceId={workspaceId}
+                  selectedFolderId={folderId}
+                  onSelectWorkspace={handleWorkspaceDestination}
+                  onSelectFolder={handleFolderDestination}
+                  onClear={() => {
+                    isUserChangeRef.current = true;
+                    setWorkspaceId(null);
+                    setFolderId(null);
+                  }}
+                  onClose={() => setIsLocationPickerOpen(false)}
+                />
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Tags */}
+        <div
+          ref={popupRef}>
+          <button
+            type="button"
+            onClick={handleTagIconClick}
+            className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed ${tagPopupOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
+            title={`${selectedTags.length > 0 ? selectedTags.map(t => t.name).join(', ') : 'Tags'} (Alt+/)`}>
+            <FiTag size={20} />
+            {selectedTags.length > 0 && (
+              <span className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-500 text-[8px] font-bold text-white shadow-sm ring-1 ring-white dark:ring-[#141414]">
+                {selectedTags.length}
+              </span>
+            )}
+          </button>
+          {tagPopupOpen && (
+            <div
+              className={`absolute ${openPopupsToBottom ? 'right-0 top-full mt-2' : openPopupsToLeft ? 'right-full top-0 mr-3' : 'left-full top-0 ml-3'} w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] rounded-lg shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200 z-[9999] flex flex-col`}>
+              
+              {/* Integrated Inline Search Row */}
+              <div className="border-b border-slate-100 dark:border-white/5 flex items-center">
+                <form
+                  onSubmit={async e => {
+                    e.preventDefault();
+                    if (!newTagName.trim()) return;
+                    const trimmed = newTagName.trim();
+                    const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
+                    if (existing) {
+                      handleTagSelect({ id: existing.id, name: existing.name });
+                    } else {
+                      if (workspaceId) {
+                        const newTagRecord = await createTag(trimmed, workspaceId);
+                        handleTagSelect({ id: newTagRecord.id, name: newTagRecord.name });
+                      } else {
+                        handleTagSelect({ id: `temp_${trimmed}`, name: trimmed });
+                      }
+                    }
+                    setNewTagName('');
+                  }}
+                  className="flex-1 flex">
+                  <input
+                    type="text"
+                    placeholder="Type to search or create..."
+                    value={newTagName}
+                    onChange={e => setNewTagName(e.target.value)}
+                    className="w-full bg-transparent px-3 py-2 text-xs outline-none text-neutral-900 dark:text-white placeholder-[var(--color-textPlaceholder)]"
+                  />
+                </form>
+              </div>
+
+              {/* Selected Tags list (if any tags are selected, show them in a tight flex container) */}
+              {selectedTags.length > 0 && (
+                <div className="px-2 py-1.5 flex flex-wrap gap-1 border-b border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                  {selectedTags.map(st => (
+                    <span
+                      key={st.id}
+                      className="flex items-center gap-1 bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium border border-blue-500/20">
+                      {st.name}
+                      <button
+                        type="button"
+                        onClick={() => handleTagSelect(st)}
+                        className="hover:text-blue-800 dark:hover:text-blue-200 opacity-70 hover:opacity-100 transition-opacity">
+                        <FiZapOff size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
               )}
 
-              {/* Location (Folder) */}
-              <div
-                className="relative"
-                onMouseEnter={() => {
-                  if (locationHoverTimerRef.current) clearTimeout(locationHoverTimerRef.current);
-                  locationHoverTimerRef.current = setTimeout(() => {
-                    setIsLocationPickerOpen(true);
-                    setIsTodoPopupOpen(false);
-                    setTagPopupOpen(false);
-                  }, 150);
-                }}
-                onMouseLeave={() => {
-                  if (locationHoverTimerRef.current) clearTimeout(locationHoverTimerRef.current);
-                  locationHoverTimerRef.current = setTimeout(() => {
-                    setIsLocationPickerOpen(false);
-                  }, 200);
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleLocationPickerToggle(); }}
-                  disabled={saveStatus === 'saving'}
-                  className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer ${isLocationPickerOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
-                  title={snippetBreadCrum?.folder_name || snippetBreadCrum?.workspace_name || "Folders"}
-                >
-                  <FaFolder size={20} />
-                </button>
-                {isLocationPickerOpen && (
-                  <div className={`absolute ${openPopupsToLeft ? 'right-full top-0 pr-3' : 'left-full top-0 pl-3'} z-[60] w-[260px]`}>
-                    <DestinationPicker
-                      selectedWorkspaceId={workspaceId}
-                      selectedFolderId={folderId}
-                      onSelectWorkspace={handleWorkspaceDestination}
-                      onSelectFolder={handleFolderDestination}
-                      onClose={() => setIsLocationPickerOpen(false)}
-                    />
-                  </div>
+              {/* Tag List Area */}
+              <style dangerouslySetInnerHTML={{__html: `
+                .no-scrollbar::-webkit-scrollbar {
+                  display: none !important;
+                }
+                .no-scrollbar {
+                  -ms-overflow-style: none !important;
+                  scrollbar-width: none !important;
+                }
+              `}} />
+              <div className="p-2 flex flex-col gap-1 max-h-[140px] overflow-y-auto no-scrollbar">
+                {/* Clear Tags item (Remove radical) with red dot */}
+                {selectedTags.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      isUserChangeRef.current = true;
+                      setSelectedTags([]);
+                    }}
+                    className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-left text-xs text-red-500 hover:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 transition-colors mb-1">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-red-500" />
+                    <span className="font-medium flex-1">Clear Tags</span>
+                    <FiZapOff size={10} className="opacity-75" />
+                  </button>
                 )}
-              </div>
 
-              {/* Tags */}
-              <div
-                className="relative"
-                ref={popupRef}
-                onMouseEnter={() => {
-                  if (tagHoverTimerRef.current) clearTimeout(tagHoverTimerRef.current);
-                  tagHoverTimerRef.current = setTimeout(() => {
-                    setTagPopupOpen(true);
-                    setIsTodoPopupOpen(false);
-                    setIsLocationPickerOpen(false);
-                  }, 150);
-                }}
-                onMouseLeave={() => {
-                  if (tagHoverTimerRef.current) clearTimeout(tagHoverTimerRef.current);
-                  tagHoverTimerRef.current = setTimeout(() => {
-                    setTagPopupOpen(false);
-                  }, 200);
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={handleTagIconClick}
-                  className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer ${tagPopupOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
-                  title="Tags"
-                >
-                  <FiTag size={20} />
-                </button>
-                {tagPopupOpen && (
-                  <div className={`absolute ${openPopupsToLeft ? 'right-full top-0 mr-3' : 'left-full top-0 ml-3'} w-[240px] bg-[var(--color-editorBg)] border border-black/10 dark:border-white/10 rounded-xl p-3 shadow-xl z-50 flex flex-col gap-2`}>
-                    <div className="text-xs font-semibold text-neutral-400 mb-1 px-1">Select Tag</div>
-                    <div className="max-h-[160px] overflow-y-auto flex flex-col gap-1 custom-scrollbar">
-                      {dbTags.map((tag, idx) => (
-                        <button
-                          key={tag.id || idx}
-                          type="button"
-                          onClick={() => {
-                            handleTagSelect({ id: tag.id, name: tag.name });
-                          }}
-                          className={`flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs transition-colors ${selectedTags.some(t => t.id === tag.id) ? 'bg-black/5 dark:bg-white/10 text-neutral-900 dark:text-white font-medium' : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white'}`}
-                        >
-                          <span>{tag.name}</span>
-                          {selectedTags.some(t => t.id === tag.id) && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
-                        </button>
-                      ))}
+                {newTagName.trim() && (
+                  <button
+                    type="button"
+                    onClick={async e => {
+                      e.stopPropagation();
+                      const trimmed = newTagName.trim();
+                      const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
+                      if (existing) {
+                        handleTagSelect({ id: existing.id, name: existing.name });
+                      } else {
+                        if (workspaceId) {
+                          const newTagRecord = await createTag(trimmed, workspaceId);
+                          handleTagSelect({ id: newTagRecord.id, name: newTagRecord.name });
+                        } else {
+                          handleTagSelect({ id: `temp_${trimmed}`, name: trimmed });
+                        }
+                      }
+                      setNewTagName('');
+                    }}
+                    className="flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white transition-colors border border-dashed border-neutral-300 dark:border-white/10 mb-1">
+                    <div className="flex items-center gap-2">
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="text-neutral-400 dark:text-neutral-500">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="16" />
+                        <line x1="8" y1="12" x2="16" y2="12" />
+                      </svg>
+                      <span>Create "{newTagName.trim()}"</span>
                     </div>
-                    <div className="border-t border-black/10 dark:border-white/10 pt-2 mt-1">
-                      <form
-                        onSubmit={async (e) => {
-                          e.preventDefault();
-                          if (!newTagName.trim()) return;
-                          const trimmed = newTagName.trim();
-                          const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
-                          if (existing) {
-                            handleTagSelect({ id: existing.id, name: existing.name });
-                          } else {
-                            if (workspaceId) {
-                               const newTagRecord = await createTag(trimmed, workspaceId);
-                               handleTagSelect({ id: newTagRecord.id, name: newTagRecord.name });
-                            } else {
-                               // Fallback if no workspace is selected
-                               handleTagSelect({ id: '', name: trimmed });
-                            }
-                          }
-                          setNewTagName('');
-                        }}
-                        className="flex gap-1"
-                      >
-                        <input
-                          type="text"
-                          placeholder="New tag..."
-                          value={newTagName}
-                          onChange={e => setNewTagName(e.target.value)}
-                          className="flex-1 bg-neutral-100 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-lg px-2 py-1 text-xs outline-none focus:border-black/20 dark:focus:border-white/20 text-neutral-900 dark:text-white placeholder-[var(--color-textPlaceholder)]"
-                        />
-                        <button
-                          type="submit"
-                          className="px-2 py-1 bg-black/5 dark:bg-[#2a2a2a] text-neutral-700 dark:text-white border border-black/10 dark:border-white/10 rounded-lg text-xs font-medium hover:bg-black/10 dark:hover:bg-[#3a3a3a]"
-                        >
-                          Add
-                        </button>
-                      </form>
-                    </div>
-                  </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded border border-neutral-200 dark:border-white/10 bg-neutral-50 dark:bg-white/5 text-neutral-400 dark:text-neutral-400 font-mono scale-90">
+                      Enter
+                    </span>
+                  </button>
                 )}
+
+                {dbTags
+                  .map((tag, idx) => {
+                    const isSelected = selectedTags.some(t => t.id === tag.id);
+                    const dotColor = getTagColor(tag.name);
+                    return (
+                      <button
+                        key={tag.id || idx}
+                        type="button"
+                        onClick={() => {
+                          handleTagSelect({ id: tag.id, name: tag.name });
+                        }}
+                        className={`flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs transition-colors ${isSelected ? 'bg-black/5 dark:bg-white/10 text-neutral-900 dark:text-white font-medium' : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white'}`}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: dotColor }}
+                          />
+                          <span>{tag.name}</span>
+                        </div>
+                        {isSelected && (
+                          <span
+                            className="text-[var(--color-danger)] hover:text-[var(--color-dangerHover)] transition-colors p-0.5 rounded flex items-center justify-center bg-[var(--color-dangerBg)]"
+                            title="Remove tag">
+                            <FiZapOff size={10} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
               </div>
             </div>
+          )}
+        </div>
+      </div>
+
+      <AltSlashPopup
+        isOpen={isAltSlashOpen}
+        onClose={() => setIsAltSlashOpen(false)}
+        isFav={isFav}
+        onToggleFav={onToggleFavorite}
+        pendingHotkey={pendingHotkey}
+        onHotkeyChange={onHotkeyChange}
+        pendingShortcut={pendingShortcut}
+        onShortcutChange={onShortcutChange}
+        reminderDate={reminderDate}
+        reminderTime={reminderTime}
+        isRecurring={isRecurring}
+        recurringCycle={recurringCycle}
+        onTodoScheduleChange={({ date, time, isRecurring: rec, cycle }) => {
+          isUserChangeRef.current = true;
+          setReminderDate(date);
+          setReminderTime(time);
+          setIsRecurring(rec);
+          setRecurringCycle(cycle);
+        }}
+        workspaceId={workspaceId}
+        folderId={folderId}
+        folderNamesMap={folderNamesMap}
+        workspaceNamesMap={workspaceNamesMap}
+        onDestinationChange={(wsId, fId) => {
+          isUserChangeRef.current = true;
+          setWorkspaceId(wsId);
+          setFolderId(fId);
+        }}
+        selectedTags={selectedTags}
+        dbTags={dbTags}
+        onTagSelect={tag => {
+          isUserChangeRef.current = true;
+          handleTagSelect(tag);
+        }}
+        onCreateTag={async name => {
+          isUserChangeRef.current = true;
+          if (workspaceId) {
+            const newTag = await createTag(name, workspaceId);
+            handleTagSelect({ id: newTag.id, name: newTag.name });
+            return newTag;
+          } else {
+            const tempTag = { id: `temp_${name}`, name };
+            handleTagSelect(tempTag);
+            return tempTag;
+          }
+        }}
+        showTodo={showTodo}
+        showShortcut={showShortcut && !['snippet', 'snippets'].includes(String(initialSnippet?.category || '').toLowerCase())}
+        showLocationPicker={showLocationPicker}
+        showTags={true}
+      />
     </>
   );
 });

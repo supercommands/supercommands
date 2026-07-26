@@ -22,7 +22,7 @@ export interface SharedProperties {
 
   // Location / Workspace picking
   workspaceId: string | null;
-  folderId: string | null;
+  folderId?: string | null;
 }
 
 export interface SharedPropertiesToolbarProps {
@@ -55,10 +55,14 @@ export interface SharedPropertiesToolbarProps {
   saveStatus?: string;
   
   // Organization data for location picker and tag picker
-  orgTeam?: any;
-  personalWorkspaces?: WorkspaceData[];
   orgTags?: TagRecord[];
   setOrgTags?: React.Dispatch<React.SetStateAction<TagRecord[]>>;
   /** When true, popups fly LEFT (into the container) instead of right. Use for right-side toolbars with no space on the right. */
   openPopupsToLeft?: boolean;
+  /** When true, popups fly DOWN instead of to the side. Used for horizontal layouts. */
+  openPopupsToBottom?: boolean;
+  showShortcut?: boolean;
+  showLocationPicker?: boolean;
+  /** Controls if the buttons are stacked vertically (default) or horizontally inline. */
+  layout?: 'vertical' | 'horizontal';
 }

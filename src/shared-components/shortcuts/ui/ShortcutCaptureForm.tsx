@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { FiLoader, FiCheck, FiZap, FiZapOff } from 'react-icons/fi';
+import { normalizeShortcutTrigger } from '../core/shortcutDbData';
 
 export interface ShortcutCaptureFormProps {
   shortcutInput: {
@@ -37,15 +38,15 @@ const ShortcutCaptureForm: React.FC<ShortcutCaptureFormProps> = ({
         <div
           className={`flex flex-col rounded-lg overflow-hidden border transition-all duration-200 ${
             error
-              ? 'border-[var(--color-danger)] shadow-[0_0_0_1px_var(--color-dangerBg)] animate-shake'
+              ? 'border-red-500/50 dark:border-red-500/80 shadow-[0_0_0_1px_rgba(239,68,68,0.2)] animate-shake'
               : 'border-[var(--color-borderDefault)] focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accentBg)]'
           }`}>
           {/* Header with Clear Button */}
           <div className="px-1 py-1.5 border-b border-[var(--color-borderDefault)] flex items-center justify-between overflow-hidden">
             <div className="text-[10px] font-bold tracking-wider text-[var(--color-textPrimary)] truncate pr-2">
               {shortcutInput.value
-                ? `Assign a Text Shortcut (/${shortcutInput.value.replace(/^\//, '')})`
-                : 'Assign a Text Shortcut (/command)'}
+                ? `Assign a Text Shortcut (${normalizeShortcutTrigger(shortcutInput.value)})`
+                : 'Assign a Text Shortcut (command)'}
             </div>
             {shortcutInput.value && shortcutInput.onClear && (
               <button
@@ -54,7 +55,7 @@ const ShortcutCaptureForm: React.FC<ShortcutCaptureFormProps> = ({
                   shortcutInput.onClear?.();
                 }}
                 disabled={shortcutInput.isSaving}
-                className="text-[var(--color-danger)] hover:text-[var(--color-dangerHover)] transition-colors p-1 rounded-md hover:bg-[var(--color-dangerBg)] flex items-center gap-1.5 text-[10px] font-medium"
+                className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors p-1 rounded-md hover:bg-red-500/10 flex items-center gap-1.5 text-[10px] font-medium"
                 title="Clear Text Shortcut">
                 {shortcutInput.isSaving && !shortcutInput.value ? (
                   <>
@@ -74,11 +75,10 @@ const ShortcutCaptureForm: React.FC<ShortcutCaptureFormProps> = ({
           {/* Body (Input - Big & Clean) */}
           <div className="relative min-h-[85px] flex items-center justify-center overflow-hidden transition-all duration-200 bg-[var(--color-panelBg)] p-3">
             <div className="flex items-center w-full max-w-[200px] border-b-2 focus-within:border-[var(--color-accent)] border-[var(--color-borderDefault)] pb-1 transition-colors">
-              <span className="text-[var(--color-textSecondary)] text-lg font-bold mr-1">/</span>
               <input
                 ref={inputRef}
                 type="text"
-                value={shortcutInput.value.replace(/^\//, '')} // Strip leading slash for display
+                value={normalizeShortcutTrigger(shortcutInput.value)}
                 onChange={shortcutInput.onChange}
                 onKeyDown={e => {
                   if (e.key === 'Enter') {
@@ -93,7 +93,7 @@ const ShortcutCaptureForm: React.FC<ShortcutCaptureFormProps> = ({
                     shortcutInput.onCancel();
                   }
                 }}
-                placeholder="type command..."
+                placeholder="type shortcut..."
                 className="w-full bg-transparent border-none outline-none text-lg font-medium text-[var(--color-textPrimary)] placeholder:text-[var(--color-textPlaceholder)]"
               />
             </div>
@@ -101,8 +101,8 @@ const ShortcutCaptureForm: React.FC<ShortcutCaptureFormProps> = ({
 
           {/* Footer (Error & Link - Minimalist) */}
           {error && (
-            <div className="px-3 py-2 border-t border-[var(--color-dangerBg)] flex flex-col gap-1 bg-[var(--color-dangerBg)]/30">
-              <div className="flex items-start gap-2 text-[var(--color-danger)]">
+            <div className="px-3 py-2 border-t border-red-500/20 flex flex-col gap-1 bg-red-500/5">
+              <div className="flex items-start gap-2 text-red-600 dark:text-red-400">
                 <FiZap size={12} className="shrink-0 mt-0.5" />
                 <div className="text-[11px] font-medium leading-tight flex flex-wrap gap-x-1">
                   <span className="text-[var(--color-textSecondary)]">Conflict:</span>
@@ -114,9 +114,9 @@ const ShortcutCaptureForm: React.FC<ShortcutCaptureFormProps> = ({
                       const itemName = parts[3];
                       return (
                         <>
-                          <span className="text-[var(--color-danger)] font-bold">"{hotkeyValue}"</span>
+                          <span className="text-red-600 dark:text-red-400 font-bold">"{hotkeyValue}"</span>
                           <span className="text-[var(--color-textSecondary)]">{isAlreadyAssigned}</span>
-                          <span className="text-[var(--color-danger)] font-bold">"{itemName}"</span>
+                          <span className="text-red-600 dark:text-red-400 font-bold">"{itemName}"</span>
                         </>
                       );
                     }

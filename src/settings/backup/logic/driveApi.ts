@@ -1,4 +1,5 @@
 import { extractDatabaseToJSON } from './extractData';
+import { generateExcelBackup } from './excelExport';
 
 const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
 const MAIN_BACKUP_FOLDER_NAME = 'cmdOS Backups';
@@ -21,7 +22,15 @@ export async function disconnectDrive(): Promise<void> {
     chrome.identity.getAuthToken({ interactive: false }, (token) => {
       if (token) {
         chrome.identity.removeCachedAuthToken({ token }, () => {
-          resolve();
+          // Completely revoke the token from Google's servers
+          fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`)
+            .then(() => {
+              chrome.identity.clearAllCachedAuthTokens(() => resolve());
+            })
+            .catch((err) => {
+              console.error('Failed to revoke token:', err);
+              chrome.identity.clearAllCachedAuthTokens(() => resolve());
+            });
         });
       } else {
         resolve();
@@ -95,6 +104,26 @@ export async function enforceRotationLimit(token: string, mainFolderId: string):
   }
 }
 
+async function uploadBlob(token: string, parentId: string, name: string, blob: Blob): Promise<void> {
+  const metadata = {
+    name,
+    parents: [parentId],
+    mimeType: blob.type
+  };
+
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', blob);
+
+  await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: form
+  });
+}
+
 export const executeDriveBackup = async (versionNumber: number = 1): Promise<void> => {
   try {
     const token = await getDriveToken();
@@ -114,6 +143,10 @@ export const executeDriveBackup = async (versionNumber: number = 1): Promise<voi
     for (const [tableName, records] of Object.entries(backupData.tables)) {
       await uploadFile(token, backupFolderId, `${tableName}.json`, JSON.stringify(records, null, 2));
     }
+    
+    // Generate and upload Excel backup
+    const excelBlob = await generateExcelBackup(backupData);
+    await uploadBlob(token, backupFolderId, `backup.xlsx`, excelBlob);
     
     // Enforce rotation
     await enforceRotationLimit(token, mainFolderId);

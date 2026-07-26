@@ -14,7 +14,7 @@ import {
 } from '../../storage/localStorage/uxCustomizationStorage';
 import { StorageManager } from '../../storage/localStorage/storageManager';
 import { getUserId, getUserInfo, CMDOS_SIGN_UP_URL } from '../../storage/API/core/api';
-import { getFaviconUrl } from '../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 import { FEATURE_FLAGS } from '../../pages/AltS_search_newtab/src/utils/featureFlags';
 import ThemeSettings from '../uiPersonalization/ThemeSettings';
 
@@ -433,7 +433,7 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
                       </div>
                     )}
                     <div className="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-md border border-white/10 z-10 select-none">
-                      <span className="text-[10px] font-bold text-white tracking-wide">Board View</span>
+                      <span className="text-[10px] font-bold text-white tracking-wide">Board (Kanaban)</span>
                     </div>
                   </motion.div>
 
@@ -464,7 +464,7 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
                       </div>
                     )}
                     <div className="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-md border border-white/10 z-10 select-none">
-                      <span className="text-[10px] font-bold text-white tracking-wide">Sheet UI</span>
+                      <span className="text-[10px] font-bold text-white tracking-wide">Table (SpreadSheet)</span>
                     </div>
                   </motion.div>
                 </div>
@@ -480,7 +480,7 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
                       className="absolute z-30 left-0 top-[140px] w-[340px] rounded-2xl border border-white/10 bg-neutral-950/95 shadow-2xl p-2 select-none pointer-events-none backdrop-blur-md"
                     >
                       <div className="text-[10px] font-bold text-[var(--color-textMuted)] uppercase tracking-wider px-2 py-1 mb-1">
-                        Preview: {hoveredLayout === 'board' ? 'Board View' : 'Sheet UI'}
+                        Preview: {hoveredLayout === 'board' ? 'Board (Kanaban)' : 'Table (SpreadSheet)'}
                       </div>
                       <div 
                         className="w-full h-[190px] rounded-xl overflow-hidden bg-neutral-900 border border-white/5"
@@ -542,8 +542,8 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
                     },
                     {
                       id: 'data-blur',
-                      title: 'Pin & Show content on hover',
-                      description: 'The To-Do list remains permanently open, but the task data is blurred until hovered.',
+                      title: 'Pin Summary',
+                      description: 'Shows a summary widget containing tasks count',
                     },
                     {
                       id: 'collapse',

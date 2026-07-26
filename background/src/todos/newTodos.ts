@@ -7,7 +7,7 @@ import { createNotification } from '../notifications/notifications';
 
 export async function handleNewTodoAlarm(alarm: chrome.alarms.Alarm) {
   const todoId = alarm.name.split('|')[1];
-  
+
   if (!todoId) return;
 
   try {
@@ -15,7 +15,7 @@ export async function handleNewTodoAlarm(alarm: chrome.alarms.Alarm) {
     if (!todo) return;
 
     const refCount = todo.references ? todo.references.length : 0;
-    
+
     // Show notification using the proven wrapper
     createNotification(`newtodo-${todoId}-${Date.now()}`, {
       title: 'Task Reminder: ' + (todo.name || 'Untitled'),
@@ -25,7 +25,7 @@ export async function handleNewTodoAlarm(alarm: chrome.alarms.Alarm) {
     // Reschedule if recurring
     if (todo.scheduleType === 'recurring' && todo.recurringType) {
       const nextRun = new Date(todo.scheduleTime);
-      
+
       if (todo.recurringType === 'daily') {
         nextRun.setDate(nextRun.getDate() + 1);
       } else if (todo.recurringType === 'weekly') {

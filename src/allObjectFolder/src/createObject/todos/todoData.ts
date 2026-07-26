@@ -21,7 +21,8 @@ export const createTodo = async (
   scheduleType: 'one-time' | 'recurring',
   scheduleTime: number,
   recurringCycle?: string,
-  description?: string
+  description?: string,
+  tagIds?: string[]
 ): Promise<TodoRecord> => {
   try {
     const now = Date.now();
@@ -45,6 +46,8 @@ export const createTodo = async (
       scheduleType,
       recurringType: recurringCycle as any,
       scheduleTime,
+      tagIds: tagIds || [],
+      tags: tagIds || [],
       createdAt: now,
       updatedAt: now
     };
@@ -88,6 +91,28 @@ export const updateTodo = async (
     }
   } catch (e) {
     console.error('Failed to update todo status in Dexie', e);
+    throw e;
+  }
+};
+
+export const updateTodoContent = async (
+  todoId: string,
+  updates: Partial<TodoRecord>
+): Promise<TodoRecord> => {
+  try {
+    if (!todoId) throw new Error('todoId is required');
+    const finalUpdates = {
+      ...updates,
+      updatedAt: Date.now()
+    };
+    
+    // We expect references to already be mapped to TodoReference[] if updated
+    await db.todos.update(todoId, finalUpdates);
+    const updatedRecord = await db.todos.get(todoId);
+    if (!updatedRecord) throw new Error('Todo not found after update');
+    return updatedRecord;
+  } catch (e) {
+    console.error('Failed to update todo content in Dexie', e);
     throw e;
   }
 };

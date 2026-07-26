@@ -1,13 +1,21 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
+import ReactDOM from 'react-dom';
 import { useAppearance } from '@extension/ui';
-import { runAutomation, type SavedAutomation, type SavedAutomation as ExecutionAutomation } from '../../../../allObjectFolder/src/createObject/automationBeta/utilities/automation';
+import {
+  runAutomation,
+  type SavedAutomation,
+  type SavedAutomation as ExecutionAutomation,
+} from '../../../../allObjectFolder/src/createObject/automationBeta/utilities/automation';
 import clsx from 'clsx';
 
 import ModelSelector from '../../../../allObjectFolder/src/createObject/ChatAgent/ModelSelector';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { findCommandByAnyId, isLocalCommandId } from '../../../../shared-components/commands';
 import { resolveAutomationIconMeta } from '../../../../shared-components/icons/automationDynamicIcon';
-import { extractUrlsFromSnippet } from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
+import {
+  extractUrlsFromSnippet,
+  resolvePrimaryAction,
+} from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
 import { resolveEntityById } from '../../../../shared-components/utils/entityResolver';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -33,29 +41,20 @@ import { BsPinAngle, BsPinAngleFill, BsList, BsGrid, BsTable, BsLayoutSidebarIns
 import DeleteDialog from '../../../../shared-components/modals/deleteDialog';
 import HomeView, { type HomeViewHandle } from '../landingPage/views/HomeView';
 
-
 import type { SnippetActionDetail } from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
 import type { InteractiveItem } from '../landingPage/views/defaultContainer';
-import {
-  resolvePrimaryAction,
-  isLinkCategory,
-  isNoteCategory,
-  isTabGroupCategory,
-} from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
-import { AI_GROUP, type CommandId } from './searchSystemComponents/searchBarMain/commandConfigurations/commands';
+import { AI_GROUP, type CommandId } from '../../../../shared-components/searchBarMain/commandConfigurations/commands';
 import { getCommandServices } from '../commands/commandServices';
 import { commandRegistry } from '../../../../shared-components/commands/registry';
 import { CommandContext } from '../../../../shared-components/commands/types';
-import { type LocalCommandId } from './searchSystemComponents/searchBarMain/commandConfigurations/localCommands';
+import { type LocalCommandId } from '../../../../shared-components/searchBarMain/commandConfigurations/localCommands';
 
 import type { FolderData } from '../../../../settings/allWorkspaceManager/folders/folderTypes';
 import type { WorkspaceData } from '../../../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 import type { SnippetRecord } from '../../../../allObjectFolder/src/createObject/snippets/snippetTypes';
 import { EditSnippetScreen } from '../../../../allObjectFolder/src/createObject/snippets/SnippetEditorScreen';
-import { NoteEditorView } from '../../../../allObjectFolder/src';
+import { NoteEditorView, CreateTodoView } from '../../../../allObjectFolder/src';
 import { AiPromptEditorView } from '../../../../allObjectFolder/src/createObject/aiPrompt';
-
-
 
 import { useUIStore } from '../../../../shared-components/uiStateManager';
 
@@ -66,18 +65,26 @@ import AutomationDashboard from '../../../../allObjectFolder/src/createObject/au
 import { deleteSnippet, updateSnippet } from '../../../../allObjectFolder/src/createObject/snippets/snippetData';
 import { nowUtc } from '../../../../shared-components/utils';
 import { format, isSameDay } from 'date-fns';
-import { CreateTodoView } from '../../../../allObjectFolder/src';
 import { toggleFavoriteRecord } from '../../../../shared-components/favorites/favoriteData';
-import { extractSnippetIdFromCompoundId } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import {
+  getItemCompoundId,
+  extractSnippetIdFromCompoundId,
+} from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { deleteLink } from '../../../../allObjectFolder/src/createObject/links/linkData';
 import { deleteTodo, createTodo } from '../../../../allObjectFolder/src/createObject/todos/todoData';
 import { deleteNote } from '../../../../allObjectFolder/src/createObject/notes/noteData';
+import { deleteSession } from '../../../../allObjectFolder/src/createObject/session/sessionData';
+import { deleteAiPrompt } from '../../../../allObjectFolder/src/createObject/aiPrompt/aiPromptData';
+import { deleteChatAgent } from '../../../../allObjectFolder/src/createObject/ChatAgent/chatAgentData';
+import { deleteAutomation } from '../../../../allObjectFolder/src/createObject/automationBeta/automationData';
 import { db } from '../../../../storage/indexDB/dbConfig';
+import { saveHotkey, clearHotkey } from '../../../../shared-components/hotkeys';
+import { saveShortcut, clearShortcut } from '../../../../shared-components/shortcuts';
 import Searchbar, {
   type SearchbarHandle,
   type SuggestionState,
   type WorkspaceItemSuggestion as SnippetSuggestion,
-} from './searchSystemComponents/searchBarMain/userInterfaceComponents/searchBar';
+} from '../../../../shared-components/searchBarMain/userInterfaceComponents/searchBar';
 import ChatAgent from '../../../../allObjectFolder/src/createObject/ChatAgent';
 import AutomationSavePrompt from '../../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/automationSavePrompt';
 import useNotification from '../../../../shared-components/notifications/useNotification';
@@ -96,16 +103,14 @@ import { storageDebug } from '../../../../shared-components/utils/storageDebugLo
 
 import AutomationActionMenu from '../../../../allObjectFolder/src/createObject/automationBeta/utilities/automationActionMenu';
 
+import { SettingsLayout, GeneralSettingsPanel, AllWorkspacesPanel } from '../../../../settings';
+import SpreadsheetMainContainer from '../../../../shared-components/spreadsheetUi/ui/spreadsheetMainContainer';
 
-import {
-  SettingsLayout,
-  GeneralSettingsPanel,
-  AllWorkspacesPanel,
-} from '../../../../settings';
-import { getTutorialProgress } from '../../../../welcomeGuide/TutorialCards';
-import SpreadsheetMainContainer from './spreadsheetUi/ui/spreadsheetMainContainer';
-
-type Snippet = SnippetRecord & { key?: string; value?: string | { urls?: string[]; names?: string[] }; category?: string };
+type Snippet = SnippetRecord & {
+  key?: string;
+  value?: string | { urls?: string[]; names?: string[] };
+  category?: string;
+};
 type Folder = FolderData & { snippets?: Snippet[]; folders?: Folder[] };
 type Workspace = WorkspaceData & { folders?: Folder[]; workspace_snippets?: Snippet[] };
 type Team = {
@@ -115,8 +120,6 @@ type Team = {
   storageMode?: string;
   migrationStatus?: string;
 };
-
-
 
 interface ContainerProps {
   reload: () => void;
@@ -180,8 +183,6 @@ const KeyHint: React.FC<{ keys: string[] }> = ({ keys }) => (
   </span>
 );
 
-
-
 const Container: React.FC<ContainerProps> = ({
   reload,
   teams,
@@ -191,7 +192,6 @@ const Container: React.FC<ContainerProps> = ({
   searchValue: propSearchValue,
 
   onSnippetSelectFromSearch,
-
 
   commandListCategory,
   onCommandListCategoryChange,
@@ -228,8 +228,10 @@ const Container: React.FC<ContainerProps> = ({
   setShowTutorial,
 }) => {
   const [storeTab, setStoreTab] = useState<'catalog' | 'saved'>('catalog');
+  const [isOnboardingDone, setIsOnboardingDone] = useState(false);
 
   const homeViewRef = useRef<HomeViewHandle>(null);
+  const boardViewRef = useRef<any>(null);
 
   // Clear any persisted dirty/draft states on app initialization (e.g. refresh)
   useEffect(() => {
@@ -254,9 +256,7 @@ const Container: React.FC<ContainerProps> = ({
   }, [suggestionState, onSuggestionStateChange]);
 
   const setSuggestionState = useCallback(
-    (
-      val: SuggestionState | null | ((prev: SuggestionState | null) => SuggestionState | null),
-    ) => {
+    (val: SuggestionState | null | ((prev: SuggestionState | null) => SuggestionState | null)) => {
       setSuggestionStateInternal(val);
     },
     [],
@@ -301,7 +301,6 @@ const Container: React.FC<ContainerProps> = ({
           // If we are cooling down and not forced, we are done!
           if (isCoolingDown && !forceCloud) return;
         }
-
       } catch (err) {
         console.error('Failed to fetch installed modules in Container:', err);
       }
@@ -456,10 +455,118 @@ const Container: React.FC<ContainerProps> = ({
   const dbFolders = useDbStore(state => state.folders);
   const dbSnippets = useDbStore(state => state.snippets);
   const dbAutomations = useDbStore(state => state.automations);
+  const dbTodos = useDbStore(state => state.todos);
+  const dbHotkeysMap = useDbStore(state => state.hotkeysMap);
+  const dbChatAgents = useDbStore(state => state.chatAgents);
+  const dbAiPrompts = useDbStore(state => state.aiPrompts);
+
+  const [activeTodoId, setActiveTodoId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (activeEditor?.type !== 'todo') {
+      setActiveTodoId(null);
+    }
+  }, [activeEditor?.type]);
+
+  const handleLoadTodo = useCallback(
+    (todo: any) => {
+      setActiveTodoId(todo.id);
+      // Load the todo into the CreateTodoView form by using the prefill mechanism
+      useUIStore.getState().setTodoCreatePrefill({
+        todo_id: todo.id,
+        key: todo.name,
+        title: todo.name,
+        description: todo.description ?? '',
+        value: todo.description ?? '',
+        category: 'custom',
+        is_done: todo.isDone,
+        event_deadline: new Date(todo.scheduleTime).toISOString(),
+        is_recurring: todo.scheduleType === 'recurring',
+        recurring_cycle: todo.recurringType ?? null,
+        is_anytime: false,
+        references: todo.references ?? [],
+        config: { id: (todo.references ?? []).map((r: any) => r.id), title: todo.name },
+        tags: todo.tags ?? todo.tagIds ?? [],
+        tagIds: todo.tagIds ?? todo.tags ?? [],
+        shortcut: todo.shortcut ?? '',
+        hotkey: dbHotkeysMap[todo.id] || todo.hotkey || '',
+      });
+    },
+    [dbHotkeysMap],
+  );
+
+  const handleDeleteTodoById = useCallback(
+    async (id: string) => {
+      try {
+        await db.todos.delete(id);
+        await deleteTodo(id);
+        if (activeTodoId === id) {
+          setActiveTodoId(null);
+          useUIStore.getState().setTodoCreatePrefill(null);
+        }
+        const chromeAny = (window as any).chrome;
+        if (chromeAny?.runtime?.sendMessage) {
+          chromeAny.runtime.sendMessage({ action: 'clear_todo_alarm', todoId: id });
+        }
+      } catch (e) {
+        console.error('[Container] Failed to delete todo from table:', e);
+      }
+    },
+    [activeTodoId],
+  );
+
+  const handleUpdateTodoField = useCallback(async (id: string, field: string, value: any) => {
+    try {
+      const todo = await db.todos.get(id);
+      if (!todo) return;
+
+      const chromeAny = (window as any).chrome;
+      if (field === 'title') {
+        await db.todos.update(id, { name: value, updatedAt: Date.now() });
+        if (chromeAny?.storage?.local) {
+          const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['local_todos'], resolve));
+          const localTodos = result.local_todos || [];
+          const updated = localTodos.map((t: any) =>
+            String(t.snippet_id || t.id || t.todo_id) === String(id) ? { ...t, key: value, title: value } : t,
+          );
+          await new Promise<void>(resolve => chromeAny.storage.local.set({ local_todos: updated }, resolve));
+        }
+      } else if (field === 'shortcut') {
+        await db.todos.update(id, { shortcut: value, updatedAt: Date.now() });
+        if (value) {
+          await saveShortcut(id, id, value, todo.name, 'todo');
+        } else {
+          await clearShortcut(id, id, 'todo');
+        }
+        if (chromeAny?.storage?.local) {
+          const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['local_todos'], resolve));
+          const localTodos = result.local_todos || [];
+          const updated = localTodos.map((t: any) =>
+            String(t.snippet_id || t.id || t.todo_id) === String(id) ? { ...t, shortcut: value } : t,
+          );
+          await new Promise<void>(resolve => chromeAny.storage.local.set({ local_todos: updated }, resolve));
+        }
+      }
+      const currentPrefill = useUIStore.getState().todoCreatePrefill;
+      if (currentPrefill) {
+        const prevId =
+          (currentPrefill as any).todo_id || (currentPrefill as any).id || (currentPrefill as any).snippet_id;
+        if (String(prevId) === String(id)) {
+          useUIStore.getState().setTodoCreatePrefill({
+            ...currentPrefill,
+            ...(field === 'title' ? { title: value, key: value } : {}),
+            ...(field === 'shortcut' ? { shortcut: value } : {}),
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[Container] Failed to update todo inline field:', e);
+    }
+  }, []);
+
   const isReturningUser = useMemo(() => {
-    // Flat DB scan: the onboarding flow only needs to know whether a local workspace exists.
-    return dbWorkspaces.some((workspace: any) => workspace.workspaceName === 'Your shortcuts');
-  }, [dbWorkspaces]);
+    return isOnboardingDone;
+  }, [isOnboardingDone]);
 
   const getWorkspaceIdForFolder = useCallback(
     (folderId: string | null | undefined): string | null => {
@@ -475,8 +582,7 @@ const Container: React.FC<ContainerProps> = ({
     return (
       Array.isArray(steps) &&
       steps.some(
-        (s: any) =>
-          String(s.module_id || s.moduleId) === '5' || s.config?.agentId === 'all_ai' || s.config?.isAllAi,
+        (s: any) => String(s.module_id || s.moduleId) === '5' || s.config?.agentId === 'all_ai' || s.config?.isAllAi,
       )
     );
   }, []);
@@ -508,7 +614,7 @@ const Container: React.FC<ContainerProps> = ({
 
   // --- Saved AI Agents for AICommandLockedUI ---
   const savedAiAgents = useMemo(() => {
-    let agents: any[] = [];
+    const agents: any[] = [];
 
     dbWorkspaces.forEach((workspace: any) => {
       collectAiAgentsFromWorkspace(workspace.id).forEach(agent => {
@@ -535,6 +641,34 @@ const Container: React.FC<ContainerProps> = ({
       }
     });
 
+    // Merge real ChatAgent records from Dexie (AI prompt editors)
+    dbChatAgents.forEach((agent: any) => {
+      if (!agents.find(a => String(a.id) === String(agent.id))) {
+        agents.push({
+          ...agent,
+          workspace_id: agent.workspaceId || agent.workspace_id || null,
+          folder_id: agent.folderId || agent.folder_id || null,
+          category: 'agent',
+          type: 'chat_agent',
+        });
+      }
+    });
+
+    // Merge real AI Prompts (AiPromptEditorView prompts)
+    dbAiPrompts.forEach((prompt: any) => {
+      if (!agents.find(a => String(a.id) === String(prompt.id))) {
+        agents.push({
+          ...prompt,
+          name: prompt.title || prompt.name || '',
+          url: prompt.prompt || '',
+          workspace_id: prompt.workspaceId || prompt.workspace_id || null,
+          folder_id: prompt.folderId || prompt.folder_id || null,
+          category: 'agent',
+          type: 'chat_agent',
+        });
+      }
+    });
+
     // 2. Merge with Local Automations
     localAutomations.forEach(localAuto => {
       if (!agents.find(a => String(a.id) === String(localAuto.id))) {
@@ -543,7 +677,7 @@ const Container: React.FC<ContainerProps> = ({
     });
 
     return agents;
-  }, [dbAutomations, dbWorkspaces, localAutomations, collectAiAgentsFromWorkspace]);
+  }, [dbAutomations, dbWorkspaces, dbChatAgents, dbAiPrompts, localAutomations, collectAiAgentsFromWorkspace]);
 
   const savedAutomations = useMemo(() => {
     const automationMap = new Map<string, any>();
@@ -560,8 +694,8 @@ const Container: React.FC<ContainerProps> = ({
     const put = (automation: any) => {
       const key = String(
         automation?.id ||
-        automation?.automation_id ||
-        `${automation?.name || 'automation'}-${automation?.timestamp || automation?.created_at || ''}`,
+          automation?.automation_id ||
+          `${automation?.name || 'automation'}-${automation?.timestamp || automation?.created_at || ''}`,
       );
       const existing = automationMap.get(key);
       if (!existing) {
@@ -604,62 +738,60 @@ const Container: React.FC<ContainerProps> = ({
   // Get state from Zustand/Dexie-backed UI state
   const selectedTeam = useUIStore((s: any) => s.selectedTeam);
   const selectedWorkspaceId = useUIStore((s: any) => s.selectedWorkspaceId);
-  const selectedWorkspace = React.useMemo(
-    () => {
-      const ws = dbWorkspaces.find((item: any) => item.id === selectedWorkspaceId) || null;
-      if (!ws) return null;
-      return {
-        ...(ws as any),
-        workspace_id: (ws as any).workspace_id || ws.id,
-        workspace_name: (ws as any).workspace_name || ws.workspaceName,
-        folders: [],
-        workspace_snippets: [],
-        workspace_automations: [],
-      } as any;
-    },
-    [dbWorkspaces, selectedWorkspaceId],
-  );
+  const selectedWorkspace = React.useMemo(() => {
+    const ws = dbWorkspaces.find((item: any) => item.id === selectedWorkspaceId) || null;
+    if (!ws) return null;
+    return {
+      ...(ws as any),
+      workspace_id: (ws as any).workspace_id || ws.id,
+      workspace_name: (ws as any).workspace_name || ws.workspaceName,
+      folders: [],
+      workspace_snippets: [],
+      workspace_automations: [],
+    } as any;
+  }, [dbWorkspaces, selectedWorkspaceId]);
   const selectedFolderId = useUIStore((s: any) => s.selectedFolderId);
-  const selectedFolder = React.useMemo(
-    () => {
-      const folder = dbFolders.find((item: any) => item.id === selectedFolderId) || null;
-      if (!folder) return null;
-      return {
-        ...(folder as any),
-        folder_id: (folder as any).folder_id || folder.id,
-        workspace_id: (folder as any).workspace_id || folder.workspaceId,
-      } as any;
-    },
-    [dbFolders, selectedFolderId],
-  );
+  const selectedFolder = React.useMemo(() => {
+    const folder = dbFolders.find((item: any) => item.id === selectedFolderId) || null;
+    if (!folder) return null;
+    return {
+      ...(folder as any),
+      folder_id: (folder as any).folder_id || folder.id,
+      workspace_id: (folder as any).workspace_id || folder.workspaceId,
+    } as any;
+  }, [dbFolders, selectedFolderId]);
   const selectedSnippetRawId = useUIStore((s: any) => s.selectedSnippetId);
-  const selectedSnippetRaw = React.useMemo(
-    () => {
-      const snippet = dbSnippets.find((item: any) => item.id === selectedSnippetRawId || (item as any).item || (item as any).snippet_id === selectedSnippetRawId) || null;
-      if (!snippet) return null;
-      return {
-        ...(snippet as any),
-        snippet_id: (snippet as any).snippet_id || snippet.id,
-      } as any;
-    },
-    [dbSnippets, selectedSnippetRawId],
-  );
+  const selectedSnippetRaw = React.useMemo(() => {
+    const snippet =
+      dbSnippets.find(
+        (item: any) =>
+          item.id === selectedSnippetRawId || (item as any).item || (item as any).snippet_id === selectedSnippetRawId,
+      ) || null;
+    if (!snippet) return null;
+    return {
+      ...(snippet as any),
+      snippet_id: (snippet as any).snippet_id || snippet.id,
+    } as any;
+  }, [dbSnippets, selectedSnippetRawId]);
   const snippetBreadCrum = useUIStore((s: any) => s.snippetBreadcrumb);
   const isCreatingNewItem = activeEditor?.id === 'new';
 
   // Guard the editor state with Zustand's activeEditor to prevent stale state bugs
   const selectedSnippet = activeEditor ? selectedSnippetRaw : null;
-  const isCreatingEditorView = activeEditor?.type === 'note' || activeEditor?.type === 'aiPrompt';
+  const isCreatingEditorView =
+    activeEditor?.type === 'note' ||
+    activeEditor?.type === 'aiPrompt' ||
+    activeEditor?.type === 'session' ||
+    activeEditor?.type === 'todo';
 
   const { theme } = useAppearance();
   const isDark = theme.isDark;
   const isFocusMode = useUIStore((s: any) => s.isFocusMode);
-  const isMac = (navigator.platform.toUpperCase().indexOf('MAC') >= 0);
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
   const isLinkEditModalOpen = useUIStore(s => s.activeEditor?.type === 'link');
   const linkEditPrefill = useUIStore((s: any) => s.linkEditPrefill);
   const todoCreatePrefill = useUIStore((s: any) => s.todoCreatePrefill);
-
 
   useEffect(() => {
     if (isSpreadsheetViewOpen) {
@@ -683,12 +815,11 @@ const Container: React.FC<ContainerProps> = ({
   const [isCheckingTutorial, setIsCheckingTutorial] = useState(true);
   const tutorialVideoSrc = 'https://drive.google.com/file/d/1IyGR9rKItnPPwXdw8RJkNcfnf7HNdfmz/view?usp=sharing';
 
-
-
   useEffect(() => {
     const checkTutorial = async () => {
       try {
         const completed = await isOnboardingCompleted();
+        setIsOnboardingDone(completed);
         if (completed) {
           setIsCheckingTutorial(false);
           return;
@@ -702,6 +833,14 @@ const Container: React.FC<ContainerProps> = ({
     };
     checkTutorial();
   }, []);
+
+  useEffect(() => {
+    if (showTutorial) {
+      isOnboardingCompleted().then(completed => {
+        setIsOnboardingDone(completed);
+      });
+    }
+  }, [showTutorial]);
 
   const handleCloseTutorial = useCallback(async () => {
     setShowTutorial?.(false);
@@ -724,15 +863,7 @@ const Container: React.FC<ContainerProps> = ({
     } catch (e) {
       console.error('[Container] Failed to trigger favorites sync:', e);
     }
-
   }, [reload, onTutorialTriggerConsumed]);
-
-
-
-
-
-
-
 
   // Load and sync favorites
   useEffect(() => {
@@ -775,7 +906,6 @@ const Container: React.FC<ContainerProps> = ({
     }
 
     if (hasUrlTrigger) {
-
       return;
     }
 
@@ -784,8 +914,6 @@ const Container: React.FC<ContainerProps> = ({
     useUIStore.getState().setSnippetBreadcrumb(null);
     useUIStore.getState().setSelectedFolderId(null);
     useUIStore.getState().setSelectedWorkspaceId(null);
-
-
 
     // dispatch(setShowTodosView(false)); // REMOVED: keep Todos open if user pinned it
 
@@ -812,10 +940,8 @@ const Container: React.FC<ContainerProps> = ({
     setTimeout(() => {
       if (searchbarRef.current) {
         if (!hasLockParam) {
-
           searchbarRef.current.lockCommand(null);
         } else {
-
         }
       }
     }, 50);
@@ -841,11 +967,7 @@ const Container: React.FC<ContainerProps> = ({
     }
   }, [activeView?.type]);
 
-
-
   const handleCloseLinkEditModal = () => {
-
-
     useUIStore.getState().setSelectedSnippetId(null); // Ensure snippet is deselected so editor mode exits and searchbar reappears
     useUIStore.getState().setView({ type: 'home' });
     // Reset search state to ensure we return to the Homepage view (no "Keep typing..." message)
@@ -877,8 +999,6 @@ const Container: React.FC<ContainerProps> = ({
   };
 
   const [userId, setUserId] = useState('');
-
-
 
   const viewMode = useUIStore((s: any) => s.viewMode);
   const triggerNotification = useNotification();
@@ -1085,7 +1205,12 @@ const Container: React.FC<ContainerProps> = ({
 
   // Ensure search bar is cleared when creating a new item (but NOT for AI/agent editors which manage their own input)
   useEffect(() => {
-    if (isCreatingNewItem && activeEditor?.type !== 'ai' && activeEditor?.type !== 'aiPrompt' && activeEditor?.type !== 'agent') {
+    if (
+      isCreatingNewItem &&
+      activeEditor?.type !== 'ai' &&
+      activeEditor?.type !== 'aiPrompt' &&
+      activeEditor?.type !== 'agent'
+    ) {
       searchbarRef.current?.clear();
     }
   }, [isCreatingNewItem, activeEditor?.type]);
@@ -1097,18 +1222,33 @@ const Container: React.FC<ContainerProps> = ({
     }
   }, [isLinkEditModalOpen]);
 
+  // Ensure search bar is cleared when session editor opens
+  useEffect(() => {
+    if (activeEditor?.type === 'session') {
+      searchbarRef.current?.clear();
+    }
+  }, [activeEditor?.type]);
+
+  // Close active editors when AI command is locked (navigating to AI Chat Agent)
+  useEffect(() => {
+    const isAiLocked =
+      suggestionState?.lockedCommand === 'ai' ||
+      suggestionState?.lockedCommand === 'gpt' ||
+      suggestionState?.lockedCommand === 'perplexity' ||
+      suggestionState?.lockedCommand === 'claude' ||
+      suggestionState?.lockedCommand === 'gemini';
+
+    if (isAiLocked && activeEditor && activeEditor.type !== 'ai') {
+      useUIStore.getState().closeEditor();
+    }
+  }, [suggestionState?.lockedCommand, activeEditor]);
+
   // CLEAR BREADCRUMB: Auto-switch back to home view when editor states are cleared
   useEffect(() => {
-    const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
+    const isEmbedded =
+      typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
     // If we're in noteEditor mode but all the editor states are cleared, go back to home
-    if (
-      activeEditor?.type === 'note' &&
-      !selectedSnippet &&
-      !isCreatingNewItem &&
-      !snippetBreadCrum &&
-      !isEmbedded
-    ) {
-
+    if (activeEditor?.type === 'note' && !selectedSnippet && !isCreatingNewItem && !snippetBreadCrum && !isEmbedded) {
       useUIStore.getState().setView({ type: 'home' });
     }
   }, [activeView?.type, selectedSnippet, isCreatingNewItem, snippetBreadCrum]);
@@ -1125,7 +1265,6 @@ const Container: React.FC<ContainerProps> = ({
       activeEditor?.type !== 'agent' &&
       activeEditor?.type !== 'todo'
     ) {
-
       useUIStore.getState().openEditor({ type: 'note', id: 'new' });
     }
   }, [isCreatingNewItem, activeView?.type]);
@@ -1196,10 +1335,14 @@ const Container: React.FC<ContainerProps> = ({
     (suggestionState?.value?.trim().length ?? 0) > 0 ||
     ((suggestionState?.selectedImagesCount ?? 0) > 0 && !suggestionState?.lockedCommand);
 
-  const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
+  const isEmbedded =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
 
   const shouldShowSuggestions =
-    !isEmbedded && (hasSearchTerm || suggestionState?.isVisible || isStoreLocked) && !isAiLocked && !isLinkEditModalOpen;
+    !isEmbedded &&
+    (hasSearchTerm || suggestionState?.isVisible || isStoreLocked) &&
+    !isAiLocked &&
+    !isLinkEditModalOpen;
 
   const displayHomeView =
     !isEmbedded &&
@@ -1216,7 +1359,8 @@ const Container: React.FC<ContainerProps> = ({
   const isBoardViewOpen = !!(
     !isStoreLocked &&
     suggestionState &&
-    (shouldShowSuggestions && suggestionState.isVisible !== false) &&
+    shouldShowSuggestions &&
+    suggestionState.isVisible !== false &&
     !suggestionState.isAtMenuOpen &&
     !suggestionState.isAutomationActive &&
     suggestionState.lockedCommand !== 'calendar' &&
@@ -1269,7 +1413,6 @@ const Container: React.FC<ContainerProps> = ({
         const user_id = await getUserId();
         setUserId(user_id);
       } catch (error) {
-
       } finally {
       }
     };
@@ -1310,7 +1453,6 @@ const Container: React.FC<ContainerProps> = ({
     useUIStore.getState().setSelectedWorkspaceId(workspaceToUse ? workspaceToUse.workspace_id : null);
     useUIStore.getState().setSelectedFolderId(null);
     useUIStore.getState().setSelectedSnippetId(null);
-
   };
 
   const handleAddLink = (folderId?: string, workspaceOverride?: Workspace | null) => {
@@ -1404,28 +1546,22 @@ const Container: React.FC<ContainerProps> = ({
     ],
   );
 
-  const handleHomeLinkEdit = useCallback(
-    (item: SnippetSuggestion) => {
-      const snippet = (item as any).item || (item as any).snippet;
-      if (!snippet) return;
+  const handleHomeLinkEdit = useCallback((item: SnippetSuggestion) => {
+    const snippet = (item as any).item || (item as any).snippet;
+    if (!snippet) return;
 
-      const category = (snippet.category || '').toLowerCase();
+    const category = (snippet.category || '').toLowerCase();
 
-
-
-      console.log('[handleHomeLinkEdit] Routing to LINK editor', { snippet });
-      // All link types - route to the unified link editor, identical to prompts
-      useUIStore.getState().openEditor({
-        type: 'link',
-        id: snippet.id || snippet.snippet_id || 'new',
-        props: {
-          snippet
-        }
-      });
-    },
-    [],
-  );
-
+    console.log('[handleHomeLinkEdit] Routing to LINK editor', { snippet });
+    // All link types - route to the unified link editor, identical to prompts
+    useUIStore.getState().openEditor({
+      type: 'link',
+      id: snippet.id || snippet.snippet_id || 'new',
+      props: {
+        snippet,
+      },
+    });
+  }, []);
 
   const handleRequestOpenUrls = useCallback(
     (urls: string[], title?: string) => {
@@ -1456,10 +1592,10 @@ const Container: React.FC<ContainerProps> = ({
       if (searchItem.category === 'session') {
         const resolved = await resolveEntityById(searchItem.snippet_id || searchItem.id);
         const sessionRecord = resolved?.entity as any;
-        
+
         let sessionUrls: string[] = [];
         let sessionNames: string[] = [];
-        
+
         if (sessionRecord && Array.isArray(sessionRecord.urls)) {
           sessionUrls = sessionRecord.urls.map((u: any) => u.url);
           sessionNames = sessionRecord.urls.map((u: any) => u.title || u.name || '');
@@ -1476,7 +1612,7 @@ const Container: React.FC<ContainerProps> = ({
         chrome.runtime.sendMessage({
           action: 'start_session',
           sessionId: searchItem.snippet_id || searchItem.id,
-          sessionName: searchItem.key || 'Untitled Tab group',
+          sessionName: searchItem.key || 'Untitled Tab Session',
           workspaceId: workspace?.workspace_id || null,
           folderId: folder?.folder_id || null,
           initialUrls: sessionUrls,
@@ -1501,8 +1637,6 @@ const Container: React.FC<ContainerProps> = ({
         useUIStore.getState().openEditor({ type: 'link', id: 'new', props: { editMode: true, snippet: searchItem } });
         return;
       }
-
-
 
       // 4. Default: Note Editor
       // Ensure searchbar is cleared when entering editor
@@ -1530,7 +1664,7 @@ const Container: React.FC<ContainerProps> = ({
         id: searchItem.snippet_id || searchItem.id || 'new',
         props: {
           snippet: searchItem,
-        }
+        },
       });
     },
     [handleRequestOpenUrls],
@@ -1601,7 +1735,9 @@ const Container: React.FC<ContainerProps> = ({
 
       const normalizedAuto = normalizeAutomationForExecution(automation);
 
-      useUIStore.getState().openEditor({ type: 'agent', id: 'new', isNew: true, props: { editMode: true, automation: normalizedAuto } });
+      useUIStore
+        .getState()
+        .openEditor({ type: 'agent', id: 'new', isNew: true, props: { editMode: true, automation: normalizedAuto } });
     },
     [normalizeAutomationForExecution],
   );
@@ -1686,11 +1822,31 @@ const Container: React.FC<ContainerProps> = ({
           await deleteSnippet(detail.snippetId);
         } else if (detail.snippetId.startsWith('note_')) {
           await deleteNote(detail.snippetId);
-        } else if (detail.snippetId.startsWith('link_') || detail.snippetId.startsWith('bookmark_') || detail.commandId === 'delete_link') {
+        } else if (
+          detail.snippetId.startsWith('link_') ||
+          detail.snippetId.startsWith('bookmark_') ||
+          (detail.commandId as string) === 'delete_link'
+        ) {
           await deleteLink(detail.snippetId);
-        } else if (detail.snippetId.startsWith('todo_') || detail.commandId === 'delete_todo') {
+        } else if (detail.snippetId.startsWith('todo_') || (detail.commandId as string) === 'delete_todo') {
           await deleteTodo(detail.snippetId);
           window.dispatchEvent(new CustomEvent('todosUpdated'));
+        } else if (detail.snippetId.startsWith('session_') || (detail.commandId as string) === 'delete_session') {
+          await deleteSession(detail.snippetId);
+        } else if (
+          detail.snippetId.startsWith('prompt_') ||
+          detail.snippetId.startsWith('aiPrompt_') ||
+          (detail.commandId as string) === 'delete_prompt'
+        ) {
+          await deleteAiPrompt(detail.snippetId);
+        } else if (
+          detail.snippetId.startsWith('agent_') ||
+          detail.snippetId.startsWith('chatAgent_') ||
+          (detail.commandId as string) === 'delete_agent'
+        ) {
+          await deleteChatAgent(detail.snippetId);
+        } else if (detail.snippetId.startsWith('automation_') || (detail.commandId as string) === 'delete_automation') {
+          await deleteAutomation(detail.snippetId);
         } else {
           await deleteSnippet(detail.snippetId);
         }
@@ -1710,7 +1866,6 @@ const Container: React.FC<ContainerProps> = ({
         ) {
           useUIStore.getState().setSelectedSnippetId(null);
           useUIStore.getState().setSnippetBreadcrumb(null);
-
         }
       } catch (error: any) {
         console.error('Delete failed, performing local fallback delete:', error);
@@ -1727,6 +1882,10 @@ const Container: React.FC<ContainerProps> = ({
           await db.links.delete(sid);
           await db.snippets.delete(sid);
           await db.todos.delete(sid);
+          await db.sessions.delete(sid);
+          await db.aiPrompts.delete(sid);
+          await db.chatAgents.delete(sid);
+          await db.automations.delete(sid);
           window.dispatchEvent(new CustomEvent('todosUpdated'));
         } catch (localErr) {
           console.error('Local fallback delete failed:', localErr);
@@ -1763,11 +1922,31 @@ const Container: React.FC<ContainerProps> = ({
         await deleteSnippet(detail.snippetId);
       } else if (detail.snippetId.startsWith('note_')) {
         await deleteNote(detail.snippetId);
-      } else if (detail.snippetId.startsWith('link_') || detail.snippetId.startsWith('bookmark_') || detail.commandId === 'delete_link') {
+      } else if (
+        detail.snippetId.startsWith('link_') ||
+        detail.snippetId.startsWith('bookmark_') ||
+        (detail.commandId as string) === 'delete_link'
+      ) {
         await deleteLink(detail.snippetId);
-      } else if (detail.snippetId.startsWith('todo_') || detail.commandId === 'delete_todo') {
+      } else if (detail.snippetId.startsWith('todo_') || (detail.commandId as string) === 'delete_todo') {
         await deleteTodo(detail.snippetId);
         window.dispatchEvent(new CustomEvent('todosUpdated'));
+      } else if (detail.snippetId.startsWith('session_') || (detail.commandId as string) === 'delete_session') {
+        await deleteSession(detail.snippetId);
+      } else if (
+        detail.snippetId.startsWith('prompt_') ||
+        detail.snippetId.startsWith('aiPrompt_') ||
+        (detail.commandId as string) === 'delete_prompt'
+      ) {
+        await deleteAiPrompt(detail.snippetId);
+      } else if (
+        detail.snippetId.startsWith('agent_') ||
+        detail.snippetId.startsWith('chatAgent_') ||
+        (detail.commandId as string) === 'delete_agent'
+      ) {
+        await deleteChatAgent(detail.snippetId);
+      } else if (detail.snippetId.startsWith('automation_') || (detail.commandId as string) === 'delete_automation') {
+        await deleteAutomation(detail.snippetId);
       } else {
         await deleteSnippet(detail.snippetId);
       }
@@ -1787,7 +1966,6 @@ const Container: React.FC<ContainerProps> = ({
       ) {
         useUIStore.getState().setSelectedSnippetId(null);
         useUIStore.getState().setSnippetBreadcrumb(null);
-
       }
     } catch (error: any) {
       console.error('Delete failed, performing local fallback delete:', error);
@@ -1804,6 +1982,10 @@ const Container: React.FC<ContainerProps> = ({
         await db.links.delete(sid);
         await db.snippets.delete(sid);
         await db.todos.delete(sid);
+        await db.sessions.delete(sid);
+        await db.aiPrompts.delete(sid);
+        await db.chatAgents.delete(sid);
+        await db.automations.delete(sid);
         window.dispatchEvent(new CustomEvent('todosUpdated'));
       } catch (localErr) {
         console.error('Local fallback delete failed:', localErr);
@@ -1817,14 +1999,19 @@ const Container: React.FC<ContainerProps> = ({
       }, 3000);
       reload();
     }
-  }, [deleteSnippet, deleteLink, deleteTodo, deleteNote, homeDeleteContext.detail, reload, selectedSnippet, selectedTeam]);
-
-
+  }, [
+    deleteSnippet,
+    deleteLink,
+    deleteTodo,
+    deleteNote,
+    homeDeleteContext.detail,
+    reload,
+    selectedSnippet,
+    selectedTeam,
+  ]);
 
   // Allow DefaultContainer (HomeView) to return focus back to the search bar
   const handleRequestFocusSearch = useCallback(() => {
-
-
     if (searchbarRef.current) {
       searchbarRef.current.focus();
     }
@@ -1842,9 +2029,6 @@ const Container: React.FC<ContainerProps> = ({
   }, []);
 
   // Global keyboard handler for closing command list with Escape/Backspace
-
-
-
 
   const handleInteractiveItemHighlight = useCallback((item: InteractiveItem | null) => {
     if (!searchbarRef.current) return;
@@ -1870,20 +2054,14 @@ const Container: React.FC<ContainerProps> = ({
       commandId: CommandId | LocalCommandId | 'ai',
       options?: { prompt?: string; files?: { base64: string; filename: string }[] },
     ) => {
-
-
+      console.log('[Container] handleCommandExecute called with:', commandId, options);
 
       const alreadyTracked = Boolean((options as any)?.__tracked);
       if (!alreadyTracked) {
-
       }
-
-
 
       // Close the Link Edit Modal first (explicit dispatch) before clearing other states
       if (isLinkEditModalOpen) {
-
-
       }
 
       // Explicitly clear any active editor states before running a command
@@ -1904,31 +2082,28 @@ const Container: React.FC<ContainerProps> = ({
         state: useDbStore.getState(),
         previouslySelectedFolder: null,
         services: getCommandServices(useDbStore.getState(), {
-
           toast: (msg, type) => triggerNotification(msg, type || 'info'),
           navigation: (view: any) => {
-
             // Handle specific view requests from commands
             if (view.kind === 'noteEditor') {
-
+              console.log('[Container] Navigation requested for noteEditor');
               useUIStore.getState().openEditor({ type: 'note', id: 'new', props: view.noteProps });
-
             } else if (view.kind === 'linkEditor') {
-
+              console.log('[Container] Navigation requested for linkEditor');
               useUIStore.getState().openEditor({ type: 'link', id: 'new', props: view.linkProps });
-
             } else if (view.kind === 'sessionEditor') {
-
               useUIStore.getState().openEditor({ type: 'session', id: 'new', props: view.sessionProps });
-
+            } else if (view.kind === 'folderEditor') {
+              useUIStore.getState().openCreateFolder();
             } else if (view.kind === 'agentPanel') {
-
               useUIStore.getState().openEditor({ type: 'agent', id: 'new', props: view.agentProps });
+            } else if (view.kind === 'custom') {
+              if (commandId === 'createprompt') {
+                useUIStore.getState().openCreateItem('aiPrompt', { id: 'new', props: {} });
+              }
             } else if (view.kind === 'store') {
-
               useUIStore.getState().setView({ type: 'store' });
             } else if (view.kind === 'allItems') {
-
               // Don't clear search bar - user can filter items using main searchbar
               setSuggestionState(null);
               useUIStore.getState().setView({ type: 'allItems', itemType: view.itemType });
@@ -1936,20 +2111,12 @@ const Container: React.FC<ContainerProps> = ({
               setTimeout(() => {
                 searchbarRef.current?.focus();
               }, 10);
-            } else if (view.kind === 'bulk') {
-
-              useUIStore.getState().setView({ type: 'bulk' });
-
-
             } else if (view.kind === 'createWorkspace') {
-
-              useUIStore.getState().setView({ type: 'createWorkspace' });
+              useUIStore.getState().openCreateWorkspace();
             } else if (view.kind === 'createFolder') {
-              useUIStore.getState().setView({ type: 'createFolder' });
+              useUIStore.getState().openCreateFolder();
             } else if (view.kind === 'workspaceShare') {
-
             } else if (commandId === 'showallnotes') {
-
               setSuggestionState(null);
               useUIStore.getState().setView({ type: 'allItems', itemType: 'notes' });
               // Ensure focus logic runs after render
@@ -1957,7 +2124,6 @@ const Container: React.FC<ContainerProps> = ({
                 searchbarRef.current?.focus();
               }, 10);
             } else if (commandId === 'showalllinks') {
-
               setSuggestionState(null);
               useUIStore.getState().setView({ type: 'allItems', itemType: 'links' });
               // Ensure focus logic runs after render
@@ -1969,8 +2135,6 @@ const Container: React.FC<ContainerProps> = ({
           reload: handleReload,
         }),
       };
-
-
 
       if (commandId === 'showallnotes') {
         useUIStore.getState().setView({ type: 'allItems', itemType: 'notes' });
@@ -1988,15 +2152,7 @@ const Container: React.FC<ContainerProps> = ({
 
       await commandRegistry.execute(commandId as string, context);
     },
-    [
-      triggerNotification,
-      handleReload,
-
-      isLoggedIn,
-      onNavigateToListView,
-
-      onCommandListCategoryChange,
-    ],
+    [triggerNotification, handleReload, isLoggedIn, onNavigateToListView, onCommandListCategoryChange],
   );
 
   // Handle Link Creation
@@ -2075,17 +2231,14 @@ const Container: React.FC<ContainerProps> = ({
     const chromeAny = (window as any).chrome;
     const cleanId = (id: string): string => {
       const idStr = String(id);
-      if (
-        idStr.includes('-') &&
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr)
-      ) {
+      if (idStr.includes('-') && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr)) {
         return idStr.split('-').slice(1).join('-');
       }
       return idStr;
     };
 
     try {
-      let snippetId = data.item?.id || data.item?.snippet_id;
+      const snippetId = data.item?.id || data.item?.snippet_id;
       if (!snippetId && data.type !== 'custom') throw new Error('Failed to identify item ID');
 
       let deadline = data.deadline || '';
@@ -2137,36 +2290,52 @@ const Container: React.FC<ContainerProps> = ({
       }
 
       // Save or Update todo
-      if (todoCreatePrefill?.todo_id || (todoCreatePrefill?.snippet_id && todoCreatePrefill?.is_todo_type)) {
-        const sid = String(todoCreatePrefill.snippet_id);
+      const existingTodoId =
+        data.todoId ||
+        todoCreatePrefill?.todo_id ||
+        (todoCreatePrefill?.snippet_id && todoCreatePrefill?.is_todo_type ? todoCreatePrefill.snippet_id : undefined);
+      if (existingTodoId) {
+        const sid = todoCreatePrefill?.snippet_id ? String(todoCreatePrefill.snippet_id) : '';
         const hasConfigIds = Array.isArray(data.selectedItems) && data.selectedItems.length > 0;
-        const configFromSelection = hasConfigIds ? {
-          id: (data.selectedItems as any[]).map((i: any) => {
-            return String(cleanId(i.id));
-          }),
-          title: data.title
-        } : {
-          id: [String(cleanId(sid))],
-          title: data.title
-        };
+        const configFromSelection = hasConfigIds
+          ? {
+              id: (data.selectedItems as any[]).map((i: any) => {
+                return String(cleanId(i.id));
+              }),
+              title: data.title,
+            }
+          : {
+              id: sid ? [String(cleanId(sid))] : [],
+              title: data.title,
+            };
 
-        if (sid.startsWith('local-')) {
+        console.log('[Container] Update Todo Details Received:', {
+          todo_id: existingTodoId,
+          sid,
+          title: data.title,
+          shortcut: data.shortcut,
+          tags: data.tags,
+        });
+
+        if (sid && sid.startsWith('local-')) {
           if (chromeAny?.storage?.local) {
             const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['local_todos'], resolve));
             const localTodos = result.local_todos || [];
             const updated = localTodos.map((t: any) =>
               String(t.snippet_id || t.id) === sid
                 ? {
-                  ...t,
-                  key: data.title,
-                  title: data.title,
-                  value: data.description,
-                  event_deadline: deadline,
-                  is_recurring: data.scheduleType === 'recurring',
-                  recurring_cycle: data.scheduleType === 'recurring' ? data.recurringCycle : null,
-                  is_anytime: isAnytime,
-                  config: configFromSelection,
-                }
+                    ...t,
+                    key: data.title,
+                    title: data.title,
+                    value: data.description,
+                    event_deadline: deadline,
+                    is_recurring: data.scheduleType === 'recurring',
+                    recurring_cycle: data.scheduleType === 'recurring' ? data.recurringCycle : null,
+                    is_anytime: isAnytime,
+                    config: configFromSelection,
+                    tags: data.tags || [],
+                    shortcut: data.shortcut || '',
+                  }
                 : t,
             );
             await new Promise<void>(resolve => chromeAny.storage.local.set({ local_todos: updated }, resolve));
@@ -2175,34 +2344,10 @@ const Container: React.FC<ContainerProps> = ({
           if (chromeAny?.storage?.local) {
             const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['local_todos'], resolve));
             const localTodos = result.local_todos || [];
+            const bestTodoId = existingTodoId;
             const updated = localTodos.map((t: any) =>
-              String(t.snippet_id || t.id) === sid
+              String(t.snippet_id || t.id || t.todo_id) === String(bestTodoId || sid)
                 ? {
-                  ...t,
-                  key: data.title,
-                  title: data.title,
-                  value: data.description,
-                  event_deadline: deadline,
-                  is_recurring: data.scheduleType === 'recurring',
-                  recurring_cycle: data.scheduleType === 'recurring' ? data.recurringCycle : null,
-                  is_anytime: isAnytime,
-                  config: configFromSelection,
-                }
-                : t,
-            );
-            await new Promise<void>(resolve => chromeAny.storage.local.set({ local_todos: updated }, resolve));
-          }
-
-          try {
-            const bestTodoId = todoCreatePrefill.todo_id;
-            const isNumeric = typeof bestTodoId === 'number' || (typeof bestTodoId === 'string' && !isNaN(Number(bestTodoId)) && !bestTodoId.includes('-'));
-
-            if (chromeAny?.storage?.local) {
-              const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['local_todos'], resolve));
-              const localTodos = result.local_todos || [];
-              const updated = localTodos.map((t: any) =>
-                String(t.snippet_id || t.id || t.todo_id) === String(bestTodoId || sid)
-                  ? {
                     ...t,
                     key: data.title,
                     title: data.title,
@@ -2210,17 +2355,26 @@ const Container: React.FC<ContainerProps> = ({
                     event_deadline: deadline,
                     is_recurring: data.scheduleType === 'recurring',
                     recurring_cycle: data.scheduleType === 'recurring' ? data.recurringCycle : null,
-                    is_done: todoCreatePrefill.is_done,
+                    is_done: todoCreatePrefill?.is_done || false,
                     config: configFromSelection,
+                    tags: data.tags || [],
+                    shortcut: data.shortcut || '',
                   }
-                  : t,
-              );
-              await new Promise<void>(resolve => chromeAny.storage.local.set({ local_todos: updated }, resolve));
-            }
+                : t,
+            );
+            await new Promise<void>(resolve => chromeAny.storage.local.set({ local_todos: updated }, resolve));
+          }
+
+          try {
+            const bestTodoId = existingTodoId;
             if (sid) {
-              await updateSnippet(sid, {
-                config: configFromSelection,
-              });
+              try {
+                await updateSnippet(sid, {
+                  config: configFromSelection,
+                });
+              } catch (updateErr) {
+                console.warn('[Container] updateSnippet failed (item may not be a snippet):', updateErr);
+              }
             }
           } catch (cloudError) {
             console.error('[Container] Cloud sync failed for edit:', cloudError);
@@ -2228,15 +2382,53 @@ const Container: React.FC<ContainerProps> = ({
 
           // Update Dexie database
           try {
-            const todoId = String(todoCreatePrefill.todo_id || sid);
+            const todoId = String(existingTodoId || sid);
+            const updateReferences =
+              Array.isArray(data.selectedItems) && data.selectedItems.length > 0
+                ? data.selectedItems.map((item: any) => ({
+                    type: item.category || 'snippet',
+                    id: item.id || item.snippet_id,
+                  }))
+                : [];
+            console.log('[Container] Dexie Update parameters:', {
+              todoId,
+              name: data.title,
+              tags: data.tags,
+              shortcut: data.shortcut,
+            });
             await db.todos.update(todoId, {
               name: data.title,
               description: data.description,
               scheduleTime: new Date(deadline).getTime(),
               recurringType: (data.recurringCycle as any) || undefined,
               scheduleType: data.scheduleType === 'recurring' ? 'recurring' : 'one-time',
-              updatedAt: Date.now()
+              references: updateReferences,
+              tagIds: data.tagIds || [],
+              shortcut: data.shortcut || '',
+              updatedAt: Date.now(),
             });
+            if (data.shortcut !== undefined) {
+              if (data.shortcut) {
+                await saveShortcut(todoId, todoId, data.shortcut, data.title, 'todo');
+              } else {
+                await clearShortcut(todoId, todoId, 'todo');
+              }
+            }
+            if (data.hotkey !== undefined) {
+              if (data.hotkey) {
+                await saveHotkey(todoId, todoId, data.hotkey, data.title, 'todo');
+              } else {
+                await clearHotkey(todoId, todoId, 'todo');
+              }
+            }
+            if (data.isFavorite !== undefined) {
+              const compoundId = getItemCompoundId({ id: todoId, _kind: 'todo' });
+              const currentFavs = useDbStore.getState().favorites || [];
+              const isFav = currentFavs.some((f: any) => f.itemId === compoundId);
+              if (data.isFavorite !== isFav) {
+                await toggleFavoriteRecord(compoundId, 'todo', data.title);
+              }
+            }
           } catch (dbError) {
             console.error('[Container] Failed to update Dexie todo:', dbError);
           }
@@ -2244,19 +2436,21 @@ const Container: React.FC<ContainerProps> = ({
           if (chromeAny?.runtime?.sendMessage) {
             chromeAny.runtime.sendMessage({
               action: 'schedule_todo_alarm',
-              todoId: String(todoCreatePrefill.todo_id || sid),
+              todoId: String(existingTodoId || sid),
               deadline: deadline || nowUtc(),
-              is_anytime: isAnytime
+              is_anytime: isAnytime,
             });
           }
         }
       } else if (['custom'].includes(data.type)) {
-        const storageResult = await new Promise<any>(resolve => chromeAny.storage.local.get(['lastNoteDestination', 'user', 'local_todos'], resolve));
+        const storageResult = await new Promise<any>(resolve =>
+          chromeAny.storage.local.get(['lastNoteDestination', 'user', 'local_todos'], resolve),
+        );
         const lastDest = storageResult.lastNoteDestination;
         const localTodos = storageResult.local_todos || [];
 
         let targetWorkspaceId = lastDest?.workspace_id;
-        let targetFolderId = lastDest?.folder_id;
+        const targetFolderId = lastDest?.folder_id;
 
         if (!targetWorkspaceId && dbWorkspaces.length > 0) {
           targetWorkspaceId = dbWorkspaces[0].id;
@@ -2273,10 +2467,24 @@ const Container: React.FC<ContainerProps> = ({
             data.scheduleType === 'recurring' ? 'recurring' : 'one-time',
             new Date(deadline).getTime(),
             data.scheduleType === 'recurring' ? data.recurringCycle : undefined,
-            data.description
+            data.description,
           );
           if (newTodo && newTodo.id) {
             todoIdVal = newTodo.id;
+            await db.todos.update(todoIdVal, {
+              tagIds: data.tagIds || [],
+              shortcut: data.shortcut || '',
+            });
+            if (data.shortcut) {
+              await saveShortcut(todoIdVal, todoIdVal, data.shortcut, data.title, 'todo');
+            }
+            if (data.hotkey) {
+              await saveHotkey(todoIdVal, todoIdVal, data.hotkey, data.title, 'todo');
+            }
+            if (data.isFavorite) {
+              const compoundId = getItemCompoundId({ id: todoIdVal, _kind: 'todo' });
+              await toggleFavoriteRecord(compoundId, 'todo', data.title);
+            }
           }
         } catch (dbError) {
           console.error('[Container] Failed to create Dexie todo (custom):', dbError);
@@ -2300,6 +2508,8 @@ const Container: React.FC<ContainerProps> = ({
           folder_id: targetFolderId || '',
           workspace_id: targetWorkspaceId || null,
           is_anytime: isAnytime,
+          tags: data.tags || [],
+          shortcut: data.shortcut || '',
         };
 
         await new Promise<void>(resolve =>
@@ -2311,37 +2521,41 @@ const Container: React.FC<ContainerProps> = ({
             action: 'schedule_todo_alarm',
             todoId: String(todoIdVal),
             deadline: deadline || nowUtc(),
-            is_anytime: isAnytime
+            is_anytime: isAnytime,
           });
         }
       } else {
         const rawId =
           String(snippetId).includes('-') &&
-            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(snippetId))
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(snippetId))
             ? String(snippetId).split('-').slice(1).join('-')
             : snippetId;
 
         const cat = data.type || 'note';
         const hasConfigIds = Array.isArray(data.selectedItems) && data.selectedItems.length > 0;
-        const configFromSelection = hasConfigIds ? {
-          id: (data.selectedItems as any[]).map((i: any) => {
-            return String(cleanId(i.id));
-          }),
-          title: data.title
-        } : (data.item?.config?.id ? {
-          id: (data.item.config.id as any[]).map(id => String(cleanId(id))),
-          title: data.title
-        } : {
-          id: [String(cleanId(rawId))],
-          title: data.title
-        });
+        const configFromSelection = hasConfigIds
+          ? {
+              id: (data.selectedItems as any[]).map((i: any) => {
+                return String(cleanId(i.id));
+              }),
+              title: data.title,
+            }
+          : data.item?.config?.id
+            ? {
+                id: (data.item.config.id as any[]).map(id => String(cleanId(id))),
+                title: data.title,
+              }
+            : {
+                id: [String(cleanId(rawId))],
+                title: data.title,
+              };
 
         const optimisticTask: any = {
           snippet_id: String(rawId),
           key: data.title,
           title: data.title,
-          value: (['automation', 'module', 'command', 'agent', 'chat_agent', 'install'].includes(cat))
-            ? (data.item?.id || data.item?.snippet_id || data.description)
+          value: ['automation', 'module', 'command', 'agent', 'chat_agent', 'install'].includes(cat)
+            ? data.item?.id || data.item?.snippet_id || data.description
             : data.description,
           category: cat,
           created_at: nowUtc(),
@@ -2351,8 +2565,9 @@ const Container: React.FC<ContainerProps> = ({
           is_todo_type: true,
           is_recurring: data.scheduleType === 'recurring',
           recurring_cycle: data.scheduleType === 'recurring' ? data.recurringCycle : null,
-          folder_id: data.item?.folder_id || '',
-          workspace_id: data.item?.workspace_id || null,
+          folder_id: data.folderId || data.item?.folder_id || '',
+          workspace_id: data.workspaceId || data.item?.workspace_id || null,
+          tagIds: data.tagIds || [],
           is_anytime: isAnytime,
           config: configFromSelection,
         };
@@ -2363,22 +2578,47 @@ const Container: React.FC<ContainerProps> = ({
           if (Array.isArray(data.selectedItems)) {
             references = data.selectedItems.map((item: any) => ({
               type: item.category || 'snippet',
-              id: item.id || item.snippet_id
+              id: item.id || item.snippet_id,
             }));
           } else if (data.item) {
-            references = [{
-              type: data.type || 'note',
-              id: rawId
-            }];
+            references = [
+              {
+                type: data.type || 'note',
+                id: rawId,
+              },
+            ];
           }
-          await createTodo(
+          const newTodo = await createTodo(
             data.title,
             references,
             data.scheduleType === 'recurring' ? 'recurring' : 'one-time',
             new Date(deadline).getTime(),
             data.scheduleType === 'recurring' ? data.recurringCycle : undefined,
-            data.description
+            data.description,
           );
+          if (newTodo && newTodo.id) {
+            const compoundId = getItemCompoundId({
+              id: newTodo.id,
+              workspace_id: data.workspaceId,
+              folder_id: data.folderId,
+              snippet: { id: newTodo.id, category: 'todo' },
+            });
+            await db.todos.update(newTodo.id, {
+              tagIds: data.tagIds || [],
+              workspaceId: data.workspaceId || null,
+              folderId: data.folderId || null,
+              shortcut: data.shortcut || '',
+            } as any);
+            if (data.shortcut) {
+              await saveShortcut(newTodo.id, compoundId, data.shortcut, data.title, 'todo');
+            }
+            if (data.hotkey) {
+              await saveHotkey(newTodo.id, compoundId, data.hotkey, 'todo');
+            }
+            if (data.isFavorite) {
+              await toggleFavoriteRecord(compoundId, 'todo', data.title);
+            }
+          }
         } catch (dbError) {
           console.error('[Container] Failed to create Dexie todo (selection):', dbError);
         }
@@ -2386,20 +2626,26 @@ const Container: React.FC<ContainerProps> = ({
         if (chromeAny?.storage?.local) {
           const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['local_todos'], resolve));
           const localTodos = result.local_todos || [];
-          await new Promise<void>(resolve => chromeAny.storage.local.set({ local_todos: [optimisticTask, ...localTodos] }, resolve));
+          await new Promise<void>(resolve =>
+            chromeAny.storage.local.set({ local_todos: [optimisticTask, ...localTodos] }, resolve),
+          );
         }
 
         const finalTask = { ...optimisticTask, todo_id: String(rawId) };
         const freshResult = await new Promise<any>(resolve => chromeAny.storage.local.get(['local_todos'], resolve));
         const freshTodos = (freshResult.local_todos || []).map((t: any) =>
-          t.snippet_id === String(rawId) ? finalTask : t
+          t.snippet_id === String(rawId) ? finalTask : t,
         );
         await new Promise<void>(resolve => chromeAny.storage.local.set({ local_todos: freshTodos }, resolve));
 
         if (rawId) {
-          await updateSnippet(rawId, {
-            config: configFromSelection,
-          });
+          try {
+            await updateSnippet(rawId, {
+              config: configFromSelection,
+            });
+          } catch (updateErr) {
+            console.warn('[Container] updateSnippet failed (item may not be a snippet):', updateErr);
+          }
         }
 
         if (chromeAny?.runtime?.sendMessage) {
@@ -2407,7 +2653,7 @@ const Container: React.FC<ContainerProps> = ({
             action: 'schedule_todo_alarm',
             todoId: String(rawId),
             deadline: deadline || nowUtc(),
-            is_anytime: isAnytime
+            is_anytime: isAnytime,
           });
         }
       }
@@ -2425,28 +2671,32 @@ const Container: React.FC<ContainerProps> = ({
   // Determines what to render in the main content area
   const renderMainContent = () => {
     // Priority -1: Sheet UI
+    let sheetBackground: React.ReactNode = null;
     if (isSpreadsheetViewOpen) {
-      return (
-        <div className="flex-1 w-full flex overflow-auto p-[1px]">
+      sheetBackground = (
+        <div className="flex-1 w-full flex overflow-auto p-[1px] relative">
           <SpreadsheetMainContainer
             onClose={onCloseSpreadsheetMainContainer}
             savedAutomations={savedAutomations}
             savedAgents={savedAiAgents}
-            installedModules={installedModules}
             onCreateOrganization={handleCreateOrganization}
             onOrganizationSettings={handleOrganizationSettings}
             onCreateWorkspace={onCreateWorkspace}
             isLoggedIn={isLoggedIn}
-            onRequireLogin={() => { }}
+            onRequireLogin={() => {}}
             onBoardViewRedirect={onBoardViewRedirect}
           />
         </div>
       );
+
+      // If we are not opening an overlay editor, just return the spreadsheet UI
+      if (!activeEditor?.props?.isOverlay) {
+        return sheetBackground;
+      }
     }
 
-
-
-    const isAiLocked = suggestionState?.lockedCommand === 'ai' ||
+    const isAiLocked =
+      suggestionState?.lockedCommand === 'ai' ||
       suggestionState?.lockedCommand === 'gpt' ||
       suggestionState?.lockedCommand === 'claude' ||
       suggestionState?.lockedCommand === 'perplexity' ||
@@ -2486,68 +2736,85 @@ const Container: React.FC<ContainerProps> = ({
       );
     }
 
-
-
     // Priority 1: Editor
-    const showEditor = activeEditor?.type === 'note';
+    const showEditor = activeEditor?.type === 'note' || activeEditor?.type === 'link';
 
-    if (activeEditor?.type === 'todo') {
-      const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
-      return (
-        <CreateTodoView
-          items={finalConvertibleItems}
-          onCreateTodo={async (data: any) => {
-            await handleCreateFromSelection(data);
-          }}
-          initialItem={todoCreatePrefill}
-          isEditMode={!!todoCreatePrefill?.todo_id}
-          onClose={() => {
-            useUIStore.getState().setTodoCreatePrefill(null);
-            useUIStore.getState().closeEditor();
-            useUIStore.getState().setView({ type: 'home' });
-            if (isEmbedded) {
-              window.parent.postMessage({ type: 'tasklabs:close-embed-creator' }, '*');
-            }
-          }}
-        />
-      );
-    }
-
-    if (activeEditor?.type === 'link') {
-      const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
-      return (
-        <div className={`flex-1 min-h-0 flex justify-center items-start ${isEmbedded ? 'pt-0 pb-0' : 'pt-[67px] pb-6'}`}>
-          {/* Invisible wrapper that centers exactly like the full 1000px modal */}
-          <div className="w-[calc(100%-48px)] max-w-[1000px] flex justify-center">
-            {/* The actual modal, which shrinks to fit its content and expands to the right */}
-            <div className={`max-h-[calc(100vh-134px)] h-fit min-h-[450px] w-fit max-w-full flex flex-col bg-[var(--color-editorBg)] rounded-xl border border-neutral-800 dark:border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] relative ${isEmbedded ? '' : '-translate-x-12'}`}>
-              <LinkEditorView
-                isOpen={true}
-                onClose={() => useUIStore.getState().closeEditor()}
-                link={activeEditor?.props?.snippet || activeLinkSnippet || null}
-                prefill={activeEditor?.props?.prefill || linkEditPrefill || null}
-                reload={reload}
-              />
-            </div>
+    if (activeEditor?.type === 'session') {
+      const editorComponent = (
+        <div className="flex-1 min-h-0 pt-6">
+          <div className="h-full w-full flex flex-col overflow-visible">
+            <SessionEditorView
+              isOpen={true}
+              onClose={() => useUIStore.getState().closeEditor()}
+              session={activeEditor?.props?.session || activeEditor?.props?.snippet || null}
+              prefill={activeEditor?.props?.prefill || null}
+              reload={reload}
+            />
           </div>
         </div>
       );
+
+      if (activeEditor?.props?.isOverlay && sheetBackground) {
+        return (
+          <div className="relative w-full h-full">
+            {sheetBackground}
+            <div className="absolute inset-0 z-[1000] backdrop-blur-sm bg-black/20 flex flex-col">
+              {editorComponent}
+            </div>
+          </div>
+        );
+      }
+
+      return editorComponent;
     }
 
-    if (activeEditor?.type === 'session') {
-      const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
+    if (activeEditor?.type === 'todo') {
       return (
-        <div className={`flex-1 min-h-0 flex justify-center items-start ${isEmbedded ? 'pt-0 pb-0' : 'pt-[67px] pb-6'}`}>
-          <div className="w-[calc(100%-48px)] max-w-[1000px] flex justify-center">
-            <div className={`max-h-[calc(100vh-134px)] h-fit min-h-[450px] w-fit max-w-full flex flex-col bg-[var(--color-editorBg)] rounded-xl border border-neutral-800 dark:border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] relative ${isEmbedded ? '' : '-translate-x-12'}`}>
-              <SessionEditorView
-                isOpen={true}
-                onClose={() => useUIStore.getState().closeEditor()}
-                session={activeEditor?.props?.session || activeEditor?.props?.snippet || null}
-                prefill={activeEditor?.props?.prefill || null}
-                reload={reload}
-              />
-            </div>
+        <div className="flex-1 min-h-0 pt-6">
+          <div className="h-full w-full flex flex-col overflow-visible">
+            <CreateTodoView
+              items={finalConvertibleItems}
+              onCreateTodo={async (data: any) => {
+                await handleCreateFromSelection(data);
+                if (!data.createMore) {
+                  useUIStore.getState().setTodoCreatePrefill(null);
+                  useUIStore.getState().closeEditor();
+                  setActiveTodoId(null);
+                } else {
+                  useUIStore.getState().setTodoCreatePrefill(null);
+                  setActiveTodoId(null);
+                }
+              }}
+              initialItem={
+                todoCreatePrefill ||
+                activeEditor?.props?.prefill ||
+                activeEditor?.props?.item ||
+                activeEditor?.props?.snippet
+              }
+              isEditMode={
+                !!(
+                  todoCreatePrefill?.todo_id ||
+                  activeEditor?.props?.prefill?.todo_id ||
+                  activeEditor?.props?.item?.id ||
+                  activeEditor?.props?.snippet?.id ||
+                  (activeEditor?.id && activeEditor.id !== 'new' && activeEditor.id !== 'todo-create')
+                )
+              }
+              onClose={() => {
+                useUIStore.getState().setTodoCreatePrefill(null);
+                useUIStore.getState().closeEditor();
+                setActiveTodoId(null);
+              }}
+              existingTodos={dbTodos}
+              activeTodoId={
+                activeTodoId ||
+                (activeEditor?.id === 'new' || activeEditor?.id === 'todo-create' ? null : activeEditor?.id)
+              }
+              onLoadTodo={handleLoadTodo}
+              onDeleteTodo={handleDeleteTodoById}
+              hotkeysMap={dbHotkeysMap}
+              onUpdateItemField={handleUpdateTodoField}
+            />
           </div>
         </div>
       );
@@ -2555,7 +2822,6 @@ const Container: React.FC<ContainerProps> = ({
 
     // Agent Panel
     if (activeEditor?.type === 'agent') {
-
       const agentProps = activeEditor?.props || {};
       return (
         <div className="flex-1 min-h-0 w-full flex flex-col items-center transition-all duration-300 px-4">
@@ -2621,76 +2887,110 @@ const Container: React.FC<ContainerProps> = ({
         activeEditor?.props?.snippet?.type === 'snippet' ||
         activeEditor?.props?.category === 'snippet';
 
-      const hotkeySnippet = isSnippetMode && activeEditor?.id !== 'new'
-        ? useDbStore.getState().snippets.find(s => s.id === activeEditor?.id)
-        : null;
+      const hotkeySnippet =
+        isSnippetMode && activeEditor?.id !== 'new'
+          ? useDbStore.getState().snippets.find(s => s.id === activeEditor?.id)
+          : null;
 
-      if (activeEditor?.type === 'note') {
-        if (isSnippetMode) {
-          return (
-            <div className="flex-1 min-h-0 pt-6">
-              <div
-                className={`${isFocusMode || isCreatingEditorView ? 'h-full' : 'h-full'} w-full flex flex-col overflow-visible`}>
-                <EditSnippetScreen
-                  selectedSnippet={activeEditor?.props?.snippet || hotkeySnippet || effectiveSnippet}
-                  isCreatingNew={activeEditor?.id === 'new'}
-                  snippetBreadCrum={snippetBreadCrum}
-                  reload={handleReload}
-                  favoritesMapping={favoritesMapping}
-                  setFavoritesMapping={data => setFavoritesMapping(data)} // fix type mismatch if any
-                  onBack={() => {
-                    setSearchValue('');
-                    setSuggestionState(null);
-                    searchbarRef.current?.clear();
-                    useUIStore.getState().closeEditor();
-                    useUIStore.getState().setView({ type: 'home' });
+      if (activeEditor?.type === 'note' || activeEditor?.type === 'link') {
+        let editorContent: React.ReactNode = null;
 
-                  }}
-                  initialDraftKey={activeEditor?.props?.initialDraftKey}
-                  initialDraftContent={activeEditor?.props?.initialDraftContent}
-                  category="snippet"
-                />
-              </div>
-            </div>
+        if (activeEditor?.type === 'link') {
+          editorContent = (
+            <LinkEditorView
+              isOpen={true}
+              onClose={() => {
+                useUIStore.getState().closeEditor();
+                if (!activeEditor?.props?.isOverlay) {
+                  setSearchValue('');
+                  setSuggestionState(null);
+                  searchbarRef.current?.clear();
+                  useUIStore.getState().setView({ type: 'home' });
+                }
+              }}
+              link={activeEditor?.props?.snippet || activeLinkSnippet || null}
+              prefill={activeEditor?.props?.prefill || linkEditPrefill || null}
+              reload={reload}
+            />
+          );
+        } else if (isSnippetMode) {
+          editorContent = (
+            <EditSnippetScreen
+              selectedSnippet={activeEditor?.props?.snippet || hotkeySnippet || effectiveSnippet}
+              isCreatingNew={activeEditor?.id === 'new'}
+              snippetBreadCrum={snippetBreadCrum}
+              reload={handleReload}
+              favoritesMapping={favoritesMapping}
+              setFavoritesMapping={data => setFavoritesMapping(data)} // fix type mismatch if any
+              onBack={() => {
+                useUIStore.getState().closeEditor();
+                if (!activeEditor?.props?.isOverlay) {
+                  setSearchValue('');
+                  setSuggestionState(null);
+                  searchbarRef.current?.clear();
+                  useUIStore.getState().setView({ type: 'home' });
+                }
+              }}
+              initialDraftKey={activeEditor?.props?.initialDraftKey}
+              initialDraftContent={activeEditor?.props?.initialDraftContent}
+              category="snippet"
+            />
           );
         } else {
+          editorContent = (
+            <NoteEditorView
+              noteId={activeEditor?.id === 'new' ? null : activeEditor?.id}
+              onBack={() => {
+                useUIStore.getState().closeEditor();
+                if (!activeEditor?.props?.isOverlay) {
+                  setSearchValue('');
+                  setSuggestionState(null);
+                  searchbarRef.current?.clear();
+                  useUIStore.getState().setView({ type: 'home' });
+                }
+              }}
+              initialDraftKey={
+                activeEditor?.props?.initialDraftKey ||
+                activeEditor?.props?.snippet?.title ||
+                activeEditor?.props?.snippet?.name ||
+                activeEditor?.props?.snippet?.key
+              }
+              initialDraftContent={
+                activeEditor?.props?.initialDraftContent ||
+                activeEditor?.props?.snippet?.body ||
+                activeEditor?.props?.snippet?.content ||
+                activeEditor?.props?.snippet?.value
+              }
+            />
+          );
+        }
+
+        if (activeEditor?.props?.isOverlay && sheetBackground) {
           return (
-            <div className="flex-1 min-h-0 pt-6">
-              <div
-                className={`${isFocusMode || isCreatingEditorView ? 'h-full' : 'h-full  '} w-full flex flex-col overflow-visible`}>
-                <NoteEditorView
-                  noteId={activeEditor?.id === 'new' ? null : activeEditor?.id}
-                  onBack={() => {
-                    setSearchValue('');
-                    setSuggestionState(null);
-                    searchbarRef.current?.clear();
-                    useUIStore.getState().closeEditor();
-                    useUIStore.getState().setView({ type: 'home' });
-                  }}
-                  initialDraftKey={
-                    activeEditor?.props?.initialDraftKey ||
-                    activeEditor?.props?.snippet?.title ||
-                    activeEditor?.props?.snippet?.name ||
-                    activeEditor?.props?.snippet?.key
-                  }
-                  initialDraftContent={
-                    activeEditor?.props?.initialDraftContent ||
-                    activeEditor?.props?.snippet?.body ||
-                    activeEditor?.props?.snippet?.content ||
-                    activeEditor?.props?.snippet?.value
-                  }
-                />
+            <div className="relative w-full h-full">
+              {sheetBackground}
+              <div className="absolute inset-0 z-[1000] backdrop-blur-sm bg-black/20 flex flex-col">
+                <div className="flex-1 min-h-0 pt-6">
+                  <div className={`${isFocusMode || isCreatingEditorView ? 'h-full' : 'h-full'} w-full flex flex-col overflow-visible bg-[var(--color-appBg)]`}>
+                    {editorContent}
+                  </div>
+                </div>
               </div>
             </div>
           );
         }
+
+        return (
+          <div className="flex-1 min-h-0 pt-6">
+            <div className={`${isFocusMode || isCreatingEditorView ? 'h-full' : 'h-full  '} w-full flex flex-col overflow-visible`}>
+              {editorContent}
+            </div>
+          </div>
+        );
       }
     }
 
-
-
     // Priority 2: Absolute Persistent Search Suggestions (Overlays secondary views)
-
 
     const isBoardSlashDropdownActive = (() => {
       const val = (suggestionState?.value || '').replace(/\u00A0/g, ' ');
@@ -2739,9 +3039,11 @@ const Container: React.FC<ContainerProps> = ({
             )
           ) : (
             <BoardView
+              ref={boardViewRef}
               state={suggestionState}
               unfilteredSuggestions={unfilteredSuggestionsRef.current}
               isLoggedIn={isLoggedIn}
+              onSheetRedirect={onOpenSpreadsheetMainContainer}
               onClose={() => {
                 const shorthandFilters = ['/a', '/t', '/n', '/s', '/p', '/l', '/c', '/b'];
                 if (shorthandFilters.includes(searchValue.trim().toLowerCase())) {
@@ -2753,12 +3055,15 @@ const Container: React.FC<ContainerProps> = ({
                 }
                 handleGoHome();
               }}
-              onExecuteItem={(item) => {
+              onExecuteItem={(item: any) => {
                 const cmdDef = item.command || item;
                 const cmdId = cmdDef.id || item.id;
                 const urlTemplate = cmdDef.urlTemplate || '';
-                const isAiCommand = cmdId === 'ai' || ['gpt', 'claude', 'perplexity', 'gemini'].includes(cmdId) || cmdDef.category === 'ai';
-                
+                const isAiCommand =
+                  cmdId === 'ai' ||
+                  ['gpt', 'claude', 'perplexity', 'gemini'].includes(cmdId) ||
+                  cmdDef.category === 'ai';
+
                 if (item._kind === 'command' && (isAiCommand || (urlTemplate && urlTemplate.includes('{query}')))) {
                   console.log('[Container] BoardView command clicked, locking command:', cmdId);
                   searchbarRef.current?.lockCommand(cmdId);
@@ -2814,50 +3119,22 @@ const Container: React.FC<ContainerProps> = ({
       );
     }
 
-
-
     // Priority 2.5: All Items View (Bookmarks only)
     if (activeView?.type === 'allItems') {
       if ((activeView as any)?.itemType === 'bookmarks') {
-        return (
-          <div className="flex-1 min-h-0 h-[90%] w-full">
-
-          </div>
-        );
+        return <div className="flex-1 min-h-0 h-[90%] w-full"></div>;
       }
     }
 
     // Priority 3.5: Organization Panels
     // OrganizationSettings panel removed
 
-    if (activeView?.type === 'createWorkspace') {
-      return (
-        <div 
-          className="fixed top-0 bottom-0 right-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          style={{ left: showSidebarColumn ? '280px' : '0px' }}
-        >
-          <div className="w-[500px] h-[340px] relative rounded-xl overflow-hidden shadow-2xl flex flex-col translate-x-[8px]">
-            <CreateWorkspacePanel
-              onClose={() => {
-                useUIStore.getState().setView({ type: 'home' });
-              }}
-              onSuccess={(id, name) => {
-                console.log(`Created Workspace ${name} (${id})`);
-                useUIStore.getState().setView({ type: 'home' });
-              }}
-            />
-          </div>
-        </div>
-      );
-    }
-
     if (activeView?.type === 'createFolder') {
       return (
-        <div 
-          className="fixed top-0 bottom-0 right-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          style={{ left: showSidebarColumn ? '280px' : '0px' }}
-        >
-          <div className="w-[500px] h-[400px] relative rounded-xl overflow-hidden shadow-2xl flex flex-col translate-x-[8px]">
+        <div
+          className="fixed top-0 bottom-0 right-0 z-[100] flex items-start pt-[15vh] justify-center pointer-events-none"
+          style={{ left: showSidebarColumn ? '280px' : '0px' }}>
+          <div className="w-[500px] h-[400px] pointer-events-auto relative bg-[var(--color-editorBg)] rounded-xl border border-neutral-800 dark:border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden translate-x-[8px]">
             <CreateFolderPanel
               onClose={() => {
                 useUIStore.getState().setView({ type: 'home' });
@@ -2872,24 +3149,44 @@ const Container: React.FC<ContainerProps> = ({
       );
     }
 
+    if (activeView?.type === 'createWorkspace') {
+      return (
+        <div
+          className="fixed top-0 bottom-0 right-0 z-[100] flex items-start pt-[15vh] justify-center pointer-events-none"
+          style={{ left: showSidebarColumn ? '280px' : '0px' }}>
+          <div className="w-[500px] h-[340px] pointer-events-auto relative bg-[var(--color-editorBg)] rounded-xl border border-neutral-800 dark:border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden translate-x-[8px]">
+            <CreateWorkspacePanel
+              onClose={() => {
+                useUIStore.getState().setView({ type: 'home' });
+              }}
+              onSuccess={(id, name) => {
+                console.log(`Created Workspace ${name} (${id})`);
+                useUIStore.getState().setView({ type: 'home' });
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
+
     if (activeView?.type === 'workspaceShare') {
       return null;
     }
-
-
-
-
 
     if (activeView?.type === 'settings') {
       // Map { type:'settings', section:'...' } → the view.kind shape that SettingsLayout expects.
       const _settingsSection = (activeView as any).section as string | undefined;
       const _settingsView: any =
-        _settingsSection === 'allWorkspaces' ? { kind: 'allWorkspaces' } :
-          _settingsSection === 'googleDriveBackup' ? { kind: 'googleDriveBackup' } :
-            _settingsSection === 'importCloudData' ? { kind: 'importCloudData' } :
-              _settingsSection === 'workspaceSettings' ? { kind: 'workspaceSettings' } :
-                // profile, billing, appearance, searchView, todoSettings, generalSettings all go here
-                { kind: 'generalSettings', section: _settingsSection };
+        _settingsSection === 'allWorkspaces'
+          ? { kind: 'allWorkspaces' }
+          : _settingsSection === 'googleDriveBackup'
+            ? { kind: 'googleDriveBackup' }
+            : _settingsSection === 'importCloudData'
+              ? { kind: 'importCloudData' }
+              : _settingsSection === 'workspaceSettings'
+                ? { kind: 'workspaceSettings' }
+                : // profile, billing, appearance, searchView, todoSettings, generalSettings all go here
+                  { kind: 'generalSettings', section: _settingsSection };
 
       return (
         <div className="flex-1 min-h-0 pt-6">
@@ -2900,15 +3197,12 @@ const Container: React.FC<ContainerProps> = ({
       );
     }
 
-
-
     // Priority 4: Home View
     if (displayHomeView) {
       return (
         <div className="flex-1 min-h-0 h-[70%] w-full">
           <HomeView
             onRequestOpenUrls={handleRequestOpenUrls}
-
             ref={homeViewRef}
             onQuickCommandSelect={commandId => {
               const localDef = findCommandByAnyId(commands, commandId);
@@ -2940,17 +3234,23 @@ const Container: React.FC<ContainerProps> = ({
             onRequestFocusSearch={handleRequestFocusSearch}
             onCommandPreview={cmd => searchbarRef.current?.previewCommand(cmd as any)}
             isCommandLocked={!!suggestionState?.lockedCommand}
-
             isSuggestionVisible={suggestionState?.isVisible}
             inlineNotification={inlineNotification}
             onNavigateToListView={onNavigateToListView}
             isLoggedIn={isLoggedIn}
+            onOpenContextMenu={(x, y, fav) => boardViewRef.current?.openContextMenu?.(x, y, fav)}
           />
+          <div className="hidden">
+            <BoardView
+              ref={boardViewRef}
+              state={suggestionState}
+              unfilteredSuggestions={unfilteredSuggestionsRef.current}
+              isLoggedIn={isLoggedIn}
+            />
+          </div>
         </div>
       );
     }
-
-
 
     if (isEmbedded) {
       return null;
@@ -2995,7 +3295,16 @@ const Container: React.FC<ContainerProps> = ({
           isSuggestionVisible={suggestionState?.isVisible}
           onNavigateToListView={onNavigateToListView}
           isLoggedIn={isLoggedIn}
+          onOpenContextMenu={(x, y, fav) => boardViewRef.current?.openContextMenu?.(x, y, fav)}
         />
+        <div className="hidden">
+          <BoardView
+            ref={boardViewRef}
+            state={suggestionState}
+            unfilteredSuggestions={unfilteredSuggestionsRef.current}
+            isLoggedIn={isLoggedIn}
+          />
+        </div>
       </div>
     );
   };
@@ -3017,7 +3326,6 @@ const Container: React.FC<ContainerProps> = ({
         state.value !== prevState.value ||
         state.highlightIndex !== prevState.highlightIndex ||
         state.isAtMenuOpen !== prevState.isAtMenuOpen ||
-
         state.isAutomationActive !== prevState.isAutomationActive ||
         state.selectedAIs?.length !== prevState.selectedAIs?.length ||
         JSON.stringify(state.selectedAIs) !== JSON.stringify(prevState.selectedAIs) ||
@@ -3043,7 +3351,7 @@ const Container: React.FC<ContainerProps> = ({
       }
 
       // 3. Only notify parent of menu visibility changes to avoid re-rendering App on item highlight
-      const isMenuOpen = !!(state?.isAtMenuOpen);
+      const isMenuOpen = !!state?.isAtMenuOpen;
       if (isMenuOpen !== prevIsMenuOpenRef.current) {
         prevIsMenuOpenRef.current = isMenuOpen;
         onMenuStateChange?.(isMenuOpen);
@@ -3083,12 +3391,7 @@ const Container: React.FC<ContainerProps> = ({
   // When a command is locked (e.g. /ai), close any active editor so the user sees the command interface
   useEffect(() => {
     if (suggestionState?.lockedCommand && !isLinkEditModalOpen) {
-      if (
-        activeEditor?.type === 'note' ||
-        activeEditor?.type === 'link' ||
-        activeView?.type === 'bulk'
-      ) {
-
+      if (activeEditor?.type === 'note' || activeEditor?.type === 'link' || activeView?.type === 'bulk') {
         useUIStore.getState().setView({ type: 'home' });
       }
     }
@@ -3096,13 +3399,10 @@ const Container: React.FC<ContainerProps> = ({
 
   const handleSearchbarFocusChange = useCallback(
     (direction: 'up' | 'down') => {
-
       if (direction === 'down') {
         // DefaultContainer handles its own navigation via global keydown listener
         // No need to call focusFirstItem() here - it causes focus to reset to index 0
-
       } else if (direction === 'up') {
-
       }
     },
     [displayHomeView],
@@ -3110,9 +3410,7 @@ const Container: React.FC<ContainerProps> = ({
 
   // Promise Queue
 
-  const handleCommandExecuteLog = (commandId: string) => {
-
-  };
+  const handleCommandExecuteLog = (commandId: string) => {};
 
   const handleStoreClose = useCallback(() => {
     useUIStore.getState().setView({ type: 'searchSuggestions' });
@@ -3124,35 +3422,74 @@ const Container: React.FC<ContainerProps> = ({
   }, []);
 
   const handleToggleFavorite = useCallback(
-    async (item: SnippetSuggestion | any) => {
-      // Use userId for global favorites
+    async (item: any) => {
       if (!userId) {
         triggerNotification('Please sign in to manage favorites', 'error');
         return;
       }
       try {
         let itemId = '';
-        let itemType: 'command' | 'snippet' = 'snippet';
+        let itemType = 'snippet';
 
         // Check if it's a command
-        const isCommand = item.source === 'last_used' || (item.label && item.id && !(item as any).item || (item as any).snippet) || item.id === 'ai';
+        const isCommand =
+          item.source === 'last_used' ||
+          item.id === 'ai' ||
+          item.type === 'command' ||
+          item._kind === 'command' ||
+          item.category === 'command';
 
         if (isCommand) {
           itemType = 'command';
           itemId = item.id;
-        } else if ((item as any).item || (item as any).snippet) {
-          // It's a snippet suggestion
-          itemType = 'snippet';
-          itemId = (item as any).item || (item as any).snippet.snippet_id || (item as any).item || (item as any).snippet.id;
-        } else if (item.id && (item._kind === 'snippet' || item._kind === 'link' || item.type === 'link' || item.type === 'snippet' || item.category === 'link' || item.category === 'snippet')) {
-          // It's a snippet/link record directly
-          itemType = 'snippet';
-          itemId = item.id;
+        } else {
+          // Unwrap the item if it's a wrapper
+          const actualItem = item.item || item.snippet || item.session || item.data || item;
+          const category = (actualItem.category || item.category || item._kind || item.type || '').toLowerCase();
+
+          if (category === 'link') {
+            itemType = 'link';
+          } else if (category === 'note') {
+            itemType = 'note';
+          } else if (category === 'session' || category === 'sessions' || category === 'tabgroup') {
+            itemType = 'session';
+          } else if (category === 'snippet') {
+            itemType = 'snippet';
+          } else if (category === 'chat_agent' || category === 'agent') {
+            itemType = 'chat_agent';
+          } else if (category === 'aiprompt' || category === 'prompt') {
+            itemType = 'aiPrompt';
+          } else if (category === 'automation') {
+            itemType = 'automation';
+          } else {
+            itemType = 'note'; // Fallback
+          }
+          itemId =
+            actualItem.snippet_id ||
+            actualItem.id ||
+            actualItem.session_id ||
+            actualItem.todo_id ||
+            item.session?.id ||
+            '';
         }
-        
+
         itemId = extractSnippetIdFromCompoundId(itemId);
 
-        const label = item.label || (item as any).item || (item as any).snippet?.key || (item as any).item || (item as any).snippet?.title || (item as any).item || (item as any).snippet?.name || item.key || item.title || item.name || '';
+        if (!itemId) {
+          triggerNotification('Could not resolve item ID to favorite', 'error');
+          return;
+        }
+
+        const label =
+          item.label ||
+          item.snippet?.key ||
+          item.snippet?.title ||
+          item.snippet?.name ||
+          item.key ||
+          item.title ||
+          item.name ||
+          '';
+
         await toggleFavoriteRecord(userId || 'local_user', itemId, itemType, label);
         triggerNotification('Favorites updated', 'success');
       } catch (error) {
@@ -3163,13 +3500,8 @@ const Container: React.FC<ContainerProps> = ({
     [userId, triggerNotification],
   );
 
-
-
-
-
   const handleLockedCommandChangeInternal = useCallback(
     (cmd: any) => {
-
       if (cmd === null && activeEditor?.type === 'ai') {
         // When clearing an AI command, close editor and return to home view
         useUIStore.getState().closeEditor();
@@ -3204,9 +3536,8 @@ const Container: React.FC<ContainerProps> = ({
             <Searchbar
               ref={searchbarRef}
               savedAiAgents={savedAiAgents}
-              hideDynamicIcon={
-                Boolean(
-                  suggestionState &&
+              hideDynamicIcon={Boolean(
+                suggestionState &&
                   (isStoreLocked || (shouldShowSuggestions && suggestionState.isVisible !== false)) &&
                   !suggestionState.isAtMenuOpen &&
                   !suggestionState.isAutomationActive &&
@@ -3214,13 +3545,16 @@ const Container: React.FC<ContainerProps> = ({
                   suggestionState.lockedCommand !== 'upload_drive' &&
                   (activeView?.type !== 'allItems' || isStoreLocked) &&
                   !isLinkEditModalOpen,
-                )
-              }
+              )}
               disableContextualPopup={true}
               placeholder={defaultPlaceholder}
               onSuggestionStateChange={handleSuggestionStateChange}
               onLockedCommandChange={handleLockedCommandChangeInternal}
-              lockedCommand={activeEditor?.type === 'ai' && !suggestionState?.lockedCommand ? 'ai' : (suggestionState?.lockedCommand || null)}
+              lockedCommand={
+                activeEditor?.type === 'ai' && !suggestionState?.lockedCommand
+                  ? 'ai'
+                  : suggestionState?.lockedCommand || null
+              }
               onSnippetSelect={handleSearchSnippetSelect}
               onAutomationSelect={handleAutomationSelect}
               onAutomationEdit={handleAutomationEdit}
@@ -3237,13 +3571,9 @@ const Container: React.FC<ContainerProps> = ({
               onRequestFocusChange={handleSearchbarFocusChange}
               onClearFolder={handleGoHome}
               onNavigateBack={handleNavigateBack}
-
-
               onRequestEditLink={handleHomeLinkEdit}
-
               onRequestSnippetDelete={handleHomeDeleteRequest as any}
               onToggleFavorite={handleToggleFavorite}
-
               onSearchbarFocus={onSearchbarFocus}
               isLoggedIn={isLoggedIn}
               onSaveAgent={() => {
@@ -3278,6 +3608,7 @@ const Container: React.FC<ContainerProps> = ({
     activeEditor?.type === 'agent' ||
     activeEditor?.type === 'note' ||
     activeEditor?.type === 'aiPrompt' ||
+    activeEditor?.type === 'todo' ||
     activeView?.type === 'store' ||
     activeView?.type === 'todo' ||
     (suggestionState?.lockedCommand as string) === 'ai';
@@ -3310,12 +3641,9 @@ const Container: React.FC<ContainerProps> = ({
 
   const isQueryBasedLockedCommand = Boolean(
     suggestionState?.lockedCommand &&
-    (
-      !isLocalCommandId(commands, suggestionState.lockedCommand) ||
-      suggestionState.requiresInlineQuery
-    ) &&
-    suggestionState.lockedCommand !== 'store' &&
-    suggestionState.lockedCommand !== 'ai'
+      (!isLocalCommandId(commands, suggestionState.lockedCommand) || suggestionState.requiresInlineQuery) &&
+      suggestionState.lockedCommand !== 'store' &&
+      suggestionState.lockedCommand !== 'ai',
   );
 
   return (
@@ -3325,42 +3653,48 @@ const Container: React.FC<ContainerProps> = ({
           ? { transform: 'translateX(-100px)' }
           : undefined
       }
-      className={`flex h-full flex-col w-full relative ${isFocusMode || isCreatingEditorView || isLinkEditModalOpen || activeView?.type === 'settings' || activeView?.type === 'createFolder' || activeView?.type === 'createWorkspace'
-        ? 'max-w-none mx-0 pt-0 pb-0 mt-0 h-full overflow-hidden'
-        : false
-          ? showSidebarColumn
-            ? 'w-full px-10 pt-4 pb-[5px] overflow-hidden'
-            : 'w-full pl-72 pr-10 pt-4 pb-[5px] overflow-hidden'
-          : isSpreadsheetViewOpen
-            ? 'w-full mx-auto pr-0 pt-0 pb-0 mt-0 h-full overflow-hidden'
-            : activeEditor?.type === 'agent'
-              ? 'max-w-5xl mx-auto pt-[14vh] pb-[5px] min-[1600px]:max-w-6xl min-[1800px]:max-w-7xl max-[1480px]:max-w-4xl max-[1370px]:max-w-3xl max-[1270px]:max-w-2xl h-[90vh] overflow-visible'
-              : isOrganizationPanelOpen && activeView?.type !== 'manageSubscription'
-                ? activeView?.type === 'subscriptions'
-                  ? 'max-w-6xl mx-auto pt-[6vh] pb-[5px] min-[1600px]:max-w-7xl w-full h-[90vh] overflow-visible'
-                  : 'max-w-5xl mx-auto pt-[14vh] pb-[5px] min-[1600px]:max-w-6xl min-[1800px]:max-w-7xl max-[1480px]:max-w-4xl max-[1370px]:max-w-3xl max-[1270px]:max-w-2xl h-[90vh] overflow-visible'
-                : activeView?.type === 'todo'
-                  ? 'max-w-4xl mx-auto pt-0 pb-[5px] min-[1600px]:max-w-5xl min-[1800px]:max-w-6xl max-[1480px]:max-w-3xl max-[1370px]:max-w-2xl max-[1270px]:max-w-xl h-full overflow-visible'
-                  : activeView?.type === 'store' || activeView?.type === 'manageSubscription'
-                    ? `pb-[5px] overflow-visible w-full mx-auto ${showSidebarColumn ? 'max-w-[1800px]' : 'max-w-4xl'} pt-[10vh] ${showSidebarColumn ? 'pl-[8%] pr-[340px]' : ''}`
-                    : activeEditor?.type === 'ai' || (suggestionState?.lockedCommand as string) === 'ai'
-                      ? `pb-[5px] overflow-visible w-full mx-auto max-w-2xl pt-[10vh]`
-                      : isQueryBasedLockedCommand
-                        ? `pb-[5px] overflow-visible w-full mx-auto max-w-2xl pt-[14vh]`
-                        : isNarrowView
-                          ? `max-w-[480px] mx-auto pt-[14vh] pb-[5px] min-[1600px]:max-w-[540px] min-[1800px]:max-w-2xl max-[1480px]:max-w-[440px] max-[1370px]:max-w-[400px] max-[1270px]:max-w-[360px] overflow-visible`
-                          : `max-w-[1200px] mx-auto pt-0 pb-0 mt-0 h-full px-8 min-[1600px]:max-w-[1400px] overflow-visible`
-        }`}>
+      className={`flex h-full flex-col w-full relative ${
+        isFocusMode ||
+        isCreatingEditorView ||
+        isLinkEditModalOpen ||
+        activeView?.type === 'settings' ||
+        activeView?.type === 'createFolder' ||
+        activeView?.type === 'createWorkspace'
+          ? 'max-w-none mx-0 pt-0 pb-0 mt-0 h-full overflow-hidden'
+          : false
+            ? showSidebarColumn
+              ? 'w-full px-10 pt-4 pb-[5px] overflow-hidden'
+              : 'w-full pl-72 pr-10 pt-4 pb-[5px] overflow-hidden'
+            : isSpreadsheetViewOpen
+              ? 'w-full mx-auto pr-0 pt-0 pb-0 mt-0 h-full overflow-hidden'
+              : activeEditor?.type === 'agent'
+                ? 'max-w-5xl mx-auto pt-[14vh] pb-[5px] min-[1600px]:max-w-6xl min-[1800px]:max-w-7xl max-[1480px]:max-w-4xl max-[1370px]:max-w-3xl max-[1270px]:max-w-2xl h-[90vh] overflow-visible'
+                : isOrganizationPanelOpen && activeView?.type !== 'manageSubscription'
+                  ? activeView?.type === 'subscriptions'
+                    ? 'max-w-6xl mx-auto pt-[6vh] pb-[5px] min-[1600px]:max-w-7xl w-full h-[90vh] overflow-visible'
+                    : 'max-w-5xl mx-auto pt-[14vh] pb-[5px] min-[1600px]:max-w-6xl min-[1800px]:max-w-7xl max-[1480px]:max-w-4xl max-[1370px]:max-w-3xl max-[1270px]:max-w-2xl h-[90vh] overflow-visible'
+                  : activeView?.type === 'todo' && !activeEditor
+                    ? 'max-w-4xl mx-auto pt-0 pb-[5px] min-[1600px]:max-w-5xl min-[1800px]:max-w-6xl max-[1480px]:max-w-3xl max-[1370px]:max-w-2xl max-[1270px]:max-w-xl h-full overflow-visible'
+                    : activeView?.type === 'store' || activeView?.type === 'manageSubscription'
+                      ? `pb-[5px] overflow-visible w-full mx-auto ${showSidebarColumn ? 'max-w-[1800px]' : 'max-w-4xl'} pt-[10vh] ${showSidebarColumn ? 'pl-[8%] pr-[340px]' : ''}`
+                      : activeEditor?.type === 'ai' || (suggestionState?.lockedCommand as string) === 'ai'
+                        ? `pb-[5px] overflow-visible w-full mx-auto max-w-2xl pt-[10vh]`
+                        : isQueryBasedLockedCommand
+                          ? `pb-[5px] overflow-visible w-full mx-auto max-w-2xl pt-[14vh]`
+                          : isNarrowView
+                            ? `max-w-[480px] mx-auto pt-[14vh] pb-[5px] min-[1600px]:max-w-[540px] min-[1800px]:max-w-2xl max-[1480px]:max-w-[440px] max-[1370px]:max-w-[400px] max-[1270px]:max-w-[360px] overflow-visible`
+                            : `max-w-[1200px] mx-auto pt-0 pb-0 mt-0 h-full px-8 min-[1600px]:max-w-[1400px] overflow-visible`
+      }`}>
       {!isOrganizationPanelOpen && !showTutorial && !isCheckingTutorial && (
         <div className={shouldHideHeader ? 'hidden pointer-events-none opacity-0 h-0 overflow-hidden' : ''}>
           {renderHeader()}
         </div>
       )}
 
-
-
       {/* Main Content Area - Hidden when sidebar search is focused or filter panel is open */}
-      {!showTutorial && !isCheckingTutorial && ((activeEditor?.type === 'agent' && !isAutomationActive) ||
+      {!showTutorial &&
+      !isCheckingTutorial &&
+      ((activeEditor?.type === 'agent' && !isAutomationActive) ||
         activeView?.type === 'todo' ||
         isSpreadsheetViewOpen ||
         !shouldHideMainContent) ? (
@@ -3381,7 +3715,6 @@ const Container: React.FC<ContainerProps> = ({
         }
       />
 
-
       {/* Save Agent Modal */}
       <AutomationSavePrompt
         isOpen={isAutomationSavePromptOpen}
@@ -3393,22 +3726,18 @@ const Container: React.FC<ContainerProps> = ({
       />
 
       {/* Tutorial Overlay */}
-      {showTutorial && (
+      {showTutorial && !isReturningUser && (
         <OnboardingCards
-          key="tutorial-overlay"
           onClose={handleCloseTutorial}
           isLoggedIn={isLoggedIn}
           isReturningUser={isReturningUser}
+          initialStep={isReturningUser ? 'presentation' : 'quote'}
         />
       )}
 
       {/* Onboarding Loader - shown during post-login draft processing */}
-
-
-
     </div>
   );
 };
 
 export default memo(Container);
-

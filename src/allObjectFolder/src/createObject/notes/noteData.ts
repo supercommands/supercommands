@@ -14,7 +14,7 @@ import Dexie from 'dexie';
 
 import type { NoteRecord, CreateNoteInput, UpdateNoteInput } from './noteTypes';
 import { generateEntityId } from '../../../../shared-components/utils';
-import { db } from '../../../../storage/indexDB/dbConfig';
+import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { normalizeNoteBody } from './noteHelpers';
 
@@ -84,19 +84,56 @@ export async function updateNote(noteId: string, input: UpdateNoteInput): Promis
   if (input.tagIds !== undefined) changes.tagIds = input.tagIds;
 
   try {
-    return await db.transaction('rw', db.notes, async () => {
-      const existing = await db.notes.get(noteId);
-      if (!existing) {
-        throw new Error('Note not found.');
+    return await db.transaction('rw', [db.notes, db.snippets, db.todos], async () => {
+      let existing = await db.notes.get(noteId);
+      if (existing) {
+        if (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) {
+          throw new ConflictError('Note was modified in another tab.', existing);
+        }
+        await db.notes.update(noteId, changes);
+        return { ...existing, ...changes } as NoteRecord;
       }
 
-      // Conflict detection
-      if (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) {
-        throw new ConflictError('Note was modified in another tab.', existing);
+      const existingSnippet = await db.snippets.get(noteId);
+      if (existingSnippet) {
+        const snippetChanges: any = {};
+        if (input.title !== undefined) snippetChanges.title = input.title.trim();
+        if (input.body !== undefined) snippetChanges.config = input.body;
+        if (input.workspaceId !== undefined) snippetChanges.workspaceId = input.workspaceId;
+        if (input.folderId !== undefined) snippetChanges.folderId = input.folderId;
+        await db.snippets.update(noteId, snippetChanges);
+        const configStr = snippetChanges.config ?? (typeof existingSnippet.config === 'string' ? existingSnippet.config : JSON.stringify(existingSnippet.config || ''));
+        return {
+          ...existingSnippet,
+          ...snippetChanges,
+          title: snippetChanges.title ?? existingSnippet.title,
+          body: configStr ?? '',
+          updatedAt: Date.now(),
+        } as any;
       }
 
-      await db.notes.update(noteId, changes);
-      return { ...existing, ...changes } as NoteRecord;
+      const existingTodo = await db.todos.get(noteId);
+      if (existingTodo) {
+        const todoChanges: any = {
+          updatedAt: Date.now(),
+        };
+        if (input.title !== undefined) todoChanges.name = input.title.trim();
+        if (input.body !== undefined) todoChanges.description = input.body;
+
+        await db.todos.update(noteId, todoChanges);
+        return {
+          id: noteId,
+          title: todoChanges.name ?? existingTodo.name,
+          body: todoChanges.description ?? existingTodo.description ?? '',
+          workspaceId: null,
+          folderId: null,
+          tagIds: [],
+          updatedAt: todoChanges.updatedAt,
+          createdAt: existingTodo.createdAt,
+        } as any;
+      }
+
+      throw new Error('Note not found.');
     });
   } catch (error: unknown) {
     if (error instanceof ConflictError) throw error;
@@ -111,7 +148,33 @@ export async function updateNote(noteId: string, input: UpdateNoteInput): Promis
  */
 export async function getNote(id: string): Promise<NoteRecord | undefined> {
   try {
-    return await db.notes.get(id);
+    const note = await db.notes.get(id);
+    if (note) return note;
+
+    const snippet = await db.snippets.get(id);
+    if (snippet) {
+      const configStr = typeof snippet.config === 'string' ? snippet.config : JSON.stringify(snippet.config || '');
+      return {
+        ...snippet,
+        body: configStr ?? '',
+      } as any;
+    }
+
+    const todo = await db.todos.get(id);
+    if (todo) {
+      return {
+        id: todo.id,
+        title: todo.name,
+        body: todo.description || '',
+        workspaceId: null,
+        folderId: null,
+        tagIds: [],
+        updatedAt: todo.updatedAt,
+        createdAt: todo.createdAt,
+      } as any;
+    }
+
+    return undefined;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';
     console.error(`[noteData.getNote] Failed: ${message}`);
@@ -175,7 +238,22 @@ export async function getNotesForFolder(workspaceId: string, folderId: string): 
  */
 export async function deleteNote(noteId: string): Promise<void> {
   try {
-    await db.notes.delete(noteId);
+    await deleteItemAssociations(noteId);
+    const note = await db.notes.get(noteId);
+    if (note) {
+      await db.notes.delete(noteId);
+      return;
+    }
+    const snippet = await db.snippets.get(noteId);
+    if (snippet) {
+      await db.snippets.delete(noteId);
+      return;
+    }
+    const todo = await db.todos.get(noteId);
+    if (todo) {
+      await db.todos.delete(noteId);
+      return;
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';
     console.error('[noteData.deleteNote] Failed:', message);

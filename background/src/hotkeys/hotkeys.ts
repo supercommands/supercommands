@@ -12,8 +12,51 @@ import { extractSnippetId as extractEntityId } from '@todos/todos';
 import { createNotification } from '@notifications/notifications';
 import { db } from '../../../src/storage/indexDB/dbConfig';
 import { resolveEntityById } from '../../../src/shared-components/utils/entityResolver';
+import { handleSessionMessage } from '@browserWindows/sessions';
 
-let cachedHotkeysMap: Record<string, { id: string, type: string }> | null = null;
+let cachedHotkeysMap: Record<string, { id: string; type: string }> | null = null;
+
+const extractSessionLaunchPayload = (sessionRecord: any) => {
+  let initialUrls: string[] = [];
+  let initialNames: string[] = [];
+
+  if (Array.isArray(sessionRecord?.urls)) {
+    sessionRecord.urls.forEach((entry: any) => {
+      const url = typeof entry === 'string' ? entry : entry?.url;
+      if (!url) return;
+      initialUrls.push(url);
+      initialNames.push(typeof entry === 'string' ? '' : entry?.title || entry?.name || '');
+    });
+  }
+
+  if (initialUrls.length === 0) {
+    const value = sessionRecord?.value;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          initialUrls = parsed.map((entry: any) => entry?.url || entry).filter(Boolean);
+          initialNames = parsed
+            .map((entry: any) => entry?.name || entry?.title || '')
+            .filter((_: any, index: number) => !!initialUrls[index]);
+        } else if (parsed && typeof parsed === 'object') {
+          if (Array.isArray(parsed.urls)) initialUrls = parsed.urls.filter(Boolean);
+          if (Array.isArray(parsed.names)) initialNames = parsed.names;
+        }
+      } catch {
+        if (value.startsWith('http')) {
+          initialUrls = [value];
+          initialNames = [''];
+        }
+      }
+    } else if (value && typeof value === 'object' && Array.isArray(value.urls)) {
+      initialUrls = value.urls.filter(Boolean);
+      initialNames = Array.isArray(value.names) ? value.names : [];
+    }
+  }
+
+  return { initialUrls, initialNames };
+};
 
 /**
  * Message handler for executing hotkeys. Supports triggering UI-bound commands
@@ -35,14 +78,15 @@ export function handleHotkeyMessage(
       return false; // synchronous
     }
 
-    db.userHotkeys.toArray()
+    db.userHotkeys
+      .toArray()
       .then(hotkeys => {
-        const hotkeysMap: Record<string, { id: string, type: string }> = {};
+        const hotkeysMap: Record<string, { id: string; type: string }> = {};
 
         hotkeys.forEach(hk => {
           hotkeysMap[hk.combination] = { id: hk.referenceId, type: hk.referenceType };
         });
-        
+
         cachedHotkeysMap = hotkeysMap;
         sendResponse({ hotkeysMap });
       })
@@ -55,14 +99,14 @@ export function handleHotkeyMessage(
 
   if (request.action === 'INVALIDATE_HOTKEYS_CACHE') {
     cachedHotkeysMap = null;
-    
+
     // Broadcast to all tabs to reload their local hotkeys map
-    chrome.tabs.query({}, (tabs) => {
+    chrome.tabs.query({}, tabs => {
       tabs.forEach(tab => {
         if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'RELOAD_HOTKEYS' }).catch(() => {});
       });
     });
-    
+
     sendResponse({ success: true });
     return false;
   }
@@ -72,8 +116,6 @@ export function handleHotkeyMessage(
     const senderTabId = sender.tab?.id;
     // For commands, automations, agents and modules, open the AltS_search_newtab page with trigger params (needs UI)
     if (['command', 'module', 'automation', 'agent', 'chat_agent'].includes(type)) {
-
-
       // Normalize ID (strip slashes and all common UI/internal prefixes)
       let normalizedId = String(id || '');
       if (normalizedId.startsWith('/')) normalizedId = normalizedId.substring(1);
@@ -113,13 +155,35 @@ export function handleHotkeyMessage(
         const actualEntityId = foundEntity.id || foundEntity.snippet_id || compoundId;
         const type = resolved.type;
 
+        if (type === 'session') {
+          const { initialUrls, initialNames } = extractSessionLaunchPayload(foundEntity);
+          const sessionRequest = {
+            action: 'start_session',
+            sessionId: actualEntityId,
+            sessionName: foundEntity.title || foundEntity.key || foundEntity.name || 'Untitled Tab Session',
+            workspaceId: foundEntity.workspaceId || foundEntity.workspace_id || null,
+            folderId: foundEntity.folderId || foundEntity.folder_id || null,
+            teamId: 'local',
+            storageMode: 'local',
+            initialUrls,
+            initialNames,
+            openSettings: foundEntity.sessionOpenSettings,
+            isInlineCreation: true,
+          };
+
+          const result = handleSessionMessage(sessionRequest, sender, sendResponse);
+          if (result !== undefined) {
+            return;
+          }
+        }
+
         // Helper function to extract URLs from a snippet/link/note/etc.
         const extractUrls = (entityData: any, entityType: string): string[] => {
           if (entityType === 'link' && Array.isArray(entityData?.urls)) {
-            return entityData.urls.map((u: any) => typeof u === 'string' ? u : u.url).filter(Boolean);
+            return entityData.urls.map((u: any) => (typeof u === 'string' ? u : u.url)).filter(Boolean);
           }
           if (entityType === 'session' && Array.isArray(entityData?.urls)) {
-            return entityData.urls.map((u: any) => typeof u === 'string' ? u : u.url).filter(Boolean);
+            return entityData.urls.map((u: any) => (typeof u === 'string' ? u : u.url)).filter(Boolean);
           }
 
           const value = entityData?.value;
@@ -216,9 +280,31 @@ export function handleHotkeyMessage(
         const actualEntityId = foundEntity.id || foundEntity.snippet_id || compoundId;
         const type = resolved.type;
 
+        if (type === 'session') {
+          const { initialUrls, initialNames } = extractSessionLaunchPayload(foundEntity);
+          const sessionRequest = {
+            action: 'start_session',
+            sessionId: actualEntityId,
+            sessionName: foundEntity.title || foundEntity.key || foundEntity.name || 'Untitled Tab Session',
+            workspaceId: foundEntity.workspaceId || foundEntity.workspace_id || null,
+            folderId: foundEntity.folderId || foundEntity.folder_id || null,
+            teamId: 'local',
+            storageMode: 'local',
+            initialUrls,
+            initialNames,
+            openSettings: foundEntity.sessionOpenSettings,
+            isInlineCreation: true,
+          };
+
+          const result = handleSessionMessage(sessionRequest, sender, sendResponse);
+          if (result !== undefined) {
+            return;
+          }
+        }
+
         const extractUrls = (entityData: any, entityType: string): string[] => {
           if (entityType === 'link' && Array.isArray(entityData?.urls)) {
-            return entityData.urls.map((u: any) => typeof u === 'string' ? u : u.url).filter(Boolean);
+            return entityData.urls.map((u: any) => (typeof u === 'string' ? u : u.url)).filter(Boolean);
           }
           if (entityType === 'session' && Array.isArray(entityData?.tabs)) {
             return entityData.tabs.map((t: any) => t.url).filter(Boolean);

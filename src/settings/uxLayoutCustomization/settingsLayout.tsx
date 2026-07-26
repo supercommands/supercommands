@@ -7,13 +7,14 @@ import {
   FiSearch,
   FiCreditCard,
   FiChevronDown,
+  FiChevronRight,
   FiArrowUpRight,
   FiCloud,
   FiX,
 } from 'react-icons/fi';
 import { FaUser, FaPalette, FaGithub } from 'react-icons/fa';
 
-import { getFaviconUrl } from '../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 import { StorageManager } from '../../storage/localStorage/storageManager';
 import { FEATURE_FLAGS } from '../../pages/AltS_search_newtab/src/utils/featureFlags';
 import { CMDOS_SIGN_UP_URL, checkHasCloudData } from '../../storage/API/core/api';
@@ -270,9 +271,9 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
               </div>
             </div>
           ) : (
-            <div className="flex flex-col gap-3 w-full">
+            <div className="flex flex-col gap-2 w-full">
               {/* Unified Login & GitHub Card Container */}
-              <div className="border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)] rounded-xl p-3 flex flex-col gap-2 shadow-sm">
+              <div className="border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)] rounded-xl p-2 flex flex-col gap-1 shadow-sm">
                 {/* 1. Login Row */}
                 {FEATURE_FLAGS.ENABLE_SHARING && (
                   <>
@@ -285,23 +286,17 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
                           window.open(CMDOS_SIGN_UP_URL, '_blank');
                         }
                       }}
-                      className="flex items-center gap-3 cursor-pointer group hover:opacity-80 transition-opacity text-left w-full"
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer group hover:bg-[var(--color-hoverBg)] transition-colors text-left w-full"
                     >
-                      <div className="w-8 h-8 rounded-full bg-indigo-500/25 border border-indigo-500/10 flex items-center justify-center shrink-0">
-                        <svg className="w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                        </svg>
-                      </div>
+                      <FaUser size={14} className="text-neutral-500 shrink-0" />
                       <div className="min-w-0 flex-grow">
-                        <div className="text-xs font-bold text-[var(--color-textPrimary)]">Login</div>
+                        <div className="text-xs font-semibold text-[var(--color-textPrimary)]">Login</div>
                       </div>
-                      <svg className="w-3.5 h-3.5 text-[var(--color-textSecondary)] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
+                      <FiChevronRight size={14} className="text-[var(--color-textMuted)] shrink-0" />
                     </div>
 
                     {/* Divider */}
-                    <div className="border-t border-[var(--color-borderDefault)] my-1" />
+                    <div className="border-t border-[var(--color-borderDefault)] my-0.5" />
                   </>
                 )}
 
@@ -310,16 +305,12 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
                   href="https://github.com/cmdOS-App/cmdOS"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-3 cursor-pointer group hover:opacity-80 transition-opacity text-left w-full"
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer group hover:bg-[var(--color-hoverBg)] transition-colors text-left w-full"
                 >
-                  <div className="w-8 h-8 rounded-full bg-neutral-800/80 border border-[var(--color-borderDefault)] flex items-center justify-center shrink-0">
-                    <FaGithub size={14} className="text-white" />
-                  </div>
+                  <FaGithub size={14} className="text-neutral-500 shrink-0" />
                   <div className="min-w-0 flex-grow">
-                    <div className="text-xs font-bold text-[var(--color-textPrimary)]">GitHub Repository</div>
-                    <div className="text-[9px] text-[var(--color-textSecondary)]">View the source code</div>
+                    <div className="text-xs font-semibold text-[var(--color-textPrimary)]">GitHub</div>
                   </div>
-                  <FiArrowUpRight className="text-indigo-400 shrink-0" size={14} />
                 </a>
               </div>
             </div>

@@ -34,6 +34,7 @@ import { getUserHotkey } from '../../../../../shared-components/hotkeys';
 import { getUserShortcut } from '../../../../../shared-components/shortcuts';
 import { saveHotkey as apiSaveHotkey } from '../../../../../shared-components/hotkeys';
 import { saveShortcut as apiSaveShortcut } from '../../../../../shared-components/shortcuts';
+import { normalizeShortcutTrigger } from '../../../../../shared-components/shortcuts/core/shortcutDbData';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
 
 
@@ -953,10 +954,10 @@ const AutomationDashboard: React.FC<AutomationDashboardProps> = ({
           const currentShortcut = shortcutsMap[compoundId] || (userId ? getUserShortcut(data.shortcuts, userId) : '');
 
           setHotkey(currentHotkey);
-          setEditedSlashCommand(currentShortcut.replace(/^\//, ''));
+          setEditedSlashCommand(normalizeShortcutTrigger(currentShortcut));
           setLastSavedValues({
             name: data.name || data.module_key || '',
-            slash: currentShortcut.replace(/^\//, ''),
+            slash: normalizeShortcutTrigger(currentShortcut),
             hotkey: currentHotkey,
           });
           setEditedName(data.name || data.module_key || '');
@@ -1075,10 +1076,9 @@ const AutomationDashboard: React.FC<AutomationDashboardProps> = ({
   };
 
   const handleShortcutChange = async (newShortcut: string) => {
-    setEditedSlashCommand(newShortcut);
+    const normalizedShortcut = normalizeShortcutTrigger(newShortcut);
+    setEditedSlashCommand(normalizedShortcut);
     try {
-      const normalizedShortcut = newShortcut ? (newShortcut.startsWith('/') ? newShortcut : `/${newShortcut}`) : '';
-
       const compoundId = getItemCompoundId({
         ...data,
         workspace_id: data.workspace_id || selectedWorkspaceId,
@@ -1645,6 +1645,4 @@ const CategoryCommandsView: React.FC<CategoryCommandsViewProps> = ({
 };
 
 export default MyAutomationsList;
-
-
 

@@ -429,11 +429,7 @@ const flattenNotesFromAllData = (rawData: unknown): NoteItem[] => {
     if (!note) return;
 
     // ALLOWED CATEGORIES: note, snippet, link
-    if (
-      note.category !== 'note' &&
-      note.category !== 'link' &&
-      note.category !== 'snippet'
-    ) {
+    if (note.category !== 'note' && note.category !== 'link' && note.category !== 'snippet') {
       return;
     }
 

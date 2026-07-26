@@ -105,8 +105,8 @@ export function useAutomationEditor(props: AutomationEditorProps) {
     const stepsChanged = JSON.stringify(automationSteps) !== lastSavedStepsRef.current;
     const workspaceChanged = workspaceId !== lastSavedWorkspaceIdRef.current;
     const folderChanged = folderId !== lastSavedFolderIdRef.current;
-    
-    const tagsChanged = 
+
+    const tagsChanged =
       tagIds.length !== lastSavedTagIdsRef.current.length ||
       [...tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
 
@@ -114,15 +114,15 @@ export function useAutomationEditor(props: AutomationEditorProps) {
   }, [automationName, automationSteps, workspaceId, folderId, tagIds]);
 
   const handleSave = useCallback(async (silent: boolean = false, overrideProps?: SharedProperties | null): Promise<boolean> => {
-    const { 
-      automationName: currentName, 
-      automationSteps: currentSteps, 
-      workspaceId: currentWsId, 
-      folderId: currentFId, 
-      tagIds: currentTIds, 
-      isInitialized: currentIsInit 
+    const {
+      automationName: currentName,
+      automationSteps: currentSteps,
+      workspaceId: currentWsId,
+      folderId: currentFId,
+      tagIds: currentTIds,
+      isInitialized: currentIsInit
     } = currentInputsRef.current;
-    
+
     const hasName = currentName.trim().length > 0;
     const hasSteps = currentSteps.length > 0;
 
@@ -145,7 +145,7 @@ export function useAutomationEditor(props: AutomationEditorProps) {
           if (activeAutomationIdRef.current === savingAutomationId) {
             activeAutomationIdRef.current = null;
             setActiveAutomationId(null);
-            
+
             lastSavedNameRef.current = '';
             lastSavedStepsRef.current = '[]';
             lastSavedWorkspaceIdRef.current = null;
@@ -258,7 +258,7 @@ export function useAutomationEditor(props: AutomationEditorProps) {
 
     savePromiseRef.current = performSave();
     return savePromiseRef.current;
-  }, []); 
+  }, []);
 
   const handleDelete = useCallback(async () => {
     const currentAutomationId = activeAutomationIdRef.current;
@@ -323,7 +323,7 @@ export function useAutomationEditor(props: AutomationEditorProps) {
   const handlePropertiesChange = useCallback((newProps: SharedProperties) => {
     const prevWsId = currentInputsRef.current.workspaceId;
     const prevFId = currentInputsRef.current.folderId;
-    
+
     let wId = prevWsId;
     let fId = prevFId;
     let tIds = currentInputsRef.current.tagIds;

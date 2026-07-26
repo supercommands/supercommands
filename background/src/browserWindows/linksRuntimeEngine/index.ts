@@ -7,7 +7,11 @@ import { tabPromptQueues, processTabQueue } from '@chatAgents/runtimeExecutionEn
 import { findMatchingTab } from '../chatRuntimeEngine';
 import { activeSessions } from '@browserWindows/sessions';
 
-export function handleLinksMessage(request: any, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void): boolean | undefined {
+export function handleLinksMessage(
+  request: any,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response: any) => void,
+): boolean | undefined {
   if (request.action === 'open_multiple_links') {
     const { links, delay = 200 } = request;
     if (!Array.isArray(links)) {

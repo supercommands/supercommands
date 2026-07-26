@@ -2,7 +2,9 @@ import type React from 'react';
 import { useCallback, useEffect, useRef, useState, forwardRef } from 'react';
 import { FaEllipsisV } from 'react-icons/fa';
 import { useShortcutValidation } from '../hooks/useShortcutValidation';
+import { normalizeShortcutTrigger } from '../core/shortcutDbData';
 import { UnifiedContextMenu } from '../../ui/UnifiedContextMenu';
+import { CUnderscoreIcon } from '../../icons/cUnderscoreIcon';
 
 export interface ShortcutAssignButtonProps {
   itemId?: string;
@@ -19,6 +21,8 @@ export interface ShortcutAssignButtonProps {
   isShortcutLoading?: boolean;
   sidebarMode?: boolean;
   openToLeft?: boolean;
+  openToBottom?: boolean;
+  title?: string;
 }
 
 export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssignButtonProps>(
@@ -29,14 +33,14 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
     disabled = false,
     className = '',
     onOverwriteShortcut,
-    defaultName = '',
-    isNewAgent = false,
     useEllipsis = false,
     onKeyDown,
     onClose,
     isShortcutLoading = false,
     sidebarMode = false,
     openToLeft = false,
+    openToBottom = false,
+    title,
   }, ref) => {
     const [isOpen, setIsOpen] = useState(false);
     const [shortcutValue, setShortcutValue] = useState(currentShortcut);
@@ -44,13 +48,12 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
     const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
     const [saveError, setSaveError] = useState<string | null>(null);
     const [conflictId, setConflictId] = useState<string | null>(null);
+    const normalizedShortcut = normalizeShortcutTrigger(currentShortcut);
 
     const internalButtonRef = useRef<HTMLButtonElement>(null);
     const wasOpenRef = useRef(false);
     const openTimerRef = useRef<NodeJS.Timeout | null>(null);
     const closeTimerRef = useRef<NodeJS.Timeout | null>(null);
-    const prevDefaultNameRef = useRef(defaultName);
-    const lastIntendedShortcutRef = useRef(currentShortcut);
 
     const { validateShortcut } = useShortcutValidation();
 
@@ -60,23 +63,31 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     }, []);
 
-    // Compute popup position based on sidebarMode
     const computePosition = useCallback(() => {
-      const rect = (ref as any)?.current?.getBoundingClientRect() ?? internalButtonRef.current?.getBoundingClientRect();
-      if (!rect) return null;
+      const buttonEl = (ref as any)?.current ?? internalButtonRef.current;
+      if (!buttonEl) return null;
+      const rect = buttonEl.getBoundingClientRect();
+      if (openToBottom) {
+        const toolbarEl = buttonEl.closest('[data-shared-toolbar="true"]');
+        if (toolbarEl) {
+          const toolbarRect = toolbarEl.getBoundingClientRect();
+          return { x: toolbarRect.right - 260, y: rect.bottom + 4 };
+        }
+        return { x: rect.left, y: rect.bottom + 4 };
+      }
       return sidebarMode
         ? { x: openToLeft ? rect.left - 244 : rect.right + 12, y: rect.top }
         : { x: rect.left, y: rect.bottom + 4 };
-    }, [ref, sidebarMode]);
+    }, [ref, sidebarMode, openToLeft, openToBottom]);
 
     const openMenu = useCallback(() => {
       if (disabled) return;
-      setShortcutValue(currentShortcut);
+      setShortcutValue(normalizedShortcut);
       setSaveError(null);
       setConflictId(null);
       setPopupPosition(computePosition());
       setIsOpen(true);
-    }, [disabled, currentShortcut, computePosition]);
+    }, [disabled, normalizedShortcut, computePosition]);
 
     const closeMenu = useCallback(() => setIsOpen(false), []);
 
@@ -95,40 +106,16 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
       }, 200);
     };
 
-
-    // Keep lastIntendedShortcutRef in sync with external prop
-    useEffect(() => { lastIntendedShortcutRef.current = currentShortcut; }, [currentShortcut]);
-
-    // Auto-sync shortcut with title (for automations)
-    useEffect(() => {
-      if (isNewAgent || !onShortcutChange || defaultName === prevDefaultNameRef.current) return;
-      const normalize = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      const isUntitled = !defaultName.trim() || defaultName.toLowerCase().includes('untitled automation');
-      const wasInSync = normalize(lastIntendedShortcutRef.current) === normalize(prevDefaultNameRef.current);
-      const shouldInitialSync = !normalize(lastIntendedShortcutRef.current) && !isUntitled && normalize(defaultName).length > 2;
-
-      if (!isUntitled && (wasInSync || shouldInitialSync)) {
-        const newShortcut = defaultName.trim().replace(/[^a-zA-Z0-9 ]/g, '');
-        if (normalize(newShortcut) !== normalize(lastIntendedShortcutRef.current)) {
-          lastIntendedShortcutRef.current = newShortcut;
-          validateShortcut(newShortcut, itemId).then(res => {
-            if (!res.errorMessage) { setShortcutValue(newShortcut); onShortcutChange(newShortcut); }
-          });
-        }
-      }
-      prevDefaultNameRef.current = defaultName;
-    }, [defaultName, itemId, isNewAgent, onShortcutChange, validateShortcut]);
-
     // Reset state on close, fire onClose callback
     useEffect(() => {
       if (!isOpen) {
-        setShortcutValue(currentShortcut);
+        setShortcutValue(normalizedShortcut);
         setSaveError(null);
         setConflictId(null);
         if (wasOpenRef.current) onClose?.();
       }
       wasOpenRef.current = isOpen;
-    }, [isOpen, currentShortcut, onClose]);
+    }, [isOpen, normalizedShortcut, onClose]);
 
     // Real-time validation when popup is open (300ms debounce)
     useEffect(() => {
@@ -137,7 +124,7 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
         let error: string | null = null;
         let conflict: string | null = null;
         
-        if (shortcutValue && shortcutValue !== currentShortcut) {
+        if (shortcutValue && shortcutValue !== normalizedShortcut) {
           const res = await validateShortcut(shortcutValue, itemId);
           if (res.errorMessage) { error = res.errorMessage; conflict = res.conflictId; }
         }
@@ -146,11 +133,11 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
         setConflictId(conflict);
       }, 300);
       return () => clearTimeout(timer);
-    }, [isOpen, shortcutValue, itemId, currentShortcut, validateShortcut]);
+    }, [isOpen, shortcutValue, itemId, normalizedShortcut, validateShortcut]);
 
     const handleSaveShortcut = useCallback(() => {
       if (saveError) return;
-      onShortcutChange?.(shortcutValue.trim().replace(/^\//, ''));
+      onShortcutChange?.(normalizeShortcutTrigger(shortcutValue));
       closeMenu();
     }, [shortcutValue, onShortcutChange, saveError, closeMenu]);
 
@@ -163,7 +150,7 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
     const handleOverwriteShortcut = useCallback(async (cId: string) => {
       if (!onOverwriteShortcut) return;
       setIsSaving(true);
-      try { await onOverwriteShortcut(cId, shortcutValue.trim().replace(/^\//, '')); closeMenu(); }
+      try { await onOverwriteShortcut(cId, normalizeShortcutTrigger(shortcutValue)); closeMenu(); }
       catch (e) { console.error('Failed to overwrite shortcut:', e); }
       finally { setIsSaving(false); }
     }, [onOverwriteShortcut, shortcutValue, closeMenu]);
@@ -176,7 +163,7 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
         onSave: handleSaveShortcut,
         onCancel: closeMenu,
         isSaving,
-        isUpdating: !!currentShortcut,
+        isUpdating: !!normalizedShortcut,
         onClear: handleClearShortcut,
         onOverwrite: conflictId ? handleOverwriteShortcut : undefined,
         showSuccess: null,
@@ -187,16 +174,15 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
 
     const isLoading = isShortcutLoading;
 
-    // Button inner content
     const buttonContent = sidebarMode ? (
       <div className="flex items-center justify-center relative">
         {isLoading
           ? <div className="w-3.5 h-3.5 border-2 border-[var(--color-accent)]/30 border-t-[var(--color-accent)] rounded-full animate-spin" />
-          : <span className="font-mono text-xl font-bold">/</span>}
+          : <CUnderscoreIcon size={20} />}
       </div>
     ) : useEllipsis ? (
       <FaEllipsisV size={11} />
-    ) : currentShortcut ? (
+    ) : normalizedShortcut ? (
       <div className="flex items-center divide-x border-[var(--color-borderDefault)] relative">
         {isLoading && (
           <div className="absolute inset-0 bg-[var(--color-panelBg)]/50 flex items-center justify-center rounded-lg z-10">
@@ -204,29 +190,27 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
           </div>
         )}
         <div className="flex items-center divide-x border-[var(--color-borderDefault)]">
-          <span className="text-[10px] font-mono font-bold px-1.5 whitespace-nowrap text-[var(--color-accent)]">/{currentShortcut}</span>
+          <span className="text-[10px] font-mono font-bold px-1.5 whitespace-nowrap text-[var(--color-accent)]">{normalizedShortcut}</span>
         </div>
       </div>
     ) : (
       <div className="flex items-center justify-center relative min-w-[20px] px-1.5">
         {isLoading
           ? <div className="w-3.5 h-3.5 border-2 border-[var(--color-accent)]/30 border-t-[var(--color-accent)] rounded-full animate-spin" />
-          : <span className="text-[10px] font-mono font-bold whitespace-nowrap text-[var(--color-textSecondary)] hover:text-[var(--color-accent)] transition-colors">/ cmd</span>}
+          : <span className="text-[10px] font-mono font-bold whitespace-nowrap text-[var(--color-textSecondary)] hover:text-[var(--color-accent)] transition-colors">cmd</span>}
       </div>
     );
 
     const buttonClassName = sidebarMode ? className : `flex items-center justify-center transition-all ${
       useEllipsis
         ? 'p-1 bg-transparent border-none text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)]'
-        : currentShortcut
+        : normalizedShortcut
           ? 'p-1.5 rounded-lg border bg-[var(--color-accent)]/10 border-[var(--color-accent)] text-[var(--color-accent)]'
           : 'p-1.5 rounded-lg border bg-[var(--color-containerBg)] border-[var(--color-borderDefault)] text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)]'
     } ${disabled ? 'opacity-50 cursor-not-allowed' : !useEllipsis ? 'hover:border-[var(--color-accent)] cursor-pointer' : 'cursor-pointer'} ${className}`;
 
     return (
       <div
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
         className="relative flex items-center justify-center"
       >
         <button
@@ -235,7 +219,7 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
           onClick={(e) => { e.stopPropagation(); openMenu(); }}
           onKeyDown={onKeyDown}
           disabled={disabled}
-          title={sidebarMode ? '' : currentShortcut ? `Shortcut: /${currentShortcut}` : 'Assign a Text Command'}
+          title={title || (sidebarMode ? '' : normalizedShortcut ? `Shortcut: ${normalizedShortcut}` : 'Assign a Text Shortcut')}
           className={buttonClassName}
         >
           {buttonContent}

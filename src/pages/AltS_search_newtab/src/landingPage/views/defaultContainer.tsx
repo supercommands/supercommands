@@ -14,8 +14,14 @@ import useNotification from '../../../../../shared-components/notifications/useN
 import { VariableSizeList as List } from 'react-window';
 // REMOVED: import { updateSnippetShortcut, updateSnippetHotkey } from '../../../../../storage/API/features/snippetApi';
 
-import { saveUserHotkey, deleteUserHotkeyByReference } from '../../../../../shared-components/hotkeys/core/hotkeyDbData';
-import { saveUserShortcut, deleteUserShortcutByReference } from '../../../../../shared-components/shortcuts/core/shortcutDbData';
+import {
+  saveUserHotkey,
+  deleteUserHotkeyByReference,
+} from '../../../../../shared-components/hotkeys/core/hotkeyDbData';
+import {
+  saveUserShortcut,
+  deleteUserShortcutByReference,
+} from '../../../../../shared-components/shortcuts/core/shortcutDbData';
 
 import {
   readAllShortcuts,
@@ -23,7 +29,6 @@ import {
   getItemCompoundId,
   extractSnippetIdFromCompoundId,
 } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
-
 
 import {
   FiEdit2,
@@ -58,22 +63,28 @@ import { MdOutlineShortcut } from 'react-icons/md';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 
-import type { CommandId } from '../../components/searchSystemComponents/searchBarMain/commandConfigurations/commands';
-import { AI_GROUP, DEFAULT_SELECTED_AIS } from '../../components/searchSystemComponents/searchBarMain/commandConfigurations/commands';
-import { isLocalCommandId, type LocalCommandId } from '../../components/searchSystemComponents/searchBarMain/commandConfigurations/localCommands';
+import type { CommandId } from '../../../../../shared-components/searchBarMain/commandConfigurations/commands';
+import {
+  AI_GROUP,
+  DEFAULT_SELECTED_AIS,
+} from '../../../../../shared-components/searchBarMain/commandConfigurations/commands';
+import {
+  isLocalCommandId,
+  type LocalCommandId,
+} from '../../../../../shared-components/searchBarMain/commandConfigurations/localCommands';
 import { TerminalIcon } from '../../../../../shared-components/icons/terminalIcon';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
 import StackedLinkIcon from '../../../../../shared-components/icons/stackedLinkIcon';
 import CmdIcon from '../../../../../shared-components/icons/cmdIcon';
-import type {  SnippetActionDetail, SnippetSuggestion  } from '../../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
-import { 
+import type {
+  SnippetActionDetail,
+  SnippetSuggestion,
+} from '../../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
+import {
   buildSnippetDeleteDetail,
   extractUrlsFromSnippet,
-  isLinkCategory,
-  isNoteCategory,
-  isTabGroupCategory,
   resolveSnippetIcon as resolveIcon,
- } from '../../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
+} from '../../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
 import { UnifiedContextMenu, type MenuAction } from '../../../../../shared-components/ui/UnifiedContextMenu';
 
 import { useKeystrokeRecording } from '../../../../../shared-components/hotkeys';
@@ -104,12 +115,12 @@ export type CommandInteractiveItem = {
 };
 
 export type SnippetInteractiveItem = {
-  kind: 'note' | 'link' | 'tabgroup';
+  kind: 'note' | 'link' | 'session';
   id: string;
   title: string;
   context: string;
   preview: string;
-  icon: 'note' | 'link' | 'tabgroup';
+  icon: 'note' | 'link' | 'session';
   suggestion: SnippetSuggestion;
   isFavorite?: boolean;
   urls?: string[];
@@ -151,7 +162,7 @@ export interface DefaultContainerProps {
   selectedAIs?: string[];
   onToggleAI?: (aiId: string) => void;
   inlineNotification?: { message: string; type: 'success' | 'error' | 'info' | 'warning' } | null;
-  status?: { status: "idle" | "loading" | "success" | "error"; message: string };
+  status?: { status: 'idle' | 'loading' | 'success' | 'error'; message: string };
   folderInfo?: { name: string; notesCount: number; linksCount: number } | null;
   isCommandLocked?: boolean;
 
@@ -220,7 +231,9 @@ const openNoteInNewTab = (snippetId: string) => {
 
   // If sendMessage not available, try direct tab creation
   if (chromeAny?.tabs?.create && chromeAny?.runtime?.getURL) {
-    const url = chromeAny.runtime.getURL(`AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`);
+    const url = chromeAny.runtime.getURL(
+      `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`,
+    );
     chromeAny.tabs.create({ url });
     return;
   }
@@ -281,7 +294,9 @@ const openMultipleLinks = async (urls: string[], snippetId?: string) => {
     if (snippetId) {
       const chromeAny = (window as any)?.chrome;
       const url = chromeAny?.runtime?.getURL
-        ? chromeAny.runtime.getURL(`AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`)
+        ? chromeAny.runtime.getURL(
+            `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`,
+          )
         : '';
       if (url) window.location.href = url;
     }
@@ -300,7 +315,9 @@ const openMultipleLinks = async (urls: string[], snippetId?: string) => {
     if (url.startsWith('agent_chat?id=')) {
       const agentId = url.split('id=')[1];
       return chromeAny?.runtime?.getURL
-        ? chromeAny.runtime.getURL(`AltS_search_newtab/index.html?lock_command=ai&agent_id=${encodeURIComponent(agentId)}`)
+        ? chromeAny.runtime.getURL(
+            `AltS_search_newtab/index.html?lock_command=ai&agent_id=${encodeURIComponent(agentId)}`,
+          )
         : '';
     }
     return url;
@@ -340,7 +357,7 @@ const openMultipleLinks = async (urls: string[], snippetId?: string) => {
 };
 
 const KeyHint: React.FC<{ keys: string[] }> = ({ keys }) => {
-  const isMac = (navigator.platform.toUpperCase().indexOf('MAC') >= 0);
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   return (
     <span className="flex items-center gap-1">
       {keys.map(key => {
@@ -384,11 +401,11 @@ const CommandIcon: React.FC<{ item: CommandInteractiveItem }> = ({ item }) => {
 
   if (CustomIcon) {
     return (
-      <div className="h-32 w-20 flex items-center justify-center">
+      <div className="h-5 w-5 flex items-center justify-center overflow-hidden rounded-full">
         {typeof CustomIcon === 'function' ? (
           <CustomIcon className="w-full h-full object-contain" />
         ) : typeof CustomIcon === 'string' ? (
-          <img src={CustomIcon} className="h-32 w-20 object-contain dark:invert" alt="" />
+          <img src={CustomIcon} className="h-full w-full object-contain dark:invert rounded-full" alt="" />
         ) : (
           CustomIcon
         )}
@@ -433,14 +450,15 @@ const headingFontStyle: React.CSSProperties = {
 };
 
 const HotkeyBadge: React.FC<{ hotkey: string; isActive?: boolean }> = ({ hotkey, isActive }) => {
-  const isMac = (navigator.platform.toUpperCase().indexOf('MAC') >= 0);
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   if (!hotkey) return null;
 
   const parts = hotkey.replace(/\+/g, ' + ').split(' ');
   return (
     <span
-      className={`flex items-center gap-0.5 ml-auto origin-right ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        }`}>
+      className={`flex items-center gap-0.5 ml-auto origin-right ${
+        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+      }`}>
       {parts.map((part, i) => {
         let display = part;
         if (isMac) {
@@ -475,8 +493,9 @@ const ShortcutBadge: React.FC<{ shortcut: string; isActive?: boolean }> = ({ sho
 
   return (
     <span
-      className={`flex items-center gap-0.5 ml-auto origin-left ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        }`}>
+      className={`flex items-center gap-0.5 ml-auto origin-left ${
+        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+      }`}>
       <span className="bg-[#eee8d5] dark:bg-white/10 text-[#586e75] dark:text-neutral-400 px-2 py-0.5 rounded font-medium text-[9px] shadow-sm">
         {shortcut.startsWith('/') ? shortcut : `/${shortcut}`}
       </span>
@@ -518,13 +537,11 @@ const renderSnippetIcon = (item: SnippetInteractiveItem | FolderInteractiveItem)
   const snippetItem = item as SnippetInteractiveItem;
   const snippet = snippetItem.suggestion?.snippet;
 
-  // For links and tabgroups, use unified StackedLinkIcon
-  if (item.icon === 'link' || item.icon === 'tabgroup') {
+  // For links and sessions, use unified StackedLinkIcon
+  if (item.icon === 'link' || item.icon === 'session') {
     const urls = snippetItem.urls || extractUrlsFromValue(snippet?.value);
-    return <StackedLinkIcon urls={urls} size={14} fallback={item.icon === 'tabgroup' ? 'tabgroup' : 'link'} />;
+    return <StackedLinkIcon urls={urls} size={14} fallback={item.icon === 'session' ? 'session' : 'link'} />;
   }
-
-
 
   // Display 'FaCode' for Snippets (backend category 'note')
   if ((snippet as any)?.category === 'note') {
@@ -554,10 +571,10 @@ const getItemTagMeta = (item: InteractiveItem, todoCounts?: { overdue: number; d
 
   const category = ((item as SnippetInteractiveItem).suggestion?.snippet as any)?.category;
 
-  if (isTabGroupCategory(category)) {
+  if (category === 'session') {
     return { label: 'Groups', isBadge: false };
   }
-  if (isLinkCategory(category)) {
+  if (category === 'link' || category === 'bulk_link') {
     return { label: 'Links', isBadge: false };
   }
 
@@ -617,9 +634,17 @@ const Row = ({ index, style, data }: any) => {
   const isActive = logicalIndex === focusIndex;
 
   const itemCompoundId = item ? getItemCompoundIdInternal(item) : '';
-  const hotkey = (itemCompoundId ? hotkeysMap[itemCompoundId] : '') || (((item as CommandInteractiveItem)?.shortcut?.includes('+') ? (item as CommandInteractiveItem).shortcut : '') || '');
+  const hotkey =
+    (itemCompoundId ? hotkeysMap[itemCompoundId] : '') ||
+    ((item as CommandInteractiveItem)?.shortcut?.includes('+') ? (item as CommandInteractiveItem).shortcut : '') ||
+    '';
   const shortcut = itemCompoundId ? shortcutsMap[itemCompoundId] || '' : '';
-  const title = ((item as any).kind || (item as any).category) === 'command' ? item.label : (item as any).title === 'Tab Group' ? 'Link Group' : (item as any).title;
+  const title =
+    ((item as any).kind || (item as any).category) === 'command'
+      ? item.label
+      : (item as any).title === 'Tab Session'
+        ? 'Link Group'
+        : (item as any).title;
   let description = '';
   if (((item as any).kind || (item as any).category) === 'command') {
     description = item.description;
@@ -639,12 +664,12 @@ const Row = ({ index, style, data }: any) => {
 
   const glassStyle: React.CSSProperties = !isDark
     ? {
-      background: isActive ? '#fdf6e3' : '#eee8d5',
-      border: isActive ? '1px solid rgba(0, 0, 0, 0.05)' : '1px solid rgba(255, 255, 255, 0.1)',
-      borderRadius: '0px',
-      boxShadow: isActive ? 'inset 0 1px 2px rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(0, 0, 0, 0.05)' : 'none',
-      backdropFilter: 'blur(4px)',
-    }
+        background: isActive ? '#fdf6e3' : '#eee8d5',
+        border: isActive ? '1px solid rgba(0, 0, 0, 0.05)' : '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '0px',
+        boxShadow: isActive ? 'inset 0 1px 2px rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(0, 0, 0, 0.05)' : 'none',
+        backdropFilter: 'blur(4px)',
+      }
     : {};
 
   const primaryTextColor = !isDark ? 'text-[#073642]' : 'text-[#FFFFFF]';
@@ -657,8 +682,9 @@ const Row = ({ index, style, data }: any) => {
         ref={node => {
           if (anchorRefs.current) anchorRefs.current[item.id] = node;
         }}
-        className={`cursor-pointer h-full w-full group ${isActive ? (isDark ? 'shadow-sm dark:bg-white/10' : '') : ''
-          } ${!isDark ? 'hover:bg-[#fdf6e3]' : 'dark:hover:bg-white/5'}`}
+        className={`cursor-pointer h-full w-full group ${
+          isActive ? (isDark ? 'shadow-sm dark:bg-white/10' : '') : ''
+        } ${!isDark ? 'hover:bg-[#fdf6e3]' : 'dark:hover:bg-white/5'}`}
         aria-selected={isActive}
         role="button"
         onContextMenu={event => {
@@ -687,12 +713,20 @@ const Row = ({ index, style, data }: any) => {
         }}>
         <div className="flex items-center gap-2 h-full overflow-hidden relative">
           <div
-            className={`flex items-center justify-start flex-shrink-0 ${((item as any).kind || (item as any).category) === 'command' && (item as CommandInteractiveItem).iconStack ? 'w-auto' : 'w-4'
-              } h-4 ${((item as any).kind || (item as any).category) === 'command' && (item as CommandInteractiveItem).color
+            className={`flex items-center justify-start flex-shrink-0 ${
+              ((item as any).kind || (item as any).category) === 'command' && (item as CommandInteractiveItem).iconStack
+                ? 'w-auto'
+                : 'w-4'
+            } h-4 ${
+              ((item as any).kind || (item as any).category) === 'command' && (item as CommandInteractiveItem).color
                 ? (item as CommandInteractiveItem).color
                 : 'text-neutral-500 dark:text-neutral-400'
-              }`}>
-            {((item as any).kind || (item as any).category) === 'command' ? <CommandIcon item={item} /> : renderSnippetIcon(item)}
+            }`}>
+            {((item as any).kind || (item as any).category) === 'command' ? (
+              <CommandIcon item={item} />
+            ) : (
+              renderSnippetIcon(item)
+            )}
           </div>
 
           <div className="flex-1 min-w-0 h-full relative">
@@ -700,8 +734,9 @@ const Row = ({ index, style, data }: any) => {
             <div
               className={`absolute inset-0 flex items-center gap-2 opacity-100 translate-y-0 group-hover:opacity-0 group-hover:translate-y-[-4px]`}>
               <span
-                className={`font-inter text-[14px] font-normal leading-[22px] tracking-[-0.002em] truncate ${primaryTextColor
-                  }`}
+                className={`font-inter text-[14px] font-normal leading-[22px] tracking-[-0.002em] truncate ${
+                  primaryTextColor
+                }`}
                 style={{ ...headingFontStyle, fontSize: '14px' }}>
                 {title}
               </span>
@@ -711,10 +746,15 @@ const Row = ({ index, style, data }: any) => {
             <div
               className={`absolute inset-0 flex items-center justify-between gap-3 opacity-0 translate-y-[4px] group-hover:opacity-100 group-hover:translate-y-0`}>
               <span
-                className={`font-inter text-[14px] font-normal leading-[22px] tracking-[-0.002em] truncate flex-shrink-0 max-w-[40%] ${primaryTextColor
-                  }`}
+                className={`font-inter text-[14px] font-normal leading-[22px] tracking-[-0.002em] truncate flex-shrink-0 max-w-[40%] ${
+                  primaryTextColor
+                }`}
                 style={{ ...headingFontStyle, fontSize: '14px' }}>
-                {((item as any).kind || (item as any).category) === 'command' ? item.label : (item as any).title === 'Tab Group' ? 'Link Group' : (item as any).title}
+                {((item as any).kind || (item as any).category) === 'command'
+                  ? item.label
+                  : (item as any).title === 'Tab Session'
+                    ? 'Link Group'
+                    : (item as any).title}
               </span>
               <span
                 className={
@@ -864,7 +904,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
 
     // By default, focus the first item in the recommended list (if any)
     const { theme } = useAppearance();
-  const isDark = theme.isDark;
+    const isDark = theme.isDark;
 
     const [focusIndex, setFocusIndex] = useState(() => (interactiveItems.length ? 0 : -1));
     const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
@@ -881,7 +921,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
       }
     }, [propSelectedAIs]);
     const [showAISubmenu, setShowAISubmenu] = useState(false);
-    const isMac = (navigator.platform.toUpperCase().indexOf('MAC') >= 0);
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
     const isLinkEditModalOpen = useUIStore((s: any) => s.activeEditor?.type === 'link');
     const commands = useDbStore(state => state.commands);
 
@@ -1073,7 +1113,9 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
               : `Shortcut "${normalizedShortcut}" is already assigned`;
 
             useUIStore.getState().setCommandStatus({ status: 'error', message: msg });
-            setTimeout(() => { useUIStore.getState().resetCommandStatus(); }, 3000);
+            setTimeout(() => {
+              useUIStore.getState().resetCommandStatus();
+            }, 3000);
             setSaveError(msg);
             setConflictId(conflictingId);
             return;
@@ -1081,9 +1123,9 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         }
 
         useUIStore.getState().setCommandStatus({
-            status: 'loading',
-            message: !normalizedShortcut ? 'Clearing...' : isUpdatingShortcut ? 'Updating...' : 'Saving...',
-          });
+          status: 'loading',
+          message: !normalizedShortcut ? 'Clearing...' : isUpdatingShortcut ? 'Updating...' : 'Saving...',
+        });
         setIsSaving(true);
 
         try {
@@ -1092,7 +1134,12 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
             await saveUserShortcut(normalizedShortcut || '', itemId, 'command');
           } else {
             const snippetItem = item as SnippetInteractiveItem;
-            const type = isLinkCategory(((snippetItem.suggestion.snippet as any).category || (snippetItem.suggestion.snippet as any).kind)) ? 'link' : 'note';
+            const cat = (
+              (snippetItem.suggestion.snippet as any).category ||
+              (snippetItem.suggestion.snippet as any).kind ||
+              ''
+            ).toLowerCase();
+            const type = cat === 'session' ? 'session' : cat === 'link' || cat === 'bulk_link' ? 'link' : 'note';
             if (normalizedShortcut) {
               await saveUserShortcut(normalizedShortcut, itemId, type as any);
             } else {
@@ -1101,10 +1148,12 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           }
 
           useUIStore.getState().setCommandStatus({
-              status: 'success',
-              message: !normalizedShortcut ? 'Cleared' : 'Saved',
-            });
-          setTimeout(() => { useUIStore.getState().resetCommandStatus(); }, 3000);
+            status: 'success',
+            message: !normalizedShortcut ? 'Cleared' : 'Saved',
+          });
+          setTimeout(() => {
+            useUIStore.getState().resetCommandStatus();
+          }, 3000);
 
           // Local refresh of maps
           const [allHotkeys, allShortcuts] = await Promise.all([readAllHotkeys(), readAllShortcuts()]);
@@ -1112,8 +1161,12 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           setShortcutsMap(allShortcuts);
         } catch (error: any) {
           console.error('[DefaultContainer] Failed to save/clear shortcut:', error);
-          useUIStore.getState().setCommandStatus({ status: 'error', message: error.message || 'Failed to update shortcut' });
-          setTimeout(() => { useUIStore.getState().resetCommandStatus(); }, 3000);
+          useUIStore
+            .getState()
+            .setCommandStatus({ status: 'error', message: error.message || 'Failed to update shortcut' });
+          setTimeout(() => {
+            useUIStore.getState().resetCommandStatus();
+          }, 3000);
         } finally {
           setIsSaving(false);
           setEditingShortcutFor(null);
@@ -1142,7 +1195,9 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           if (conflictExtCmd) {
             const msg = `Hotkey is reserved by extension`;
             useUIStore.getState().setCommandStatus({ status: 'error', message: msg });
-            setTimeout(() => { useUIStore.getState().resetCommandStatus(); }, 3000);
+            setTimeout(() => {
+              useUIStore.getState().resetCommandStatus();
+            }, 3000);
             if (saveError !== msg) setSaveError(msg);
             setConflictId('extension-reserved');
             return;
@@ -1160,7 +1215,9 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
               : `Hotkey "${hotkeyValue}" is already assigned`;
 
             useUIStore.getState().setCommandStatus({ status: 'error', message: msg });
-            setTimeout(() => { useUIStore.getState().resetCommandStatus(); }, 3000);
+            setTimeout(() => {
+              useUIStore.getState().resetCommandStatus();
+            }, 3000);
             if (saveError !== msg) setSaveError(msg);
             setConflictId(conflictingId);
             return;
@@ -1168,9 +1225,9 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         }
 
         useUIStore.getState().setCommandStatus({
-            status: 'loading',
-            message: !hotkeyValue ? 'Clearing...' : isUpdatingHotkey ? 'Updating...' : 'Saving...',
-          });
+          status: 'loading',
+          message: !hotkeyValue ? 'Clearing...' : isUpdatingHotkey ? 'Updating...' : 'Saving...',
+        });
         setIsSaving(true);
 
         try {
@@ -1182,7 +1239,12 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
             }
           } else {
             const snippetItem = item as SnippetInteractiveItem;
-            const type = isLinkCategory(((snippetItem.suggestion.snippet as any).category || (snippetItem.suggestion.snippet as any).kind)) ? 'link' : 'note';
+            const cat = (
+              (snippetItem.suggestion.snippet as any).category ||
+              (snippetItem.suggestion.snippet as any).kind ||
+              ''
+            ).toLowerCase();
+            const type = cat === 'session' ? 'session' : cat === 'link' || cat === 'bulk_link' ? 'link' : 'note';
             if (hotkeyValue) {
               await saveUserHotkey(hotkeyValue, itemId, type);
             } else {
@@ -1196,11 +1258,17 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           setShortcutsMap(allShortcuts);
 
           useUIStore.getState().setCommandStatus({ status: 'success', message: !hotkeyValue ? 'Cleared' : 'Saved' });
-          setTimeout(() => { useUIStore.getState().resetCommandStatus(); }, 3000);
+          setTimeout(() => {
+            useUIStore.getState().resetCommandStatus();
+          }, 3000);
         } catch (error: any) {
           console.error('[DefaultContainer] Failed to save/clear hotkey:', error);
-          useUIStore.getState().setCommandStatus({ status: 'error', message: error.message || 'Failed to update hotkey' });
-          setTimeout(() => { useUIStore.getState().resetCommandStatus(); }, 3000);
+          useUIStore
+            .getState()
+            .setCommandStatus({ status: 'error', message: error.message || 'Failed to update hotkey' });
+          setTimeout(() => {
+            useUIStore.getState().resetCommandStatus();
+          }, 3000);
         } finally {
           setIsSaving(false);
           if (shouldClose) {
@@ -1667,11 +1735,11 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
       (item: InteractiveItem) => {
         setOpenMenuFor(null);
 
-        // Global check for Tab Group (Bulk Link) - handles both 'link' and 'note' kinds
+        // Global check for Tab Session (Bulk Link) - handles both 'link' and 'note' kinds
         // (sometimes TabGroups might be misclassified if category is missing/weird)
         const snippet = (item as any).suggestion?.snippet;
         const category = ((snippet as any)?.category || '').toLowerCase();
-        // Global check removed to allow Tab Groups to use standard link opening logic below
+        // Global check removed to allow Tab Sessions to use standard link opening logic below
         /*
         if (category === 'link' || category === 'link') {
           const event = new CustomEvent('openBulkEditor', {
@@ -1720,7 +1788,10 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
                 }
               }
             } else {
-              openMultipleLinks(urls, (snippetItem.suggestion.snippet as any)?.snippet_id || snippetItem.suggestion.snippet?.id);
+              openMultipleLinks(
+                urls,
+                (snippetItem.suggestion.snippet as any)?.snippet_id || snippetItem.suggestion.snippet?.id,
+              );
             }
           } else {
             onSnippetSelect((item as any).suggestion);
@@ -1742,13 +1813,6 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           // ... (keep existing command actions)
           const actions: MenuAction[] = [
             {
-              key: 'run',
-              label: 'Run command',
-              icon: <FiPlay size={14} />,
-              onSelect: () => activateItem(item),
-            },
-            { key: 'div-0', label: '', icon: null, onSelect: () => { }, divider: true },
-            {
               key: 'favorite',
               label: (item as any).isFavorite ? 'Remove from favorites' : 'Mark as favorite',
               icon: (item as any).isFavorite ? <FaStar size={14} className="text-yellow-500" /> : <FiStar size={14} />,
@@ -1760,7 +1824,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
                 }
               },
             },
-            { key: 'div-1', label: '', icon: null, onSelect: () => { }, divider: true },
+            { key: 'div-1', label: '', icon: null, onSelect: () => {}, divider: true },
             {
               key: 'assign-shortcut',
               label: 'Assign command',
@@ -1770,7 +1834,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
               onSelect: async () => {
                 const itemId = getItemCompoundIdInternal(item);
                 const allShortcuts = await readAllShortcuts();
-                let existingValue = allShortcuts[itemId] || '';
+                const existingValue = allShortcuts[itemId] || '';
 
                 setEditingShortcutFor(item.id);
                 setEditingHotkeyFor(null);
@@ -1791,7 +1855,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
               onSelect: async () => {
                 const itemId = getItemCompoundIdInternal(item);
                 const allHotkeys = await readAllHotkeys();
-                let existingValue = allHotkeys[itemId] || '';
+                const existingValue = allHotkeys[itemId] || '';
 
                 setEditingHotkeyFor(item.id);
                 setEditingShortcutFor(null);
@@ -1806,11 +1870,11 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
               icon: <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)]" />,
               onSelect: (e?: any) => {
                 useUIStore.getState().setTodoCreatePrefill({
-                    snippet_id: `cmd-${commandItem.commandId}`,
-                    key: commandItem.label || 'New Task',
-                    value: commandItem.commandId || '',
-                    category: 'command',
-                  });
+                  snippet_id: `cmd-${commandItem.commandId}`,
+                  key: commandItem.label || 'New Task',
+                  value: commandItem.commandId || '',
+                  category: 'command',
+                });
                 useUIStore.getState().setSidebar('todoSidebar', { open: true });
                 // Also close the searchbar if it's open
                 window.dispatchEvent(new CustomEvent('close-searchbar'));
@@ -1820,14 +1884,14 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
 
           // Add AI Selection Submenu Trigger
           if ((item as any).commandId === 'ai') {
-            actions.push({ key: 'div-ai', label: '', icon: null, onSelect: () => { }, divider: true });
+            actions.push({ key: 'div-ai', label: '', icon: null, onSelect: () => {}, divider: true });
             actions.push({
               key: 'header-ai',
               label: 'Select Models',
               icon: null,
               disabled: true,
               className: 'text-[10px] font-bold text-neutral-400 dark:text-neutral-500 px-3 py-1 select-none',
-              onSelect: () => { },
+              onSelect: () => {},
             });
             AI_SERVICES.forEach(service => {
               const isSelected = localSelectedAIs.includes(service.id);
@@ -1895,10 +1959,13 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         const snippetItem = item as SnippetInteractiveItem;
         const isLink = snippetItem.kind === 'link';
         const snippet = snippetItem.suggestion?.snippet;
-        const isNote = snippet && ((snippet as any).category || (snippet as any).kind)?.toLowerCase() === 'snippet';
-        const isTabGroup =
+        const isSnippet = snippet && ((snippet as any).category || (snippet as any).kind)?.toLowerCase() === 'snippet';
+        const isActualNote =
           snippet &&
-          (((snippet as any).category || (snippet as any).kind)?.toLowerCase() === 'tabgroup' || ((snippet as any).category || (snippet as any).kind)?.toLowerCase() === 'tab group');
+          !['link', 'session', 'snippet'].includes(
+            ((snippet as any).category || (snippet as any).kind || '').toLowerCase(),
+          );
+        const isTabGroup = snippet && ((snippet as any).category || (snippet as any).kind)?.toLowerCase() === 'session';
 
         const actions: MenuAction[] = [
           {
@@ -1907,27 +1974,27 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
             icon: <FiPlay size={14} />,
             onSelect: () => activateItem(item),
           },
-          // Only show "Open in full screen" for notes, not for links
-          ...(isNote
+          // Only show "Open in full screen" for notes/snippets, not for links
+          ...(isActualNote || isSnippet
             ? [
-              {
-                key: 'open-AltS_search_newtab',
-                label: `Open in full screen ${isMac ? '(⌘+Enter)' : '(Ctrl+Enter)'}`,
-                icon: <FiExternalLink size={14} />,
-                onSelect: () => {
-                  if (snippet) {
-                    const snippetId = ((snippet as any).snippet_id || snippet.id) || snippet.id;
-                    if (snippetId) {
-                      openNoteInNewTab(snippetId);
+                {
+                  key: 'open-AltS_search_newtab',
+                  label: `Open in full screen ${isMac ? '(⌘+Enter)' : '(Ctrl+Enter)'}`,
+                  icon: <FiExternalLink size={14} />,
+                  onSelect: () => {
+                    if (snippet) {
+                      const snippetId = (snippet as any).snippet_id || snippet.id || snippet.id;
+                      if (snippetId) {
+                        openNoteInNewTab(snippetId);
+                      }
                     }
-                  }
+                  },
                 },
-              },
-            ]
+              ]
             : []),
           {
             key: 'edit',
-            label: `${isTabGroup ? 'Edit routine' : isLink ? 'Edit link' : 'Edit note'} ${isMac ? '(⌘+Shift+E)' : '(Alt+Shift+E)'}`,
+            label: `${isTabGroup ? 'Edit routine' : isLink ? 'Edit link' : isSnippet ? 'Edit snippet' : 'Edit note'} ${isMac ? '(⌘+Shift+E)' : '(Alt+Shift+E)'}`,
             icon: <FiEdit2 size={14} />,
             onSelect: () => {
               if (isLink || isTabGroup) {
@@ -1946,11 +2013,11 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
             icon: <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)]" />,
             onSelect: (e?: any) => {
               useUIStore.getState().setTodoCreatePrefill({
-                  snippet_id: (snippet as any)?.snippet_id || snippet?.id,
-                  key: (snippet as any)?.key || (item as any).title,
-                  value: typeof snippet?.value === 'string' ? snippet.value : JSON.stringify(snippet?.value),
-                  category: (snippet as any)?.category || ((item as any).kind || (item as any).category),
-                });
+                snippet_id: (snippet as any)?.snippet_id || snippet?.id,
+                key: (snippet as any)?.key || (item as any).title,
+                value: typeof snippet?.value === 'string' ? snippet.value : JSON.stringify(snippet?.value),
+                category: (snippet as any)?.category || (item as any).kind || (item as any).category,
+              });
               useUIStore.getState().setSidebar('todoSidebar', { open: true });
               // Also close the searchbar if it's open
               window.dispatchEvent(new CustomEvent('close-searchbar'));
@@ -1970,30 +2037,30 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           },
         ];
 
-        actions.push({ key: 'div-0', label: '', icon: null, onSelect: () => { }, divider: true });
+        actions.push({ key: 'div-0', label: '', icon: null, onSelect: () => {}, divider: true });
 
         const favoriteAction: MenuAction = onToggleFavorite
           ? {
-            key: 'favorite',
-            label: snippetItem.isFavorite ? 'Remove from favourites' : 'Mark as favourite',
-            icon: snippetItem.isFavorite ? <FaStar size={14} className="text-yellow-500" /> : <FiStar size={14} />,
-            closeOnExecute: false,
-            onSelect: () => {
-              onToggleFavorite(snippetItem);
-            },
-          }
+              key: 'favorite',
+              label: snippetItem.isFavorite ? 'Remove from favourites' : 'Mark as favourite',
+              icon: snippetItem.isFavorite ? <FaStar size={14} className="text-yellow-500" /> : <FiStar size={14} />,
+              closeOnExecute: false,
+              onSelect: () => {
+                onToggleFavorite(snippetItem);
+              },
+            }
           : {
-            key: 'favorite',
-            label: snippetItem.isFavorite ? 'Remove from favourites' : 'Mark as favourite',
-            icon: snippetItem.isFavorite ? <FaStar size={14} className="text-yellow-500" /> : <FiStar size={14} />,
-            disabled: true,
-            closeOnExecute: false,
-            onSelect: () => undefined,
-          };
+              key: 'favorite',
+              label: snippetItem.isFavorite ? 'Remove from favourites' : 'Mark as favourite',
+              icon: snippetItem.isFavorite ? <FaStar size={14} className="text-yellow-500" /> : <FiStar size={14} />,
+              disabled: true,
+              closeOnExecute: false,
+              onSelect: () => undefined,
+            };
 
         actions.push(favoriteAction);
 
-        actions.push({ key: 'div-1', label: '', icon: null, onSelect: () => { }, divider: true });
+        actions.push({ key: 'div-1', label: '', icon: null, onSelect: () => {}, divider: true });
 
         // Add Assign shortcut (for snippets)
         {
@@ -2008,7 +2075,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
             onSelect: async () => {
               const innerItemId = getItemCompoundIdInternal(item);
               const allShortcuts = await readAllShortcuts();
-              let existingValue = allShortcuts[innerItemId] || '';
+              const existingValue = allShortcuts[innerItemId] || '';
 
               setEditingShortcutFor(item.id);
               setEditingHotkeyFor(null);
@@ -2032,7 +2099,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           onSelect: async () => {
             const itemId = getItemCompoundIdInternal(item);
             const allHotkeys = await readAllHotkeys();
-            let existingValue = allHotkeys[itemId] || '';
+            const existingValue = allHotkeys[itemId] || '';
 
             setEditingHotkeyFor(item.id);
             setEditingShortcutFor(null);
@@ -2072,7 +2139,10 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
       if (!isLoggedIn) {
         // Filter out actions that require login, EXCEPT create-link which should trigger the login popup
         actions = actions.filter(
-          a => !['favorite', 'assign-shortcut', 'assign-hotkey', 'create-todo', 'convert-to-todo', 'schedule'].includes(a.key as string)
+          a =>
+            !['favorite', 'assign-shortcut', 'assign-hotkey', 'create-todo', 'convert-to-todo', 'schedule'].includes(
+              a.key as string,
+            ),
         );
         // Clean up any double dividers created by filtering
         actions = actions.filter((a, i, arr) => {
@@ -2093,7 +2163,15 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         if ('divider' in action && action.divider) return;
         if (action.disabled) return;
 
-        const requiresLogin = ['favorite', 'assign-shortcut', 'assign-hotkey', 'schedule', 'create-todo', 'convert-to-todo', 'create-link'].includes(action.key as string);
+        const requiresLogin = [
+          'favorite',
+          'assign-shortcut',
+          'assign-hotkey',
+          'schedule',
+          'create-todo',
+          'convert-to-todo',
+          'create-link',
+        ].includes(action.key as string);
         if (requiresLogin && !isLoggedIn) {
           triggerNotification('Please login to use the extension', 'error');
           return;
@@ -2113,7 +2191,6 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         // We allow events when isCommandLocked is true to support navigating/activating items (like Draft Restore)
         // while a command (like /gpt) is locked in the Searchbar.
         if (
-          
           isAtMenuOpen ||
           (window as any).isFavoritesMenuOpen ||
           (window as any).isTodoDashboardOpen ||
@@ -2133,9 +2210,9 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         // Determine if target is a searchbar input
         const isSearchbarInput = Boolean(
           target?.getAttribute('data-searchbar-input') === 'true' ||
-          target?.id === 'searchbar-input' ||
-          target?.id === 'searchbar-inline-input' ||
-          target?.closest('.searchbar-glow-container')
+            target?.id === 'searchbar-input' ||
+            target?.id === 'searchbar-inline-input' ||
+            target?.closest('.searchbar-glow-container'),
         );
 
         // If focus is in an input-like element that is NOT the searchbar input, do not capture/intercept keys
@@ -2235,17 +2312,15 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
 
         if (key === 'ArrowDown') {
           event.preventDefault();
-          
+
           // If focusIndex is -1 (not set), set it to 0 (first item)
           // Otherwise, move to next item
           if (focusIndex < 0) {
-            
             if (interactiveItems.length > 0 && interactiveItems[0] && onHighlightChange) {
               onHighlightChange(interactiveItems[0]);
             }
             setFocusIndex(0);
           } else {
-            
             moveFocus(1);
           }
           return;
@@ -2278,7 +2353,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
             const snippetItem = item as SnippetInteractiveItem;
             const snippet = snippetItem.suggestion?.snippet;
             if (snippet) {
-              const snippetId = ((snippet as any).snippet_id || snippet.id) || snippet.id;
+              const snippetId = (snippet as any).snippet_id || snippet.id || snippet.id;
               if (snippetId) {
                 openNoteInNewTab(snippetId);
               }
@@ -2294,17 +2369,20 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
 
         if (isAltShiftE) {
           const item = focusedItem;
-          if (item && (((item as any).kind || (item as any).category) === 'note' || ((item as any).kind || (item as any).category) === 'link')) {
+          if (
+            item &&
+            (((item as any).kind || (item as any).category) === 'note' ||
+              ((item as any).kind || (item as any).category) === 'link')
+          ) {
             event.preventDefault();
             const snippetItem = item as SnippetInteractiveItem;
             const snippet = snippetItem.suggestion?.snippet;
             const isLink = snippetItem.kind === 'link';
             const isTabGroup =
-              snippet &&
-              (((snippet as any).category || (snippet as any).kind)?.toLowerCase() === 'tabgroup' || ((snippet as any).category || (snippet as any).kind)?.toLowerCase() === 'tab group');
+              snippet && ((snippet as any).category || (snippet as any).kind)?.toLowerCase() === 'session';
 
             if (isLink || isTabGroup) {
-              // For links and tab groups, open edit link panel
+              // For links and Tab Sessions, open edit link panel
               if (onRequestEditLink) {
                 onRequestEditLink(snippetItem.suggestion);
               }
@@ -2317,7 +2395,10 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         }
 
         if (key === 'Enter') {
-          const item = focusedItem;
+          // If no item is keyboard-focused (focusIndex = -1), fall back to the first item.
+          // Without this, Enter would bubble to the global handler and open the notes editor
+          // instead of activating the highlighted command card (ai / collections).
+          const item = focusedItem ?? (interactiveItems.length > 0 ? interactiveItems[0] : null);
           if (item) {
             event.preventDefault();
             activateItem(item);
@@ -2372,20 +2453,20 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
 
     useEffect(() => {
       window.addEventListener('keydown', processKeyEvent, { capture: true });
-    
-    const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
-      if (openMenuFor) {
-        closeMenu();
-        return true;
-      }
-      return false;
-    });
 
-    return () => {
-      window.removeEventListener('keydown', processKeyEvent, { capture: true });
-      unregister();
-    };
-  }, [processKeyEvent, openMenuFor, closeMenu]);
+      const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
+        if (openMenuFor) {
+          closeMenu();
+          return true;
+        }
+        return false;
+      });
+
+      return () => {
+        window.removeEventListener('keydown', processKeyEvent, { capture: true });
+        unregister();
+      };
+    }, [processKeyEvent, openMenuFor, closeMenu]);
 
     useEffect(() => {
       if (focusIndex < 0) return;
@@ -2483,47 +2564,45 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           hotkeyInput={
             editingHotkeyFor === item.id
               ? {
-                value: editValue,
-                onChange: (e: React.KeyboardEvent<HTMLInputElement>) => {
-                  const result = captureHotkey(e);
-                  if (!result) return;
+                  value: editValue,
+                  onChange: (e: React.KeyboardEvent<HTMLInputElement>) => {
+                    const result = captureHotkey(e);
+                    if (!result) return;
 
-                  if (result === 'CANCEL') {
-                    handleCancelEdit();
-                  } else if (result) {
-                    // Valid hotkey string
-                    setEditValue(result as string);
-                    setSaveError(null);
-                  }
-                },
-                onSave: () => saveHotkey(item, editValue),
-                onCancel: handleCancelEdit,
-                onOverwrite: handleOverwriteHotkey,
-                isSaving: isSaving,
-                isUpdating: isUpdatingHotkey,
-                onClear: () => {
-                  setEditValue('');
-                  saveHotkey(item, '', false);
-                },
-              }
+                    if (result === 'CANCEL') {
+                      handleCancelEdit();
+                    } else if (result) {
+                      // Valid hotkey string
+                      setEditValue(result as string);
+                      setSaveError(null);
+                    }
+                  },
+                  onSave: () => saveHotkey(item, editValue),
+                  onCancel: handleCancelEdit,
+                  onOverwrite: handleOverwriteHotkey,
+                  isSaving: isSaving,
+                  isUpdating: isUpdatingHotkey,
+                  onClear: () => {
+                    setEditValue('');
+                    saveHotkey(item, '', false);
+                  },
+                }
               : undefined
           }
           shortcutInput={
             editingShortcutFor === item.id
               ? {
-                value: editValue,
-                onChange: setEditValue,
-                onSave: () => saveShortcut(item, editValue),
-                onCancel: handleCancelEdit,
-                onOverwrite: handleOverwriteShortcut,
-                isSaving: isSaving,
-                isUpdating: isUpdatingShortcut,
-              }
+                  value: editValue,
+                  onChange: setEditValue,
+                  onSave: () => saveShortcut(item, editValue),
+                  onCancel: handleCancelEdit,
+                  onOverwrite: handleOverwriteShortcut,
+                  isSaving: isSaving,
+                  isUpdating: isUpdatingShortcut,
+                }
               : undefined
           }
-          rightPanelContent={
-            undefined
-          }
+          rightPanelContent={undefined}
           onNavigateAlreadyAssigned={handleGoToConflict}
           error={saveError || undefined}
           conflictId={conflictId}
@@ -2549,7 +2628,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
               ref={listRef}
               height={Math.min(
                 visualItems.length * dynamicRowHeight + dynamicRowHeight * 0.5, // Small buffer
-                Math.max(windowDimensions.height * (windowDimensions.width >= 1600 ? 0.48 : 0.40), 350), // 48% height for big screens, 40% for others
+                Math.max(windowDimensions.height * (windowDimensions.width >= 1600 ? 0.48 : 0.4), 350), // 48% height for big screens, 40% for others
               )}
               itemCount={visualItems.length}
               itemSize={getItemSize}
@@ -2580,7 +2659,9 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
                           status.status === 'error' ? 'bg-red-500' : 'bg-emerald-500'
                         }`}
                       />
-                      <span className="text-white/90 text-[12px] font-normal tracking-wide select-none">{typeof status.message === 'string' ? status.message : JSON.stringify(status.message)}</span>
+                      <span className="text-white/90 text-[12px] font-normal tracking-wide select-none">
+                        {typeof status.message === 'string' ? status.message : JSON.stringify(status.message)}
+                      </span>
                     </>
                   ) : (
                     <>
@@ -2595,7 +2676,11 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
                                 : 'bg-blue-500'
                         }`}
                       />
-                      <span className="text-white/90 text-[12px] font-normal tracking-wide select-none">{typeof inlineNotification!.message === 'string' ? inlineNotification!.message : JSON.stringify(inlineNotification!.message)}</span>
+                      <span className="text-white/90 text-[12px] font-normal tracking-wide select-none">
+                        {typeof inlineNotification!.message === 'string'
+                          ? inlineNotification!.message
+                          : JSON.stringify(inlineNotification!.message)}
+                      </span>
                     </>
                   )}
                 </div>
@@ -2628,4 +2713,3 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
 DefaultContainer.displayName = 'DefaultContainer';
 
 export default React.memo(DefaultContainer);
-

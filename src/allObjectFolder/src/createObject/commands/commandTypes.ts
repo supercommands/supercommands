@@ -27,6 +27,7 @@ export interface CommandRecord {
   type?: string;
   urlTemplate?: string;
   enabled?: boolean;
+  showInDashboard?: boolean;
   updatedAt?: number;
 }
 
@@ -44,6 +45,7 @@ export interface CreateCommandInput {
   type?: string;
   urlTemplate?: string;
   enabled?: boolean;
+  showInDashboard?: boolean;
 }
 
 export interface UpdateCommandInput {
@@ -59,4 +61,5 @@ export interface UpdateCommandInput {
   type?: string;
   urlTemplate?: string;
   enabled?: boolean;
+  showInDashboard?: boolean;
 }

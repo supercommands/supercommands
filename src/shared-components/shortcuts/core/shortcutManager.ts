@@ -1,17 +1,26 @@
 import { saveUserShortcut, deleteUserShortcutByReference } from './shortcutDbData';
 import { extractSnippetIdFromCompoundId } from '../../hotkeys/utils/hotkeyUtils';
+import { normalizeShortcutTrigger } from './shortcutDbData';
 
-export type ShortcutItemType = 'link' | 'note' | 'snippet' |  'automation' | 'module' | 'command';
+export type ShortcutItemType = 'link' | 'note' | 'snippet' | 'automation' | 'module' | 'command' | 'session' | 'aiPrompt' | 'todo';
 export type StorageMode = 'local' | 'cloud';
 
 const syncShortcutToChromeStorage = async (snippetId: string, compoundId: string, shortcut: string | null, itemType: string) => {
   const chromeAny = (window as any)?.chrome;
   if (!chromeAny?.storage?.local) return;
 
-  const storageKey = itemType === 'link' ? 'link_commands' : 'note_commands';
+  const storageKey =
+    itemType === 'link'
+      ? 'link_commands'
+      : itemType === 'session'
+        ? 'session_commands'
+        : itemType === 'todo'
+          ? 'todo_commands'
+          : 'note_commands';
+  const legacyKeysToClear = itemType === 'session' ? ['note_commands'] : [];
 
   return new Promise<void>(resolve => {
-    chromeAny.storage.local.get([storageKey], (res: any) => {
+    chromeAny.storage.local.get([storageKey, ...legacyKeysToClear], (res: any) => {
       const map = res[storageKey] || {};
       if (shortcut) {
         const entry = map[compoundId] || {};
@@ -21,7 +30,15 @@ const syncShortcutToChromeStorage = async (snippetId: string, compoundId: string
       } else {
         delete map[compoundId];
       }
-      chromeAny.storage.local.set({ [storageKey]: map }, () => resolve());
+
+      const updates: Record<string, any> = { [storageKey]: map };
+      for (const legacyKey of legacyKeysToClear) {
+        const legacyMap = { ...(res[legacyKey] || {}) };
+        delete legacyMap[compoundId];
+        updates[legacyKey] = legacyMap;
+      }
+
+      chromeAny.storage.local.set(updates, () => resolve());
     });
   });
 };
@@ -35,13 +52,15 @@ export async function saveShortcut(
   _storageMode?: any,
   _skipCloud?: any
 ) {
-  if (shortcut) {
-    await saveUserShortcut(shortcut, compoundId, itemType as any);
+  const normalizedShortcut = normalizeShortcutTrigger(shortcut);
+
+  if (normalizedShortcut) {
+    await saveUserShortcut(normalizedShortcut, compoundId, itemType as any);
   } else {
     await deleteUserShortcutByReference(compoundId);
   }
   
-  await syncShortcutToChromeStorage(snippetId, compoundId, shortcut || null, itemType);
+  await syncShortcutToChromeStorage(snippetId, compoundId, normalizedShortcut || null, itemType);
   return null;
 }
 

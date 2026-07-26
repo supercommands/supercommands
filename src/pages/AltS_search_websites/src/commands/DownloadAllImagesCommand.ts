@@ -13,7 +13,7 @@ import type { PageActionCommand } from './types';
 export const DownloadAllImagesCommand: PageActionCommand = {
   id: 'downloadallimages',
   label: 'Download All Images',
-  prefix: '/downloadallimages',
+  prefix: 'downloadallimages',
   keywords: ['download', 'images', 'all', 'save', 'export', 'bulk', 'pictures', 'photos'],
   description: 'Scan the page and bulk-download all images',
   action: 'execute_image_download',

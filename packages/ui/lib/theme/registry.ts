@@ -34,6 +34,7 @@ export const defaultDarkTheme: ThemeProfile = {
     textDisabled: 'rgba(255, 255, 255, 0.35)',
     textPlaceholder: '#A3A3A3',
     textError: '#EF4444',
+    sectionCountText: '#9CA3AF',
 
     // Borders
     borderDefault: 'rgba(255, 255, 255, 0.1)',

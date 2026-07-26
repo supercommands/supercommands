@@ -15,14 +15,14 @@ export const useKeyboardShortcuts = ({
   isKeystrokeRecordingActive,
   searchbarRef,
   setIsViewDropdownOpen,
-  setIsGlobalCreateMenuOpen
+  setIsGlobalCreateMenuOpen,
 }: UseKeyboardShortcutsProps) => {
   const dbNotes = useDbStore(state => state.notes);
   const dbLinks = useDbStore(state => state.links);
   const dbSnippets = useDbStore(state => state.snippets);
   const dbWorkspaces = useDbStore(state => state.workspaces);
   const dbFolders = useDbStore(state => state.folders);
-// Helper function to check if any modal/popup is open
+  // Helper function to check if any modal/popup is open
   const isModalOpen = useCallback((): boolean => {
     // Check for modals/popups by looking for common modal classes or fixed overlays
     // This includes EditWorkspaceNamePopup, EditFolderNamePopup, DeleteDialog, etc.
@@ -84,7 +84,6 @@ export const useKeyboardShortcuts = ({
     },
     [findFolder, findWorkspace],
   );
-
 
   // Handle ESC key to exit filter mode
   useEffect(() => {
@@ -167,10 +166,10 @@ export const useKeyboardShortcuts = ({
           if (referenceType === 'note' || referenceType === 'snippet' || (referenceType as string) === 'prompt') {
             e.preventDefault();
             e.stopPropagation();
-            
+
             // Extract the actual item ID from the compound ID (which could be workspace-folder-noteId) using centralized logic
             const actualId = extractSnippetIdFromCompoundId(referenceId);
-            
+
             if (referenceType === 'snippet') {
               useUIStore.getState().openEditor({ type: 'note', id: actualId, props: { category: 'snippet' } });
             } else if ((referenceType as string) === 'prompt') {
@@ -184,9 +183,9 @@ export const useKeyboardShortcuts = ({
           if (referenceType === 'link' || (referenceType as string) === 'session') {
             e.preventDefault();
             e.stopPropagation();
-            
+
             const actualId = extractSnippetIdFromCompoundId(referenceId);
-            
+
             // Trigger the hotkey via background to actually open the URLs in new tabs
             chrome.runtime.sendMessage({
               action: 'trigger_hotkey',
@@ -246,5 +245,3 @@ export const useKeyboardShortcuts = ({
 
   return { isModalOpen };
 };
-
-

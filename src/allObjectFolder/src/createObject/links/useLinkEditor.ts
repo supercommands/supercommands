@@ -18,6 +18,10 @@ import type { SharedProperties } from '../../../../shared-components/editorToolb
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
+import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { saveShortcut, clearShortcut } from '../../../../shared-components/shortcuts';
+import { useShortcutValidation } from '../../../../shared-components/shortcuts/hooks/useShortcutValidation';
+import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
 
 export interface UseLinkEditorParams {
   linkId?: string; // If provided, load this link
@@ -40,6 +44,72 @@ const areStringArraysEqual = (a: string[], b: string[]) => {
   return a.every(item => setB.has(item));
 };
 
+const normalizeEditorShortcut = (value: string) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+const getDirtyDebugSnapshot = ({
+  activeLinkId,
+  linkTitle,
+  linkUrls,
+  workspaceId,
+  folderId,
+  tagIds,
+  linkShortcut,
+  lastSavedTitle,
+  lastSavedUrls,
+  lastSavedWorkspaceId,
+  lastSavedFolderId,
+  lastSavedTagIds,
+  lastSavedShortcut,
+}: {
+  activeLinkId: string | null;
+  linkTitle: string;
+  linkUrls: LinkItem[];
+  workspaceId: string | null;
+  folderId: string | null;
+  tagIds: string[];
+  linkShortcut: string;
+  lastSavedTitle: string;
+  lastSavedUrls: LinkItem[];
+  lastSavedWorkspaceId: string | null;
+  lastSavedFolderId: string | null;
+  lastSavedTagIds: string[];
+  lastSavedShortcut: string;
+}) => {
+  const hasTitle = linkTitle.trim().length > 0;
+  const hasUrls = linkUrls.length > 0;
+  return {
+    activeLinkId,
+    hasTitle,
+    hasUrls,
+    titleChanged: linkTitle !== lastSavedTitle,
+    urlsChanged: !areLinkItemsEqual(linkUrls, lastSavedUrls),
+    workspaceChanged: workspaceId !== lastSavedWorkspaceId,
+    folderChanged: folderId !== lastSavedFolderId,
+    tagsChanged: !areStringArraysEqual(tagIds, lastSavedTagIds),
+    shortcutChanged:
+      normalizeEditorShortcut(linkShortcut) !== normalizeEditorShortcut(lastSavedShortcut),
+    current: {
+      title: linkTitle,
+      urlCount: linkUrls.length,
+      workspaceId,
+      folderId,
+      tagIds,
+      shortcut: normalizeEditorShortcut(linkShortcut),
+    },
+    saved: {
+      title: lastSavedTitle,
+      urlCount: lastSavedUrls.length,
+      workspaceId: lastSavedWorkspaceId,
+      folderId: lastSavedFolderId,
+      tagIds: lastSavedTagIds,
+      shortcut: normalizeEditorShortcut(lastSavedShortcut),
+    },
+  };
+};
+
 export function useLinkEditor(props: LinkEditorProps) {
   const {
     linkId,
@@ -56,7 +126,7 @@ export function useLinkEditor(props: LinkEditorProps) {
     isMounted.current = true;
     return () => { isMounted.current = false; };
   }, []);
-  
+
   const lastSavedTitleRef = useRef<string>(initialDraftKey || '');
   const lastSavedUrlsRef = useRef<LinkItem[]>(initialDraftUrls || []);
   const lastSavedWorkspaceIdRef = useRef<string | null>(null);
@@ -67,18 +137,24 @@ export function useLinkEditor(props: LinkEditorProps) {
   // We use this ref to synchronously track ID creation inside save locks
   const activeLinkIdRef = useRef<string | null>(linkId ?? null);
   const [activeLinkId, setActiveLinkId] = useState<string | null>(linkId ?? null);
-  
+
   const [linkTitle, setLinkTitle] = useState<string>(initialDraftKey || '');
   const [linkUrls, setLinkUrls] = useState<LinkItem[]>(initialDraftUrls || []);
-  
+  const { validateShortcut } = useShortcutValidation();
+  const [linkShortcut, setLinkShortcut] = useState<string>('');
+  const lastSavedShortcutRef = useRef<string>('');
+  const isShortcutManuallyEditedRef = useRef<boolean>(false);
+
   // Editor state tracking for location and tags
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [isInitialized, setIsInitialized] = useState<boolean>(!linkId);
+  const [isShortcutInitialized, setIsShortcutInitialized] = useState<boolean>(!linkId);
 
   const [saveStatusRaw, setSaveStatusRaw] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle');
   const setSaveStatus = useCallback((status: 'idle' | 'saving' | 'saved' | 'error' | 'conflict') => {
+    console.log('[DEBUG-SaveStatus] setSaveStatus called with:', status);
     setSaveStatusRaw(status);
   }, []);
   const saveStatus = saveStatusRaw;
@@ -87,6 +163,7 @@ export function useLinkEditor(props: LinkEditorProps) {
 
   const [isLinkDeleted, setIsLinkDeleted] = useState(false);
   const hasLoadedLiveLinkRef = useRef(false);
+  const hasLoadedShortcutRef = useRef(false);
   const isImportedCloudSnippetRef = useRef(false);
   const [conflictLink, setConflictLink] = useState<LinkRecord | null>(null);
   const hasConflictRef = useRef(false);
@@ -96,19 +173,24 @@ export function useLinkEditor(props: LinkEditorProps) {
 
   // Save Lock to prevent overlapping autosaves
   const saveAgainRef = useRef(false);
-  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const savePromiseRef = useRef<Promise<string | boolean> | null>(null);
   const pendingSaveAfterInitRef = useRef(false);
 
   // Keep track of latest inputs for retry to avoid stale closures!
-  const currentInputsRef = useRef({ linkTitle, linkUrls, workspaceId, folderId, tagIds, isInitialized });
-  currentInputsRef.current = { linkTitle, linkUrls, workspaceId, folderId, tagIds, isInitialized };
+  const currentInputsRef = useRef({ linkTitle, linkUrls, workspaceId, folderId, tagIds, isInitialized, linkShortcut });
+  currentInputsRef.current = { linkTitle, linkUrls, workspaceId, folderId, tagIds, isInitialized, linkShortcut };
 
   // Initialize draft OR load existing link ID
   useEffect(() => {
     if (linkId) {
       activeLinkIdRef.current = linkId;
       setActiveLinkId(linkId);
+      setLinkShortcut('');
+      lastSavedShortcutRef.current = '';
+      isShortcutManuallyEditedRef.current = false;
+      hasLoadedShortcutRef.current = false;
       setIsInitialized(false);
+      setIsShortcutInitialized(false);
       setIsLinkDeleted(false);
       hasLoadedLiveLinkRef.current = false;
       isImportedCloudSnippetRef.current = false;
@@ -119,7 +201,11 @@ export function useLinkEditor(props: LinkEditorProps) {
     setActiveLinkId(null);
     setLinkTitle(initialDraftKey || '');
     setLinkUrls(initialDraftUrls || []);
-    
+    setLinkShortcut('');
+    lastSavedShortcutRef.current = '';
+    isShortcutManuallyEditedRef.current = false;
+    hasLoadedShortcutRef.current = false;
+
     // Load default workspace (falling back to smart default) and folder
     const initDefaults = async () => {
       const smartWs = await getSmartDefaultWorkspace();
@@ -133,7 +219,7 @@ export function useLinkEditor(props: LinkEditorProps) {
       }
     };
     void initDefaults();
-    
+
     setTagIds([]);
 
     lastSavedTitleRef.current = initialDraftKey || '';
@@ -146,46 +232,155 @@ export function useLinkEditor(props: LinkEditorProps) {
     setIsLinkDeleted(false);
     hasLoadedLiveLinkRef.current = true;
     setIsInitialized(true);
-  }, [linkId, initialDraftKey, initialDraftUrls]);
+    setIsShortcutInitialized(true);
+  }, [linkId]);
 
   // Natively sync across tabs using centralized useDbStore
   const liveLink = useDbStore(state => state.links.find(l => l.id === activeLinkId));
+  const liveLinkRef = useRef(liveLink);
+  liveLinkRef.current = liveLink;
 
-  const isDirty = useMemo(() => {
-    if (!isInitialized) return false;
-    const titleChanged = linkTitle !== lastSavedTitleRef.current;
-    const workspaceChanged = workspaceId !== lastSavedWorkspaceIdRef.current;
-    const folderChanged = folderId !== lastSavedFolderIdRef.current;
-    
-    // Check URL array changes using helper
-    const urlsChanged = !areLinkItemsEqual(linkUrls, lastSavedUrlsRef.current);
-    
-    // Check if tag IDs match using set equality
-    const tagsChanged = !areStringArraysEqual(tagIds, lastSavedTagIdsRef.current);
+  let isDirty = false;
+  if (isInitialized && isShortcutInitialized) {
+    const hasTitle = linkTitle.trim().length > 0;
+    const hasUrls = linkUrls.length > 0;
 
-    return titleChanged || urlsChanged || workspaceChanged || folderChanged || tagsChanged;
-  }, [linkTitle, linkUrls, workspaceId, folderId, tagIds, isInitialized]);
+    // If it's a new link and has not yet received both title and urls, it is not dirty
+    if (!activeLinkId && (!hasTitle || !hasUrls)) {
+      isDirty = false;
+    } else {
+      const titleChanged = linkTitle !== lastSavedTitleRef.current;
+      const workspaceChanged = workspaceId !== lastSavedWorkspaceIdRef.current;
+      const folderChanged = folderId !== lastSavedFolderIdRef.current;
 
-  const handleSave = useCallback(async (silent: boolean = false, overrideProps?: SharedProperties | null): Promise<boolean> => {
+      // Check URL array changes using helper
+      const urlsChanged = !areLinkItemsEqual(linkUrls, lastSavedUrlsRef.current);
+
+      // Check if tag IDs match using set equality
+      const tagsChanged = !areStringArraysEqual(tagIds, lastSavedTagIdsRef.current);
+
+      const shortcutChanged =
+        isShortcutInitialized && normalizeEditorShortcut(linkShortcut) !== normalizeEditorShortcut(lastSavedShortcutRef.current);
+
+      isDirty = titleChanged || urlsChanged || workspaceChanged || folderChanged || tagsChanged || shortcutChanged;
+    }
+  }
+
+  useEffect(() => {
+    console.log('[LinkEditor Debug] Dirty snapshot', getDirtyDebugSnapshot({
+      activeLinkId,
+      linkTitle,
+      linkUrls,
+      workspaceId,
+      folderId,
+      tagIds,
+      linkShortcut,
+      lastSavedTitle: lastSavedTitleRef.current,
+      lastSavedUrls: lastSavedUrlsRef.current,
+      lastSavedWorkspaceId: lastSavedWorkspaceIdRef.current,
+      lastSavedFolderId: lastSavedFolderIdRef.current,
+      lastSavedTagIds: lastSavedTagIdsRef.current,
+      lastSavedShortcut: lastSavedShortcutRef.current,
+    }));
+  }, [activeLinkId, linkTitle, linkUrls, workspaceId, folderId, tagIds, linkShortcut, isDirty]);
+
+  const isEditMode = !!linkId || !!activeLinkId;
+
+
+
+  // Synchronize shortcut from DB on load or activeLinkId changes
+  useEffect(() => {
+    if (!activeLinkId) {
+      setLinkShortcut('');
+      lastSavedShortcutRef.current = '';
+      hasLoadedShortcutRef.current = false;
+      setIsShortcutInitialized(true);
+      return;
+    }
+
+    setIsShortcutInitialized(false);
+
+    const loadSavedShortcut = async () => {
+      try {
+        const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
+        const fldObj = folderId ? { folder_id: folderId } : null;
+        const targetCompoundId = getItemCompoundId({
+          id: activeLinkId,
+          workspace_id: wsObj?.workspace_id || null,
+          folder_id: fldObj?.folder_id || null,
+          snippet: { id: activeLinkId, category: 'link' }
+        });
+        const shortcutsMap = await readAllShortcuts();
+        const sc = normalizeShortcutTrigger(shortcutsMap[targetCompoundId] || '');
+        if (isMounted.current) {
+          if (!isShortcutManuallyEditedRef.current) {
+            setLinkShortcut(sc);
+            currentInputsRef.current.linkShortcut = sc;
+          }
+          lastSavedShortcutRef.current = sc;
+          hasLoadedShortcutRef.current = true;
+          setIsShortcutInitialized(true);
+        }
+      } catch (err) {
+        console.error('Failed to load shortcut:', err);
+        if (isMounted.current) {
+          setIsShortcutInitialized(true);
+        }
+      }
+    };
+    void loadSavedShortcut();
+  }, [activeLinkId, workspaceId, folderId]);
+
+  const handleSave = useCallback(async (silent: boolean = false, overrideProps?: SharedProperties | null): Promise<string | boolean> => {
     if (hasConflictRef.current) return false;
 
     // ALWAYS read from refs to avoid stale closure issues during retries
-    const { linkTitle: currentTitle, linkUrls: currentUrls, workspaceId: currentWsId, folderId: currentFId, tagIds: currentTIds, isInitialized: currentIsInit } = currentInputsRef.current;
-    
+    const {
+      linkTitle: currentTitle,
+      linkUrls: currentUrls,
+      workspaceId: currentWsId,
+      folderId: currentFId,
+      tagIds: currentTIds,
+      isInitialized: currentIsInit,
+      linkShortcut: currentShortcut,
+    } = currentInputsRef.current;
+
     if (isMounted.current) setSaveError(null);
     if (!silent && autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
     }
-    
+
     const hasTitle = currentTitle.trim().length > 0;
     const hasUrls = currentUrls.length > 0;
     const currentLinkId = activeLinkIdRef.current;
     const savingLinkId = currentLinkId;
 
+    const normalizedCurrentShortcut = normalizeEditorShortcut(currentShortcut);
+    const hasMeaningfulChanges =
+      currentTitle !== lastSavedTitleRef.current ||
+      !areLinkItemsEqual(currentUrls, lastSavedUrlsRef.current) ||
+      currentWsId !== lastSavedWorkspaceIdRef.current ||
+      currentFId !== lastSavedFolderIdRef.current ||
+      !areStringArraysEqual(currentTIds, lastSavedTagIdsRef.current) ||
+      normalizedCurrentShortcut !== normalizeEditorShortcut(lastSavedShortcutRef.current);
+
+    if (currentLinkId && currentIsInit && hasTitle && hasUrls && !hasMeaningfulChanges) {
+      if (isMounted.current && saveStatusRaw !== 'saved') {
+        setSaveStatus('saved');
+        if (lastSavedUpdatedAtRef.current !== null) {
+          setLastSavedAt(new Date(lastSavedUpdatedAtRef.current));
+        }
+      }
+      return true;
+    }
+
     // 1. Empty Draft Auto-deletion (or do nothing if it's a new unsaved link)
     if (!hasTitle && !hasUrls) {
-      if (!currentLinkId) return false;
+      if (!currentLinkId) {
+        if (isMounted.current) setSaveStatus('idle');
+        return false;
+      }
 
       if (savePromiseRef.current) {
         saveAgainRef.current = true;
@@ -218,7 +413,7 @@ export function useLinkEditor(props: LinkEditorProps) {
           if (saveAgainRef.current && !hasConflictRef.current) {
             saveAgainRef.current = false;
             if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-            autosaveTimerRef.current = setTimeout(() => handleSave(), 1000);
+            autosaveTimerRef.current = setTimeout(() => handleSave(), 400);
           }
         }
       };
@@ -230,8 +425,7 @@ export function useLinkEditor(props: LinkEditorProps) {
     // 2. Missing Title Validation
     if (!hasTitle) {
       if (isMounted.current) {
-        setSaveError('Enter the title for this link collection');
-        setSaveStatus('error');
+        setSaveError('Enter the title');
       }
       return false;
     }
@@ -240,7 +434,6 @@ export function useLinkEditor(props: LinkEditorProps) {
     if (!hasUrls) {
       if (isMounted.current) {
         setSaveError('Add at least one link to this collection');
-        setSaveStatus('error');
       }
       return false;
     }
@@ -268,7 +461,7 @@ export function useLinkEditor(props: LinkEditorProps) {
         saveAgainRef.current = true;
         return savePromiseRef.current;
       }
-      
+
       const performDelete = async (): Promise<boolean> => {
         try {
           await deleteLink(currentLinkId);
@@ -282,7 +475,7 @@ export function useLinkEditor(props: LinkEditorProps) {
           savePromiseRef.current = null;
         }
       };
-      
+
       savePromiseRef.current = performDelete();
       return savePromiseRef.current;
     }
@@ -294,15 +487,16 @@ export function useLinkEditor(props: LinkEditorProps) {
       return savePromiseRef.current;
     }
 
-    const performSave = async (): Promise<boolean> => {
-      let finalResult = false;
-      
+    const performSave = async (): Promise<string | boolean> => {
+      let finalResult: string | boolean = false;
+
       // Re-read latest inputs inside the loop to avoid stale data
       const loopWsId = overrideProps && overrideProps.workspaceId !== undefined ? overrideProps.workspaceId : currentInputsRef.current.workspaceId;
       const loopFId = overrideProps && overrideProps.folderId !== undefined ? overrideProps.folderId : currentInputsRef.current.folderId;
       const loopTagIds = overrideProps && overrideProps.selectedTags ? overrideProps.selectedTags.map((t: { id: string }) => t.id) : currentInputsRef.current.tagIds;
       const loopTitle = currentInputsRef.current.linkTitle;
       const loopUrls = currentInputsRef.current.linkUrls;
+      const loopShortcut = currentInputsRef.current.linkShortcut;
 
       if (!silent && isMounted.current) setSaveStatus('saving');
 
@@ -339,7 +533,7 @@ export function useLinkEditor(props: LinkEditorProps) {
             urls: sanitizedUrls,
             tagIds: loopTagIds,
           };
-          
+
           savedLink = await createLink(input);
           isImportedCloudSnippetRef.current = false;
         } else {
@@ -352,23 +546,23 @@ export function useLinkEditor(props: LinkEditorProps) {
             tagIds: loopTagIds,
             expectedUpdatedAt: lastSavedUpdatedAtRef.current ?? undefined,
           };
-          
+
           const titleChanged = loopTitle !== lastSavedTitleRef.current;
           const urlsChanged = !areLinkItemsEqual(sanitizedUrls, lastSavedUrlsRef.current);
           const workspaceChanged = loopWsId !== lastSavedWorkspaceIdRef.current;
           const folderChanged = loopFId !== lastSavedFolderIdRef.current;
           const tagsChanged = !areStringArraysEqual(loopTagIds, lastSavedTagIdsRef.current);
-          
-          if (!titleChanged && !urlsChanged && !workspaceChanged && !folderChanged && !tagsChanged) {
-             hasConflictRef.current = false;
-             setConflictLink(null);
-             if (!silent) {
-               setSaveStatus('saved');
-               if (lastSavedUpdatedAtRef.current !== null) {
-                 setLastSavedAt(new Date(lastSavedUpdatedAtRef.current));
-               }
-             }
-             return true;
+          const normalizedLoopShortcut = normalizeEditorShortcut(loopShortcut);
+          const shortcutChanged = normalizedLoopShortcut !== lastSavedShortcutRef.current;
+
+          if (!titleChanged && !urlsChanged && !workspaceChanged && !folderChanged && !tagsChanged && !shortcutChanged) {
+            hasConflictRef.current = false;
+            setConflictLink(null);
+            setSaveStatus('saved');
+            if (lastSavedUpdatedAtRef.current !== null) {
+              setLastSavedAt(new Date(lastSavedUpdatedAtRef.current));
+            }
+            return true;
           }
 
           savedLink = await updateLink(currentLinkId, input);
@@ -405,6 +599,57 @@ export function useLinkEditor(props: LinkEditorProps) {
         lastSavedUpdatedAtRef.current = savedLink.updatedAt;
         hasConflictRef.current = false;
 
+        // Save shortcut!
+        const wsObj = savedLink.workspaceId ? { workspace_id: savedLink.workspaceId } : null;
+        const fldObj = savedLink.folderId ? { folder_id: savedLink.folderId } : null;
+        const targetCompoundId = getItemCompoundId({
+          id: savedLink.id,
+          workspace_id: wsObj?.workspace_id || null,
+          folder_id: fldObj?.folder_id || null,
+          snippet: { id: savedLink.id, category: 'link' }
+        });
+
+        const finalShortcut = normalizeEditorShortcut(loopShortcut);
+        if (finalShortcut) {
+          const valRes = await validateShortcut(finalShortcut, savedLink.id);
+          if (valRes.isValid) {
+            console.log(`[ShortcutDebug] handleSave: Valid shortcut "${finalShortcut}", saving to DB for item "${savedLink.id}"...`);
+            await saveShortcut(savedLink.id, targetCompoundId, finalShortcut, savedLink.title, 'link');
+          } else {
+            console.warn(`[ShortcutDebug] handleSave: Shortcut "${finalShortcut}" has validation error "${valRes.errorMessage}". SKIPPING DB save on background autosave.`);
+          }
+          // Always update the ref to prevent infinite autosave loops
+          lastSavedShortcutRef.current = finalShortcut;
+        } else {
+          console.log(`[ShortcutDebug] handleSave: Clearing shortcut for item "${savedLink.id}"...`);
+          await clearShortcut(savedLink.id, targetCompoundId, 'link');
+          lastSavedShortcutRef.current = '';
+        }
+        hasLoadedShortcutRef.current = true;
+        if (isMounted.current) {
+          setLinkShortcut(finalShortcut);
+          currentInputsRef.current.linkShortcut = finalShortcut;
+        }
+        console.log('[LinkEditor Debug] Save settled', getDirtyDebugSnapshot({
+          activeLinkId: savedLink.id,
+          linkTitle: currentInputsRef.current.linkTitle,
+          linkUrls: currentInputsRef.current.linkUrls,
+          workspaceId: currentInputsRef.current.workspaceId,
+          folderId: currentInputsRef.current.folderId,
+          tagIds: currentInputsRef.current.tagIds,
+          linkShortcut: finalShortcut,
+          lastSavedTitle: savedLink.title,
+          lastSavedUrls: savedLink.urls,
+          lastSavedWorkspaceId: savedLink.workspaceId,
+          lastSavedFolderId: savedLink.folderId,
+          lastSavedTagIds: savedLink.tagIds,
+          lastSavedShortcut: finalShortcut,
+        }));
+
+        if (!currentLinkId && isMounted.current && activeLinkIdRef.current !== activeLinkId) {
+          setActiveLinkId(savedLink.id);
+        }
+
         // Persist default selections to localStorage
         const wId = savedLink.workspaceId;
         const fId = savedLink.folderId;
@@ -414,7 +659,7 @@ export function useLinkEditor(props: LinkEditorProps) {
 
         setConflictLink(null);
 
-        if (!silent && isMounted.current) {
+        if (isMounted.current) {
           setSaveStatus('saved');
           if (savedLink.updatedAt) {
             setLastSavedAt(new Date(savedLink.updatedAt));
@@ -422,14 +667,14 @@ export function useLinkEditor(props: LinkEditorProps) {
             setLastSavedAt(new Date());
           }
         }
-        finalResult = true;
+        finalResult = savedLink.id || true;
       } catch (err: any) {
         if (err.name === 'ConflictError') {
           console.warn('Conflict detected:', err.message);
           hasConflictRef.current = true;
           if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
           setSaveStatus('conflict');
-          setConflictLink(err.remoteLink ?? liveLink ?? null);
+          setConflictLink(err.remoteLink ?? liveLinkRef.current ?? null);
           return false;
         }
         console.error('Save failed:', err);
@@ -440,7 +685,7 @@ export function useLinkEditor(props: LinkEditorProps) {
         if (saveAgainRef.current && !hasConflictRef.current) {
           saveAgainRef.current = false;
           if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-          autosaveTimerRef.current = setTimeout(() => handleSave(silent), 1000);
+          autosaveTimerRef.current = setTimeout(() => handleSave(silent), 400);
         }
       }
       return finalResult;
@@ -448,7 +693,7 @@ export function useLinkEditor(props: LinkEditorProps) {
 
     savePromiseRef.current = performSave();
     return savePromiseRef.current;
-  }, [liveLink]);
+  }, []);
 
   const handleDelete = useCallback(async () => {
     const currentLinkId = activeLinkIdRef.current;
@@ -475,10 +720,14 @@ export function useLinkEditor(props: LinkEditorProps) {
 
   // Autosave effect triggered by input changes
   useEffect(() => {
-    if (!isDirty) return;
+    if (!isDirty) {
+      console.log('[DEBUG-Autosave] Bypassing autosave - isDirty is false');
+      return;
+    }
 
     const hasTitle = linkTitle.trim().length > 0;
     const hasUrls = linkUrls.length > 0;
+    console.log('[DEBUG-Autosave] isDirty is true, conditions:', { activeLinkId, hasTitle, hasUrls });
     if (activeLinkId || (hasTitle && hasUrls)) {
       setSaveStatus('saving');
     }
@@ -487,7 +736,7 @@ export function useLinkEditor(props: LinkEditorProps) {
       clearTimeout(autosaveTimerRef.current);
     }
 
-    const delay = 1000;
+    const delay = 400;
     autosaveTimerRef.current = setTimeout(() => {
       handleSave();
     }, delay);
@@ -497,7 +746,7 @@ export function useLinkEditor(props: LinkEditorProps) {
         clearTimeout(autosaveTimerRef.current);
       }
     };
-  }, [linkTitle, linkUrls, workspaceId, folderId, tagIds, handleSave, isDirty, activeLinkId]);
+  }, [linkTitle, linkUrls, linkShortcut, workspaceId, folderId, tagIds, handleSave, isDirty, activeLinkId]);
 
   // Trigger pending save if user typed before initialization completed
   useEffect(() => {
@@ -509,11 +758,12 @@ export function useLinkEditor(props: LinkEditorProps) {
 
   // If liveLink is fetched from IndexedDB, update the editor if we aren't currently dirty
   useEffect(() => {
+    console.log('[DEBUG-Sync] liveLink sync effect triggered:', { liveLink, isDirty, activeLinkId });
     if (liveLink === undefined) return;
     hasLoadedLiveLinkRef.current = true;
 
     if (liveLink === null) {
-      // It's not in the database! Treat it as an imported cloud snippet.
+      console.log('[DEBUG-Sync] liveLink is null');
       if (!isInitialized) {
         isImportedCloudSnippetRef.current = true;
         setIsInitialized(true);
@@ -522,6 +772,7 @@ export function useLinkEditor(props: LinkEditorProps) {
     }
 
     if (lastSavedUpdatedAtRef.current !== null && liveLink.updatedAt <= lastSavedUpdatedAtRef.current) {
+      console.log('[DEBUG-Sync] liveLink is older or equal to lastSavedUpdatedAtRef:', { liveLinkUpdate: liveLink.updatedAt, lastSaved: lastSavedUpdatedAtRef.current });
       setIsLinkDeleted(false);
       return;
     }
@@ -584,14 +835,14 @@ export function useLinkEditor(props: LinkEditorProps) {
       setLastSavedAt(new Date(liveLink.updatedAt));
 
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = setTimeout(() => handleSave(), 1000);
+      autosaveTimerRef.current = setTimeout(() => handleSave(), 400);
       return;
     }
 
     if (!isInitialized) {
       // First load of an existing link
       const hasLocalEdits = isDirty;
-      
+
       if (!hasLocalEdits) {
         setLinkTitle(liveLink.title);
         setLinkUrls(liveLink.urls);
@@ -604,7 +855,8 @@ export function useLinkEditor(props: LinkEditorProps) {
           workspaceId: liveLink.workspaceId,
           folderId: liveLink.folderId,
           tagIds: liveLink.tagIds,
-          isInitialized: true
+          isInitialized: true,
+          linkShortcut: linkShortcut
         };
       } else {
         currentInputsRef.current = {
@@ -619,7 +871,7 @@ export function useLinkEditor(props: LinkEditorProps) {
       lastSavedFolderIdRef.current = liveLink.folderId;
       lastSavedTagIdsRef.current = liveLink.tagIds;
       lastSavedUpdatedAtRef.current = liveLink.updatedAt;
-      
+
       hasConflictRef.current = false;
       setConflictLink(null);
 
@@ -630,7 +882,7 @@ export function useLinkEditor(props: LinkEditorProps) {
       if ((saveAgainRef.current || hasLocalEdits) && !hasConflictRef.current) {
         saveAgainRef.current = false;
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-        autosaveTimerRef.current = setTimeout(() => handleSave(), 1000);
+        autosaveTimerRef.current = setTimeout(() => handleSave(), 400);
       }
     } else if (!isDirty) {
       // Background sync from other tabs
@@ -656,7 +908,7 @@ export function useLinkEditor(props: LinkEditorProps) {
     const prevWsId = currentInputsRef.current.workspaceId;
     const prevFId = currentInputsRef.current.folderId;
     const prevTIds = currentInputsRef.current.tagIds;
-    
+
     let wId = prevWsId;
     let fId = prevFId;
     let tIds = prevTIds;
@@ -665,15 +917,26 @@ export function useLinkEditor(props: LinkEditorProps) {
     if (newProps.folderId !== undefined) fId = newProps.folderId;
     if (newProps.selectedTags) tIds = newProps.selectedTags.map((t: any) => t.id);
 
+    const tagsChanged = !areStringArraysEqual(tIds, prevTIds);
+    const hasDestinationChange = prevWsId !== wId || prevFId !== fId || tagsChanged;
+
+    if (!hasDestinationChange) {
+      return;
+    }
+
+    currentInputsRef.current = {
+      ...currentInputsRef.current,
+      workspaceId: wId,
+      folderId: fId,
+      tagIds: tIds,
+    };
+
     setWorkspaceId(wId);
     setFolderId(fId);
     setTagIds(tIds);
 
-    // Trigger an immediate SILENT save if destination or tags change!
-    const tagsChanged = !areStringArraysEqual(tIds, prevTIds);
-    if (prevWsId !== wId || prevFId !== fId || tagsChanged) {
-      void handleSave(false, newProps);
-    }
+    // Trigger an immediate silent save if destination or tags change.
+    void handleSave(true, newProps);
   }, [handleSave]);
 
   const resolveConflictWithRemote = useCallback(() => {
@@ -690,7 +953,8 @@ export function useLinkEditor(props: LinkEditorProps) {
       workspaceId: conflictLink.workspaceId,
       folderId: conflictLink.folderId,
       tagIds: conflictLink.tagIds,
-      isInitialized: true
+      isInitialized: true,
+      linkShortcut: linkShortcut
     };
 
     lastSavedTitleRef.current = conflictLink.title;
@@ -730,25 +994,55 @@ export function useLinkEditor(props: LinkEditorProps) {
     setSaveError(null);
     setLastSavedAt(null);
     setIsLinkDeleted(false);
-    hasLoadedLiveLinkRef.current = false;
+    hasLoadedLiveLinkRef.current = true;
     isImportedCloudSnippetRef.current = false;
     hasConflictRef.current = false;
     setConflictLink(null);
-  }, []);
+    setIsInitialized(true);
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    setLinkShortcut('');
+    lastSavedShortcutRef.current = '';
+    isShortcutManuallyEditedRef.current = false;
+    hasLoadedShortcutRef.current = false;
+
+    currentInputsRef.current = {
+      linkTitle: '',
+      linkUrls: [],
+      workspaceId,
+      folderId,
+      tagIds,
+      isInitialized: true,
+      linkShortcut: '',
+    };
+  }, [workspaceId, folderId, tagIds]);
 
   return {
     linkTitle,
     linkUrls,
-    activeLinkId,
+    linkShortcut,
+    setLinkShortcut,
+    isShortcutManuallyEditedRef,
+    activeLinkId: linkId || activeLinkId,
     liveLink,
     workspaceId,
     folderId,
     tagIds,
     saveStatus,
+    setSaveStatus,
     saveError,
     setSaveError,
     lastSavedAt,
+    setLastSavedAt,
+    lastSavedTitleRef,
+    lastSavedShortcutRef,
     isDirty,
+    isInitialized: isInitialized && (linkId === activeLinkId),
+    isShortcutInitialized,
     isDeleteDialogOpen,
     isUnsavedChangesDialogOpen,
     isLinkDeleted,

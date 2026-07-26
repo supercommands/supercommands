@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { MainView, ActiveEditorState, SidebarType, SidebarState, ModalType, ContextualUIType, ContextualUIState, TodoDisplayMode } from './types';
+import { MainView, ActiveEditorState, SidebarType, SidebarState, ModalType, ContextualUIType, ContextualUIState, TodoDisplayMode, EditorType } from './types';
 import { getStoredTodoDisplayMode, setStoredTodoDisplayMode } from '../../storage/localStorage/uxCustomizationStorage';
 
 export const NONE_TEAM = {
@@ -62,11 +62,37 @@ interface UIStoreState {
   activeLinkSnippet: any | null;
   selectedSnippet: any | null;
   activeTutorial: string | null;
+  isSheetOpen: boolean;
+  activeSheetSection: string | null;
 
   // --- Explicit Actions ---
   setView: (view: MainView) => void;
   openEditor: (editorState: ActiveEditorState) => void;
   closeEditor: () => void;
+  openSheet: (section?: string | null) => void;
+  closeSheet: () => void;
+  openCreateWorkspace: () => void;
+  openCreateFolder: () => void;
+  openItemEditor: (
+    editorType: EditorType,
+    id: string,
+    options?: {
+      isNew?: boolean;
+      props?: any;
+      linkPrefill?: any;
+      openTodoSidebar?: boolean;
+    },
+  ) => void;
+  openCreateItem: (
+    editorType: EditorType,
+    options?: {
+      id?: string;
+      isNew?: boolean;
+      props?: any;
+      linkPrefill?: any;
+      openTodoSidebar?: boolean;
+    },
+  ) => void;
   
   setSidebar: (sidebar: SidebarType, state: Partial<SidebarState>) => void;
   setSelection: (selection: {
@@ -174,14 +200,104 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
   activeLinkSnippet: null,
   selectedSnippet: null,
   activeTutorial: null,
+  isSheetOpen: false,
+  activeSheetSection: null,
   draftAutomation: null,
 
   setView: (view) =>
     set(state => (shallowEqual(state.activeView as any, view as any) ? state : { activeView: view })),
   
   openEditor: (editorState) =>
-    set(state => (state.activeEditor === editorState ? state : { activeEditor: editorState })),
-  closeEditor: () => set(state => (state.activeEditor === null ? state : { activeEditor: null })),
+    set(state => {
+      const updates: Partial<UIStoreState> = { activeEditor: editorState };
+      if (editorState?.type && editorState.type !== 'todo' && state.todoCreatePrefill !== null) {
+        updates.todoCreatePrefill = null;
+      }
+      return updates;
+    }),
+  closeEditor: () => set(state => {
+    console.log('[ESCAPE][closeEditor] called. activeView before:', state.activeView, '| isSheetOpen:', state.isSheetOpen, '| activeEditor:', state.activeEditor);
+    const newView = state.activeView.type === 'sheet' ? state.activeView : { type: 'home' };
+    console.log('[ESCAPE][closeEditor] -> setting activeView to:', newView);
+    const updates: Partial<UIStoreState> = { 
+      activeEditor: null, 
+      activeView: newView as any
+    };
+    if (state.todoCreatePrefill !== null) {
+      updates.todoCreatePrefill = null;
+    }
+    return updates;
+  }),
+  openSheet: (section = null) =>
+    set(state => ({
+      activeView: state.activeView.type === 'sheet' ? state.activeView : { type: 'sheet' },
+      isSheetOpen: true,
+      activeSheetSection: section,
+    })),
+  closeSheet: () =>
+    set(state => ({
+      activeView: state.activeView.type === 'sheet' ? { type: 'home' } : state.activeView,
+      isSheetOpen: false,
+      activeSheetSection: null,
+    })),
+  openCreateWorkspace: () =>
+    set({
+      activeEditor: null,
+      activeView: { type: 'createWorkspace' },
+      isSheetOpen: false,
+      activeSheetSection: null,
+    }),
+  openCreateFolder: () =>
+    set({
+      activeEditor: null,
+      activeView: { type: 'createFolder' },
+      isSheetOpen: false,
+      activeSheetSection: null,
+    }),
+  openItemEditor: (editorType, id, options) =>
+    set(state => {
+      const updates: Partial<UIStoreState> = {
+        activeEditor: {
+          type: editorType,
+          id,
+          isNew: options?.isNew,
+          props: options?.props,
+        },
+        linkEditPrefill: options?.linkPrefill ?? null,
+        activeSidebars: options?.openTodoSidebar
+          ? {
+              ...state.activeSidebars,
+              todoSidebar: { ...state.activeSidebars.todoSidebar, open: true },
+            }
+          : state.activeSidebars,
+      };
+      if (editorType !== 'todo' && state.todoCreatePrefill !== null) {
+        updates.todoCreatePrefill = null;
+      }
+      return updates;
+    }),
+  openCreateItem: (editorType, options) =>
+    set(state => {
+      const updates: Partial<UIStoreState> = {
+        activeEditor: {
+          type: editorType,
+          id: options?.id ?? 'new',
+          isNew: options?.isNew,
+          props: options?.props,
+        },
+        linkEditPrefill: options?.linkPrefill ?? null,
+        activeSidebars: options?.openTodoSidebar
+          ? {
+              ...state.activeSidebars,
+              todoSidebar: { ...state.activeSidebars.todoSidebar, open: true },
+            }
+          : state.activeSidebars,
+      };
+      if (editorType !== 'todo' && state.todoCreatePrefill !== null) {
+        updates.todoCreatePrefill = null;
+      }
+      return updates;
+    }),
 
   setSidebar: (sidebar, sidebarState) =>
     set(state => {
@@ -298,7 +414,7 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
   setOS: os => set({ os }),
   setTodoDraft: (draft) => set(state => ({ todoDraft: { ...state.todoDraft, ...draft } })),
   setSnippetBreadcrumb: breadcrumb => set({ snippetBreadcrumb: breadcrumb }),
-  clearEditorStates: () => set({ activeEditor: null, activeContextualUIs: { ...get().activeContextualUIs, inlinePrompt: { open: false } } }),
+  clearEditorStates: () => set({ activeEditor: null, todoCreatePrefill: null, linkEditPrefill: null, activeContextualUIs: { ...get().activeContextualUIs, inlinePrompt: { open: false } } }),
   viewSnippet: payload => set({ 
     selectedSnippetId: payload.snippet?.id, 
     snippetBreadcrumb: payload.breadcrumb, 
@@ -317,9 +433,13 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
   handleEscape: () => {
     const { modalStack, activeContextualUIs, activeEditor, activeSidebars, lockedCommand, activeView, escapeInterceptors } = get();
 
+    console.log('[ESCAPE][handleEscape] interceptors:', escapeInterceptors.length, '| activeEditor:', activeEditor, '| activeView:', activeView);
+
     // 0. Check all registered interceptors first (LIFO order, most recent first)
     for (let i = escapeInterceptors.length - 1; i >= 0; i--) {
-      if (escapeInterceptors[i]()) {
+      const result = escapeInterceptors[i]();
+      console.log('[ESCAPE][handleEscape] interceptor[' + i + '] returned:', result);
+      if (result) {
         return; // Interceptor handled it
       }
     }
@@ -346,6 +466,7 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
     }
     // 5. Active Editor
     if (activeEditor) {
+      console.log('[ESCAPE][handleEscape] -> step 5: closing activeEditor, isOverlay:', activeEditor?.props?.isOverlay);
       if (get().editorEscapeHandler) {
         const handled = get().editorEscapeHandler!();
         if (handled) {
@@ -369,6 +490,7 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
     }
     // 8. Active View
     if (activeView.type !== 'home') {
+      console.log('[ESCAPE][handleEscape] -> step 8: forcing home because activeView is:', activeView);
       get().setView({ type: 'home' });
       return;
     }

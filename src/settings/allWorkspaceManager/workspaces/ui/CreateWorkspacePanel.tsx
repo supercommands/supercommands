@@ -63,12 +63,11 @@ const CreateWorkspacePanel: React.FC<CreateWorkspacePanelProps> = ({ onClose, on
 
   return (
     <div
-      style={{ backgroundColor: 'var(--color-editorBg)' }}
-      className="relative flex h-full w-full flex-col overflow-hidden outline-none backdrop-blur-md rounded-xl border border-[var(--color-borderDefault)] shadow-2xl text-[var(--color-textPrimary)] select-none"
+      className="relative flex h-full w-full flex-col overflow-hidden outline-none text-[var(--color-textPrimary)] select-none"
     >
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 p-1 rounded-md text-[var(--color-textSecondary)] hover:text-[var(--color-textError)] hover:bg-red-500/10 transition-colors z-20"
+        className="absolute top-2.5 right-2 md:top-2.5 md:right-2 p-2 rounded-md text-[var(--color-textSecondary)] hover:text-[var(--color-textError)] hover:bg-[var(--color-hoverBg)] transition-colors z-50 cursor-pointer"
       >
         <FaTimes size={16} />
       </button>
@@ -85,15 +84,16 @@ const CreateWorkspacePanel: React.FC<CreateWorkspacePanelProps> = ({ onClose, on
           </div>
 
           <div className="mb-4 w-full">
-            <label className="block text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase mb-2">Workspace Name</label>
-            <input
-              type="text"
-              value={workspaceName}
-              onChange={e => setWorkspaceName(e.target.value)}
-              placeholder="Enter workspace name"
-              className="w-full text-sm font-medium text-[var(--color-textPrimary)] bg-[var(--color-inputBg)]/60 border border-[var(--color-borderDefault)] rounded-lg px-4 py-2.5 outline-none focus:border-[var(--color-borderActive)] placeholder:text-[var(--color-textMuted)] transition-colors duration-150"
-              autoFocus
-            />
+            <div className="relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-4 py-2.5 flex items-center">
+              <input
+                type="text"
+                value={workspaceName}
+                onChange={e => setWorkspaceName(e.target.value)}
+                placeholder="Give your organization a name..."
+                className="flex-1 text-sm font-medium text-black dark:text-white placeholder-[var(--color-textPlaceholder)]/70 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0"
+                autoFocus
+              />
+            </div>
           </div>
 
           {error && <p className="text-xs text-[var(--color-textError)] mt-2 font-semibold">{error}</p>}

@@ -123,7 +123,8 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [baseTheme, wallpaperId, customWallpaperBase64]);
 
   useEffect(() => {
-    const root = document.documentElement;
+    const isContentScript = typeof chrome !== 'undefined' && chrome.runtime && !location.protocol.startsWith('chrome-extension:');
+    const root = (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || (!isContentScript ? document.documentElement : null);
     if (!root) return;
     const glassPanels = [
       'appBg',

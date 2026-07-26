@@ -14,7 +14,7 @@ Access search, browser commands, and web shortcuts — all from one command bar.
 [![pnpm](https://img.shields.io/badge/pnpm-9.15.1-orange)](https://pnpm.io)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[**Getting Started**](#getting-started) · [**Features**](#features) · [**Contributing**](#contributing) · [**License**](#license)
+[**Getting Started**](#getting-started) · [**Features**](#features) · [**Contributing**](#contributing) · [**Wiki**](https://github.com/cmdOS-app/cmdOS/wiki) · [**Community**](https://github.com/cmdOS-app/cmdOS/community) · [**Security**](https://github.com/cmdOS-app/cmdOS/security) · [**License**](#license)
 
 </div>
 
@@ -61,9 +61,10 @@ Built-in commands available from the command bar:
 | Layer | Technology |
 |---|---|
 | UI | React 19, TypeScript |
-| Build | Vite 6, Turborepo |
+| Build | WXT, Vite 6, Turborepo |
 | Styling | Tailwind CSS |
 | Package manager | pnpm workspaces |
+| Local Database | Dexie.js (IndexedDB) — all data stored locally on device |
 | Storage | Chrome Extension APIs (local-first) |
 | Extension | Manifest V3 |
 
@@ -83,7 +84,7 @@ cmdOS/
 ├── src/
 │   ├── allObjectFolder/         # Core object types — the heart of the extension
 │   │   └── src/createObject/
-│   │       ├── links/           # Link and tab group objects
+│   │       ├── links/           # Link and Tab Session objects
 │   │       ├── notes/           # Rich note objects
 │   │       ├── snippets/        # Reusable text snippets
 │   │       ├── commands/        # Command definitions and handlers
@@ -132,23 +133,19 @@ git clone https://github.com/cmdOS-App/cmdOS.git
 cd cmdOS
 ```
 
-**2. Set up environment**
-
-```bash
-cp .env .env.local
-# The default .env is pre-configured for local development.
-# No changes needed to run the extension locally.
-```
-
-**3. Install dependencies**
+**2. Install dependencies**
 
 ```bash
 pnpm install
 ```
 
+The `.env` file is already pre-configured with the OSS extension public key and Google OAuth client ID. No changes needed to run locally.
+
+---
+
 ### Development
 
-Start the development server with hot reload:
+Start the WXT dev server with hot reload:
 
 ```bash
 pnpm dev
@@ -159,19 +156,36 @@ Then load the extension in Chrome:
 1. Open `chrome://extensions/`
 2. Enable **Developer mode** (top right toggle)
 3. Click **Load unpacked**
-4. Select the `dist/` directory
+4. Select the `.output/chrome-mv3/` directory
 
-The extension rebuilds automatically when you save changes.
+WXT watches your files and automatically reloads the extension when you save changes. All your notes, snippets, and data are stored locally in **Dexie.js (IndexedDB)** — nothing leaves your device.
+
+---
 
 ### Building
 
-Build the production extension:
+Build the production extension (with the shared OSS extension ID locked):
 
 ```bash
-pnpm build
+pnpm run wxt:build:chrome:oss
 ```
 
-The built extension will be in `dist/`. Load it in Chrome using the same steps as development.
+The built extension will be in `.output/chrome-mv3/`. Load it in Chrome:
+
+1. Open `chrome://extensions/`
+2. Enable **Developer mode**
+3. Click **Load unpacked**
+4. Select `.output/chrome-mv3/`
+
+> The `wxt:build:chrome:oss` command automatically sets the correct build variant, loads the OSS environment file, and locks the shared extension ID so Google OAuth redirect URIs match for all contributors.
+
+To create a `.zip` ready for the Chrome Web Store:
+
+```bash
+pnpm run wxt:zip:chrome:oss
+```
+
+---
 
 ### Type Checking
 
@@ -188,9 +202,12 @@ pnpm prettier
 
 ---
 
+## Contributing
 
+We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+---
 
 ## License
 
 Copyright © 2024–2026 RPA TASKLABS AUTOMATION SOFTWARE PRIVATE LIMITED · [Apache License 2.0](LICENSE)
-

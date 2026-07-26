@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss';
 
-export default {
+const config = {
   theme: {
     extend: {
       backdropBlur: {
@@ -88,3 +88,5 @@ export default {
     },
   ],
 } as Omit<Config, 'content'>;
+
+export default config;

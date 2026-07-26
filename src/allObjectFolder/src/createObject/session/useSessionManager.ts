@@ -1,8 +1,8 @@
 /**
  * @file useSessionManager.ts
  * @description Custom React hook managing active link-gathering sessions in extension windows/tabs,
- * including prefilling tab URLs, window change tracking, duplicate group name checking, and session lifecycle controls.
- * 
+ * including window change tracking, duplicate group name checking, and session lifecycle controls.
+ *
  * @usage
  * ```tsx
  * import { useLinkSessionManager } from './useSessionManager';
@@ -11,7 +11,6 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-
 
 /**
  * Interface representing a browser session tracked for link gathering.
@@ -27,63 +26,27 @@ export function useLinkSessionManager(onTabCaptured?: (tab: any) => void) {
   const [sessionName, setSessionName] = useState<string>('');
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isStartingSession, setIsStartingSession] = useState<boolean>(false);
-  const [prefillUrls, setPrefillUrls] = useState<{ url: string; title: string; favIconUrl: string; id: string }[]>([]);
-  const capturedUrlsRef = useRef<Set<string>>(new Set());
+  const capturedTabsRef = useRef<Map<string, string>>(new Map());
 
-  // Stable ref to chrome API — avoids triggering useEffect deps on every render
+  // Stable ref to chrome API â€” avoids triggering useEffect deps on every render
   const chromeRef = useRef<any>((window as any)?.chrome);
   const chromeAny = chromeRef.current;
 
-  // Track whether the prefill check has completed (use state so window-check effect re-fires)
-  const [prefillChecked, setPrefillChecked] = useState(false);
-
-  // Load session from pending prefill if launched from context menu / background
+  // Load active session for current window.
   useEffect(() => {
-    if (!chromeAny?.storage?.local) {
-      setPrefillChecked(true);
-      return;
-    }
-    chromeAny.storage.local.get('pending_session_prefill', (result: any) => {
-      const prefill = result.pending_session_prefill;
-      if (prefill?.sessionId) {
-        setActiveSessionId(prefill.sessionId);
-        // BoardView writes `title`, legacy paths may write `sessionName`
-        setSessionName(prefill.title || prefill.sessionName || '');
-        if (prefill.urls) {
-          const urls = Array.isArray(prefill.urls) ? prefill.urls : [];
-          const names = Array.isArray(prefill.names) ? prefill.names : [];
-          setPrefillUrls(urls.map((u: string, i: number) => ({
-            id: String(Date.now() + Math.random()),
-            url: u,
-            title: names[i] || u,
-            favIconUrl: ''
-          })));
+    if (!chromeAny?.storage?.local || !chromeAny?.windows || activeSessionId) return;
+
+    chromeAny.windows.getCurrent((currentWindow: any) => {
+      chromeAny.storage.local.get('active_sessions', (result: any) => {
+        const sessions: LinkSession[] = result.active_sessions || [];
+        const matchedSession = sessions.find((s) => s.windowId === currentWindow.id);
+        if (matchedSession) {
+          setSessionName(matchedSession.sessionName);
+          setActiveSessionId(matchedSession.sessionId);
         }
-        chromeAny.storage.local.remove('pending_session_prefill');
-      }
-      setPrefillChecked(true);
-    });
-  }, []);
-
-  // Load active session for current window — only after prefill check completes (to avoid race)
-  useEffect(() => {
-    if (!prefillChecked || !chromeAny?.storage?.local || !chromeAny?.windows || activeSessionId) return;
-
-    const checkCurrentWindowSession = async () => {
-      chromeAny.windows.getCurrent((currentWindow: any) => {
-        chromeAny.storage.local.get('active_sessions', (result: any) => {
-          const sessions: LinkSession[] = result.active_sessions || [];
-          const matchedSession = sessions.find((s) => s.windowId === currentWindow.id);
-          if (matchedSession) {
-            setSessionName(matchedSession.sessionName);
-            setActiveSessionId(matchedSession.sessionId);
-          }
-        });
       });
-    };
-
-    checkCurrentWindowSession();
-  }, [prefillChecked, activeSessionId]);
+    });
+  }, [activeSessionId]);
 
   /**
    * Validates if a session name is duplicate
@@ -92,7 +55,7 @@ export function useLinkSessionManager(onTabCaptured?: (tab: any) => void) {
     (name: string, onResult: (isValid: boolean, errorMsg: string | null) => void) => {
       const trimmedName = name.trim();
       if (!trimmedName) {
-        onResult(false, 'Tab group name is required');
+        onResult(false, 'Tab Session name is required');
         return;
       }
 
@@ -104,11 +67,13 @@ export function useLinkSessionManager(onTabCaptured?: (tab: any) => void) {
       chromeAny.storage.local.get('active_sessions', (res: any) => {
         const activeSessions: LinkSession[] = res.active_sessions || [];
         const duplicateActive = activeSessions.some(
-          (s) => s.sessionName?.toLowerCase() === trimmedName.toLowerCase()
+          (s) =>
+            s.sessionName?.toLowerCase() === trimmedName.toLowerCase() &&
+            String(s.sessionId || '') !== String(activeSessionId || '')
         );
 
         if (duplicateActive) {
-          onResult(false, 'A tab group with this name is currently active.');
+          onResult(false, 'A Tab Session with this name is currently active.');
         } else {
           onResult(true, null);
         }
@@ -117,32 +82,39 @@ export function useLinkSessionManager(onTabCaptured?: (tab: any) => void) {
     []
   );
 
-
   // Listen for real-time session tab captures from the background script
   useEffect(() => {
-    capturedUrlsRef.current.clear();
+    capturedTabsRef.current.clear();
   }, [activeSessionId]);
 
   useEffect(() => {
     const handleMessage = (message: any) => {
       if (message.action === 'session_tab_captured') {
         if (activeSessionId && message.sessionId === activeSessionId) {
-          const url = message.url;
-          if (url && capturedUrlsRef.current.has(url)) {
-            return; // Deduplicate
-          }
-          if (url) {
-            capturedUrlsRef.current.add(url);
+          if (!message.url) {
+            return;
           }
 
+          const captureKey = message.tabId ? `tab:${String(message.tabId)}` : String(message.url);
+          const url = message.url;
+          if (capturedTabsRef.current.has(captureKey)) {
+            const previousUrl = capturedTabsRef.current.get(captureKey);
+            if (previousUrl === url) {
+              return; // Fully duplicate (same tab, same url)
+            }
+          }
+          capturedTabsRef.current.set(captureKey, url);
+
+          const tabData = {
+            id: String(Date.now() + Math.random()),
+            name: message.title || message.url,
+            url: message.url,
+            source: 'tab' as const,
+            favIconUrl: message.favIconUrl || '',
+            originalData: message.tabId ? { id: message.tabId } : undefined,
+          };
           if (onTabCaptured) {
-            onTabCaptured({
-              id: String(Date.now() + Math.random()),
-              name: message.title || message.url,
-              url: message.url,
-              source: 'tab',
-              favIconUrl: message.favIconUrl || ''
-            });
+            onTabCaptured(tabData);
           }
         }
       }
@@ -165,6 +137,5 @@ export function useLinkSessionManager(onTabCaptured?: (tab: any) => void) {
     isStartingSession,
     setIsStartingSession,
     validateSessionName,
-    prefillUrls,
   };
 }

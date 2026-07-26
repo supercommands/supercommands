@@ -10,8 +10,7 @@ const toTitleCase = (str: string) => {
     .replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
 };
 
-const wallpaperModules = (import.meta as any).glob('../../pages/AltS_search_newtab/public/images/wallappear/*.{png,jpg,jpeg,webp,gif}');
-
+// Wallpaper generation moved to a static list to avoid duplicate build-time bundling
 const ThemeSettings: React.FC = () => {
   const { themeId, setTheme: setThemeProfile, wallpaperId, setWallpaper } = useAppearance();
   const [customWallpaperPreview, setCustomWallpaperPreview] = useState<string>('');
@@ -54,14 +53,17 @@ const ThemeSettings: React.FC = () => {
   const wallpapers = [
     { id: 'none', label: '', src: '' },
     ...(customWallpaperPreview ? [{ id: 'custom', label: 'Custom Image', src: customWallpaperPreview }] : []),
-    ...Object.keys(wallpaperModules).map(path => {
-      const filename = path.split('/').pop() || '';
+    ...['Car Race.png', 'Evermist.png', 'sky.png'].map(filename => {
       const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
       return {
         id: filename,
         label: filename === 'car-race.png' ? 'Car Race' : toTitleCase(nameWithoutExt),
         src: `AltS_search_newtab/images/wallappear/${filename}`,
       };
+    }).sort((a, b) => {
+      if (a.label === 'Default Wallpaper') return -1;
+      if (b.label === 'Default Wallpaper') return 1;
+      return a.label.localeCompare(b.label);
     })
   ];
 

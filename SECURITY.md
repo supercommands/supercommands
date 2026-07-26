@@ -11,7 +11,7 @@ Only the latest release of the TaskLabs open-source extension is supported for s
 We take the security of TaskLabs seriously. If you find a security vulnerability, please do **NOT** open a public issue. Instead, report it privately.
 
 To report a vulnerability:
-* Send an email detailing the vulnerability to **security@tasklabs.com** (or contact the maintainers via the support channel).
+* Send an email detailing the vulnerability to **bhanu.n@outlook.com** (or contact the maintainers via the support channel).
 * Include a detailed description of the issue, steps to reproduce, and any proof of concept (PoC) scripts or screenshots.
 
 We will acknowledge your report within 48 hours and work with you to analyze and patch the vulnerability before releasing a public advisory.

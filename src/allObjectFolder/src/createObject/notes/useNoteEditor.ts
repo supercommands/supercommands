@@ -10,7 +10,7 @@
  * ```
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import { createNote, updateNote, deleteNote } from './noteData';
 import type { NoteRecord, CreateNoteInput, UpdateNoteInput } from './noteTypes';
@@ -26,11 +26,13 @@ import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastU
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
 
 const ENABLE_DEBUG_LOGS = false;
-const AUTOSAVE_DELAY_MS = 1000;
+const AUTOSAVE_DELAY_MS = 400;
 const sameTagIds = (a: string[], b: string[]) =>
   a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
 
-const noteEditorLog = (..._args: unknown[]) => { };
+const noteEditorLog = (...args: unknown[]) => {
+  if (ENABLE_DEBUG_LOGS) console.log('[NoteEditorLog]', ...args);
+};
 
 const summarizeHtml = (html: string) => ({
   length: html.length,
@@ -111,6 +113,14 @@ export function useNoteEditor(props: NoteEditorViewProps) {
 
   const scheduleAutosaveRef = useRef<() => void>(() => { });
 
+  const clearAutosaveTimer = useCallback(() => {
+    if (autosaveTimerRef.current) {
+      noteEditorLog('clear autosave timer');
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+  }, []);
+
   // Initialize draft OR load existing note ID
   useEffect(() => {
     noteEditorLog('init effect start', {
@@ -119,13 +129,46 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       initialDraftContent: summarizeHtml(initialDraftContent || ''),
     });
 
+    clearAutosaveTimer();
+
     if (resolvedNoteId) {
       noteEditorLog('init existing note', { resolvedNoteId });
       activeNoteIdRef.current = resolvedNoteId;
       setActiveNoteId(resolvedNoteId);
       setIsInitialized(false);
       setIsNoteDeleted(false);
+      hasConflictRef.current = false;
+      setConflictNote(null);
       hasLoadedLiveNoteRef.current = false;
+
+      // Reset dirty status and refs so loading a new note starts fresh
+      isDirtyRef.current = false;
+      setIsDirty(false);
+      lastSavedTitleRef.current = '';
+      lastSavedBodyRef.current = '';
+      lastSavedWorkspaceIdRef.current = null;
+      lastSavedFolderIdRef.current = null;
+      lastSavedTagIdsRef.current = [];
+      lastSavedUpdatedAtRef.current = null;
+
+      setNoteTitle('');
+      setNoteBody('');
+      noteBodyRef.current = '';
+      setWorkspaceId(null);
+      setFolderId(null);
+      setTagIds([]);
+
+      currentInputsRef.current = {
+        noteTitle: '',
+        noteBody: '',
+        workspaceId: null,
+        folderId: null,
+        tagIds: [],
+        isInitialized: false,
+      };
+
+      setSaveStatus('idle');
+      setLastSavedAt(null);
       return;
     }
 
@@ -161,6 +204,14 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     lastSavedFolderIdRef.current = null;
     lastSavedTagIdsRef.current = [];
     lastSavedUpdatedAtRef.current = null;
+    currentInputsRef.current = {
+      noteTitle: initialDraftKey || '',
+      noteBody: initialDraftContent || '',
+      workspaceId: null,
+      folderId: null,
+      tagIds: [],
+      isInitialized: true,
+    };
     setSaveStatus('idle');
     setIsNoteDeleted(false);
     hasLoadedLiveNoteRef.current = true;
@@ -169,20 +220,47 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       title: initialDraftKey || '',
       body: summarizeHtml(initialDraftContent || ''),
     });
-  }, [resolvedNoteId, initialDraftKey, initialDraftContent]);
+  }, [resolvedNoteId, initialDraftKey, initialDraftContent, clearAutosaveTimer]);
 
   // Removed properties effect
 
   // Natively sync across tabs using centralized useDbStore
-  const liveNote = useDbStore(state => state.notes.find(n => n.id === activeNoteId));
+  const rawLiveNote = useDbStore(state =>
+    state.notes.find(n => n.id === activeNoteId) ||
+    state.snippets.find(s => s.id === activeNoteId) ||
+    state.todos.find(t => t.id === activeNoteId)
+  );
 
-  const clearAutosaveTimer = useCallback(() => {
-    if (autosaveTimerRef.current) {
-      noteEditorLog('clear autosave timer');
-      clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
+  const liveNote = useMemo(() => {
+    if (!rawLiveNote) return undefined;
+
+    // Check if it's a Todo record — 'isDone' is a reliable discriminator (always present, not in Note/Snippet)
+    if ('isDone' in rawLiveNote) {
+      const todo = rawLiveNote as any;
+      return {
+        id: todo.id,
+        title: todo.name || '',
+        body: todo.description ?? '',
+        workspaceId: null,
+        folderId: null,
+        tagIds: [],
+        updatedAt: todo.updatedAt,
+        createdAt: todo.createdAt,
+      } as any;
     }
-  }, []);
+
+    // Check if it's a Snippet record
+    if ('config' in rawLiveNote) {
+      const snippet = rawLiveNote as any;
+      const configStr = typeof snippet.config === 'string' ? snippet.config : JSON.stringify(snippet.config || '');
+      return {
+        ...snippet,
+        body: configStr ?? '',
+      } as any;
+    }
+
+    return rawLiveNote as NoteRecord;
+  }, [rawLiveNote]);
 
   const handleSave = useCallback(async (silent: boolean = false, overrideProps?: SharedProperties | null): Promise<boolean> => {
     noteEditorLog('handleSave called', {
@@ -242,6 +320,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
 
     if (!currentNoteId && !hasTitle && !hasBody) {
       noteEditorLog('handleSave skipped for empty draft');
+      setSaveStatus('idle');
       return false;
     }
 
@@ -275,8 +354,9 @@ export function useNoteEditor(props: NoteEditorViewProps) {
           }
           return true;
         } catch (err) {
-          console.error('Auto-delete failed:', err);
+          console.error('[useNoteEditor] Auto-delete failed:', err);
           noteEditorLog('auto delete failed', { currentNoteId, err });
+          setSaveStatus('error');
           return false;
         } finally {
           saveInProgressRef.current = false;
@@ -299,7 +379,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     }
 
     const performSave = async (): Promise<boolean> => {
-      console.log(`[useNoteEditor] performSave start. currentNoteId: ${currentNoteId}, silent: ${silent}`);
+
       noteEditorLog('performSave start', {
         currentNoteId,
         savingNoteId,
@@ -347,7 +427,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
             expectedUpdatedAt: lastSavedUpdatedAtRef.current ?? undefined,
           };
           if (currentTitle !== lastSavedTitleRef.current) input.title = currentTitle;
-          if (currentBody !== lastSavedBodyRef.current) input.body = currentBody;
+          if (normalizeNoteBody(currentBody) !== normalizeNoteBody(lastSavedBodyRef.current)) input.body = currentBody;
           if (activeWorkspaceId !== lastSavedWorkspaceIdRef.current) input.workspaceId = activeWorkspaceId || undefined;
           if (activeFolderId !== lastSavedFolderIdRef.current) input.folderId = activeFolderId;
           if (!sameTagIds(activeTagIds, lastSavedTagIdsRef.current)) input.tagIds = activeTagIds;
@@ -399,13 +479,16 @@ export function useNoteEditor(props: NoteEditorViewProps) {
           noteEditorLog('switched draft to saved note id', { savedId: savedNote.id });
         }
 
-        const stillMatchesSnapshot =
-          currentInputsRef.current.noteTitle === currentTitle &&
-          currentInputsRef.current.noteBody === currentBody &&
-          currentInputsRef.current.workspaceId === activeWorkspaceId &&
-          currentInputsRef.current.folderId === activeFolderId &&
-          currentInputsRef.current.isInitialized === currentIsInit &&
-          currentTagIdsKey === [...currentInputsRef.current.tagIds].sort().join(',');
+        const currentTagIdsKey = [...currentInputsRef.current.tagIds].sort().join(',');
+        const snapshotMatches = {
+          title: currentInputsRef.current.noteTitle === currentTitle,
+          body: currentInputsRef.current.noteBody === currentBody,
+          workspace: currentInputsRef.current.workspaceId === activeWorkspaceId,
+          folder: currentInputsRef.current.folderId === activeFolderId,
+          init: currentInputsRef.current.isInitialized === currentIsInit,
+          tags: currentTagIdsKey === [...activeTagIds].sort().join(','),
+        };
+        const stillMatchesSnapshot = Object.values(snapshotMatches).every(Boolean);
 
         if (currentInputsRef.current.workspaceId === activeWorkspaceId) {
           setWorkspaceId(savedNote.workspaceId);
@@ -553,7 +636,16 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   useEffect(() => clearAutosaveTimer, [clearAutosaveTimer]);
 
   const handleBodyChange = useCallback((html: string) => {
-    if (sameString(noteBodyRef.current, html)) return;
+    // If the content is effectively empty in both previous and new state, ignore it
+    const isNewEmpty = extractTextFromHTML(html) === '';
+    const isPrevEmpty = extractTextFromHTML(noteBodyRef.current) === '';
+    if (isNewEmpty && isPrevEmpty) {
+      return;
+    }
+
+    if (sameString(normalizeNoteBody(noteBodyRef.current), normalizeNoteBody(html))) {
+      return;
+    }
     noteEditorLog('body change', {
       activeNoteId: activeNoteIdRef.current,
       body: summarizeHtml(html),
@@ -668,7 +760,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       const localTagsChanged = [...currentInputsRef.current.tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
 
       const remoteTitleChanged = liveNote.title !== lastSavedTitleRef.current;
-      const remoteBodyChanged = liveNote.body !== lastSavedBodyRef.current;
+      const remoteBodyChanged = normalizeNoteBody(liveNote.body) !== normalizeNoteBody(lastSavedBodyRef.current);
       const remoteWsChanged = liveNote.workspaceId !== lastSavedWorkspaceIdRef.current;
       const remoteFolderChanged = liveNote.folderId !== lastSavedFolderIdRef.current;
       const remoteTagsChanged = [...liveNote.tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
@@ -965,10 +1057,58 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     setIsDirty(false);
     setSaveStatus('idle');
     setLastSavedAt(null);
-    hasLoadedLiveNoteRef.current = false;
+    hasLoadedLiveNoteRef.current = true;
     hasConflictRef.current = false;
     setConflictNote(null);
+    setIsNoteDeleted(false);
+    setIsInitialized(true);
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    lastSavedTitleRef.current = '';
+    lastSavedBodyRef.current = '';
+    lastSavedWorkspaceIdRef.current = null;
+    lastSavedFolderIdRef.current = null;
+    lastSavedTagIdsRef.current = [];
+    lastSavedUpdatedAtRef.current = null;
+
+    const initDefaults = async () => {
+      const smartWs = await getSmartDefaultWorkspace();
+      if (smartWs) {
+        setWorkspaceId(smartWs.id);
+        const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
+        setFolderId(savedFolderId || null);
+      } else {
+        setWorkspaceId(null);
+        setFolderId(null);
+      }
+    };
+    void initDefaults();
+    setTagIds([]);
+
+    currentInputsRef.current = {
+      noteTitle: '',
+      noteBody: '',
+      workspaceId: null,
+      folderId: null,
+      tagIds: [],
+      isInitialized: true,
+    };
   }, []);
+
+  const flushSave = useCallback(async () => {
+    while (savePromiseRef.current || isDirtyRef.current) {
+      if (savePromiseRef.current) {
+        await savePromiseRef.current;
+      }
+      if (isDirtyRef.current) {
+        await handleSave(false);
+      }
+    }
+  }, [handleSave]);
 
   const syncRevision = liveNote?.updatedAt ?? 0;
 
@@ -992,6 +1132,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     setNoteTitle: handleTitleChange,
     setNoteBody: handleBodyChange,
     handleSave,
+    flushSave,
     handleDelete,
     handleClose,
     setIsDeleteDialogOpen,

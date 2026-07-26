@@ -18,7 +18,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppearance } from '@extension/ui';
 import { motion } from 'framer-motion';
 import { FaCheck, FaPencilAlt, FaPlus } from 'react-icons/fa';
-import { getFaviconUrl } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 
 interface ModelOption {
   id: string;
