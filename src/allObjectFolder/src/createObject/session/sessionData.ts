@@ -1,6 +1,6 @@
 /**
  * @file sessionData.ts
- * @description Handles CRUD database operations for Session (tab group) records in IndexedDB.
+ * @description Handles CRUD database operations for Session (Tab Session) records in IndexedDB.
  * Supports loading by workspace, folder, or at root levels.
  * 
  * @usage
@@ -14,7 +14,7 @@ import Dexie from 'dexie';
 
 import type { SessionRecord, CreateSessionInput, UpdateSessionInput } from './sessionTypes';
 import { generateEntityId } from '../../../../shared-components/utils';
-import { db } from '../../../../storage/indexDB/dbConfig';
+import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 
 /**
@@ -39,7 +39,7 @@ export async function createSession(input: CreateSessionInput): Promise<SessionR
     workspaceId,
     folderId,
 
-    title: input.title.trim() || 'Untitled Tab group',
+    title: input.title.trim() || 'Untitled Tab Session',
     urls: input.urls ?? [],
     tagIds: input.tagIds ?? [],
     sessionOpenSettings: input.sessionOpenSettings,
@@ -78,7 +78,7 @@ export async function updateSession(sessionId: string, input: UpdateSessionInput
   };
 
   if (input.title !== undefined) {
-    changes.title = input.title.trim() || 'Untitled Tab group';
+    changes.title = input.title.trim() || 'Untitled Tab Session';
   }
 
   if (input.urls !== undefined) {
@@ -178,6 +178,7 @@ export async function getSessionsForFolder(workspaceId: string, folderId: string
  */
 export async function deleteSession(sessionId: string): Promise<void> {
   try {
+    await deleteItemAssociations(sessionId);
     await db.sessions.delete(sessionId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';

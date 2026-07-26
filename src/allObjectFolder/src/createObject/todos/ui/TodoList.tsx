@@ -69,14 +69,15 @@ import NotesIcon from '../../../../../shared-components/icons/notesIcon';
 import AutomationDynamicIcon from '../../../../../shared-components/icons/automationDynamicIcon';
 import CmdIcon from '../../../../../shared-components/icons/cmdIcon';
 import StackedLinkIcon from '../../../../../shared-components/icons/stackedLinkIcon';
-import { getFaviconUrl } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { useAppearance } from '@extension/ui';
 import { isLocalEntityId } from '../../../../../shared-components/utils';
+import { resolveEntityById } from '../../../../../shared-components/utils/entityResolver';
 
 
 
-import { COMMANDS, AI_GROUP } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/commandConfigurations/commands';
-import { LOCAL_COMMANDS } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/commandConfigurations/localCommands';
+import { COMMANDS, AI_GROUP } from '../../../../../shared-components/searchBarMain/commandConfigurations/commands';
+import { LOCAL_COMMANDS } from '../../../../../shared-components/searchBarMain/commandConfigurations/localCommands';
 import CreateTodoView from './CreateTodoView';
 import FullScreenNoteView from '../../../../../shared-components/editorViews/fullScreenNoteView';
 
@@ -132,6 +133,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({
     active: false,
     overdue: false,
+    scheduled_fut: false,
     completed: true,
   });
 
@@ -143,7 +145,6 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
   };
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [inlineNoteId, setInlineNoteId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -182,7 +183,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     const handleOutsideClick = (e: MouseEvent) => {
       const button = dropdownRef.current?.parentElement?.querySelector('button');
       if (
-        dropdownRef.current && 
+        dropdownRef.current &&
         !dropdownRef.current.contains(e.target as Node) &&
         (!button || !button.contains(e.target as Node))
       ) {
@@ -202,7 +203,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     if (targetTodoId) {
       await db.todos.delete(String(targetTodoId));
     }
-    
+
     try {
       if (task.todo_id) {
         await deleteTodo(String(task.todo_id));
@@ -212,7 +213,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     } catch (e) {
       console.error('Permanent delete failed:', e);
     }
-    
+
     if (chromeAny?.runtime?.sendMessage) {
       chromeAny.runtime.sendMessage({ action: 'clear_todo_alarm', todoId: targetTodoId ? String(targetTodoId) : sid });
     }
@@ -249,8 +250,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     return new Date(String(d).replace(' ', 'T'));
   };
 
-  useEffect(() => {
-  }, [isCreateModalOpen]);
+
 
   const normalizeDeadline = (d: string | undefined): string => {
     if (!d) return '';
@@ -279,7 +279,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         });
         useUIStore.getState().setTodoCreatePrefill(null);
       } else {
-        setIsCreateModalOpen(true);
+        useUIStore.getState().openEditor({ type: 'todo', id: '' });
       }
     }
   }, [todoCreatePrefill, isOpen]);
@@ -289,11 +289,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     onClose();
   }, [onClose]);
 
-  useEffect(() => {
-    return () => {
-      useUIStore.getState().setTodoCreatePrefill(null);
-    };
-  }, []);
+
 
   const isDarkMode = document.documentElement.classList.contains('dark');
 
@@ -327,7 +323,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     }
   };
 
-  
+
   const rawTodos = useDbStore(state => state.todos);
   const dexieTodos = useMemo(() => {
     return [...rawTodos].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -345,6 +341,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       todo_id: dt.id,
       key: dt.name,
       title: dt.name,
+      description: dt.description || '',
       value: dt.description || '',
       category: 'custom',
       is_done: dt.isDone,
@@ -358,7 +355,10 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       folder_id: '',
       workspace_id: '',
       references: dt.references,
-      config: { id: dt.references.map(r => r.id), title: dt.name }
+      config: { id: dt.references.map(r => r.id), title: dt.name },
+      shortcut: dt.shortcut || '',
+      tags: dt.tags || dt.tagIds || [],
+      tagIds: dt.tagIds || dt.tags || [],
     }));
   }, [dexieTodos]);
 
@@ -376,6 +376,9 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         const completionDate = task.updated_at ? new Date(task.updated_at.replace(' ', 'T')) : deadline;
         return !isNaN(completionDate.getTime()) && isSameDay(completionDate, now);
       }
+
+      // Recurring todos always appear in the today view (they repeat regardless of next date)
+      if (task.is_recurring) return true;
 
       const isFutureDay = !isSameDay(deadline, now) && deadline.getTime() > now.getTime();
 
@@ -570,7 +573,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       todo_id: numericId || task.todo_id || task.snippet_id
     };
     useUIStore.getState().setTodoCreatePrefill(taskWithId);
-    setIsCreateModalOpen(true);
+    useUIStore.getState().openEditor({ type: 'todo', id: String(taskWithId.todo_id || taskWithId.snippet_id || '') });
   };
 
   const handleDelete = async (task: TodoItem) => {
@@ -653,13 +656,169 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     return value?.urls || [];
   };
 
+  const startSessionFromTodoReference = async (sessionLike: any) => {
+    const chromeAny = (window as any)?.chrome;
+    if (!chromeAny?.runtime?.sendMessage) return;
+
+    const record = sessionLike?.data || sessionLike?.session || sessionLike?.item || sessionLike;
+    if (!record) return;
+
+    const sessionId = record.id || record.session_id || record.snippet_id;
+    if (!sessionId) return;
+
+    const sessionName = record.title || record.key || record.name || 'Untitled Tab Session';
+    const workspaceId = record.workspaceId || record.workspace_id || null;
+    const folderId = record.folderId || record.folder_id || null;
+
+    let initialUrls: string[] = [];
+    let initialNames: string[] = [];
+    let openSettings = record.sessionOpenSettings || sessionLike?.sessionOpenSettings;
+
+    const extractSessionUrlPayload = (entries: any[] | undefined | null) => {
+      if (!Array.isArray(entries)) {
+        return { urls: [] as string[], names: [] as string[] };
+      }
+
+      const urls: string[] = [];
+      const names: string[] = [];
+
+      entries.forEach((entry: any) => {
+        const url = typeof entry === 'string' ? entry : entry?.url;
+        if (!url) return;
+        urls.push(url);
+        names.push(typeof entry === 'string' ? '' : entry?.title || entry?.name || '');
+      });
+
+      return { urls, names };
+    };
+
+    try {
+      const resolved = await resolveEntityById(String(sessionId));
+      const sessionRecord = resolved?.entity as any;
+      if (sessionRecord) {
+        openSettings = sessionRecord.sessionOpenSettings || openSettings;
+        const resolvedPayload = extractSessionUrlPayload(sessionRecord.urls);
+        if (resolvedPayload.urls.length > 0) {
+          initialUrls = resolvedPayload.urls;
+          initialNames = resolvedPayload.names;
+        }
+      }
+    } catch { }
+
+    if (initialUrls.length === 0) {
+      const recordPayload = extractSessionUrlPayload(record.urls);
+      initialUrls = recordPayload.urls;
+      initialNames = recordPayload.names;
+
+      if (initialUrls.length === 0) {
+        try {
+          const parsed = typeof record.value === 'string' ? JSON.parse(record.value) : record.value;
+          if (Array.isArray(parsed)) {
+            initialUrls = parsed.map((l: any) => l.url || l).filter(Boolean);
+            initialNames = parsed.map((l: any) => l.name || l.title || '').filter((_: any, idx: number) => !!initialUrls[idx]);
+          } else if (parsed && typeof parsed === 'object') {
+            if (Array.isArray(parsed.urls)) initialUrls = parsed.urls.filter(Boolean);
+            if (Array.isArray(parsed.names)) initialNames = parsed.names;
+          }
+        } catch { }
+
+        if (initialUrls.length === 0) {
+          initialUrls = extractUrlsFromValue(record.value);
+        }
+      }
+    }
+
+    const activeTabContext = await new Promise<{ currentTabId: number | null; currentWindowId: number | null; currentPageUrl: string }>((resolve) => {
+      if (!chromeAny?.tabs?.query) {
+        resolve({
+          currentTabId: null,
+          currentWindowId: null,
+          currentPageUrl: window.location.href,
+        });
+        return;
+      }
+
+      chromeAny.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+        const activeTab = tabs?.[0];
+        resolve({
+          currentTabId: activeTab?.id ?? null,
+          currentWindowId: activeTab?.windowId ?? null,
+          currentPageUrl: activeTab?.url || window.location.href,
+        });
+      });
+    });
+
+    await new Promise<void>(resolve => {
+      chromeAny.runtime.sendMessage(
+        {
+          action: 'start_session',
+          sessionId,
+          sessionName,
+          workspaceId,
+          folderId: folderId || null,
+          teamId: 'local',
+          storageMode: 'local',
+          initialUrls,
+          initialNames,
+          openSettings,
+          isInlineCreation: true,
+          ...activeTabContext,
+        },
+        () => resolve(),
+      );
+    });
+  };
+
   const executeTask = async (task: TodoItem, skipToggle = false) => {
     if (task.is_done && !skipToggle) return;
 
+    const { category, value, snippet_id } = task;
+    const cat = (category || (task as any).snippet_category || '').toLowerCase();
+
+    // 1. If it's a custom/pure Todo, open the Todo itself as a note so its title & description render.
+    const isCustom = cat === 'custom' || task.todo_id || (task.id && String(task.id).startsWith('todo_'));
+    if (isCustom) {
+      const triggerId = snippet_id || task.id || task.todo_id || (task as any).todoId;
+      chrome.tabs.create({
+        url: chrome.runtime.getURL(
+          `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(triggerId)}`,
+        ),
+      });
+    } else if (['tabgroup', 'tab session', 'session', 'sessions'].includes(cat)) {
+      await startSessionFromTodoReference({
+        data: {
+          id: snippet_id || task.id || task.todo_id || (task as any).todoId,
+          title: task.key || task.title || task.name || 'Untitled Tab Session',
+          value,
+          urls: task.urls,
+          sessionOpenSettings: (task as any).sessionOpenSettings,
+        },
+        sessionOpenSettings: (task as any).sessionOpenSettings,
+      });
+    } else if (['link', 'collection', 'agent_collection'].includes(cat)) {
+      extractUrlsFromValue(value).forEach(url => chrome.tabs.create({ url }));
+    } else if (['note', 'snippet', 'prompt'].includes(cat)) {
+      setInlineNoteId(snippet_id);
+      return;
+    } else if (['command', 'automation', 'agent', 'chat_agent'].includes(cat)) {
+      const triggerId = value || snippet_id || task.id || task.todo_id || (task as any).todoId;
+      chrome.tabs.create({
+        url: chrome.runtime.getURL(
+          `AltS_search_newtab/index.html?trigger_hotkey=true&type=${cat}&id=${encodeURIComponent(triggerId)}`,
+        ),
+      });
+    }
+
+    // 2. Open any attached references
     const configIds = task.config?.id;
     if (Array.isArray(configIds) && configIds.length > 0) {
       for (const cid of configIds) {
         const cidStr = String(cid);
+        // Skip opening the Todo itself again
+        if (cidStr === String(task.todo_id) || cidStr === String(task.id) || cidStr === String(snippet_id)) {
+          continue;
+        }
+
         const matched = finalConvertibleItems.find(item => {
           const itemIdStr = String(item.id);
           if (itemIdStr === cidStr) return true;
@@ -673,8 +832,16 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
           const itemId = matched.id;
           const itemVal = matched.data?.value || matched.data?.url || matched.data?.link || '';
 
-          if (['link', 'collection', 'agent_collection'].includes(itemCat)) {
-            extractUrlsFromValue(itemVal).forEach(url => chrome.tabs.create({ url }));
+          if (['tabgroup', 'tab session', 'session', 'sessions'].includes(itemCat)) {
+            await startSessionFromTodoReference(matched);
+          } else if (['link', 'collection', 'agent_collection'].includes(itemCat)) {
+            let urls: string[] = [];
+            if (Array.isArray(matched.data?.urls)) {
+              urls = matched.data.urls.map((u: any) => u.url || u.link || u).filter(Boolean);
+            } else {
+              urls = extractUrlsFromValue(itemVal);
+            }
+            urls.forEach(url => chrome.tabs.create({ url }));
           } else if (['note', 'snippet', 'prompt', 'custom'].includes(itemCat)) {
             chrome.tabs.create({
               url: chrome.runtime.getURL(
@@ -690,37 +857,8 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
           }
         }
       }
-
-      if (!skipToggle) {
-        await handleToggleDone(task);
-      }
-      return;
     }
 
-    const { category, value, snippet_id } = task;
-    const cat = (category || (task as any).snippet_category || '').toLowerCase();
-
-    if (['link', 'collection', 'agent_collection'].includes(cat)) {
-      extractUrlsFromValue(value).forEach(url => chrome.tabs.create({ url }));
-    } else if (['note', 'snippet', 'prompt'].includes(cat)) {
-      setInlineNoteId(snippet_id);
-      return;
-    } else if (['command', 'automation', 'agent', 'chat_agent', 'custom'].includes(cat)) {
-      const triggerId = value || snippet_id;
-      if (cat === 'custom') {
-        chrome.tabs.create({
-          url: chrome.runtime.getURL(
-            `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(triggerId)}`,
-          ),
-        });
-      } else {
-        chrome.tabs.create({
-          url: chrome.runtime.getURL(
-            `AltS_search_newtab/index.html?trigger_hotkey=true&type=${cat}&id=${encodeURIComponent(triggerId)}`,
-          ),
-        });
-      }
-    }
     if (!skipToggle) {
       await handleToggleDone(task);
     }
@@ -749,13 +887,13 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         const cat = (matched.category || '').toLowerCase();
         if (cat === 'command') return 'Command';
         if (cat === 'folder') return 'Folder';
-        if (['tabgroup', 'tab group', 'agent_collection', 'collection'].includes(cat)) return 'Group';
+        if (['tabgroup', 'Tab Session', 'agent_collection', 'collection'].includes(cat)) return 'Group';
         if (['link'].includes(cat)) return 'Link';
-        if (cat === 'prompt') return 'Prompt';
+        if (cat === 'prompt') return 'AI Prompt';
         if (cat === 'note') return 'Note';
         if (cat === 'snippet') return 'Snippet';
         if (cat === 'chat_agent' || cat === 'agent') return 'Agent';
-        if (cat === 'prompt') return 'Prompt';
+        if (cat === 'prompt') return 'AI Prompt';
         return cat.charAt(0).toUpperCase() + cat.slice(1).toLowerCase().replace(/_/g, ' ');
       }
     }
@@ -764,11 +902,11 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     if (catLower && !['note', 'snippet', 'custom'].includes(catLower)) {
       if (catLower === 'command') return 'Command';
       if (catLower === 'folder') return 'Folder';
-      if (['tabgroup', 'tab group', 'agent_collection', 'collection'].includes(catLower)) return 'Group';
+      if (['tabgroup', 'Tab Session', 'agent_collection', 'collection'].includes(catLower)) return 'Group';
       if (['link'].includes(catLower)) return 'Link';
-      if (catLower === 'prompt') return 'Prompt';
+      if (catLower === 'prompt') return 'AI Prompt';
       if (catLower === 'chat_agent' || catLower === 'agent') return 'Agent';
-      if (catLower === 'prompt') return 'Prompt';
+      if (catLower === 'prompt') return 'AI Prompt';
     }
 
     return 'Task';
@@ -778,7 +916,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     try {
       setIsLoading(true);
       let deadline = data.deadline || '';
-      
+
       if (!deadline && data.date) {
         const [year, month, day] = data.date.split('-').map(Number);
         const [hour, minute] = data.time ? data.time.split(':').map(Number) : [23, 59];
@@ -787,13 +925,13 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
           deadline = dt.toISOString();
         }
       }
-      
+
       if (!deadline) {
         deadline = new Date().toISOString();
       }
-      
+
       const scheduleTime = new Date(deadline).getTime();
-      
+
       let references: any[] = [];
       if (Array.isArray(data.selectedItems)) {
         references = data.selectedItems.map((item: any) => ({
@@ -803,16 +941,31 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       }
 
       console.log('[TodoList] handleCreateFromSelection called with:', { title: data.title, scheduleType: data.scheduleType, date: data.date, time: data.time });
-      const newTodo = await createTodo(
-        data.title,
-        references,
-        data.scheduleType === 'recurring' ? 'recurring' : 'one-time',
-        scheduleTime,
-        data.scheduleType === 'recurring' ? data.recurringCycle : undefined,
-        data.description
-      );
-      console.log('[TodoList] createTodo succeeded:', newTodo?.id);
-      
+      let newTodo;
+      if (todoCreatePrefill?.todo_id) {
+        await db.todos.update(String(todoCreatePrefill.todo_id), {
+          name: data.title,
+          description: data.description ?? '',
+          references: references,
+          scheduleType: data.scheduleType === 'recurring' ? 'recurring' : 'one-time',
+          recurringType: data.scheduleType === 'recurring' ? data.recurringCycle : undefined,
+          scheduleTime,
+          updatedAt: Date.now()
+        });
+        newTodo = { id: String(todoCreatePrefill.todo_id) };
+        console.log('[TodoList] updateTodo succeeded:', newTodo.id);
+      } else {
+        newTodo = await createTodo(
+          data.title,
+          references,
+          data.scheduleType === 'recurring' ? 'recurring' : 'one-time',
+          scheduleTime,
+          data.scheduleType === 'recurring' ? data.recurringCycle : undefined,
+          data.description
+        );
+        console.log('[TodoList] createTodo succeeded:', newTodo?.id);
+      }
+
       try {
         const chromeAny = (window as any).chrome;
         if (chromeAny?.runtime?.sendMessage) {
@@ -825,11 +978,10 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       } catch (err) {
         console.error('Failed to schedule new dexie todo alarm', err);
       }
-      
+
       // Let CreateTodoView handle its own onClose logic for animations and createMore
       if (!data.createMore) {
         if (onClose) onClose();
-        setIsCreateModalOpen(false);
       }
     } catch (e) {
       console.error('Failed to create dexie todo', e);
@@ -839,10 +991,9 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
   };
 
   const createViewFlatItems = React.useMemo(() => {
-    if (isCreateModalOpen) return [];
     const q = createSearchQuery.toLowerCase();
     return finalConvertibleItems.filter(item => (item.name || item.key || '').toLowerCase().includes(q));
-  }, [finalConvertibleItems, activeSection, createSearchQuery, isCreateModalOpen]);
+  }, [finalConvertibleItems, activeSection, createSearchQuery]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -850,17 +1001,14 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
     useUIStore.getState().setHighlightedCommandId(null);
     const activeTag = document.activeElement?.tagName;
     if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
-      if (!isCreateModalOpen && searchInputRef.current) {
+      if (searchInputRef.current) {
         searchInputRef.current.focus();
-      } else if (!isCreateModalOpen) {
+      } else {
         containerRef.current?.focus();
       }
     }
 
     const blockEvents = (e: KeyboardEvent) => {
-      if (isCreateModalOpen) {
-        return;
-      }
       const isInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
 
       if (inlineNoteId) {
@@ -876,21 +1024,19 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
 
       if (e.key === 'ArrowDown') {
         let maxIndex = allOrderedTasks.length - 1;
-        if (isCreateModalOpen) return;
 
         e.preventDefault();
         setSelectedIndex(prev => Math.min(prev + 1, maxIndex));
         return;
       }
       if (e.key === 'ArrowUp') {
-        if (isCreateModalOpen) return;
 
         e.preventDefault();
         setSelectedIndex(prev => Math.max(prev - 1, 0));
         return;
       }
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-        if (isInput || isCreateModalOpen) return;
+        if (isInput) return;
         const pillList = ['today', 'scheduled'] as const;
         const currentPillIndex = pillList.indexOf(activeSection as any);
         const nextIndex = e.key === 'ArrowRight' ? (currentPillIndex + 1) % pillList.length : (currentPillIndex - 1 + pillList.length) % pillList.length;
@@ -907,7 +1053,6 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         return;
       }
       if (e.key === 'Enter') {
-        if (isCreateModalOpen) return;
 
         e.preventDefault();
         const task = allOrderedTasks[selectedIndex];
@@ -928,7 +1073,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       (window as any).isTodoDashboardOpen = false;
       window.removeEventListener('keydown', blockEvents, true);
     };
-  }, [isOpen, activeSection, selectedIndex, allOrderedTasks, collapsedCategories, finalConvertibleItems, inlineNoteId, isCreateModalOpen]);
+  }, [isOpen, activeSection, selectedIndex, allOrderedTasks, collapsedCategories, finalConvertibleItems, inlineNoteId]);
   useEffect(() => {
     if (!isOpen) return;
     const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
@@ -1005,7 +1150,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         return wrapIcon(<FaLayerGroup size={iconSize - 2} className={wrap ? "text-[#38bdf8]" : ""} />);
       }
       if ((!configIds || configIds.length === 0) && (category === 'note' || category === 'snippet' || category === 'custom')) {
-        return wrapIcon(<FiCheckSquare size={iconSize} className={wrap ? "text-amber-500" : ""} />);
+        return null;
       }
 
       let urls: string[] = [];
@@ -1100,7 +1245,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
 
           return wrapIcon(<CmdIcon size={18} height={12} fontSize={8} />);
         case 'tabgroup':
-        case 'tab group':
+        case 'Tab Session':
         case 'collection':
         case 'agent_collection':
           return <StackedLinkIcon urls={urls} size={iconSize} fallback="tabgroup" />;
@@ -1207,8 +1352,8 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         }}
         className={`group transition-all duration-200 cursor-pointer flex items-center justify-between w-full py-1.5 mb-1 rounded-lg ${task.is_done ? 'opacity-[0.6]' : ''}`}
       >
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 shrink-0">
             {task.is_done ? (
               <button
                 type="button"
@@ -1217,9 +1362,9 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
                   handleToggleDone(task);
                 }}
                 title="Completed"
-                className="w-[18px] h-[18px] rounded-full bg-emerald-500 border border-emerald-500 text-white flex items-center justify-center shadow-sm cursor-pointer transition-all hover:bg-emerald-600 shrink-0"
+                className="w-[15px] h-[15px] rounded-full bg-emerald-500 border border-emerald-500 text-white flex items-center justify-center shadow-sm cursor-pointer transition-all hover:bg-emerald-600 shrink-0"
               >
-                <FaCheck size={9} />
+                <FaCheck size={8} />
               </button>
             ) : (
               <button
@@ -1229,9 +1374,9 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
                   handleToggleDone(task);
                 }}
                 title="Mark Done"
-                className="w-[18px] h-[18px] rounded-full border border-white/30 hover:border-emerald-500 hover:bg-emerald-500/10 flex items-center justify-center transition-all cursor-pointer shrink-0"
+                className="w-[15px] h-[15px] rounded-full border border-white/30 hover:border-emerald-500 hover:bg-emerald-500/10 flex items-center justify-center transition-all cursor-pointer shrink-0"
               >
-                <FaCheck size={9} className="opacity-0 hover:opacity-50 text-emerald-500 transition-opacity" />
+                <FaCheck size={8} className="opacity-0 hover:opacity-50 text-emerald-500 transition-opacity" />
               </button>
             )}
             {!isSidebar && (
@@ -1244,7 +1389,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
           <div className="flex flex-col justify-center min-w-0 flex-1">
             {isSidebar ? (
               <>
-                <div className="flex items-center gap-1.5 min-w-0 w-full">
+                <div className="flex items-center gap-1 min-w-0 w-full">
                   <div className="flex items-center justify-center scale-[0.75] opacity-80 shrink-0">
                     {renderTypeIcon(false)}
                   </div>
@@ -1260,7 +1405,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
               </>
             ) : (
               <>
-                <div className="flex items-center gap-1.5 max-w-full">
+                <div className="flex items-center gap-1 max-w-full">
                   <div className="flex items-center justify-center scale-[0.75] opacity-80 shrink-0">
                     {renderTypeIcon(false)}
                   </div>
@@ -1272,10 +1417,10 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
                     {taskTitle}
                   </span>
                 </div>
-                <div className={`flex items-center gap-1.5 mt-0.5 ${task.is_done ? 'text-white/30' : (theme.wallpaper ? 'text-[var(--color-textSecondary)]' : 'text-[#8b949e]')}`}>
+                <div className={`flex items-center gap-1 mt-0.5 ${task.is_done ? 'text-white/30' : (theme.wallpaper ? 'text-[var(--color-textSecondary)]' : 'text-[#8b949e]')}`}>
                   <span className={`text-[11px] font-medium tracking-wide whitespace-nowrap ${Array.isArray(task.config?.id) && task.config.id.length > 1
-                      ? 'text-white/40 dark:text-white/30 font-normal'
-                      : ''
+                    ? 'text-white/40 dark:text-white/30 font-normal'
+                    : ''
                     }`}>
                     {getTaskCategoryDisplay(task)}
                   </span>
@@ -1286,14 +1431,14 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
           </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0 text-right whitespace-nowrap ml-4">
+        <div className="flex items-center gap-2 shrink-0 text-right whitespace-nowrap ml-2">
           {isSidebar ? (
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#8b949e]">
-              <span>{getTaskCategoryDisplay(task)}</span>
+            <div className={`grid ${deadlineDate.getTime() !== 0 ? 'grid-cols-[70px_10px_90px]' : 'grid-cols-[170px]'} items-center justify-end text-[11px] font-medium text-[#8b949e]`}>
+              <span className="text-right truncate">{getTaskCategoryDisplay(task)}</span>
               {deadlineDate.getTime() !== 0 && (
                 <>
-                  <span className="opacity-50">•</span>
-                  <span>
+                  <span className="text-center opacity-50 shrink-0">•</span>
+                  <span className="text-left truncate">
                     {isSameDay(deadlineDate, now)
                       ? deadlineDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
                       : `${isTomorrow(deadlineDate) ? 'Tomorrow' : format(deadlineDate, 'MMM d')}, ${deadlineDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
@@ -1351,7 +1496,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         <div className="absolute bottom-2 left-0 text-neutral-500/40 text-sm">✦</div>
         <div className="absolute top-2 right-1 text-neutral-500/40 text-sm">✦</div>
         <div className="absolute bottom-1 right-2 text-neutral-500/40 text-xs">✦</div>
-        
+
         <div className="w-14 h-14 rounded-full border border-neutral-700/30 flex items-center justify-center bg-transparent">
           <div className="w-10 h-10 rounded-full border border-neutral-700/60 flex items-center justify-center bg-transparent">
             <FiCheck className="text-neutral-400 text-lg stroke-[3]" />
@@ -1373,7 +1518,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {
         setIsHovered(false);
-        if (todoDisplayMode === 'collapse' && isSidebar && !isCreateModalOpen && !inlineNoteId) {
+        if (todoDisplayMode === 'collapse' && isSidebar && !inlineNoteId) {
           onClose();
         }
       }}
@@ -1383,7 +1528,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         <div
           style={isSidebar ? { maxHeight: '100%', height: 'auto' } : { maxHeight: `${listHeight}px`, height: 'auto' }}
           className={`flex flex-col w-full overflow-hidden relative ${isSidebar ? 'bg-transparent border-0' : 'bg-[var(--color-editorBg)] border border-[#2f3142] rounded-xl shadow-2xl'}`}>
-          <div className={`flex items-center justify-between px-2 shrink-0 w-full box-border border-b border-white/[0.06] ${isSidebar ? 'py-2.5' : 'py-4'}`}>
+          <div className={`flex items-center justify-between px-2 shrink-0 w-full box-border border-b border-white/[0.06] group/header-tabs ${isSidebar ? 'py-2.5' : 'py-4'}`}>
             <div className="flex items-center gap-4">
               <button
                 onClick={() => { setActiveSection('today'); setSelectedIndex(0); }}
@@ -1393,21 +1538,25 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
               </button>
               <button
                 onClick={() => { setActiveSection('scheduled'); setSelectedIndex(0); }}
-                className={`text-[12px] font-medium tracking-wide transition-all flex items-center gap-1.5 ${activeSection === 'scheduled' || activeSection === 'calendar' ? 'text-white font-bold' : 'text-[#8b949e] hover:text-[#e4e5eb]'}`}>
-                <BsCalendarCheck size={12} />
+                className={`text-[12px] font-medium tracking-wide transition-all flex items-center gap-1.5 ${activeSection === 'scheduled'
+                    ? 'text-white font-bold opacity-100 pointer-events-auto'
+                    : 'text-[#8b949e] hover:text-[#e4e5eb] opacity-0 pointer-events-none group-hover/header-tabs:opacity-100 group-hover/header-tabs:pointer-events-auto'
+                  } duration-200`}>
+                <FiCalendar size={12} />
                 <span>Scheduled</span>
               </button>
             </div>
             <div className="flex items-center gap-2 relative">
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   if (isLoggedIn === false && onRequireLogin) {
                     onRequireLogin();
                     return;
                   }
                   useUIStore.getState().setTodoCreatePrefill(null);
-                  setIsCreateModalOpen(true);
-                  setSelectedIndex(0);
+                  useUIStore.getState().setSidebar('todoSidebar', { open: false });
+                  useUIStore.getState().openEditor({ type: 'todo', id: 'new' });
                 }}
                 className="w-7 h-7 flex items-center justify-center rounded-[6px] border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.08] text-[#e4e5eb] cursor-pointer transition-all"
                 title="Add Task"
@@ -1447,11 +1596,10 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
                             }}
                             onMouseEnter={() => setHoveredMode('pin')}
                             onMouseLeave={() => setHoveredMode(null)}
-                            className={`flex items-center justify-between px-2 py-1 rounded-lg text-left text-[11px] font-semibold cursor-pointer transition-colors ${
-                              todoDisplayMode === 'pin'
+                            className={`flex items-center justify-between px-2 py-1 rounded-lg text-left text-[11px] font-semibold cursor-pointer transition-colors ${todoDisplayMode === 'pin'
                                 ? 'bg-emerald-500/10 text-emerald-400'
-                               : 'text-neutral-300 hover:bg-white/5'
-                            }`}
+                                : 'text-neutral-300 hover:bg-white/5'
+                              }`}
                           >
                             <span>Pin</span>
                             {todoDisplayMode === 'pin' && <FiCheck size={10} className="stroke-[3]" />}
@@ -1463,13 +1611,12 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
                             }}
                             onMouseEnter={() => setHoveredMode('data-blur')}
                             onMouseLeave={() => setHoveredMode(null)}
-                            className={`flex items-center justify-between px-2 py-1 rounded-lg text-left text-[11px] font-semibold cursor-pointer transition-colors ${
-                              todoDisplayMode === 'data-blur'
+                            className={`flex items-center justify-between px-2 py-1 rounded-lg text-left text-[11px] font-semibold cursor-pointer transition-colors ${todoDisplayMode === 'data-blur'
                                 ? 'bg-emerald-500/10 text-emerald-400'
                                 : 'text-neutral-300 hover:bg-white/5'
-                            }`}
+                              }`}
                           >
-                            <span>Pin & Show content on hover</span>
+                            <span>Pin Summary</span>
                             {todoDisplayMode === 'data-blur' && <FiCheck size={10} className="stroke-[3]" />}
                           </button>
                           <button
@@ -1479,11 +1626,10 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
                             }}
                             onMouseEnter={() => setHoveredMode('collapse')}
                             onMouseLeave={() => setHoveredMode(null)}
-                            className={`flex items-center justify-between px-2 py-1 rounded-lg text-left text-[11px] font-semibold cursor-pointer transition-colors ${
-                              todoDisplayMode === 'collapse'
+                            className={`flex items-center justify-between px-2 py-1 rounded-lg text-left text-[11px] font-semibold cursor-pointer transition-colors ${todoDisplayMode === 'collapse'
                                 ? 'bg-emerald-500/10 text-emerald-400'
                                 : 'text-neutral-300 hover:bg-white/5'
-                            }`}
+                              }`}
                           >
                             <span>Always close</span>
                             {todoDisplayMode === 'collapse' && <FiCheck size={10} className="stroke-[3]" />}
@@ -1491,11 +1637,11 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
                         </motion.div>
                         {hoveredMode && createPortal(
                           <div className="fixed right-[216px] top-[calc(14vh+44px)] z-[55] w-[400px] rounded-xl border border-white/10 bg-neutral-950/95 backdrop-blur-md shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                            <img 
+                            <img
                               src={
                                 hoveredMode === 'pin' ? pinTodoGif :
-                                hoveredMode === 'data-blur' ? todoDataBlurGif :
-                                unpinTodoGif
+                                  hoveredMode === 'data-blur' ? todoDataBlurGif :
+                                    unpinTodoGif
                               }
                               alt="Preview"
                               className="w-full block rounded-xl"
@@ -1521,158 +1667,148 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
               )}
 
               <div
-                style={todoDisplayMode === 'data-blur' && !isHovered ? { filter: 'blur(5px)', pointerEvents: 'none' } : undefined}
                 className="w-full text-[var(--color-textPrimary)] flex flex-col px-4 pt-4 transition-all duration-200"
               >
-                {activeSection === 'today' ? (
-                      <>
-                        {(() => {
-                          const overdueItems = activeTasks.filter(t => {
-                            const deadlineDate = parseTaskDate(t.event_deadline);
-                            return deadlineDate.getTime() < now.getTime() && (!isSameDay(deadlineDate, now) || (t.event_deadline && t.event_deadline.includes(':')));
-                          });
-                          const todayActiveItems = activeTasks.filter(t => !overdueItems.includes(t));
-                          const todayDoneItems = doneTasks.filter(t => t.is_done && isToday(parseTaskDate(t.event_deadline)));
+                {todoDisplayMode === 'data-blur' ? (
+                  <div className="flex flex-col items-center justify-center py-10 w-full h-full text-center">
+                    {activeTasks.length === 0 ? (
+                      <span className="text-neutral-300 font-semibold text-sm tracking-wide">All done</span>
+                    ) : (
+                      <span className="text-neutral-300 font-medium text-sm tracking-wide">Pending ({activeTasks.length})</span>
+                    )}
+                  </div>
+                ) : activeSection === 'today' ? (
+                  <>
+                    {(() => {
+                      const overdueItems = activeTasks.filter(t => {
+                        const deadlineDate = parseTaskDate(t.event_deadline);
+                        return deadlineDate.getTime() < now.getTime() && (!isSameDay(deadlineDate, now) || (t.event_deadline && t.event_deadline.includes(':')));
+                      });
+                      const todayActiveItems = activeTasks.filter(t => !overdueItems.includes(t));
+                      const todayDoneItems = doneTasks.filter(t => t.is_done && isToday(parseTaskDate(t.event_deadline)));
 
-                          const rows: React.ReactNode[] = [];
+                      const rows: React.ReactNode[] = [];
 
-                          const pushActive = () => {
-                            rows.push(
-                              <div key="active-header" className="group/header select-none cursor-pointer rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2" onClick={() => toggleGroupCollapsed('active')}>
-                                <div className="w-full py-2 flex items-center bg-transparent">
-                                  <div className="flex items-center gap-1.5 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
-                                    {collapsedGroups.active ? <FiChevronRight size={12} className="opacity-70" /> : <FiChevronDown size={12} className="opacity-70" />}
-                                    <FiClock size={12} className="text-blue-500 shrink-0" />
-                                    <span>Today</span>
-                                    <span className="opacity-50">•</span>
-                                    <span>{todayActiveItems.length}</span>
-                                  </div>
-                                </div>
+                      const pushActive = () => {
+                        rows.push(
+                          <div key="active-header" className="group/header select-none cursor-pointer rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2" onClick={() => toggleGroupCollapsed('active')}>
+                            <div className="w-full py-2 flex items-center bg-transparent">
+                              <div className="flex items-center gap-1.5 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
+                                {collapsedGroups.active ? <FiChevronRight size={12} className="opacity-70" /> : <FiChevronDown size={12} className="opacity-70" />}
+                                <FiClock size={12} className="text-blue-500 shrink-0" />
+                                <span>Today</span>
+                                <span className="opacity-50">•</span>
+                                <span>{todayActiveItems.length}</span>
                               </div>
-                            );
-                            if (!collapsedGroups.active) {
-                              if (todayActiveItems.length > 0) {
-                                todayActiveItems.forEach((task, index) => {
-                                  rows.push(renderTaskRow(task, index));
-                                });
-                              }
-                            }
-                          };
-
-                          const pushOverdue = () => {
-                            if (overdueItems.length === 0) return;
-                            rows.push(
-                              <div key="overdue-header" className="group/header select-none cursor-pointer rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2" onClick={() => toggleGroupCollapsed('overdue')}>
-                                <div className="w-full py-2 flex items-center bg-transparent">
-                                  <div className="flex items-center gap-1.5 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
-                                    {collapsedGroups.overdue ? <FiChevronRight size={12} className="opacity-70" /> : <FiChevronDown size={12} className="opacity-70" />}
-                                    <FiClock size={12} className="text-red-500 shrink-0" />
-                                    <span>Overdue</span>
-                                    <span className="opacity-50">•</span>
-                                    <span>{overdueItems.length}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                            if (!collapsedGroups.overdue) {
-                              overdueItems.forEach((task, index) => {
-                                rows.push(renderTaskRow(task, todayActiveItems.length + index));
-                              });
-                            }
-                          };
-
-                          const pushCompleted = () => {
-                            rows.push(
-                              <div key="completed-header" className="group/header select-none cursor-pointer rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2" onClick={() => toggleGroupCollapsed('completed')}>
-                                <div className="w-full py-2 flex items-center bg-transparent">
-                                  <div className="flex items-center gap-1.5 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
-                                    {collapsedGroups.completed ? <FiChevronRight size={12} className="opacity-70" /> : <FiChevronDown size={12} className="opacity-70" />}
-                                    <FiCheckCircle size={12} className="text-emerald-500 shrink-0" />
-                                    <span>Completed</span>
-                                    <span className="opacity-50">•</span>
-                                    <span>{todayDoneItems.length}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                            if (!collapsedGroups.completed) {
-                              todayDoneItems.forEach((task, index) => {
-                                rows.push(renderTaskRow(task, activeTasks.length + index));
-                              });
-                            }
-                          };
-
-                          const shouldShowOverdueFirst = todayActiveItems.length === 0 && overdueItems.length > 0;
-                          if (shouldShowOverdueFirst) {
-                            pushOverdue();
-                            pushActive();
-                            pushCompleted();
-                          } else {
-                            pushActive();
-                            pushOverdue();
-                            pushCompleted();
+                            </div>
+                          </div>
+                        );
+                        if (!collapsedGroups.active) {
+                          if (todayActiveItems.length > 0) {
+                            todayActiveItems.forEach((task, index) => {
+                              rows.push(renderTaskRow(task, index));
+                            });
                           }
+                        }
+                      };
 
-                          return <>{rows}</>;
-                        })()}
-                      </>
-                    ) : activeSection === 'calendar' ? (
-                      <>
-                        <div className="group/header select-none cursor-pointer hover:bg-white/[0.02] rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2">
-                          <div className="w-full py-2 flex items-center bg-transparent">
-                            <div className="flex items-center gap-2 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
-                              <span>Tasks for {format(selectedDate, 'MMMM d, yyyy')}</span>
-                              <span className="opacity-50">•</span>
-                              <span>{activeTasks.length}</span>
+                      const pushOverdue = () => {
+                        if (overdueItems.length === 0) return;
+                        rows.push(
+                          <div key="overdue-header" className="group/header select-none cursor-pointer rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2" onClick={() => toggleGroupCollapsed('overdue')}>
+                            <div className="w-full py-2 flex items-center bg-transparent">
+                              <div className="flex items-center gap-1.5 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
+                                {collapsedGroups.overdue ? <FiChevronRight size={12} className="opacity-70" /> : <FiChevronDown size={12} className="opacity-70" />}
+                                <FiClock size={12} className="text-red-500 shrink-0" />
+                                <span>Overdue</span>
+                                <span className="opacity-50">•</span>
+                                <span>{overdueItems.length}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        {activeTasks.length === 0 ? (
-                          renderCaughtUpState('All caught up', 'No tasks for this day.')
-                        ) : (
-                          activeTasks.map((task, index) => renderTaskRow(task, index))
-                        )}
-                      </>
-                    ) : activeSection === 'scheduled' ? (
-                      <>
-                        <div className="group/header select-none cursor-pointer hover:bg-white/[0.02] rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2">
-                          <div className="w-full py-2 flex items-center bg-transparent">
-                            <div className="flex items-center gap-2 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
-                              <span>Upcoming Tasks</span>
-                              <span className="opacity-50">•</span>
-                              <span>{activeTasks.length}</span>
+                        );
+                        if (!collapsedGroups.overdue) {
+                          overdueItems.forEach((task, index) => {
+                            rows.push(renderTaskRow(task, todayActiveItems.length + index));
+                          });
+                        }
+                      };
+
+                      const pushCompleted = () => {
+                        rows.push(
+                          <div key="completed-header" className="group/header select-none cursor-pointer rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2" onClick={() => toggleGroupCollapsed('completed')}>
+                            <div className="w-full py-2 flex items-center bg-transparent">
+                              <div className="flex items-center gap-1.5 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
+                                {collapsedGroups.completed ? <FiChevronRight size={12} className="opacity-70" /> : <FiChevronDown size={12} className="opacity-70" />}
+                                <FiCheckCircle size={12} className="text-emerald-500 shrink-0" />
+                                <span>Completed</span>
+                                <span className="opacity-50">•</span>
+                                <span>{todayDoneItems.length}</span>
+                              </div>
                             </div>
                           </div>
+                        );
+                        if (!collapsedGroups.completed) {
+                          todayDoneItems.forEach((task, index) => {
+                            rows.push(renderTaskRow(task, activeTasks.length + index));
+                          });
+                        }
+                      };
+
+                      const shouldShowOverdueFirst = todayActiveItems.length === 0 && overdueItems.length > 0;
+                      if (shouldShowOverdueFirst) {
+                        pushOverdue();
+                        pushActive();
+                        pushCompleted();
+                      } else {
+                        pushActive();
+                        pushOverdue();
+                        pushCompleted();
+                      }
+
+                      return <>{rows}</>;
+                    })()}
+                  </>
+                ) : activeSection === 'calendar' ? (
+                  <>
+                    <div className="group/header select-none cursor-pointer hover:bg-white/[0.02] rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2">
+                      <div className="w-full py-2 flex items-center bg-transparent">
+                        <div className="flex items-center gap-2 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
+                          <span>Tasks for {format(selectedDate, 'MMMM d, yyyy')}</span>
+                          <span className="opacity-50">•</span>
+                          <span>{activeTasks.length}</span>
                         </div>
-                        {activeTasks.length === 0 ? (
-                          renderCaughtUpState('All caught up', 'No tasks scheduled.')
-                        ) : (
-                          activeTasks.map((task, index) => renderTaskRow(task, index))
-                        )}
-                      </>
-                    ) : activeSection === 'done' ? (
-                      <>
-                        <div className="group/header select-none cursor-pointer hover:bg-white/[0.02] rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2">
-                          <div className="w-full py-2 flex items-center bg-transparent">
-                            <div className="flex items-center gap-2 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
-                              <span>Completed History</span>
-                              <span className="opacity-50">•</span>
-                              <span>{doneTasks.length}</span>
-                            </div>
-                          </div>
+                      </div>
+                    </div>
+                    {activeTasks.length === 0 ? (
+                      renderCaughtUpState('All caught up', 'No tasks for this day.')
+                    ) : (
+                      activeTasks.map((task, index) => renderTaskRow(task, index))
+                    )}
+                  </>
+                ) : activeSection === 'scheduled' ? (
+                  <>
+                    <div className="group/header select-none cursor-pointer hover:bg-white/[0.02] rounded-lg transition-all duration-200 pr-2 pl-0 -mx-2">
+                      <div className="w-full py-2 flex items-center bg-transparent">
+                        <div className="flex items-center gap-2 font-bold text-[10px] tracking-[0.08em] text-[#8b949e]">
+                          <span>Scheduled Tasks</span>
+                          <span className="opacity-50">•</span>
+                          <span>{activeTasks.length}</span>
                         </div>
-                        {doneTasks.length === 0 ? (
-                          renderCaughtUpState('All caught up', 'No completed tasks yet.')
-                        ) : (
-                          doneTasks.map((task, index) => renderTaskRow(task, index))
-                        )}
-                      </>
-                    ) : null}
+                      </div>
+                    </div>
+                    {activeTasks.length === 0 ? (
+                      renderCaughtUpState('No tasks scheduled', 'Create a new task to get started.')
+                    ) : (
+                      activeTasks.map((task, index) => renderTaskRow(task, index))
+                    )}
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
 
-          {(!isCreateModalOpen && !isSidebar) && (
+          {(!isSidebar) && (
             <div
               className="px-6 py-3 border-t flex items-center justify-end text-[11px] font-medium bg-[var(--color-editorBg)] border-white/[0.06] text-[#8b949e]">
               <div className="flex items-center gap-6">
@@ -1691,25 +1827,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         </div>
       </div>
 
-      {isCreateModalOpen && createPortal(
-        <CreateTodoView
-          items={finalConvertibleItems}
-          onCreateTodo={async (data: any) => {
-            await handleCreateFromSelection(data);
-          }}
-          initialItem={todoCreatePrefill}
-          isEditMode={!!todoCreatePrefill?.todo_id}
-          onClose={() => {
-            if (isCreateModalOnly) {
-              onClose();
-            } else {
-              setIsCreateModalOpen(false);
-              useUIStore.getState().setTodoCreatePrefill(null);
-            }
-          }}
-        />,
-        document.body
-      )}
+
 
       {inlineNoteId && createPortal(
         <div className="fixed inset-0 z-[100001] bg-black/60 backdrop-blur-sm">

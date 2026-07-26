@@ -26,7 +26,7 @@ This is the heart of the extension. Every object type (link, note, snippet, comm
 
 ```
 src/allObjectFolder/src/createObject/
-├── links/          # Link and tab group objects
+├── links/          # Link and Tab Session objects
 ├── notes/          # Rich note objects
 ├── snippets/       # Reusable text snippets
 ├── commands/       # Command definitions

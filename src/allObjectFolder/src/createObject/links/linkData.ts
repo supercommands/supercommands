@@ -15,7 +15,7 @@ import Dexie from 'dexie';
 import type { LinkRecord, CreateLinkInput, UpdateLinkInput } from './linkTypes';
 
 import { generateEntityId } from '../../../../shared-components/utils';
-import { db } from '../../../../storage/indexDB/dbConfig';
+import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 
 /**
@@ -177,6 +177,7 @@ export async function getLinksForFolder(workspaceId: string, folderId: string): 
  */
 export async function deleteLink(linkId: string): Promise<void> {
   try {
+    await deleteItemAssociations(linkId);
     await db.links.delete(linkId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';

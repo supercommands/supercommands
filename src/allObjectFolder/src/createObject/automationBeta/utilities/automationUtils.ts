@@ -128,7 +128,7 @@ export const createCloudGroupVariable = (group: CloudVariableGroup, variables: a
   const baseInput = group.inputs[0];
   const baseName = String(baseInput?.definition?.id || baseInput?.variable?.name || 'prompt').replace(/[^\w]/g, '_');
   const baseLabel = String(
-    baseInput?.definition?.label || baseInput?.variable?.label || baseInput?.variable?.name || 'Prompt',
+    baseInput?.definition?.label || baseInput?.variable?.label || baseInput?.variable?.name || 'AI Prompt',
   ).trim();
   const maxOrder = group.inputs.reduce(
     (highest, input) => Math.max(highest, input.definition.order ?? group.order),

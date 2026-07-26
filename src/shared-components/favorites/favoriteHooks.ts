@@ -1,10 +1,23 @@
 import { useMemo } from 'react';
 import { useDbStore } from '../../storage/store/useDbStore';
 import { AI_GROUP, findCommandByAnyId, resolveCommandLookupKey } from '../commands';
-import { toggleFavoriteRecord, removeFavoriteRecord } from './favoriteData';
+import {
+  toggleFavoriteRecord,
+  removeFavoriteRecord,
+  addFavoriteRecord,
+  updateFavoriteRecordCategory,
+} from './favoriteData';
 import { extractSnippetIdFromCompoundId } from '../hotkeys/utils/hotkeyUtils';
 
 import { useState, useEffect } from 'react';
+
+const extractSessionFavoriteId = (referenceId: string): string => {
+  const normalized = String(referenceId || '');
+  const sessionMatch = normalized.match(/session_[0-9a-f-]+$/i);
+  if (sessionMatch?.[0]) return sessionMatch[0];
+  return extractSnippetIdFromCompoundId(normalized);
+};
+
 export const useUser = () => {
   const [userId, setUserId] = useState<string>('local_user');
   useEffect(() => {
@@ -20,7 +33,7 @@ export const useUser = () => {
             setUserId('local_user');
           }
         });
-        
+
         // Also listen for changes to accessToken to dynamically update the active user
         handleStorageChange = (changes: Record<string, any>, areaName: string) => {
           if (areaName === 'local' && changes.accessToken) {
@@ -56,6 +69,10 @@ export const useFavorites = () => {
   const snippets = useDbStore((state) => state.snippets);
   const sessions = useDbStore((state) => state.sessions);
   const commands = useDbStore((state) => state.commands);
+  const chatAgents = useDbStore((state) => state.chatAgents);
+  const aiPrompts = useDbStore((state) => state.aiPrompts);
+  const automations = useDbStore((state) => state.automations);
+  const todos = useDbStore((state) => state.todos);
   const userId = useUser();
 
   const userFavorites = useMemo(() => {
@@ -68,13 +85,35 @@ export const useFavorites = () => {
   const populatedFavorites = useMemo(() => {
     const seenReferenceIds = new Set<string>();
     return userFavorites.map(fav => {
-      let fullObj: any = { favourite_id: fav.favourite_id, label: fav.label };
+      let fullObj: any = {
+        favourite_id: fav.favourite_id,
+        label: fav.label,
+        favoriteCategoryId: fav.favoriteCategoryId ?? null,
+        reference_id: fav.reference_id,
+      };
       let found: any = undefined;
       let resolvedType = fav.reference_type;
-      const rawId = extractSnippetIdFromCompoundId(fav.reference_id);
+      const rawId =
+        fav.reference_type === 'session'
+          ? extractSessionFavoriteId(fav.reference_id)
+          : extractSnippetIdFromCompoundId(fav.reference_id);
 
       if (fav.reference_type === 'session') {
         found = sessions.find(s => s.id === fav.reference_id || s.id === rawId);
+      } else if (fav.reference_type === 'chat_agent' || fav.reference_type === 'agent') {
+        found = chatAgents.find(a => a.id === fav.reference_id || a.id === rawId);
+        resolvedType = 'chat_agent';
+      } else if (fav.reference_type === 'aiPrompt' || fav.reference_type === 'prompt') {
+        found = aiPrompts.find(p => p.id === fav.reference_id || p.id === rawId);
+        resolvedType = 'aiPrompt';
+      } else if (fav.reference_type === 'automation') {
+        found = automations.find(au => au.id === fav.reference_id || au.id === rawId);
+      } else if (fav.reference_type === 'todo') {
+        found = todos.find(t => t.id === fav.reference_id || t.id === rawId);
+        if (!found) {
+          found = snippets.find(s => s.id === fav.reference_id || s.id === rawId);
+        }
+        resolvedType = 'todo';
       } else if (fav.reference_type === 'note') {
         found = notes.find(n => n.id === fav.reference_id || n.id === rawId);
         if (!found) {
@@ -111,12 +150,20 @@ export const useFavorites = () => {
       }
 
       if (found) {
-        fullObj = { ...found, ...fullObj, type: resolvedType };
+        fullObj = {
+          ...found,
+          ...fullObj,
+          type: resolvedType,
+          category:
+            resolvedType === 'session'
+              ? 'session'
+              : (found as any).category || resolvedType,
+        };
       } else if (fav.reference_type === 'command') {
         const cmd = findCommandByAnyId(commands, fav.reference_id) || (fav.reference_id === 'ai' ? AI_GROUP : null);
         fullObj = { ...cmd, ...fullObj, type: 'command' };
       }
-      
+
       // Determine compoundId for the favorite item
       const itemFolderId = fullObj.folderId || fullObj.folder_id || null;
       const itemWorkspaceId = fullObj.workspaceId || fullObj.workspace_id || null;
@@ -145,34 +192,65 @@ export const useFavorites = () => {
       seenReferenceIds.add(refId);
       return true;
     });
-  }, [userFavorites, notes, links, snippets, sessions, commands, hotkeysMap, shortcutsMap]);
+  }, [userFavorites, notes, links, snippets, sessions, commands, chatAgents, aiPrompts, automations, todos, hotkeysMap, shortcutsMap]);
 
   const isFavorite = (referenceId: string) => {
-    const rawId = extractSnippetIdFromCompoundId(referenceId);
+    const rawId = extractSessionFavoriteId(referenceId);
     return userFavorites.some(
       (fav) =>
         fav.reference_id === referenceId ||
         fav.reference_id === rawId ||
-        extractSnippetIdFromCompoundId(fav.reference_id) === rawId
+        extractSessionFavoriteId(fav.reference_id) === rawId
     );
   };
 
-  const toggleFavorite = async (referenceId: string, referenceType: string, label?: string) => {
+  const getFavoriteRecord = (referenceId: string) => {
+    const rawId = extractSessionFavoriteId(referenceId);
+    return userFavorites.find(
+      fav =>
+        fav.reference_id === referenceId ||
+        fav.reference_id === rawId ||
+        extractSessionFavoriteId(fav.reference_id) === rawId,
+    ) || null;
+  };
+
+  const addFavorite = async (referenceId: string, referenceType: string, label?: string, favoriteCategoryId?: string | null) => {
     if (!userId) return;
-    const rawId = extractSnippetIdFromCompoundId(referenceId);
-    await toggleFavoriteRecord(userId, rawId, referenceType, label);
+    const rawId =
+      referenceType === 'session'
+        ? extractSessionFavoriteId(referenceId)
+        : extractSnippetIdFromCompoundId(referenceId);
+    await addFavoriteRecord(userId, rawId, referenceType, label, favoriteCategoryId);
+  };
+
+  const toggleFavorite = async (referenceId: string, referenceType: string, label?: string, favoriteCategoryId?: string | null) => {
+    if (!userId) return;
+    const rawId =
+      referenceType === 'session'
+        ? extractSessionFavoriteId(referenceId)
+        : extractSnippetIdFromCompoundId(referenceId);
+    await toggleFavoriteRecord(userId, rawId, referenceType, label, favoriteCategoryId);
   };
 
   const removeFavorite = async (referenceId: string) => {
-    const rawId = extractSnippetIdFromCompoundId(referenceId);
+    const rawId = extractSessionFavoriteId(referenceId);
     return removeFavoriteRecord(userId, rawId);
+  };
+
+  const setFavoriteCategory = async (referenceId: string, favoriteCategoryId: string | null) => {
+    if (!userId) return null;
+    const rawId = extractSessionFavoriteId(referenceId);
+    return updateFavoriteRecordCategory(userId, rawId, favoriteCategoryId);
   };
 
   return {
     favorites: userFavorites,
     populatedFavorites,
     isFavorite,
+    getFavoriteRecord,
+    addFavorite,
     toggleFavorite,
     removeFavorite,
+    setFavoriteCategory,
   };
 };

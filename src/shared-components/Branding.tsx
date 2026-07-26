@@ -13,12 +13,12 @@ const Branding: React.FC<BrandingProps> = ({ className = '', onClick, textColor 
 
 
   return (
-    <div className={`flex items-center gap-2  z-50 ${className}`}>
+    <div className={`flex items-center  z-50 ${className}`}>
 
       {logoUrl ? (
         <img
           src={logoUrl}
-          className="h-9 w-7 rounded cursor-pointer select-none"
+          className="h-9 w-9 object-contain rounded cursor-pointer select-none"
           onClick={onClick}
           alt="cmdOS"
         />

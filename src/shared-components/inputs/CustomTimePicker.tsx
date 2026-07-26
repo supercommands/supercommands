@@ -47,7 +47,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({ value, onChange, is
   const handleMeridiemChange = (newIsPM: boolean) => updateTime(hr12, mm, newIsPM);
 
   return (
-    <div ref={popupRef} className="absolute right-0 top-full mt-2 bg-[#141414] border border-white/10 rounded-xl p-2 shadow-2xl z-[160] flex gap-2 text-white font-sans" onClick={e => e.stopPropagation()}>
+    <div ref={popupRef} className="absolute right-0 top-full mt-2 bg-[#141414] border border-white/10 rounded-xl p-2 shadow-2xl z-[10000] flex gap-2 text-white font-sans" onClick={e => e.stopPropagation()}>
       {/* Hours */}
       <div className="flex flex-col gap-1 w-12 h-40 overflow-y-auto custom-scrollbar pr-1">
         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(h => (

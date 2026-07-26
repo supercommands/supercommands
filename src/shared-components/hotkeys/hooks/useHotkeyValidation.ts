@@ -6,6 +6,8 @@ export interface ValidationResult {
   isValid: boolean;
   conflictId: string | null;
   errorMessage: string | null;
+  conflictingItemName?: string | null;
+  isOverrideable?: boolean;
 }
 
 export const useHotkeyValidation = () => {

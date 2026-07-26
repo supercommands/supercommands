@@ -1,6 +1,6 @@
 import { useDbStore } from '../../../storage/store/useDbStore';
 import { getAllUserHotkeys } from '../core/hotkeyDbData';
-import { getAllUserShortcuts } from '../../shortcuts/core/shortcutDbData';
+import { getAllUserShortcuts, normalizeShortcutTrigger } from '../../shortcuts/core/shortcutDbData';
 
 export const readAllShortcuts = async (): Promise<Record<string, string>> => {
   const chromeAny = (window as any)?.chrome;
@@ -36,23 +36,28 @@ export const readAllShortcuts = async (): Promise<Record<string, string>> => {
   if (chromeAny?.storage?.local) {
     await new Promise<void>(resolve => {
       chromeAny.storage.local.get(
-        ['link_commands', 'note_commands', 'alts_automation_shortcuts'],
+        ['link_commands', 'note_commands', 'session_commands', 'alts_automation_shortcuts'],
         (res: any) => {
           const linkCmds = res.link_commands || {};
           const noteCmds = res.note_commands || {};
+          const sessionCmds = res.session_commands || {};
           const autoShortcuts = res.alts_automation_shortcuts || {};
 
           // Link Commands
           Object.entries(linkCmds).forEach(([id, data]: [string, any]) => {
-            if (data?.shortcut && !all[id]) all[id] = data.shortcut;
+            if (data?.shortcut && !all[id]) all[id] = normalizeShortcutTrigger(data.shortcut);
           });
           // Note Commands
           Object.entries(noteCmds).forEach(([id, data]: [string, any]) => {
-            if (data?.shortcut && !all[id]) all[id] = data.shortcut;
+            if (data?.shortcut && !all[id]) all[id] = normalizeShortcutTrigger(data.shortcut);
+          });
+          // Session Commands
+          Object.entries(sessionCmds).forEach(([id, data]: [string, any]) => {
+            if (data?.shortcut && !all[id]) all[id] = normalizeShortcutTrigger(data.shortcut);
           });
           // Automation Shortcuts
           Object.entries(autoShortcuts).forEach(([id, sc]) => {
-            if (typeof sc === 'string' && !all[id]) all[id] = sc;
+            if (typeof sc === 'string' && !all[id]) all[id] = normalizeShortcutTrigger(sc);
           });
 
           resolve();

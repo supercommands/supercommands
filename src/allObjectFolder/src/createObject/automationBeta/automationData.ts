@@ -14,7 +14,7 @@ import Dexie from 'dexie';
 
 import type { AutomationRecord, CreateAutomationInput, UpdateAutomationInput } from './automationTypes';
 import { generateEntityId } from '../../../../shared-components/utils';
-import { db } from '../../../../storage/indexDB/dbConfig';
+import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 
 /**
@@ -177,6 +177,7 @@ export async function getAutomationsForFolder(workspaceId: string, folderId: str
  */
 export async function deleteAutomation(automationId: string): Promise<void> {
   try {
+    await deleteItemAssociations(automationId);
     await db.automations.delete(automationId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';

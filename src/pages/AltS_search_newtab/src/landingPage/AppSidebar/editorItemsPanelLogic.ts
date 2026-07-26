@@ -4,10 +4,21 @@ import type { LinkRecord } from '../../../../../allObjectFolder/src/createObject
 import type { NoteRecord } from '../../../../../allObjectFolder/src/createObject/notes/noteTypes';
 import type { SessionRecord } from '../../../../../allObjectFolder/src/createObject/session/sessionTypes';
 import type { SnippetRecord } from '../../../../../allObjectFolder/src/createObject/snippets/snippetTypes';
+import type { TodoRecord } from '../../../../../allObjectFolder/src/createObject/todos/todoTypes';
+import type { FolderData } from '../../../../../settings/allWorkspaceManager/folders/folderTypes';
+import type { WorkspaceData } from '../../../../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 
-export type EditorItemsKind = 'link' | 'session' | 'note' | 'snippet' | 'aiPrompt';
+export type EditorItemsKind = 'link' | 'session' | 'note' | 'snippet' | 'aiPrompt' | 'todo' | 'folder' | 'workspace';
 
-export type EditorItemsRecord = LinkRecord | SessionRecord | NoteRecord | SnippetRecord | AiPromptRecord;
+export type EditorItemsRecord =
+  | LinkRecord
+  | SessionRecord
+  | NoteRecord
+  | SnippetRecord
+  | AiPromptRecord
+  | TodoRecord
+  | FolderData
+  | WorkspaceData;
 
 export type EditorItemsRow = {
   item: EditorItemsRecord;
@@ -28,14 +39,17 @@ const KIND_BY_EDITOR: Partial<Record<EditorType, EditorItemsKind>> = {
   note: 'note',
   snippet: 'snippet',
   aiPrompt: 'aiPrompt',
+  todo: 'todo',
 };
 
-export const resolveEditorItemsKind = (editorType: EditorType | null | undefined): EditorItemsKind | null => {
+export const resolveEditorItemsKind = (editorType: string | null | undefined): EditorItemsKind | null => {
   if (!editorType) return null;
-  return KIND_BY_EDITOR[editorType] ?? null;
+  if (editorType === 'folder') return 'folder';
+  if (editorType === 'workspace') return 'workspace';
+  return KIND_BY_EDITOR[editorType as EditorType] ?? null;
 };
 
-export const resolveEditorItemsKindFromActiveEditor = (activeEditor: ActiveEditorLike): EditorItemsKind | null =>
+export const resolveEditorItemsKindFromActiveEditor = (activeEditor: ActiveEditorLike | any): EditorItemsKind | null =>
   resolveEditorItemsKind(activeEditor?.type ?? null);
 
 export const getEditorItemsLabel = (kind: EditorItemsKind | null) => {
@@ -44,6 +58,9 @@ export const getEditorItemsLabel = (kind: EditorItemsKind | null) => {
   if (kind === 'note') return 'All notes';
   if (kind === 'snippet') return 'All snippets';
   if (kind === 'aiPrompt') return 'All prompts';
+  if (kind === 'todo') return "All To Do's";
+  if (kind === 'folder') return 'All Folders';
+  if (kind === 'workspace') return 'All Organizations';
   return '';
 };
 
@@ -53,17 +70,21 @@ export const getEditorItemsEmptyState = (kind: EditorItemsKind | null) => {
   if (kind === 'note') return 'No note items found.';
   if (kind === 'snippet') return 'No snippet items found.';
   if (kind === 'aiPrompt') return 'No AI prompt items found.';
+  if (kind === 'todo') return 'No To Do items found.';
+  if (kind === 'folder') return 'No Folders found.';
+  if (kind === 'workspace') return 'No Organizations found.';
   return 'No related items found.';
 };
 
-export const getEditorItemsId = (item: Partial<EditorItemsRecord> & { snippet_id?: string } | any) =>
-  item?.id || item?.snippet_id || '';
+export const getEditorItemsId = (
+  item: (Partial<EditorItemsRecord> & { snippet_id?: string; folder_id?: string; workspace_id?: string }) | any,
+) => item?.id || item?.snippet_id || item?.folder_id || item?.workspace_id || '';
 
 export const getEditorItemsTitle = (item: Partial<EditorItemsRecord> | any) =>
-  item?.title || item?.name || item?.label || item?.key || 'Untitled';
+  item?.title || item?.name || item?.label || item?.key || item?.folderName || item?.workspaceName || 'Untitled';
 
 export const isInSelectedScope = (
-  item: Partial<EditorItemsRecord> & { workspace_id?: string; folder_id?: string | null } | any,
+  item: (Partial<EditorItemsRecord> & { workspace_id?: string; folder_id?: string | null }) | any,
   selectedWorkspaceId: string | null,
   selectedFolderId: string | null,
 ) => {

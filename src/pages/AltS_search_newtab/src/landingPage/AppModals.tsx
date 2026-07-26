@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import AutomationStatusIndicator from '../../../../allObjectFolder/src/createObject/automationBeta/ui/automationStatusIndicator';
 import NotificationContainer from '../../../../shared-components/notifications/NotificationContainer';
 import CreateWorkspacePanel from '../../../../settings/allWorkspaceManager/workspaces/ui/CreateWorkspacePanel';
@@ -22,23 +22,12 @@ export const AppModals: React.FC<AppModalsProps> = ({
   isGlobalCreateMenuOpen,
   setIsGlobalCreateMenuOpen,
   openSpreadsheetView,
-  searchbarRef
+  searchbarRef,
 }) => {
   return (
     <>
       <AutomationStatusIndicator />
       <NotificationContainer />
-
-      {createWorkspaceModal.isOpen && (
-        <div className="fixed inset-0 bg-black/20 z-[100] flex items-center justify-center backdrop-blur-sm">
-          <div
-            style={{ backgroundColor: 'var(--color-editorBg)' }}
-            className="rounded-xl shadow-xl border border-[var(--color-borderDefault)] overflow-hidden w-[500px]"
-          >
-            <CreateWorkspacePanel onClose={() => setCreateWorkspaceModal((prev: any) => ({ ...prev, isOpen: false }))} />
-          </div>
-        </div>
-      )}
 
       <GlobalAltCPopup
         isOpen={isGlobalCreateMenuOpen}
@@ -53,11 +42,17 @@ export const AppModals: React.FC<AppModalsProps> = ({
             return;
           }
           if (commandId === 'createtodo') {
-            useUIStore.getState().openEditor({ type: 'todo', id: 'todo-create', props: { prefill: { isCreateModalOnly: true } } });
+            useUIStore
+              .getState()
+              .openEditor({ type: 'todo', id: 'todo-create', props: { prefill: { isCreateModalOnly: true } } });
             return;
           }
           if (commandId === 'ai') {
-            useUIStore.getState().openEditor({ type: 'aiPrompt', id: 'new', props: {} });
+            useUIStore.getState().openCreateItem('aiPrompt', { id: 'new', props: {} });
+            return;
+          }
+          if (commandId === 'createprompt') {
+            useUIStore.getState().openCreateItem('aiPrompt', { id: 'new', props: {} });
             return;
           }
           if (searchbarRef.current) {
@@ -70,8 +65,6 @@ export const AppModals: React.FC<AppModalsProps> = ({
           }
         }}
       />
-
-      
     </>
   );
 };

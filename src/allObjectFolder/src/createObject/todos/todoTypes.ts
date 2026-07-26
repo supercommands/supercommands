@@ -31,6 +31,12 @@ export interface TodoRecord {
   recurringType?: RecurringType;
   scheduleTime: number; // Unix timestamp in milliseconds
   
+  tags?: string[];
+  tagIds?: string[];
+  shortcut?: string;
+  workspaceId?: string;
+  folderId?: string;
+
   createdAt: number;
   updatedAt: number;
 }

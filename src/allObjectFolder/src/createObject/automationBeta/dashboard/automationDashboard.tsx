@@ -40,6 +40,7 @@ import { HotkeyAssignButton } from '../../../../../shared-components/hotkeys';
 import { ShortcutAssignButton } from '../../../../../shared-components/shortcuts';;
 import { saveHotkey as apiSaveHotkey } from '../../../../../shared-components/hotkeys';
 import { saveShortcut as apiSaveShortcut } from '../../../../../shared-components/shortcuts';
+import { normalizeShortcutTrigger } from '../../../../../shared-components/shortcuts/core/shortcutDbData';
 import { readAllHotkeys, readAllShortcuts, getItemCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { useShortcutValidation } from '../../../../../shared-components/shortcuts';
 import { useFavorites } from '../../../../../shared-components/favorites/favoriteHooks';
@@ -144,7 +145,7 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
           const currentShortcut = shortcutsMap[compoundId] || '';
 
           setPendingHotkey(currentHotkey);
-          setPendingShortcut(currentShortcut.replace(/^\//, ''));
+          setPendingShortcut(normalizeShortcutTrigger(currentShortcut));
         } catch (error) {
           console.error('[AgentPanel] Error loading hotkeys/shortcuts:', error);
         }
@@ -208,15 +209,14 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
   };
 
   const handleShortcutChange = async (newShortcut: string) => {
+    const normalizedShortcut = normalizeShortcutTrigger(newShortcut);
     if (!automation?.id || !userId) {
-      setPendingShortcut(newShortcut);
+      setPendingShortcut(normalizedShortcut);
       return;
     }
     setIsShortcutSyncing(true);
-    setPendingShortcut(newShortcut);
+    setPendingShortcut(normalizedShortcut);
     try {
-      const cleanShortcut = newShortcut ? (newShortcut.startsWith('/') ? newShortcut : `/${newShortcut}`) : '';
-
       // Local Registry Parity
       const compoundId = getItemCompoundId({
         ...automation,
@@ -228,7 +228,7 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
       await apiSaveShortcut(
         automation.id.toString(),
         compoundId,
-        cleanShortcut,
+        normalizedShortcut,
         automation.name || 'Automation',
         'automation',
         selectedTeam?.storageMode || 'local',
@@ -238,7 +238,7 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
       // 3. specialized Automation Shortcuts Map (for background/search parity)
       const res = await chrome.storage.local.get('alts_automation_shortcuts');
       const ex = (res.alts_automation_shortcuts as Record<string, string>) || {};
-      if (cleanShortcut) ex[automation.id.toString()] = cleanShortcut;
+      if (normalizedShortcut) ex[automation.id.toString()] = normalizedShortcut;
       else delete ex[automation.id.toString()];
       await chrome.storage.local.set({ alts_automation_shortcuts: ex });
     } catch (err) {
@@ -802,11 +802,11 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
 
           if (pendingShortcut) {
             const compoundId = `${folderIdForSave || targetWorkspaceId}-${newIdStr}`;
-            const cleanShortcut = pendingShortcut.startsWith('/') ? pendingShortcut : `/${pendingShortcut}`;
-            await apiSaveShortcut(newIdStr, compoundId, cleanShortcut, title || 'Automation', 'automation', 'cloud', true);
+            const normalizedShortcut = normalizeShortcutTrigger(pendingShortcut);
+            await apiSaveShortcut(newIdStr, compoundId, normalizedShortcut, title || 'Automation', 'automation', 'cloud', true);
             const res = await chrome.storage.local.get('alts_automation_shortcuts');
             const ex = (res.alts_automation_shortcuts as Record<string, string>) || {};
-            ex[newIdStr] = cleanShortcut;
+            ex[newIdStr] = normalizedShortcut;
             await chrome.storage.local.set({ alts_automation_shortcuts: ex });
           }
 
@@ -1430,4 +1430,3 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
 };
 
 export default AutomationDashboard;
-

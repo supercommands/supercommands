@@ -28,6 +28,7 @@ export interface ThemeTokens {
   textDisabled: string;
   textPlaceholder: string;
   textError: string;
+  sectionCountText: string;
 
   // Borders
   borderDefault: string;

@@ -1,4 +1,3 @@
-
 export class ImageDownloader {
   private validImages: HTMLImageElement[] = [];
   private selectedImages = new Set<number>();

@@ -14,7 +14,7 @@ import { FiCheck } from 'react-icons/fi';
 
 import { useSelector } from 'react-redux';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
-import { removeRecentCommand } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { removeRecentCommand } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 
 const KeyHint: React.FC<{ keys: string[] }> = ({ keys }) => {
   const { theme } = useAppearance();

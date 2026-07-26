@@ -13,10 +13,7 @@ import { ViewMenuPanel } from '../../../pages/AltS_search_newtab/src/components/
 import { SidebarSettingsDropdown } from '../../../pages/AltS_search_newtab/src/components/altsNewtabSidebar/sidebarSettingsDropdown';
 import { EditorItemsPanel } from '../../../pages/AltS_search_newtab/src/landingPage/AppSidebar/EditorItemsPanel';
 
-import {
-  getFaviconUrl,
-  stripCmdStatus,
-} from '../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl, stripCmdStatus } from '../../../shared-components/searchBarMain/utilityFunctions/utils';
 import type { FolderData } from '../../../settings/allWorkspaceManager/folders/folderTypes';
 import type { SnippetRecord } from '../../../allObjectFolder/src/createObject/snippets/snippetTypes';
 import { HiOutlineStar, HiArrowsUpDown } from 'react-icons/hi2';
@@ -35,12 +32,7 @@ import {
   FiCheckSquare,
 } from 'react-icons/fi';
 import { LuSparkles } from 'react-icons/lu';
-import {
-  readAllHotkeys,
-  readAllShortcuts,
-  getItemCompoundId,
-} from '../../hotkeys/utils/hotkeyUtils';
-import { TutorialCard, setTutorialStepFinished, clearTutorialStep } from '../../../welcomeGuide/TutorialCards';
+import { readAllHotkeys, readAllShortcuts, getItemCompoundId } from '../../hotkeys/utils/hotkeyUtils';
 import { useFavorites, useUser } from '../favoriteHooks';
 import { useDbStore } from '../../../storage/store/useDbStore';
 import { resolveEntityById } from '../../utils/entityResolver';
@@ -131,6 +123,7 @@ export interface FavoritesPanelProps {
   onRequestEditLink?: (suggestion: { snippet: any; workspace: any; folder: any }) => void;
   isSidebar?: boolean;
   forceMode?: 'favorites' | 'notes' | 'links' | 'snippets';
+  openSpreadsheetView?: (section?: string) => void;
 }
 
 const FavoritesPanel = ({
@@ -144,6 +137,7 @@ const FavoritesPanel = ({
   onRequestEditLink,
   isSidebar = false,
   forceMode = 'favorites',
+  openSpreadsheetView,
 }: FavoritesPanelProps) => {
   const { theme } = useAppearance();
   const isDark = theme.isDark;
@@ -153,36 +147,56 @@ const FavoritesPanel = ({
   const showFavorites = useUIStore(state => state.showFavorites);
   const selectedSnippet = useUIStore(state => state.selectedSnippet);
   const activeEditor = useUIStore(state => state.activeEditor);
+  const activeView = useUIStore(state => state.activeView);
   const savedAgentSelect = onSelectSavedAgent;
 
   const handleStartExistingSession = useCallback(
     async (suggestion: { snippet: Snippet | any; workspace: any; folder: any }) => {
       const { snippet, workspace, folder } = suggestion;
       const sessionId = snippet.snippet_id || snippet.id;
-      const sessionName = snippet.key || 'Untitled Tab group';
+      const sessionName = snippet.title || snippet.key || snippet.name || 'Untitled Tab Session';
       const workspaceId = workspace?.workspace_id || workspace?.id;
       const folderId = folder?.folder_id || folder?.id;
 
       let initialUrls: string[] = [];
       let initialNames: string[] = [];
       let openSettings = snippet.sessionOpenSettings;
+      const extractSessionUrlPayload = (entries: any[] | undefined | null) => {
+        if (!Array.isArray(entries)) {
+          return { urls: [] as string[], names: [] as string[] };
+        }
+
+        const urls: string[] = [];
+        const names: string[] = [];
+
+        entries.forEach((entry: any) => {
+          const url = typeof entry === 'string' ? entry : entry?.url;
+          if (!url) return;
+          urls.push(url);
+          names.push(typeof entry === 'string' ? '' : entry?.title || entry?.name || '');
+        });
+
+        return { urls, names };
+      };
 
       try {
         const resolved = await resolveEntityById(sessionId);
         const sessionRecord = resolved?.entity as any;
         if (sessionRecord) {
           openSettings = sessionRecord.sessionOpenSettings || openSettings;
-          if (Array.isArray(sessionRecord.urls)) {
-            initialUrls = sessionRecord.urls.map((u: any) => u.url);
-            initialNames = sessionRecord.urls.map((u: any) => u.title || u.name || '');
+          const resolvedPayload = extractSessionUrlPayload(sessionRecord.urls);
+          if (resolvedPayload.urls.length > 0) {
+            initialUrls = resolvedPayload.urls;
+            initialNames = resolvedPayload.names;
           }
         }
       } catch (err) {}
 
       if (initialUrls.length === 0) {
-        if (Array.isArray(snippet.urls)) {
-          initialUrls = snippet.urls.map((u: any) => u.url);
-          initialNames = snippet.urls.map((u: any) => u.title || u.name || '');
+        const snippetPayload = extractSessionUrlPayload(snippet.urls);
+        if (snippetPayload.urls.length > 0) {
+          initialUrls = snippetPayload.urls;
+          initialNames = snippetPayload.names;
         } else {
           try {
             const parsed = typeof snippet.value === 'string' ? JSON.parse(snippet.value) : snippet.value;
@@ -197,12 +211,29 @@ const FavoritesPanel = ({
         }
       }
 
-      // Save prefill to local storage perfectly mimicking create session
-      await StorageManager.setItem('pending_session_prefill', {
-        title: sessionName,
-        sessionId: sessionId,
-        urls: initialUrls,
-        names: initialNames,
+      const activeTabContext = await new Promise<{
+        currentTabId: number | null;
+        currentWindowId: number | null;
+        currentPageUrl: string;
+      }>(resolve => {
+        const chromeAny = (window as any)?.chrome;
+        if (!chromeAny?.tabs?.query) {
+          resolve({
+            currentTabId: null,
+            currentWindowId: null,
+            currentPageUrl: window.location.href,
+          });
+          return;
+        }
+
+        chromeAny.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+          const activeTab = tabs?.[0];
+          resolve({
+            currentTabId: activeTab?.id ?? null,
+            currentWindowId: activeTab?.windowId ?? null,
+            currentPageUrl: activeTab?.url || window.location.href,
+          });
+        });
       });
 
       chrome.runtime.sendMessage(
@@ -218,12 +249,29 @@ const FavoritesPanel = ({
           initialNames,
           openSettings,
           isInlineCreation: true,
+          ...activeTabContext,
         },
         response => {
           if (response?.ok && openSettings?.openMode === 'same_window') {
+            if (response?.reused || response?.reusedCurrentTab) {
+              return;
+            }
             const encodedName = encodeURIComponent(sessionName);
-            window.history.replaceState(null, '', `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`);
-            useUIStore.getState().openEditor({ type: 'session', id: 'new' });
+            window.history.replaceState(
+              null,
+              '',
+              `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`,
+            );
+            useUIStore.getState().openEditor({
+              type: 'session',
+              id: sessionId,
+              props: {
+                session: {
+                  id: sessionId,
+                  title: sessionName,
+                },
+              },
+            });
           }
         },
       );
@@ -238,7 +286,7 @@ const FavoritesPanel = ({
   const [sectionsOrder, setSectionsOrder] = useState<string[]>(['create', 'favorites', 'view']);
   const [showFavoritesSection, setShowFavoritesSection] = useState<boolean>(true);
   const [showCreateSection, setShowCreateSection] = useState<boolean>(true);
-  const [showViewSection, setShowViewSection] = useState<boolean>(true);
+  const [showViewSection, setShowViewSection] = useState<boolean>(false);
 
   useEffect(() => {
     StorageManager.getItem([
@@ -267,6 +315,8 @@ const FavoritesPanel = ({
       }
       if (result.sidebar_show_view_section !== undefined) {
         setShowViewSection(result.sidebar_show_view_section);
+      } else {
+        setShowViewSection(false);
       }
     });
   }, []);
@@ -325,6 +375,11 @@ const FavoritesPanel = ({
   const [hasBeenExpanded, setHasBeenExpanded] = useState<boolean>(false);
   const [isReordering, setIsReordering] = useState<boolean>(false);
   const [sortOrder, setSortOrder] = useState<'hotkeys' | 'alphabetic' | 'custom' | 'type'>('hotkeys');
+  const [favoritesItemsOrder, setFavoritesItemsOrder] = useState<string[]>([]);
+  const [visibleFavoritesItems, setVisibleFavoritesItems] = useState<Record<string, boolean>>({});
+  const [favoritesCustomGroupNames, setFavoritesCustomGroupNames] = useState<Record<string, string>>({});
+  const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
+  const prevFavIdsRef = useRef<string>('');
   const [showSortMenu, setShowSortMenu] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
   const reorderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -618,17 +673,41 @@ const FavoritesPanel = ({
     }
   };
 
-  // Load sort order
+  // Load sort order and custom favorites layout data
   useEffect(() => {
-    StorageManager.getItem('favoritesSortOrder').then(result => {
-      if (result) {
-        setSortOrder(result);
+    StorageManager.getItem([
+      'favoritesSortOrder',
+      'favorites_items_order',
+      'favorites_visible_items',
+      'favorites_custom_group_names',
+    ]).then(result => {
+      if (result.favoritesSortOrder) {
+        setSortOrder(result.favoritesSortOrder);
       }
+      if (result.favorites_items_order) {
+        setFavoritesItemsOrder(result.favorites_items_order);
+      }
+      if (result.favorites_visible_items) {
+        setVisibleFavoritesItems(result.favorites_visible_items);
+      }
+      if (result.favorites_custom_group_names) {
+        setFavoritesCustomGroupNames(result.favorites_custom_group_names);
+      }
+      setHasLoadedStorage(true);
     });
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
       if (changes.favoritesSortOrder) {
         setSortOrder(changes.favoritesSortOrder.newValue);
+      }
+      if (changes.favorites_items_order) {
+        setFavoritesItemsOrder(changes.favorites_items_order.newValue || []);
+      }
+      if (changes.favorites_visible_items) {
+        setVisibleFavoritesItems(changes.favorites_visible_items.newValue || {});
+      }
+      if (changes.favorites_custom_group_names) {
+        setFavoritesCustomGroupNames(changes.favorites_custom_group_names.newValue || {});
       }
     };
     chrome.storage.onChanged.addListener(handleStorageChange);
@@ -645,6 +724,29 @@ const FavoritesPanel = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) return;
+
+    const dbFavIds = populatedFavorites.map(f => f.compoundId).filter(Boolean);
+    const favIdsStr = JSON.stringify(dbFavIds);
+
+    if (favIdsStr === prevFavIdsRef.current) {
+      return;
+    }
+    prevFavIdsRef.current = favIdsStr;
+
+    // Filter out any IDs in favoritesItemsOrder that are no longer in the DB (except headers)
+    let cleanedOrder = favoritesItemsOrder.filter(id => id.startsWith('header-') || dbFavIds.includes(id));
+
+    // Add any new DB favorites that are not in cleanedOrder yet
+    const missingFavs = dbFavIds.filter(id => !favoritesItemsOrder.includes(id));
+    if (missingFavs.length > 0) {
+      cleanedOrder = [...missingFavs, ...cleanedOrder];
+      setFavoritesItemsOrder(cleanedOrder);
+      StorageManager.setItem('favorites_items_order', cleanedOrder);
+    }
+  }, [populatedFavorites, favoritesItemsOrder, hasLoadedStorage]);
 
   const handleSortChange = (newOrder: 'hotkeys' | 'alphabetic' | 'custom' | 'type') => {
     setSortOrder(newOrder);
@@ -670,17 +772,6 @@ const FavoritesPanel = ({
 
   // Tutorial event listeners handled centrally in App.tsx
 
-  const handleCloseTutorial = async () => {
-    await setTutorialStepFinished('favorites');
-    useUIStore.getState().setActiveTutorial('agent');
-  };
-
-  const handleGoPrev = async () => {
-    // Clear flag to allow Step 1 to show again
-    await clearTutorialStep('search');
-    useUIStore.getState().setActiveTutorial('search');
-  };
-
   // Initialize default favorites once for new installations
   useEffect(() => {
     if (!userId) return;
@@ -705,7 +796,7 @@ const FavoritesPanel = ({
           item: { ...item, commandPrefix: dynamicPrefix },
           folder: null,
           workspace: null,
-          compoundId: item.id || item.automation_id || item.snippet_id,
+          compoundId: item.compoundId || item.id || item.automation_id || item.snippet_id,
         });
         return;
       }
@@ -720,12 +811,15 @@ const FavoritesPanel = ({
       };
 
       // Build compound ID using workspace/folder from the item itself
-      const cId = getItemCompoundId({
-        _kind: 'snippet',
-        snippet: { ...item, id },
-        workspace: item.workspaceId ? { workspace_id: item.workspaceId } : null,
-        folder: item.folderId ? { folder_id: item.folderId } : null,
-      }) || id;
+      const cId =
+        item.compoundId ||
+        getItemCompoundId({
+          _kind: 'snippet',
+          snippet: { ...item, id },
+          workspace: item.workspaceId ? { workspace_id: item.workspaceId } : null,
+          folder: item.folderId ? { folder_id: item.folderId } : null,
+        }) ||
+        id;
 
       results.push({ item: liveItem, folder: null, workspace: null, compoundId: cId });
     });
@@ -739,6 +833,7 @@ const FavoritesPanel = ({
       if (category === 'link') return 'links';
       if (category === 'note') return 'notes';
       if (category === 'snippet') return 'snippets';
+      if (category === 'session') return 'sessions';
       return 'automations';
     };
 
@@ -747,7 +842,7 @@ const FavoritesPanel = ({
       const nameB = (b.item.label || b.item.key || '').toLowerCase();
 
       if (sortOrder === 'type') {
-        const groupWeights: Record<string, number> = { links: 1, notes: 2, snippets: 3, automations: 4 };
+        const groupWeights: Record<string, number> = { links: 1, notes: 2, snippets: 3, sessions: 4, automations: 5 };
         const groupA = getItemGroupType(a.item);
         const groupB = getItemGroupType(b.item);
         if (groupA !== groupB) {
@@ -776,7 +871,12 @@ const FavoritesPanel = ({
 
   const allLinksWithFolders = useMemo(() => {
     const results = links.map(snip => {
-      const cId = getItemCompoundId({ _kind: 'snippet', snippet: { ...snip, category: 'link' }, workspace: (snip as any).workspaceId ? { workspace_id: (snip as any).workspaceId } : null, folder: (snip as any).folderId ? { folder_id: (snip as any).folderId } : null });
+      const cId = getItemCompoundId({
+        _kind: 'snippet',
+        snippet: { ...snip, category: 'link' },
+        workspace: (snip as any).workspaceId ? { workspace_id: (snip as any).workspaceId } : null,
+        folder: (snip as any).folderId ? { folder_id: (snip as any).folderId } : null,
+      });
       return {
         item: { ...snip, key: snip.title || (snip as any).url || 'Untitled Link', type: 'link' },
         folder: null,
@@ -804,7 +904,12 @@ const FavoritesPanel = ({
 
   const allNotesWithFolders = useMemo(() => {
     const results = notes.map(snip => {
-      const cId = getItemCompoundId({ _kind: 'snippet', snippet: { ...snip, category: 'note' }, workspace: (snip as any).workspaceId ? { workspace_id: (snip as any).workspaceId } : null, folder: (snip as any).folderId ? { folder_id: (snip as any).folderId } : null });
+      const cId = getItemCompoundId({
+        _kind: 'snippet',
+        snippet: { ...snip, category: 'note' },
+        workspace: (snip as any).workspaceId ? { workspace_id: (snip as any).workspaceId } : null,
+        folder: (snip as any).folderId ? { folder_id: (snip as any).folderId } : null,
+      });
       return {
         item: { ...snip, key: snip.title || 'Untitled Note', type: 'note' },
         folder: null,
@@ -832,7 +937,12 @@ const FavoritesPanel = ({
 
   const allSnippetsWithFolders = useMemo(() => {
     const results = snippets.map(snip => {
-      const cId = getItemCompoundId({ _kind: 'snippet', snippet: { ...snip, category: (snip as any).category || 'snippet' }, workspace: (snip as any).workspaceId ? { workspace_id: (snip as any).workspaceId } : null, folder: (snip as any).folderId ? { folder_id: (snip as any).folderId } : null });
+      const cId = getItemCompoundId({
+        _kind: 'snippet',
+        snippet: { ...snip, category: (snip as any).category || 'snippet' },
+        workspace: (snip as any).workspaceId ? { workspace_id: (snip as any).workspaceId } : null,
+        folder: (snip as any).folderId ? { folder_id: (snip as any).folderId } : null,
+      });
       return {
         item: { ...snip, key: snip.title || 'Untitled Snippet', type: 'snippet' },
         folder: null,
@@ -857,28 +967,6 @@ const FavoritesPanel = ({
       return nameA.localeCompare(nameB);
     });
   }, [snippets, sortOrder, hotkeysMap]);
-
-  const displayList = useMemo(() => {
-    return favoritesWithFolders;
-  }, [favoritesWithFolders]);
-
-  const handleReorder = (newOrderIds: string[]) => {
-    try {
-      const reorderedItems = newOrderIds
-        .map(cid => {
-          const found = displayList.find((f: any) => f.compoundId === cid);
-          return found ? found.item : null;
-        })
-        .filter(Boolean);
-
-      /* No-op: update should go to IndexedDB eventually but for now we skip local state */
-      // Notice: In the new architecture, order is typically managed via an array of IDs in Dexie or Redux.
-      // We are just updating the local mapping here. To persist reordering across reloads,
-      // a 'sortOrder' field would need to be added to the favorites schema.
-    } catch (error) {
-      console.error('Error reordering favorites:', error);
-    }
-  };
 
   const handleAddNewFavorite = () => {
     useUIStore.getState().openEditor({ type: 'link', id: 'new' });
@@ -929,7 +1017,7 @@ const FavoritesPanel = ({
             ...(showFavoritesTutorial ? { borderColor: '#22c55e' } : {}),
           }}>
           {/* Settings — rendered ONCE at top-right of the entire panel, never inside sections, to prevent unmounting */}
-          <div className="absolute top-2.5 right-3 z-50 flex items-center gap-0.5">
+          <div className="absolute top-[14px] right-4 z-50 flex items-center gap-0.5">
             <SidebarSettingsDropdown
               showFavoritesSection={showFavoritesSection}
               onToggleFavoritesSection={handleToggleFavoritesSection}
@@ -947,7 +1035,7 @@ const FavoritesPanel = ({
             axis="y"
             values={sectionsOrder}
             onReorder={handleSectionsReorder}
-            className={`flex flex-col gap-0 w-full ${isSidebar ? 'overflow-y-auto custom-scrollbar h-full pb-12 pr-1' : ''}`}>
+            className={`flex flex-col gap-0 w-full ${isSidebar ? 'overflow-y-auto clean-scrollbar h-full pb-12 pr-1' : ''}`}>
             {sectionsOrder.map(sectionId => {
               if (sectionId === 'create') {
                 if (!showCreateSection) return null;
@@ -963,107 +1051,8 @@ const FavoritesPanel = ({
                 );
               }
               if (sectionId === 'favorites') {
-                if (!showFavoritesSection) return null;
-                return (
-                  <Reorder.Item
-                    key="favorites"
-                    value="favorites"
-                    className="list-none"
-                    dragListener={false}
-                    dragControls={favoritesDragControls}>
-                    <div className="px-3 pt-2.5 pb-0 flex items-center gap-2 pr-[56px] relative group/favorites-header">
-                      <span
-                        className={`text-[12px] font-bold tracking-wider ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                        FAVORITES
-                      </span>
-                      <div className={`flex-1 border-t ${isDark ? 'border-white/10' : 'border-[#eee8d5]'}`} />
-                    </div>
-
-                    <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pl-[20px] pr-2 py-0.5 max-h-[30vh]">
-                      {displayList.length > 0 ? (
-                        <div className="flex flex-col pb-2">
-                          <Reorder.Group
-                            axis="y"
-                            values={displayList.map((f: any) => f.compoundId)}
-                            onReorder={handleReorder}
-                            className="flex flex-col gap-0">
-                            {displayList.map(({ item, folder, workspace, compoundId }: any, index: number) => {
-                              const getItemGroupType = (itm: any): string => {
-                                const cat = (itm.category || itm.type || '').toLowerCase();
-                                if (cat === 'link') return 'links';
-                                if (cat === 'note') return 'notes';
-                                if (cat === 'snippet') return 'snippets';
-                                return 'automations';
-                              };
-                              const groupType = getItemGroupType(item);
-                              const showHeader = sortOrder === 'type' && (index === 0 || getItemGroupType(displayList[index - 1].item) !== groupType);
-                              const groupHeaders: Record<string, string> = {
-                                links: 'Links',
-                                notes: 'Notes',
-                                snippets: 'Snippets',
-                                automations: 'Automations & Sessions',
-                              };
-
-                              return (
-                                <React.Fragment key={compoundId}>
-                                  {showHeader && (
-                                    <div className={`px-2 py-1 mt-2 mb-1 text-[9px] font-black tracking-wider uppercase border-b select-none ${
-                                      isDark 
-                                        ? 'text-neutral-400 border-white/5 bg-neutral-900/10' 
-                                        : 'text-neutral-500 border-black/5 bg-[#eee8d5]/10'
-                                    }`}>
-                                      {groupHeaders[groupType]}
-                                    </div>
-                                  )}
-                                  <Reorder.Item
-                                    key={compoundId}
-                                    value={compoundId}
-                                    className="list-none"
-                                    drag={sortOrder === 'custom' ? 'y' : false}
-                                    transition={sortOrder === 'custom' ? undefined : { type: 'just', duration: 0 }}
-                                    onDragStart={() => setIsReordering(true)}
-                                    onDragEnd={() => {
-                                      if (reorderTimeoutRef.current) clearTimeout(reorderTimeoutRef.current);
-                                      reorderTimeoutRef.current = setTimeout(() => {
-                                        setIsReordering(false);
-                                      }, 200);
-                                    }}>
-                                    <FavoriteItem
-                                      key={item.id}
-                                      userId={userId}
-                                      snippet={item}
-                                      folder={folder}
-                                      workspace={workspace}
-                                      selectedItem={selectedSnippet?.id || null}
-                                      reload={reload}
-                                      selectedTeamId={teamId}
-                                      index={index}
-                                      onCommandSelect={onCommandSelect}
-                                      onSelectSavedAgent={savedAgentSelect}
-                                      onAutomationSelect={onAutomationSelect}
-                                      hotkeysMap={hotkeysMap}
-                                      shortcutsMap={shortcutsMap}
-                                      onNavigateToListView={onNavigateToListView}
-                                      onOpenUrls={onOpenUrls}
-                                      onRequestEditLink={onRequestEditLink as any}
-                                      onStartExistingSession={handleStartExistingSession as any}
-                                      onInlineEditLinkClick={handleInlineEditLink}
-                                      isSessionMode={isSessionMode || isNotesMode || isPromptsMode}
-                                    />
-                                  </Reorder.Item>
-                                </React.Fragment>
-                              );
-                            })}
-                          </Reorder.Group>
-                        </div>
-                      ) : (
-                        <div className={`text-center text-sm py-4 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                          No favorites yet.
-                        </div>
-                      )}
-                    </div>
-                  </Reorder.Item>
-                );
+                // Favorites are now displayed in the Home View grid card — not in the sidebar
+                return null;
               }
               if (sectionId === 'view') {
                 if (!showViewSection) return null;
@@ -1075,15 +1064,35 @@ const FavoritesPanel = ({
                     dragListener={false}
                     dragControls={viewDragControls}
                     transition={{ type: 'just', duration: 0 }}>
-                    {activeEditor && activeEditor.type !== 'todo' ? (
-                      <EditorItemsPanel
-                        activeEditor={activeEditor}
-                        onOpenUrls={onOpenUrls}
-                        onRequestEditLink={onRequestEditLink}
-                      />
-                    ) : (
-                      <ViewMenuPanel searchbarRef={searchbarRef} />
-                    )}
+                    {(() => {
+                      let effectiveEditor = activeEditor;
+                      if (!effectiveEditor && activeView) {
+                        if (activeView.type === 'createFolder' || activeView.type === 'sharedFolderCreation') {
+                          effectiveEditor = { type: 'folder', id: '' } as any;
+                        } else if (
+                          activeView.type === 'createWorkspace' ||
+                          activeView.type === 'organizationSettings'
+                        ) {
+                          effectiveEditor = { type: 'workspace', id: '' } as any;
+                        }
+                      }
+
+                      return effectiveEditor &&
+                        effectiveEditor.type !== 'note' &&
+                        effectiveEditor.type !== 'aiPrompt' &&
+                        effectiveEditor.type !== 'todo' &&
+                        effectiveEditor.type !== 'agent' ? (
+                        <EditorItemsPanel
+                          activeEditor={effectiveEditor}
+                          onOpenUrls={onOpenUrls}
+                          onRequestEditLink={onRequestEditLink}
+                          onStartExistingSession={handleStartExistingSession as any}
+                          searchbarRef={searchbarRef}
+                          openSpreadsheetView={openSpreadsheetView}
+                        />
+                      ) : null;
+                    })()}
+                    <ViewMenuPanel searchbarRef={searchbarRef} openSpreadsheetView={openSpreadsheetView} />
                   </Reorder.Item>
                 );
               }

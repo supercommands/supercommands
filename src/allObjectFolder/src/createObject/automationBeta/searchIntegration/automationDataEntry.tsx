@@ -9,7 +9,7 @@ import { extractFrequentValues } from '../utilities/historyExtractor';
 import AutomationDynamicIcon, { resolveAutomationIconMeta } from '../../../../../shared-components/icons/automationDynamicIcon';
 import type { AutomationSuggestionsListItem } from './automationSuggestionsList';
 import AutomationSuggestionsList from './automationSuggestionsList';
-import { resolvePlaceholderFromCmd } from '../../../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/userInterfaceComponents/searchBar';
+import { resolvePlaceholderFromCmd } from '../../../../../shared-components/searchBarMain/userInterfaceComponents/searchBar';
 
 export interface AutomationInputField {
   key: string;

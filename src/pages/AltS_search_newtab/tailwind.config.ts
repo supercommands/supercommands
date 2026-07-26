@@ -1,17 +1,23 @@
 import baseConfig from '@extension/tailwindcss-config';
-import { withUI } from '@extension/ui';
+import { withUI } from '../../../packages/ui/lib/withUI';
 import typography from '@tailwindcss/typography';
+
+import path from 'path';
+
+const toPosix = (p: string) => p.replace(/\\/g, '/');
+const localDir = toPosix(__dirname);
 
 export default withUI({
   ...baseConfig,
   darkMode: 'class',
   content: [
-    './index.html',
-    './src/**/*.{js,ts,jsx,tsx}',
-    '../../allObjectFolder/src/**/*.{js,ts,jsx,tsx}',
-    '../../shared-components/**/*.{js,ts,jsx,tsx}',
-    '../../settings/**/*.{js,ts,jsx,tsx}',
-    '../../welcomeGuide/**/*.{js,ts,jsx,tsx}'
+    `${localDir}/index.html`,
+    `${localDir}/src/**/*.{js,ts,jsx,tsx}`,
+    `${localDir}/../../allObjectFolder/src/**/*.{js,ts,jsx,tsx}`,
+    `${localDir}/../../shared-components/**/*.{js,ts,jsx,tsx}`,
+    `${localDir}/../../settings/**/*.{js,ts,jsx,tsx}`,
+    `${localDir}/../../welcomeGuide/**/*.{js,ts,jsx,tsx}`,
+    '!**/node_modules/**',
   ],
   plugins: [...(baseConfig.plugins || []), typography],
   theme: {

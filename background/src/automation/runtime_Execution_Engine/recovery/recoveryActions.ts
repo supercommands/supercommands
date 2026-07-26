@@ -28,6 +28,7 @@
  *   Phase 2+: will return signals so the executor can route to a native helper.
  */
 
+import { attachDebugger } from '../debugger/debuggerActions';
 import type {
   ValidateStateContext,
   RecoverActionContext,
@@ -114,7 +115,6 @@ export const fallbackDebugger = async (ctx: FallbackDebuggerContext): Promise<In
     const target = ctx.target || { tabId: ctx.tabId };
 
     // Ensure attached
-    const { attachDebugger } = await import('../debugger/debuggerActions');
     const finalTarget = await attachDebugger(ctx.tabId);
 
     const result = await chrome.debugger.sendCommand(finalTarget, ctx.command, ctx.params || {});

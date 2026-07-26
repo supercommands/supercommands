@@ -23,22 +23,22 @@
   --color-accentHover: #9333ea;
   --color-accentBg: rgba(168, 85, 247, 0.1);
   --color-favorite: #eab308;
-  
+
   --color-textPrimary: #e5e5e5;
   --color-textSecondary: #9ca3af;
   --color-textPlaceholder: #6b7280;
-  
+
   --color-borderDefault: rgba(255, 255, 255, 0.1);
   --color-panelBg: rgba(255, 255, 255, 0.05);
 
 }
 
-/* Apply backdrop filter automatically to all themed popups, context menus, and search input wrappers */
 .bg-\[var\(--color-popupBg\)\],
 .bg-\[var\(--color-contextMenuBg\)\],
 .bg-\[var\(--color-modalBg\)\],
 .bg-\[var\(--color-sidebarBg\)\],
 .bg-\[var\(--color-containerBg\)\],
+.bg-\[var\(--color-editorBg\)\],
 .bg-\[var\(--color-cardBg\)\],
 #sheet-search-wrapper {
   backdrop-filter: var(--color-backdrop) !important;
@@ -116,6 +116,115 @@ html.dark body {
 
 .custom-scrollbar:hover {
   scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
+}
+
+.clean-scrollbar {
+  overflow-y: auto;
+}
+
+@supports (-moz-appearance:none) {
+  .clean-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(184, 184, 184, 0.3) transparent;
+  }
+}
+
+.clean-scrollbar::-webkit-scrollbar {
+  width: 4px !important;
+  height: 4px !important;
+}
+
+.clean-scrollbar::-webkit-scrollbar-track,
+.clean-scrollbar::-webkit-scrollbar-track-piece,
+.clean-scrollbar::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.clean-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 9999px !important;
+  box-shadow: none !important;
+  min-height: 28px !important;
+  transition: background-color 0.2s;
+}
+
+.clean-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
+  background: rgba(184, 184, 184, 0.3) !important;
+}
+
+.clean-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(150, 150, 150, 0.5) !important;
+}
+
+/* Completely remove native top and bottom arrow buttons */
+.clean-scrollbar::-webkit-scrollbar-button,
+.clean-scrollbar::-webkit-scrollbar-button:single-button,
+.clean-scrollbar::-webkit-scrollbar-button:start,
+.clean-scrollbar::-webkit-scrollbar-button:end,
+.clean-scrollbar::-webkit-scrollbar-button:vertical:start:decrement,
+.clean-scrollbar::-webkit-scrollbar-button:vertical:end:increment,
+.clean-scrollbar::-webkit-scrollbar-button:vertical:decrement,
+.clean-scrollbar::-webkit-scrollbar-button:vertical:increment {
+  display: none !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+.custom-scrollbar-thin {
+  overflow-y: auto;
+}
+
+.custom-scrollbar-thin::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+}
+
+.custom-scrollbar-thin::-webkit-scrollbar-button,
+.custom-scrollbar-thin::-webkit-scrollbar-button:single-button,
+.custom-scrollbar-thin::-webkit-scrollbar-button:start:decrement,
+.custom-scrollbar-thin::-webkit-scrollbar-button:end:increment,
+.custom-scrollbar-thin::-webkit-scrollbar-button:vertical,
+.custom-scrollbar-thin::-webkit-scrollbar-button:horizontal {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.custom-scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent !important;
+  border-radius: 99px !important;
+  border: 1px solid transparent !important;
+}
+
+.custom-scrollbar-thin:hover::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.custom-scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: transparent !important;
+  border-radius: 99px !important;
+  border: 2px solid transparent !important;
+  background-clip: padding-box !important;
+}
+
+.custom-scrollbar-thin:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.custom-scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.55) !important;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -511,4 +620,27 @@ html.dark body {
 html.is-searchbar-focused .footer-indications {
   opacity: 1 !important;
   pointer-events: auto;
+}
+
+/* Input shake animation for validation */
+@keyframes inputShake {
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  20%,
+  60% {
+    transform: translateX(-4px);
+  }
+
+  40%,
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-input-shake {
+  animation: inputShake 0.3s ease-in-out;
 }

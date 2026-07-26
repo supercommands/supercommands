@@ -9,6 +9,7 @@ import { LinkRecord } from '../../allObjectFolder/src/createObject/links/linkTyp
 import { SnippetRecord } from '../../allObjectFolder/src/createObject/snippets/snippetTypes';
 import { CommandRecord } from '../../allObjectFolder/src/createObject/commands/commandTypes';
 import { TagRecord } from '../../allObjectFolder/src/createObject/tags/tagTypes';
+import { FavoriteCategoryRecord } from '../../allObjectFolder/src/createObject/favoriteCategory/favoriteCategoryTypes';
 import { TodoRecord } from '../../allObjectFolder/src/createObject/todos/todoTypes';
 import { AutomationRecord } from '../../allObjectFolder/src/createObject/automationBeta/automationTypes';
 import { ChatAgentRecord } from '../../allObjectFolder/src/createObject/ChatAgent/chatAgentTypes';
@@ -22,6 +23,7 @@ import { syncCommandsFromSource } from '../../allObjectFolder/src/createObject/c
 import type { UpdateCommandInput } from '../../allObjectFolder/src/createObject/commands/commandTypes';
 import { storageDebug } from '../../shared-components/utils/storageDebugLogger';
 import { SessionRecord } from '../../allObjectFolder/src/createObject/session/sessionTypes';
+import { normalizePrefix } from '../../shared-components/commands/utils';
 
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -29,6 +31,7 @@ interface DbStoreState {
   notes: NoteRecord[];
   links: LinkRecord[];
   tags: TagRecord[];
+  favoriteCategories: FavoriteCategoryRecord[];
 
   snippets: SnippetRecord[];
   commands: CommandRecord[];
@@ -69,6 +72,7 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
   notes: [],
   links: [],
   tags: [],
+  favoriteCategories: [],
 
   snippets: [],
   commands: [],
@@ -160,7 +164,7 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
     const nextRecord: CommandRecord = {
       ...existing,
       label: input.label !== undefined ? input.label.trim() : existing.label,
-      prefix: input.prefix !== undefined ? input.prefix.trim() : existing.prefix,
+      prefix: input.prefix !== undefined ? normalizePrefix(input.prefix) : existing.prefix,
       behavior: input.behavior ?? existing.behavior,
       surface: input.surface !== undefined ? input.surface : existing.surface,
       site: input.site !== undefined ? input.site : existing.site,
@@ -189,28 +193,78 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
     set({ isInitialized: true });
     storageDebug.log('useDbStore.initDbSync', 'Starting Dexie liveQuery subscriptions');
 
+    const notifyDbChanged = (table: string) => {
+      try {
+        const chromeAny = (window as any).chrome;
+        if (chromeAny?.runtime?.sendMessage) {
+          chromeAny.runtime.sendMessage({ action: 'db_changed', table }).catch(() => {});
+        }
+      } catch (err) {
+        // Safe catch for environment differences
+      }
+    };
+
     syncCommandsFromSource().catch(err => {
       console.error('Failed to sync commands to Dexie:', err);
       storageDebug.error('useDbStore.syncCommandsFromSource', 'Failed to sync commands to Dexie', err);
     });
 
     // Subscribe to Dexie changes and push them to Zustand
+    let isInitNotes = true;
     liveQuery(() => db.notes.toArray()).subscribe((notes) => {
       storageDebug.log('useDbStore.liveQuery.notes', 'Dexie emitted notes', { count: notes.length });
-      set(state => (sameJson(state.notes, notes) ? state : { notes }));
-    });
-    liveQuery(() => db.links.toArray()).subscribe((links) => {
-      storageDebug.log('useDbStore.liveQuery.links', 'Dexie emitted links', { count: links.length });
-      set(state => (sameJson(state.links, links) ? state : { links }));
-    });
-    liveQuery(() => db.tags.toArray()).subscribe((tags) => {
-      storageDebug.log('useDbStore.liveQuery.tags', 'Dexie emitted tags', { count: tags.length });
-      set(state => (sameJson(state.tags, tags) ? state : { tags }));
+      set(state => {
+        if (sameJson(state.notes, notes)) return state;
+        if (!isInitNotes) notifyDbChanged('notes');
+        isInitNotes = false;
+        return { notes };
+      });
     });
 
+    let isInitLinks = true;
+    liveQuery(() => db.links.toArray()).subscribe((links) => {
+      storageDebug.log('useDbStore.liveQuery.links', 'Dexie emitted links', { count: links.length });
+      set(state => {
+        if (sameJson(state.links, links)) return state;
+        if (!isInitLinks) notifyDbChanged('links');
+        isInitLinks = false;
+        return { links };
+      });
+    });
+
+    let isInitTags = true;
+    liveQuery(() => db.tags.toArray()).subscribe((tags) => {
+      storageDebug.log('useDbStore.liveQuery.tags', 'Dexie emitted tags', { count: tags.length });
+      set(state => {
+        if (sameJson(state.tags, tags)) return state;
+        if (!isInitTags) notifyDbChanged('tags');
+        isInitTags = false;
+        return { tags };
+      });
+    });
+
+    let isInitFavoriteCategories = true;
+    liveQuery(() => db.favoriteCategories.toArray()).subscribe((favoriteCategories) => {
+      storageDebug.log('useDbStore.liveQuery.favoriteCategories', 'Dexie emitted favorite categories', {
+        count: favoriteCategories.length,
+      });
+      set(state => {
+        if (sameJson(state.favoriteCategories, favoriteCategories)) return state;
+        if (!isInitFavoriteCategories) notifyDbChanged('favoriteCategories');
+        isInitFavoriteCategories = false;
+        return { favoriteCategories };
+      });
+    });
+
+    let isInitSnippets = true;
     liveQuery(() => db.snippets.toArray()).subscribe((snippets) => {
       storageDebug.log('useDbStore.liveQuery.snippets', 'Dexie emitted snippets', { count: snippets.length });
-      set(state => (sameJson(state.snippets, snippets) ? state : { snippets }));
+      set(state => {
+        if (sameJson(state.snippets, snippets)) return state;
+        if (!isInitSnippets) notifyDbChanged('snippets');
+        isInitSnippets = false;
+        return { snippets };
+      });
       try {
         const chromeAny = (window as any).chrome;
         if (chromeAny?.storage?.local) {
@@ -236,74 +290,141 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
         storageDebug.error('useDbStore.liveQuery.snippets', 'Failed to mirror snippets into chrome.storage.local', e);
       }
     });
+
+    let isInitCommands = true;
     liveQuery(() => db.commands.toArray()).subscribe((commands) => {
       storageDebug.log('useDbStore.liveQuery.commands', 'Dexie emitted commands', { count: commands.length });
-      set(state => (sameJson(state.commands, commands) ? state : { commands }));
+      set(state => {
+        if (sameJson(state.commands, commands)) return state;
+        if (!isInitCommands) notifyDbChanged('commands');
+        isInitCommands = false;
+        return { commands };
+      });
     });
+
+    let isInitTodos = true;
     liveQuery(() => db.todos.toArray()).subscribe((todos) => {
       storageDebug.log('useDbStore.liveQuery.todos', 'Dexie emitted todos', { count: todos.length });
-      set(state => (sameJson(state.todos, todos) ? state : { todos }));
+      set(state => {
+        if (sameJson(state.todos, todos)) return state;
+        if (!isInitTodos) notifyDbChanged('todos');
+        isInitTodos = false;
+        return { todos };
+      });
     });
+
+    let isInitAutomations = true;
     liveQuery(() => db.automations.toArray()).subscribe((automations) => {
       storageDebug.log('useDbStore.liveQuery.automations', 'Dexie emitted automations', { count: automations.length });
-      set(state => (sameJson(state.automations, automations) ? state : { automations }));
+      set(state => {
+        if (sameJson(state.automations, automations)) return state;
+        if (!isInitAutomations) notifyDbChanged('automations');
+        isInitAutomations = false;
+        return { automations };
+      });
     });
+
+    let isInitChatAgents = true;
     liveQuery(() => db.chatAgents.toArray()).subscribe((chatAgents) => {
       storageDebug.log('useDbStore.liveQuery.chatAgents', 'Dexie emitted chat agents', { count: chatAgents.length });
-      set(state => (sameJson(state.chatAgents, chatAgents) ? state : { chatAgents }));
+      set(state => {
+        if (sameJson(state.chatAgents, chatAgents)) return state;
+        if (!isInitChatAgents) notifyDbChanged('chatAgents');
+        isInitChatAgents = false;
+        return { chatAgents };
+      });
     });
+
+    let isInitAiPrompts = true;
     liveQuery(() => db.aiPrompts.toArray()).subscribe((aiPrompts) => {
       storageDebug.log('useDbStore.liveQuery.aiPrompts', 'Dexie emitted AI prompts', { count: aiPrompts.length });
-      set(state => (sameJson(state.aiPrompts, aiPrompts) ? state : { aiPrompts }));
+      set(state => {
+        if (sameJson(state.aiPrompts, aiPrompts)) return state;
+        if (!isInitAiPrompts) notifyDbChanged('aiPrompts');
+        isInitAiPrompts = false;
+        return { aiPrompts };
+      });
     });
+
+    let isInitWorkspaces = true;
     liveQuery(() => db.workspaces.toArray()).subscribe((workspaces) => {
       storageDebug.log('useDbStore.liveQuery.workspaces', 'Dexie emitted workspaces', {
         count: workspaces.length,
         ids: workspaces.map(workspace => workspace.id),
       });
-      set(state => (sameJson(state.workspaces, workspaces) ? state : { workspaces }));
+      set(state => {
+        if (sameJson(state.workspaces, workspaces)) return state;
+        if (!isInitWorkspaces) notifyDbChanged('workspaces');
+        isInitWorkspaces = false;
+        return { workspaces };
+      });
     });
+
+    let isInitFolders = true;
     liveQuery(() => db.folders.toArray()).subscribe((folders) => {
       storageDebug.log('useDbStore.liveQuery.folders', 'Dexie emitted folders', {
         count: folders.length,
         ids: folders.map(folder => folder.id),
         workspaceIds: Array.from(new Set(folders.map(folder => folder.workspaceId))),
       });
-      set(state => (sameJson(state.folders, folders) ? state : { folders }));
+      set(state => {
+        if (sameJson(state.folders, folders)) return state;
+        if (!isInitFolders) notifyDbChanged('folders');
+        isInitFolders = false;
+        return { folders };
+      });
     });
+
+    let isInitFavorites = true;
     liveQuery(() => db.favorites.toArray()).subscribe((favorites) => {
       storageDebug.log('useDbStore.liveQuery.favorites', 'Dexie emitted favorites', { count: favorites.length });
-      set(state => (sameJson(state.favorites, favorites) ? state : { favorites }));
+      set(state => {
+        if (sameJson(state.favorites, favorites)) return state;
+        if (!isInitFavorites) notifyDbChanged('favorites');
+        isInitFavorites = false;
+        return { favorites };
+      });
     });
+
+    let isInitUserHotkeys = true;
     liveQuery(() => db.userHotkeys.toArray()).subscribe((userHotkeys) => {
       storageDebug.log('useDbStore.liveQuery.userHotkeys', 'Dexie emitted user hotkeys', { count: userHotkeys.length });
       const map: Record<string, string> = {};
       userHotkeys.forEach(hk => {
         map[hk.referenceId] = hk.combination;
       });
-      set(state =>
-        sameJson(state.userHotkeys, userHotkeys) && sameJson(state.hotkeysMap, map)
-          ? state
-          : { userHotkeys, hotkeysMap: map },
-      );
+      set(state => {
+        const changed = !sameJson(state.userHotkeys, userHotkeys) || !sameJson(state.hotkeysMap, map);
+        if (changed && !isInitUserHotkeys) notifyDbChanged('userHotkeys');
+        isInitUserHotkeys = false;
+        return changed ? { userHotkeys, hotkeysMap: map } : state;
+      });
     });
     
+    let isInitUserShortcuts = true;
     liveQuery(() => db.userShortcuts.toArray()).subscribe((userShortcuts) => {
       storageDebug.log('useDbStore.liveQuery.userShortcuts', 'Dexie emitted user shortcuts', { count: userShortcuts.length });
       const map: Record<string, string> = {};
       userShortcuts.forEach(sc => {
         map[sc.referenceId] = sc.trigger;
       });
-      set(state =>
-        sameJson(state.userShortcuts, userShortcuts) && sameJson(state.shortcutsMap, map)
-          ? state
-          : { userShortcuts, shortcutsMap: map },
-      );
+      set(state => {
+        const changed = !sameJson(state.userShortcuts, userShortcuts) || !sameJson(state.shortcutsMap, map);
+        if (changed && !isInitUserShortcuts) notifyDbChanged('userShortcuts');
+        isInitUserShortcuts = false;
+        return changed ? { userShortcuts, shortcutsMap: map } : state;
+      });
     });
 
+    let isInitSessions = true;
     liveQuery(() => db.sessions.toArray()).subscribe((sessions) => {
       storageDebug.log('useDbStore.liveQuery.sessions', 'Dexie emitted sessions', { count: sessions.length });
-      set(state => (sameJson(state.sessions, sessions) ? state : { sessions }));
+      set(state => {
+        if (sameJson(state.sessions, sessions)) return state;
+        if (!isInitSessions) notifyDbChanged('sessions');
+        isInitSessions = false;
+        return { sessions };
+      });
     });
   }
 }));

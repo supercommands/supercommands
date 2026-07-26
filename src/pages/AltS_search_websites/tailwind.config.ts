@@ -1,13 +1,19 @@
 import baseConfig from '@extension/tailwindcss-config';
-import { withUI } from '@extension/ui';
+import { withUI } from '../../../packages/ui/lib/withUI';
+
+import path from 'path';
+
+const toPosix = (p: string) => p.replace(/\\/g, '/');
+const localDir = toPosix(__dirname);
 
 export default withUI({
   ...baseConfig,
   darkMode: 'class',
   content: [
-    './src/**/*.{ts,tsx}',
-    '../../shared-components/**/*.{ts,tsx,js,jsx}',
-    '../AltS_search_newtab/src/components/Shared/**/*.{ts,tsx}'
+    `${localDir}/src/**/*.{ts,tsx}`,
+    `${localDir}/../../shared-components/**/*.{ts,tsx,js,jsx}`,
+    `${localDir}/../AltS_search_newtab/src/components/Shared/**/*.{ts,tsx}`,
+    '!**/node_modules/**',
   ],
   theme: {
     ...baseConfig.theme,

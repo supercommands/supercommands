@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
-import '@src/index.css';
+import './index.css';
 import '@extension/ui/lib/global.css';
-import AltS_search_newtab from '@src/NewTab';
+import AltS_search_newtab from './NewTab';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Provider } from 'react-redux';
 import { queryClient } from './query/queryClient';

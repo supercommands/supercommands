@@ -123,28 +123,36 @@ export async function executePageActionCommand(item: AltQPageActionItem, onClose
 }
 
 // ---------------------------------------------------------------------------
-// Internal helper — reuses AltQ's existing inline-toast pattern
+// Internal helper — creates standalone DOM toast on host page/portal host
 // ---------------------------------------------------------------------------
-function showAltQToast(message: string, bg: string): void {
+function showAltQToast(message: string, bg = '#1a73e8'): void {
+  const container =
+    (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body;
   const toastId = `altq-page-action-toast-${Date.now()}`;
   const toast = document.createElement('div');
   toast.id = toastId;
   toast.textContent = message;
   toast.style.cssText = [
     'position:fixed',
-    'bottom:80px',
+    'bottom:24px',
     'left:50%',
     'transform:translateX(-50%)',
     `background:${bg}`,
     'color:white',
-    'padding:8px 20px',
+    'padding:10px 22px',
     'border-radius:20px',
     'z-index:2147483647',
     'font-family:system-ui,sans-serif',
-    'font-size:14px',
+    'font-size:13px',
     'font-weight:600',
-    'box-shadow:0 4px 12px rgba(0,0,0,0.4)',
+    'box-shadow:0 8px 24px rgba(0,0,0,0.4)',
+    'pointer-events:none',
+    'transition:opacity 0.2s ease-in-out',
   ].join(';');
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 2500);
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 200);
+  }, 2500);
 }
+

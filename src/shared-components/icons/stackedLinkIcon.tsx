@@ -1,28 +1,28 @@
 import React from 'react';
 import { FaLink, FaLayerGroup } from 'react-icons/fa';
-import { getFaviconUrl } from '../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 
 export interface StackedLinkIconProps {
   urls?: string[];
   size?: number;
   className?: string;
   maxIcons?: number;
-  fallback?: 'link' | 'tabgroup';
+  fallback?: 'link' | 'tabgroup' | 'session';
 }
 
 /**
  * Renders a stack of favicons for a list of URLs.
- * Used for TabGroups and Link snippets.
+ * Used for Sessions and Link snippets.
  */
 export const StackedLinkIcon: React.FC<StackedLinkIconProps> = ({
   urls = [],
   size = 16,
   className = '',
   maxIcons = 3,
-  fallback = 'tabgroup',
+  fallback = 'session',
 }) => {
   if (!urls || urls.length === 0) {
-    if (fallback === 'tabgroup') {
+    if (fallback === 'tabgroup' || fallback === 'session') {
       return <FaLayerGroup size={size} className={`text-[var(--color-iconDefault)] ${className}`} />;
     }
     return <FaLink size={size} className={`text-[var(--color-iconDefault)] ${className}`} />;

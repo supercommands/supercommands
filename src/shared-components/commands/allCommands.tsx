@@ -1,30 +1,36 @@
-import { useUIStore } from '../uiStateManager';
-// === IMPORTS ===
 import React from 'react';
-import { SiGooglecalendar } from 'react-icons/si';
-import { FaLayerGroup, FaGoogleDrive, FaPlay, FaClock } from 'react-icons/fa';
-import type { CommandModule, CommandContext } from './types';
-import { EntitySelection } from './types';
+import type { CommandModule } from './types';
+import { AiPromptEditorView } from '../../allObjectFolder/src/createObject/aiPrompt';
+import { useUIStore } from '../uiStateManager';
 
-// === CONSTANTS AND COMMAND DECLARATIONS ===
+export const SearchCommand: CommandModule = {
+  id: 'search',
+  label: 'Search Commands',
+  prefix: 'search',
+  keywords: ['search', 'commands', 'all commands', 'list'],
+  behavior: 'instant',
+  surface: 'both',
+  execute: context => {
+    const targetUrl = new URL(window.location.href);
+    targetUrl.searchParams.set('open_sheet', 'commands');
+    window.history.replaceState({}, '', targetUrl.toString());
+
+    context.services.navigation({ kind: 'commandList', category: 'general_commands' });
+  },
+};
+
 export const CreateNoteCommand: CommandModule = {
   id: 'createnotes',
   label: 'Create Notes',
-  prefix: '/createnotes',
+  prefix: 'createnotes',
   keywords: ['create note', 'new note', 'note', 'notes', 'add note', 'save note'],
   behavior: 'instant',
-
   execute: context => {
-    const { services } = context;
-
-
-
-    // Navigate to note editor
-    services.navigation({
+    context.services.navigation({
       kind: 'noteEditor',
       noteProps: {
-        category: 'note', // Corrected to 'note'
-        onClose: () => services.navigation({ kind: 'home' }),
+        category: 'note',
+        onClose: () => context.services.navigation({ kind: 'home' }),
       },
     });
   },
@@ -33,21 +39,15 @@ export const CreateNoteCommand: CommandModule = {
 export const CreateSnippetCommand: CommandModule = {
   id: 'createsnippet',
   label: 'Create Snippet',
-  prefix: '/createsnippet',
+  prefix: 'createsnippet',
   keywords: ['create snippet', 'new snippet', 'snippet', 'snippets', 'add snippet', 'save snippet'],
   behavior: 'instant',
-
   execute: context => {
-    const { services } = context;
-
-
-
-    // Navigate to note editor with category snippet
-    services.navigation({
+    context.services.navigation({
       kind: 'noteEditor',
       noteProps: {
-        category: 'snippet', // Corrected to 'snippet'
-        onClose: () => services.navigation({ kind: 'home' }),
+        category: 'snippet',
+        onClose: () => context.services.navigation({ kind: 'home' }),
       },
     });
   },
@@ -56,20 +56,14 @@ export const CreateSnippetCommand: CommandModule = {
 export const CreateLinkCommand: CommandModule = {
   id: 'createlinks',
   label: 'Create Smart Links',
-  prefix: '/createlinks',
+  prefix: 'createlinks',
   keywords: ['create link', 'new link', 'link', 'links', 'save link', 'saved link'],
   behavior: 'instant',
-
   execute: context => {
-    const { services } = context;
-
-
-
-    // Navigate to link editor
-    services.navigation({
+    context.services.navigation({
       kind: 'linkEditor',
       linkProps: {
-        onClose: () => services.navigation({ kind: 'home' }),
+        onClose: () => context.services.navigation({ kind: 'home' }),
       },
     });
   },
@@ -77,771 +71,332 @@ export const CreateLinkCommand: CommandModule = {
 
 export const CreateSessionCommand: CommandModule = {
   id: 'createsession',
-  label: 'Create Tab group',
-  prefix: '/createsession',
-  keywords: ['create tab group', 'new tab group', 'tab group', 'tab groups', 'session', 'sessions'],
+  label: 'Create Tab session',
+  prefix: 'createsession',
+  keywords: ['create Tab Session', 'new Tab Session', 'Tab Session', 'Tab Sessions', 'session', 'sessions'],
   behavior: 'instant',
-
   execute: context => {
-    const { services } = context;
-    services.navigation({
+    context.services.navigation({
       kind: 'sessionEditor',
       sessionProps: {
-        onClose: () => services.navigation({ kind: 'home' }),
+        onClose: () => context.services.navigation({ kind: 'home' }),
       },
     });
   },
 };
 
-export const AgentCommand: CommandModule = {
-  id: 'agent',
-  label: 'Create an Automation Agent',
-  prefix: '/agent',
-  keywords: ['agent', 'ai agent', 'assistant', 'ai assistant', 'automation'],
+export const CreatePromptCommand: CommandModule = {
+  id: 'createprompt',
+  label: 'Create AI Prompt',
+  prefix: 'createprompt',
+  keywords: ['create prompt', 'new prompt', 'prompt', 'prompts', 'ai prompt'],
   behavior: 'instant',
-
+  surface: 'both',
   execute: context => {
-    const { services } = context;
+    context.services.navigation({
+      kind: 'custom',
+      element: () => <AiPromptEditorView onBack={() => context.services.navigation({ kind: 'home' })} />,
+    });
+  },
+};
 
-    // Clear transient automation storage keys
-    const chromeAny = (window as any)?.chrome;
-    if (chromeAny?.storage?.local) {
-      chromeAny.storage.local.remove(['automation_recording_state', 'automation_draft_steps_count']);
-    }
+export const CreateTodoCommand: CommandModule = {
+  id: 'createtodo',
+  label: 'Create Todo',
+  prefix: 'createtodo',
+  keywords: ['create todo', 'new todo', 'todo', 'task', 'add todo', 'save todo'],
+  behavior: 'instant',
+  surface: 'both',
+  execute: context => {
+    useUIStore.getState().setView({ type: 'home' });
+    useUIStore.getState().openCreateItem('todo', {
+      id: 'new',
+      props: { prefill: { isCreateModalOnly: true } as any },
+      openTodoSidebar: true,
+    });
+  },
+};
 
-    // Navigate to agent panel
-    services.navigation({
-      kind: 'agentPanel',
-      agentProps: {
-        onClose: () => services.navigation({ kind: 'home' }),
+export const CreateFolderCommand: CommandModule = {
+  id: 'createfolder',
+  label: 'Create Folder',
+  prefix: 'createfolder',
+  keywords: ['create folder', 'new folder', 'folder', 'folders'],
+  behavior: 'instant',
+  surface: 'both',
+  execute: context => {
+    context.services.navigation({
+      kind: 'folderEditor',
+      folderProps: {
+        onClose: () => context.services.navigation({ kind: 'home' }),
+        reload: context.services.reload,
       },
     });
   },
 };
 
-const SYSTEM_PROMPT =
-  'Act as a professional AI personal assistant and calendar manager. Access the Google Calendar. Optimize the schedule for productivity, allow for breaks, and manage conflicts. When scheduling, consider existing appointments.';
-
-export const CalendarCommand: CommandModule = {
-  id: 'calendar',
-  // Use a colored icon component instance
-  icon: <SiGooglecalendar className="text-[#4285F4]" />,
-  label: 'Calendar Event AI Agent',
-  prefix: '/calendar',
-  keywords: ['calendar', 'schedule', 'meeting', 'event', 'agenda', 'ai', 'call'],
+export const CreateWorkspaceCommand: CommandModule = {
+  id: 'createworkspace',
+  label: 'Create Workspace',
+  prefix: 'createworkspace',
+  keywords: ['create workspace', 'new workspace', 'workspace', 'workspaces'],
   behavior: 'instant',
-
-  execute: async context => {
-    const { services, prompt } = context;
-
-    const fullPrompt = prompt ? `${SYSTEM_PROMPT} ${prompt}` : SYSTEM_PROMPT;
-
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage(
-        {
-          action: 'open_tab_with_auto_submit',
-          url: 'https://gemini.google.com/app',
-          autoSubmit: {
-            kind: 'gemini', // Use 'gemini' generic handler since we are providing the full prompt here
-            prompt: fullPrompt,
-          },
-          forceNewTab: true,
-        },
-        response => {
-          if (!response || !response.ok) {
-            console.error('Failed to open calendar agent:', response?.error);
-            if (services.toast) services.toast('Failed to open Calendar Agent', 'error');
-          }
-        },
-      );
-    } else {
-      if (services.toast) services.toast('Chrome runtime not available', 'error');
-    }
-  },
-};
-
-export const DashboardCommand: CommandModule = {
-  id: 'dashboard',
-  label: 'Dashboard',
-  prefix: '/dashboard',
-  keywords: [],
-  behavior: 'instant',
+  surface: 'both',
   execute: context => {
-    window.open(context.services.urls.dashboard, '_blank');
-  },
-};
-
-export const TutorialsCommand: CommandModule = {
-  id: 'tutorials',
-  label: 'Tutorials',
-  prefix: '/tutorials',
-  keywords: [],
-  behavior: 'instant',
-  execute: context => {
-    window.open(context.services.urls.docs, '_blank');
-  },
-};
-
-export const CreateOrganizationCommand: CommandModule = {
-  id: 'createWorkspace',
-  label: 'Create New Organization',
-  prefix: '/createorganization',
-  keywords: ['create', 'organization', 'new', 'team', 'org', 'add org', 'new org'],
-  behavior: 'instant',
-  description: 'Create a new organization',
-
-  execute: context => {
-    // Navigate to in-app create organization panel
     context.services.navigation({ kind: 'createWorkspace' });
   },
 };
 
-export const SwitchOrganizationCommand: CommandModule = {
-  id: 'switchorganization',
-  label: 'Switch Organization',
-  prefix: '/switchorganization',
-  keywords: ['switch', 'organization', 'change', 'team', 'org', 'switch org'],
+export const CreateAutomationAgentCommand: CommandModule = {
+  id: 'agent',
+  label: 'Create Automation Agent (beta)',
+  prefix: 'agent',
+  keywords: ['agent', 'automation', 'automation agent', 'workflow', 'automation beta'],
   behavior: 'instant',
-  description: 'Switch to a different organization',
-
+  surface: 'both',
+  category: 'automation',
   execute: context => {
-    // Navigate to organizations list view
-    context.services.navigation({ kind: 'allItems', itemType: 'organizations' });
+    useUIStore.getState().setView({ type: 'home' });
+    useUIStore.getState().openCreateItem('agent', {
+      id: 'new',
+      isNew: true,
+      props: { editMode: false, automation: null },
+    });
+    context.services.clearDraftAutomation();
   },
 };
 
-export const StoreCommand: CommandModule = {
-  id: 'store',
-  label: 'Automation Store',
-  prefix: '/store',
-  description: 'Browse and install automation modules by category.',
-  keywords: [
-    'store',
-    'app store',
-    'module store',
-    'apps',
-    'app',
-    'connect app',
-    'connect',
-    'integration',
-    'integrations',
-    'marketplace',
-  ],
+export const AiAllCommand: CommandModule = {
+  id: 'ai',
+  label: 'All AI Chat Agents',
+  prefix: 'ai',
+  keywords: ['ai', 'all ai', 'chat agents', 'assistant', 'prompt'],
   behavior: 'locked',
-  icon: FaLayerGroup,
+  category: 'ai',
+  surface: 'both',
+  url: '',
+};
 
+export const ChatGPTCommand: CommandModule = {
+  id: 'gpt',
+  label: 'ChatGPT',
+  prefix: 'gpt',
+  keywords: ['chatgpt', 'openai', 'gpt', 'ai'],
+  behavior: 'instant',
+  surface: 'both',
+  category: 'ai',
+  iconHost: 'chatgpt.com',
+  autoSubmit: 'chatgpt',
+  urlTemplate: 'https://chatgpt.com/',
+  showInDashboard: false,
+};
+
+export const ClaudeCommand: CommandModule = {
+  id: 'claude',
+  label: 'Claude',
+  prefix: 'claude',
+  keywords: ['claude', 'anthropic', 'ai'],
+  behavior: 'instant',
+  surface: 'both',
+  category: 'ai',
+  iconHost: 'claude.ai',
+  autoSubmit: 'claude',
+  urlTemplate: 'https://claude.ai/new',
+  showInDashboard: false,
+};
+
+export const GeminiCommand: CommandModule = {
+  id: 'gemini',
+  label: 'Gemini',
+  prefix: 'gemini',
+  keywords: ['gemini', 'google ai', 'ai'],
+  behavior: 'instant',
+  surface: 'both',
+  category: 'ai',
+  iconHost: 'gemini.google.com',
+  autoSubmit: 'gemini',
+  urlTemplate: 'https://gemini.google.com/app',
+  showInDashboard: false,
+};
+
+export const PerplexityCommand: CommandModule = {
+  id: 'perplexity',
+  label: 'Perplexity',
+  prefix: 'perplexity',
+  keywords: ['perplexity', 'search', 'ai'],
+  behavior: 'instant',
+  surface: 'both',
+  category: 'ai',
+  iconHost: 'perplexity.ai',
+  autoSubmit: 'perplexity',
+  urlTemplate: 'https://www.perplexity.ai/',
+  showInDashboard: false,
+};
+
+export const CaptureScreenshotCommand: CommandModule = {
+  id: 'capture_screenshot',
+  label: 'Capture Screenshot',
+  prefix: 'screenshot',
+  keywords: ['capture', 'shot', 'image', 'photo', 'screen', 'visible', 'png'],
+  behavior: 'instant',
+  surface: 'website',
+  category: 'page_action',
   execute: () => {
-    // Logic moved to search-integrated store view
+    chrome.runtime.sendMessage({ action: 'CAPTURE_VISIBLE_TAB' });
   },
 };
 
-export const ShortcutsCommand: CommandModule = {
-  id: 'shortcuts',
-  label: 'Command List',
-  prefix: '/shortcuts',
-  keywords: ['commands', 'list commands', 'shortcuts', 'hotkeys', 'help'],
+export const CaptureElementCommand: CommandModule = {
+  id: 'capture_element_screenshot',
+  label: 'Capture Element',
+  prefix: 'elementscreenshot',
+  keywords: ['capture', 'element', 'part', 'select', 'pick', 'hover', 'screenshot', 'section'],
   behavior: 'instant',
-
-  execute: ({ services }) => {
-    services.navigation({ kind: 'commandList' });
-  },
-};
-
-export const SavedAutomationsCommand: CommandModule = {
-  id: 'saved-automation',
-  label: 'My Automations',
-  prefix: '/saved',
-  description: 'Manage and run your saved automation library.',
-  keywords: ['saved automations', 'my automations', 'workflows'],
-  behavior: 'locked',
-  icon: FaPlay,
-
+  surface: 'website',
+  category: 'page_action',
   execute: () => {
-    // Logic handled in search-integrated view via 'locked' behavior.
-    // When this command is activated, the Searchbar switches to SavedAutomationsPanel.
+    chrome.runtime.sendMessage({ action: 'INIT_ELEMENT_SELECTION' });
   },
 };
 
-
-export const DeleteSnippetCommand: CommandModule = {
-  id: 'delete_snippet',
-  label: 'Delete Note',
-  prefix: '/deletenote',
-  keywords: ['delete', 'remove', 'trash', 'dlt', 'del', 'discard', 'snippet', 'note', 'delete note', 'remove note'],
-  behavior: 'entity',
-  scope: 'snippet',
-  action: 'delete',
-
-  execute: (context, entity) => {
-    if (!entity?.snippet || !entity?.workspace) {
-      context.services.toast('No note selected', 'error');
-      return;
-    }
-
-    // TODO: Delegate to central Workspace Manager / API
-    console.warn('DeleteNoteCommand: Delegating to WorkspaceManager (Not implemented in UI yet)');
-  },
-};
-
-export const DeleteLinkCommand: CommandModule = {
-  id: 'delete_link',
-  label: 'Delete Link',
-  prefix: '/deletelink',
-  keywords: ['delete', 'remove', 'trash', 'dlt', 'del', 'discard', 'link', 'links', 'delete link', 'remove link'],
-  behavior: 'entity',
-  scope: 'snippet',
-  action: 'delete',
-
-  execute: (context, entity) => {
-    if (!entity?.snippet || !entity?.workspace) {
-      context.services.toast('No link selected', 'error');
-      return;
-    }
-
-    // TODO: Delegate to central Workspace Manager / API
-    console.warn('DeleteLinkCommand: Delegating to WorkspaceManager (Not implemented in UI yet)');
-  },
-};
-
-export const ProfileCommand: CommandModule = {
-  id: 'profile',
-  label: 'Profile',
-  prefix: '/profile',
-  keywords: ['profile', 'account', 'user', 'settings', 'me'],
+export const CaptureFullPageCommand: CommandModule = {
+  id: 'capture_full_screenshot',
+  label: 'Capture Full Page',
+  prefix: 'fullscreenshot',
+  keywords: ['capture', 'full', 'page', 'scroll', 'screenshot', 'whole', 'entire', 'png'],
   behavior: 'instant',
-  execute: context => {
-    window.open(context.services.urls.profile, '_blank');
+  surface: 'website',
+  category: 'page_action',
+  execute: () => {
+    chrome.runtime.sendMessage({ action: 'CAPTURE_FULL_PAGE' });
   },
 };
 
-export const ShowAllNotesCommand: CommandModule = {
-  id: 'show_all_notes',
-  label: 'Show all notes',
-  prefix: '/notes',
-  keywords: ['notes', 'all notes', 'show notes', 'list notes', 'view notes', 'my notes'],
-  behavior: 'instant',
-
-  execute: context => {
-    // Navigate to the all notes view
-    context.services.navigation({ kind: 'allItems', itemType: 'notes' });
-  },
-};
-
-export const ShowAllLinksCommand: CommandModule = {
-  id: 'show_all_links',
-  label: 'Show all links',
-  prefix: '/links',
-  keywords: ['links', 'all links', 'show links', 'list links', 'view links', 'tabgroups', 'tab groups', 'my links'],
-  behavior: 'instant',
-
-  execute: context => {
-    // Navigate to the all links view
-    context.services.navigation({ kind: 'allItems', itemType: 'links' });
-  },
-};
-
-
-export const ToggleAutoExpandCommand: CommandModule = {
-  id: 'toggle_auto_expand',
-  label: 'Toggle Auto Expand Folders',
-  prefix: '/autoexpand',
-  keywords: ['toggle', 'expand', 'auto', 'folder'],
-  behavior: 'instant',
-
-  execute: context => {
-    const current = useUIStore.getState().isAutoExpandMode;
-    const newValue = !current;
-
-    context.services.setIsAutoExpandMode(newValue);
-    context.services.toast(`Auto Expand Folders is now ${newValue ? 'ON' : 'OFF'}.`, 'success');
-  },
-};
-
-export const RefreshCommand: CommandModule = {
-  id: 'refresh',
-  label: 'Refresh',
-  prefix: '/refresh',
-  keywords: ['refresh', 'reload', 'Refresh', 'reload page'],
-  behavior: 'instant',
-
-  execute: async context => {
-    // Relying on IndexedDB state, we only need to reload tabs.
-    const chromeAny = (window as any)?.chrome;
-
-    // Reload all open AltS_search_newtab instances and the active tab
-    if (chromeAny?.tabs?.query && chromeAny?.tabs?.reload) {
-      chromeAny.tabs.query({}, (tabs: chrome.tabs.Tab[]) => {
-        if (chromeAny.runtime?.lastError) {
-          console.warn('[RefreshCommand] Error querying tabs:', chromeAny.runtime.lastError);
-          // Fallback to window.location.reload() if available
-          if (typeof window !== 'undefined' && window.location) {
-            window.location.reload();
-          }
-          return;
-        }
-
-        const extensionId = chromeAny.runtime?.id;
-        const tabsToReload: { id: number; isActive: boolean }[] = [];
-
-        tabs.forEach(tab => {
-          if (!tab.id) return;
-
-          const isNewTab =
-            tab.url &&
-            (tab.url.includes('chrome://newtab') ||
-              (extensionId &&
-                tab.url.includes(`chrome-extension://${extensionId}/pages/AltS_search_newtab/index.html`)) ||
-              tab.url.includes('AltS_search_newtab/index.html'));
-
-          if (isNewTab || tab.active) {
-            tabsToReload.push({ id: tab.id, isActive: !!tab.active });
-          }
-        });
-
-        // Sort so that we reload background tabs first, and reload the active tab last
-        tabsToReload.sort((a, b) => (a.isActive ? 1 : 0) - (b.isActive ? 1 : 0));
-
-        let activeTabReloaded = false;
-        tabsToReload.forEach(t => {
-          chromeAny.tabs.reload(t.id);
-          if (t.isActive) {
-            activeTabReloaded = true;
-          }
-        });
-
-        if (!activeTabReloaded && typeof window !== 'undefined' && window.location) {
-          window.location.reload();
-        }
-      });
-    } else {
-      // chrome.tabs API not available, use window.location.reload() as fallback
-      if (typeof window !== 'undefined' && window.location) {
-        window.location.reload();
-      }
-    }
-  },
-};
-
-export const UploadDriveCommand: CommandModule = {
-  id: 'upload_drive',
-  label: 'Upload Drive',
-  prefix: '/upload_drive',
-  keywords: ['upload', 'drive', 'google', 'files', 'cloud'],
-  behavior: 'locked',
-  icon: FaGoogleDrive,
-
-  execute: async context => {
-    const { files } = context;
-    const { toast } = context.services;
-
-    if (!files || files.length === 0) {
-      toast('Please attach files first (Ctrl+U or paste)', 'error');
-      return;
-    }
-
-    toast(`Starting upload flow for ${files.length} file(s)...`, 'info');
-
-    try {
-      // Use the unified auto-submit flow
-      chrome.runtime.sendMessage(
-        {
-          action: 'open_tab_with_auto_submit',
-          url: 'https://drive.google.com/drive/my-drive',
-          autoSubmit: {
-            kind: 'drive',
-            images: files,
-          },
-        },
-        (response: any) => {
-          if (chrome.runtime.lastError) {
-            toast(`Upload failed: ${chrome.runtime.lastError.message}`, 'error');
-          } else if (response?.ok) {
-            // No need for "triggered" toast usually as the page is about to navigate
-          } else {
-            toast(response?.error || 'Failed to start upload flow', 'error');
-          }
-        },
-      );
-    } catch (err) {
-      console.error('[UploadDriveCommand] Error sending files:', err);
-      toast('Failed to start upload flow', 'error');
-    }
-  },
-};
-
-export const GitHubCreateIssueCommand: CommandModule = {
-  id: 'github_create_issue',
-  label: 'Create Issue',
-  prefix: '/github-create-issue',
-  keywords: ['github', 'issue', 'create issue', 'new issue'],
-  behavior: 'instant',
-  showInDashboard: false,
-  category: 'thissite_action',
-
-  isAvailable: webContext => {
-    return (
-      webContext?.site === 'github' &&
-      webContext?.pageType === 'repository' &&
-      !!webContext?.metadata?.owner &&
-      !!webContext?.metadata?.repo
-    );
-  },
-
-  execute: context => {
-    // For direct link opening commands, execution is typically resolved via the tab context url in AltQ,
-    // or by opening a tab. We provide an execute method that opens a tab.
-    const url = GitHubCreateIssueCommand.url;
-    if (url) {
-      window.open(url, '_blank');
-    }
-  },
-
-  getDynamicLabel: context => {
-    // Label can be customized dynamically if we have context in the UI,
-    // but the fallback label is 'Create Issue'.
-    return 'Create Issue';
-  },
-};
-
-export const GitHubCreatePRCommand: CommandModule = {
-  id: 'github_create_pr',
-  label: 'Create Pull Request',
-  prefix: '/github-create-pr',
-  keywords: ['github', 'pr', 'pull request', 'create pr', 'new pr', 'compare'],
-  behavior: 'instant',
-  showInDashboard: false,
-  category: 'thissite_action',
-
-  isAvailable: webContext => {
-    return (
-      webContext?.site === 'github' &&
-      webContext?.pageType === 'repository' &&
-      !!webContext?.metadata?.owner &&
-      !!webContext?.metadata?.repo
-    );
-  },
-
-  execute: context => {
-    const url = GitHubCreatePRCommand.url;
-    if (url) {
-      window.open(url, '_blank');
-    }
-  },
-
-  getDynamicLabel: context => {
-    return 'Create Pull Request';
-  },
-};
-
-export const GitHubOpenSettingsCommand: CommandModule = {
-  id: 'github_open_settings',
-  label: 'Open Repository Settings',
-  prefix: '/github-open-settings',
-  keywords: ['github', 'settings', 'repository settings', 'repo settings'],
-  behavior: 'instant',
-  showInDashboard: false,
-  category: 'thissite_action',
-
-  isAvailable: webContext => {
-    return (
-      webContext?.site === 'github' &&
-      webContext?.pageType === 'repository' &&
-      !!webContext?.metadata?.owner &&
-      !!webContext?.metadata?.repo
-    );
-  },
-
-  execute: context => {
-    const url = GitHubOpenSettingsCommand.url;
-    if (url) {
-      window.open(url, '_blank');
-    }
-  },
-
-  getDynamicLabel: context => {
-    return 'Open Repository Settings';
-  },
-};
-
-export const GitHubOrgCommand: CommandModule = {
-  id: 'github_org_action',
-  label: 'GitHub Org Action',
-  prefix: '/github-org',
-  keywords: ['github', 'organization', 'org', 'repository', 'open repository', 'create issue', 'settings'],
-  behavior: 'instant',
-  showInDashboard: false,
-  category: 'thissite_action',
-
-  isAvailable: webContext => {
-    return (
-      webContext?.site === 'github' && webContext?.pageType === 'organization' && !!webContext?.metadata?.organization
-    );
-  },
-
-  execute: context => {
-    // Resolved directly within AltQ UI dropdowns/palettes.
-  },
-};
-
-// === CATEGORIZED ARRAYS ===
 export const INSTANT_COMMANDS: CommandModule[] = [
+  SearchCommand,
   CreateNoteCommand,
   CreateSnippetCommand,
   CreateLinkCommand,
   CreateSessionCommand,
-  AgentCommand,
-  CalendarCommand,
-  DashboardCommand,
-  TutorialsCommand,
-  CreateOrganizationCommand,
-  SwitchOrganizationCommand,
-  ShortcutsCommand,
-  ProfileCommand,
-  ShowAllNotesCommand,
-  ShowAllLinksCommand,
-  ToggleAutoExpandCommand,
-  RefreshCommand,
-  GitHubCreateIssueCommand,
-  GitHubCreatePRCommand,
-  GitHubOpenSettingsCommand,
-  GitHubOrgCommand,
+  CreatePromptCommand,
+  CreateTodoCommand,
+  CreateFolderCommand,
+  CreateWorkspaceCommand,
+  CreateAutomationAgentCommand,
+  AiAllCommand,
+  ChatGPTCommand,
+  ClaudeCommand,
+  GeminiCommand,
+  PerplexityCommand,
+  CaptureScreenshotCommand,
+  CaptureElementCommand,
+  CaptureFullPageCommand,
 ];
 
-export const ENTITY_COMMANDS: CommandModule[] = [DeleteSnippetCommand, DeleteLinkCommand];
-
-export const LOCKED_COMMANDS: CommandModule[] = [StoreCommand, SavedAutomationsCommand, UploadDriveCommand];
-
-// Helper to determine the browser scheme and icon host
-const getBrowserInfo = (): { scheme: string; iconHost: string; name: string } => {
-  const userAgent = navigator.userAgent.toLowerCase();
-
-  // Edge and Brave have specific schemes
-  if (userAgent.includes('edg/') || userAgent.includes('edge')) {
-    return { scheme: 'edge://', iconHost: 'microsoft.com', name: 'Edge' };
-  }
-
-  if ((navigator as any).brave && (navigator as any).brave.isBrave) {
-    return { scheme: 'brave://', iconHost: 'brave.com', name: 'Brave' };
-  }
-
-  // Default to Chrome (handles Comet, Atlas, and standard Chrome)
-  return { scheme: 'chrome://', iconHost: 'google.com', name: 'Chrome' };
-};
-
-const BROWSER_INFO = getBrowserInfo();
-export const BROWSER_NAME = BROWSER_INFO.name;
+export const ENTITY_COMMANDS: CommandModule[] = [];
+export const LOCKED_COMMANDS: CommandModule[] = [];
 
 export const QUERY_COMMANDS: CommandModule[] = [
-  // --- Core Search Commands (Used for Omnibox Prefix Routing) ---
-  {
-    id: 'search_notes',
-    label: 'Search Notes',
-    prefix: '/n',
-    behavior: 'query',
-    keywords: ['notes', 'search notes', 'find notes'],
-    category: 'core',
-  },
-  {
-    id: 'search_links',
-    label: 'Search Links',
-    prefix: '/l',
-    behavior: 'query',
-    keywords: ['links', 'search links', 'find links'],
-    category: 'core',
-  },
-  {
-    id: 'search_commands',
-    label: 'Search Commands',
-    prefix: '/c',
-    behavior: 'query',
-    keywords: ['commands', 'search commands', 'find commands', 'run command'],
-    category: 'core',
-  },
-
-  // --- Internal Browser Pages ---
   {
     id: 'history',
-    //   behavior: \'query\',
     label: 'History',
-    prefix: '/history',
-    urlTemplate: `${BROWSER_INFO.scheme}history`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://history',
+    iconHost: 'google.com',
     keywords: ['history', 'recent', 'past', 'visited', 'core'],
     category: 'browser',
   },
   {
     id: 'extensions',
-    //   behavior: \'query\',
     label: 'Extensions',
-    prefix: '/extensions',
-    urlTemplate: `${BROWSER_INFO.scheme}extensions`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: 'extensions',
+    urlTemplate: 'chrome://extensions',
+    iconHost: 'google.com',
     keywords: ['extensions', 'plugins', 'addons', 'browser extensions', 'core'],
     category: 'browser',
   },
-
   {
     id: 'downloads',
-    //   behavior: \'query\',
     label: 'Downloads',
-    prefix: '/downloads',
-    urlTemplate: `${BROWSER_INFO.scheme}downloads`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://downloads',
+    iconHost: 'google.com',
     keywords: ['downloads', 'files', 'downloaded', 'core'],
     category: 'browser',
   },
-
   {
     id: 'passwords',
-    //   behavior: \'query\',
     label: 'Passwords',
-    prefix: '/passwords',
-    urlTemplate: `${BROWSER_INFO.scheme}password-manager`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://password-manager',
+    iconHost: 'google.com',
     keywords: ['passwords', 'credentials', 'login', 'manager', 'core'],
     category: 'browser',
   },
   {
     id: 'flags',
-    //   behavior: \'query\',
     label: 'Flags',
-    prefix: '/flags',
-    urlTemplate: `${BROWSER_INFO.scheme}flags`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://flags',
+    iconHost: 'google.com',
     keywords: ['flags', 'experimental', 'features', 'dev'],
     category: 'browser',
   },
   {
     id: 'inspect',
-    //   behavior: \'query\',
     label: 'Inspect',
-    prefix: '/inspect',
-    urlTemplate: `${BROWSER_INFO.scheme}inspect`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://inspect',
+    iconHost: 'google.com',
     keywords: ['inspect', 'developer', 'tools', 'debug', 'dev'],
     category: 'browser',
   },
   {
     id: 'version',
-    //   behavior: \'query\',
     label: 'Version',
-    prefix: '/version',
-    urlTemplate: `${BROWSER_INFO.scheme}version`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://version',
+    iconHost: 'google.com',
     keywords: ['version', 'build', 'about', 'info', 'dev'],
     category: 'browser',
   },
   {
-    id: 'tasks',
-    //   behavior: \'query\',
-    label: 'Tasks',
-    prefix: '/tasks',
-    urlTemplate: `${BROWSER_INFO.scheme}tasks`,
-    iconHost: BROWSER_INFO.iconHost,
-    keywords: ['tasks', 'manager', 'processes', 'perf', 'performance'],
-    category: 'browser',
-  },
-  {
     id: 'gpu',
-    //   behavior: \'query\',
     label: 'GPU',
-    prefix: '/gpu',
-    urlTemplate: `${BROWSER_INFO.scheme}gpu`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://gpu',
+    iconHost: 'google.com',
     keywords: ['gpu', 'graphics', 'acceleration', 'perf', 'performance'],
     category: 'browser',
   },
   {
     id: 'dino',
-    //   behavior: \'query\',
     label: 'Dino Game',
-    prefix: '/dino',
-    urlTemplate: `${BROWSER_INFO.scheme}dino`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://dino',
+    iconHost: 'google.com',
     keywords: ['dino', 'game', 't-rex', 'offline', 'fun'],
     category: 'browser',
   },
   {
     id: 'about',
-    //   behavior: \'query\',
     label: 'About Browser',
-    prefix: '/about',
-    urlTemplate: `${BROWSER_INFO.scheme}about`,
-    iconHost: BROWSER_INFO.iconHost,
+    behavior: 'instant',
+    prefix: '',
+    urlTemplate: 'chrome://about',
+    iconHost: 'google.com',
     keywords: ['about', 'list', 'urls', 'chrome urls', 'all'],
     category: 'browser',
   },
-
-  // --- Existing Commands ---
-  {
-    id: 'ai',
-    //   behavior: \'query\',
-    label: 'All AI Chat Agents',
-    prefix: '/ai',
-    urlTemplate: 'about:blank#ai:{query}',
-    iconHost: 'chatgpt.com',
-    keywords: ['ai', 'assistants', 'all ai', 'meta'],
-    category: 'ai',
-  },
-  {
-    id: 'gpt',
-    //   behavior: \'query\',
-    label: 'ChatGPT',
-    prefix: '/gpt',
-    urlTemplate: 'https://chatgpt.com/?q={query}',
-    iconHost: 'chatgpt.com',
-    autoSubmit: 'chatgpt',
-    keywords: ['chatgpt', 'gpt', 'openai', 'ai', 'chat', 'assistant'],
-    category: 'ai',
-  },
-  {
-    id: 'claude',
-    //   behavior: \'query\',
-    label: 'Claude',
-    prefix: '/claude',
-    urlTemplate: 'https://claude.ai/new?q={query}',
-    iconHost: 'claude.ai',
-    autoSubmit: 'claude',
-    keywords: ['claude', 'anthropic', 'ai', 'assistant', 'chat'],
-    category: 'ai',
-  },
-  {
-    id: 'gemini',
-    //   behavior: \'query\',
-    label: 'Gemini',
-    prefix: '/gemini',
-    // Gemini does not accept prompt params; we open the app and auto-inject via background
-    urlTemplate: 'https://gemini.google.com/app',
-    iconHost: 'gemini.google.com',
-    autoSubmit: 'gemini',
-    keywords: ['gemini', 'google ai', 'bard', 'chat', 'assistant', 'ai'],
-    category: 'ai',
-  },
-  {
-    id: 'perplexity',
-    //   behavior: \'query\',
-    label: 'Perplexity',
-    prefix: '/p',
-    urlTemplate: 'https://www.perplexity.ai/search?q={query}',
-    iconHost: 'perplexity.ai',
-    autoSubmit: 'perplexity',
-    keywords: ['perplexity', 'ai', 'answers', 'search assistant', 'ask'],
-    category: 'ai',
-  },
-
-].filter((cmd: any) => {
-  // Filter out Chrome-specific commands for non-Chrome browsers (Edge, Brave)
-  const chromeSpecificIds = ['passwords', 'tasks', 'inspect', 'dino'];
-  if (BROWSER_INFO.scheme !== 'chrome://' && chromeSpecificIds.includes(cmd.id)) {
-    return false;
-  }
-  return true;
-}) as CommandModule[];
-
-export const ALL_COMMANDS: CommandModule[] = [
-  ...INSTANT_COMMANDS,
-  ...ENTITY_COMMANDS,
-  ...LOCKED_COMMANDS,
-  ...QUERY_COMMANDS,
 ];
 
+export const ALL_COMMANDS: CommandModule[] = [...INSTANT_COMMANDS, ...ENTITY_COMMANDS, ...LOCKED_COMMANDS, ...QUERY_COMMANDS];

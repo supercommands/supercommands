@@ -58,5 +58,3 @@ export const useAuthSync = () => {
 
   return { authChecked, userId, isLoggedIn };
 };
-
-

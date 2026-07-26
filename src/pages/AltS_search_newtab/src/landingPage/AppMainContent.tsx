@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import { useUIStore } from '../../../../shared-components/uiStateManager';
 import Container from '../components/Container';
 
@@ -87,88 +87,83 @@ export const AppMainContent: React.FC<AppMainContentProps> = ({
   selectedSnippet,
   showTutorial,
   setShowTutorial,
-  showSidebarColumn
+  showSidebarColumn,
 }) => {
-
-
   const activeEditor = useUIStore(s => s.activeEditor);
 
   return (
     <>
       {/* Main Content Area (Rich Text Editor) */}
-        <div
-          className={`flex-1 flex flex-col text-neutral-900 dark:text-white min-w-0 w-full h-full relative ${isViewDropdownOpen ? 'z-[50]' : 'z-0'} ${isFullScreenModalOpen && theme.wallpaper ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-          style={{
-            transition: 'filter 0.3s ease',
-          }}>
-          <Container
-            showSidebarColumn={showSidebarColumn}
-         
-            onSuggestionStateChange={setSuggestionState}
-
-            isLoggedIn={isLoggedIn}
-            teams={teams}
-            reload={backgroundRefresh}
-            searchbarRef={searchbarRef}
-            isSpreadsheetViewOpen={isSpreadsheetViewOpen}
-            onOpenSpreadsheetMainContainer={openSpreadsheetView}
-            onCreateWorkspace={handleCreateWorkspace}
-            onCloseSpreadsheetMainContainer={closeSpreadsheetView}
-            onBoardViewRedirect={handleBoardViewRedirectFromSheet}
-            onMenuStateChange={setIsSearchMenuOpen}
-            onBoardViewOpenChange={setIsBoardViewOpen}
-            onShortcutBoardView={() => {
-              useUIStore.getState().setView({ type: 'home' });
-              setIsInitialAltSFocus(true);
-              const chromeAny = (window as any)?.chrome;
-              if (chromeAny?.storage?.local) {
-                chromeAny.storage.local.set({ new_tab_is_board_view_enabled: true });
-              }
-            }}
-            onShortcutCreateMenu={() => {
-              useUIStore.getState().setView({ type: 'home' });
-              setIsGlobalCreateMenuOpen(true);
-            }}
-            onAutomationActiveChange={setIsAutomationActive}
-            commandListCategory={commandListCategory}
-            onCommandListCategoryChange={setCommandListCategory}
-            activeCommandSection={activeCommandSection}
-            onCommandSectionChange={setActiveCommandSection}
-            isInitialAltSFocus={isInitialAltSFocus}
-            onInitialAltSFocusChange={setIsInitialAltSFocus}
-            onOrganizationHandlersReady={handleOrganizationHandlersReady}
-            onOrganizationPanelChange={handleOrganizationPanelChange}
-            onNavigateToListView={handleNavigateToListView}
-            hideMainContent={
-              isSpreadsheetViewOpen ||
-              (!!activeLockedCommand &&
-                activeLockedCommand !== 'ai' &&
-                activeLockedCommand !== 'store' &&
-                activeLockedCommand !== 'saved-automation') ||
-              isSearchMenuOpen
+      <div
+        className={`flex-1 flex flex-col text-neutral-900 dark:text-white min-w-0 w-full h-full relative ${isViewDropdownOpen ? 'z-[50]' : 'z-0'} ${isFullScreenModalOpen && theme.wallpaper ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+        style={{
+          transition: 'filter 0.3s ease',
+        }}>
+        <Container
+          showSidebarColumn={showSidebarColumn}
+          onSuggestionStateChange={setSuggestionState}
+          isLoggedIn={isLoggedIn}
+          teams={teams}
+          reload={backgroundRefresh}
+          searchbarRef={searchbarRef}
+          isSpreadsheetViewOpen={isSpreadsheetViewOpen}
+          onOpenSpreadsheetMainContainer={openSpreadsheetView}
+          onCreateWorkspace={handleCreateWorkspace}
+          onCloseSpreadsheetMainContainer={closeSpreadsheetView}
+          onBoardViewRedirect={handleBoardViewRedirectFromSheet}
+          onMenuStateChange={setIsSearchMenuOpen}
+          onBoardViewOpenChange={setIsBoardViewOpen}
+          onShortcutBoardView={() => {
+            useUIStore.getState().setView({ type: 'home' });
+            setIsInitialAltSFocus(true);
+            const chromeAny = (window as any)?.chrome;
+            if (chromeAny?.storage?.local) {
+              chromeAny.storage.local.set({ new_tab_is_board_view_enabled: true });
             }
-            onLockedCommandChange={handleLockedCommandChange}
-            onSearchbarFocus={handleSearchbarFocus}
-            onHoverSlashDot={() => setIsViewDropdownOpen(true)}
-            showTutorial={showTutorial}
-            setShowTutorial={setShowTutorial}
-          />
+          }}
+          onShortcutCreateMenu={() => {
+            useUIStore.getState().setView({ type: 'home' });
+            setIsGlobalCreateMenuOpen(true);
+          }}
+          onAutomationActiveChange={setIsAutomationActive}
+          commandListCategory={commandListCategory}
+          onCommandListCategoryChange={setCommandListCategory}
+          activeCommandSection={activeCommandSection}
+          onCommandSectionChange={setActiveCommandSection}
+          isInitialAltSFocus={isInitialAltSFocus}
+          onInitialAltSFocusChange={setIsInitialAltSFocus}
+          onOrganizationHandlersReady={handleOrganizationHandlersReady}
+          onOrganizationPanelChange={handleOrganizationPanelChange}
+          onNavigateToListView={handleNavigateToListView}
+          hideMainContent={
+            isSpreadsheetViewOpen ||
+            (!!activeLockedCommand &&
+              activeLockedCommand !== 'ai' &&
+              activeLockedCommand !== 'store' &&
+              activeLockedCommand !== 'saved-automation') ||
+            isSearchMenuOpen
+          }
+          onLockedCommandChange={handleLockedCommandChange}
+          onSearchbarFocus={handleSearchbarFocus}
+          onHoverSlashDot={() => setIsViewDropdownOpen(true)}
+          showTutorial={showTutorial}
+          setShowTutorial={setShowTutorial}
+        />
 
-          {!isFocusMode && !isEmbedded && (
-            <div className="absolute top-4 right-4 z-[9999] flex flex-row items-center gap-2 pointer-events-auto">
-              {!isSpreadsheetViewOpen &&
-                !isCreatingNewItem &&
-                !selectedSnippet &&
-                activeEditor?.type !== 'note' &&
-                (activeEditor?.type as string) !== 'prompt' &&
-                activeEditor?.type !== 'agent' &&
-                activeEditor?.type !== 'ai' ? (
-                <>
-                </>
-              ) : null}
-            </div>
-          )}
-        </div>
+        {!isFocusMode && !isEmbedded && (
+          <div className="absolute top-4 right-4 z-[9999] flex flex-row items-center gap-2 pointer-events-auto">
+            {!isSpreadsheetViewOpen &&
+            !isCreatingNewItem &&
+            !selectedSnippet &&
+            activeEditor?.type !== 'note' &&
+            (activeEditor?.type as string) !== 'prompt' &&
+            activeEditor?.type !== 'agent' &&
+            activeEditor?.type !== 'ai' ? (
+              <></>
+            ) : null}
+          </div>
+        )}
+      </div>
     </>
   );
 };

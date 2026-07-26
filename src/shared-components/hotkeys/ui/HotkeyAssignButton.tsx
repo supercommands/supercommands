@@ -25,6 +25,8 @@ export interface HotkeyAssignButtonProps {
   isHotkeyLoading?: boolean;
   sidebarMode?: boolean;
   openToLeft?: boolean;
+  openToBottom?: boolean;
+  title?: string;
 }
 
 export const HotkeyAssignButton = forwardRef<HTMLButtonElement, HotkeyAssignButtonProps>(
@@ -46,6 +48,8 @@ export const HotkeyAssignButton = forwardRef<HTMLButtonElement, HotkeyAssignButt
     isHotkeyLoading = false,
     sidebarMode = false,
     openToLeft = false,
+    openToBottom = false,
+    title,
   }, ref) => {
     const [isOpen, setIsOpen] = useState(false);
     const [editValue, setEditValue] = useState(currentHotkey);
@@ -68,14 +72,22 @@ export const HotkeyAssignButton = forwardRef<HTMLButtonElement, HotkeyAssignButt
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     }, []);
 
-    // Compute popup position based on sidebarMode
     const computePosition = useCallback(() => {
-      const rect = (ref as any)?.current?.getBoundingClientRect() ?? internalButtonRef.current?.getBoundingClientRect();
-      if (!rect) return null;
+      const buttonEl = (ref as any)?.current ?? internalButtonRef.current;
+      if (!buttonEl) return null;
+      const rect = buttonEl.getBoundingClientRect();
+      if (openToBottom) {
+        const toolbarEl = buttonEl.closest('[data-shared-toolbar="true"]');
+        if (toolbarEl) {
+          const toolbarRect = toolbarEl.getBoundingClientRect();
+          return { x: toolbarRect.right - 260, y: rect.bottom + 4 };
+        }
+        return { x: rect.left, y: rect.bottom + 4 };
+      }
       return sidebarMode
         ? { x: openToLeft ? rect.left - 244 : rect.right + 12, y: rect.top }
         : { x: rect.left, y: rect.bottom + 4 };
-    }, [ref, sidebarMode]);
+    }, [ref, sidebarMode, openToLeft, openToBottom]);
 
     const openMenu = useCallback(() => {
       if (disabled) return;
@@ -220,8 +232,6 @@ export const HotkeyAssignButton = forwardRef<HTMLButtonElement, HotkeyAssignButt
 
     return (
       <div
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
         className="relative flex items-center justify-center"
       >
         <button
@@ -230,7 +240,7 @@ export const HotkeyAssignButton = forwardRef<HTMLButtonElement, HotkeyAssignButt
           onClick={(e) => { e.stopPropagation(); openMenu(); }}
           onKeyDown={onKeyDown}
           disabled={disabled}
-          title={sidebarMode ? '' : currentHotkey ? `Hotkey: ${currentHotkey}` : 'Assign a Keyboard Shortcut'}
+          title={title || (sidebarMode ? '' : currentHotkey ? `Hotkey: ${currentHotkey}` : 'Assign a Keyboard Shortcut')}
           className={buttonClassName}
         >
           {buttonContent}

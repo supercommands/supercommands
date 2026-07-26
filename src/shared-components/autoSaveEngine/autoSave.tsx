@@ -28,6 +28,24 @@ export function AutoSaveIndicator({
   activeId,
 }: AutoSaveIndicatorProps) {
   const lastSavedMessage = useRelativeSavedTime(lastSavedAt);
+  const [hasChanges, setHasChanges] = React.useState(false);
+  const prevIdRef = React.useRef<string | null | undefined>(activeId);
+
+  // Reset change tracker if we switch to a different item
+  if (activeId !== prevIdRef.current) {
+    const wasExistingItem = prevIdRef.current !== undefined && prevIdRef.current !== null && prevIdRef.current !== '' && prevIdRef.current !== 'new';
+    prevIdRef.current = activeId;
+    if (wasExistingItem) {
+      setHasChanges(false);
+    }
+  }
+
+  // Set hasChanges to true if item becomes dirty or starts saving
+  React.useEffect(() => {
+    if (isDirty || saveStatus === 'saving') {
+      setHasChanges(true);
+    }
+  }, [isDirty, saveStatus]);
 
   // If there's an error, prioritize showing it
   if (saveStatus === 'error') {
@@ -46,8 +64,8 @@ export function AutoSaveIndicator({
     );
   }
 
-  // Handle saving and dirty status
-  if (saveStatus === 'saving' || isDirty) {
+  // Handle saving status
+  if (saveStatus === 'saving') {
     return (
       <span className={`text-sm font-medium text-neutral-400 dark:text-neutral-500 flex items-center gap-1 whitespace-nowrap ${className}`}>
         <FiLoader className="animate-spin text-xs opacity-70" /> Saving...
@@ -55,11 +73,13 @@ export function AutoSaveIndicator({
     );
   }
 
+
+
   // Handle saved status
-  if (saveStatus === 'saved' || saveStatus === 'success') {
+  if ((saveStatus === 'saved' || saveStatus === 'success') && hasChanges) {
     return (
-      <span className={`text-sm font-medium text-neutral-400 dark:text-neutral-500 flex items-center gap-1 whitespace-nowrap ${className}`}>
-        {lastSavedMessage} <FaCheckCircle className="opacity-70 text-xs text-emerald-500" />
+      <span className={`text-sm font-medium text-neutral-400 dark:text-neutral-500 flex items-center gap-1.5 whitespace-nowrap ${className}`}>
+        <FaCheckCircle className="opacity-70 text-xs text-emerald-500" /> {lastSavedMessage}
       </span>
     );
   }

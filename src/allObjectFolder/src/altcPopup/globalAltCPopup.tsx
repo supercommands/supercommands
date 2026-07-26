@@ -20,7 +20,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 import { useAppearance } from '@extension/ui';
-import { FaLink } from 'react-icons/fa';
+import { FaBuilding, FaLink, FaRegFolder } from 'react-icons/fa';
 import { FiZap, FiCode, FiCheckSquare } from 'react-icons/fi';
 import { FaLayerGroup } from 'react-icons/fa';
 import { LuSparkles } from 'react-icons/lu';
@@ -39,11 +39,13 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
   const [selectedMenuIndex, setSelectedMenuIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const shortcutTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingActionRef = useRef<(() => void) | null>(null);
 
   const createItems = useMemo(() => [
     {
       id: 'createlinks',
-      label: 'Link Collection',
+      label: 'Link',
       category: 'Data',
       icon: <FaLink size={14} />,
       action: () => onCommandSelect('createlinks'),
@@ -51,7 +53,7 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
     },
     {
       id: 'createnotes',
-      label: 'Notes',
+      label: 'Note',
       category: 'Data',
       icon: <NotesIcon size={15} />,
       action: () => onCommandSelect('createnotes'),
@@ -59,19 +61,19 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
     },
     {
       id: 'createsession',
-      label: 'Session',
+      label: 'Tab Session',
       category: 'Data',
       icon: <FaLayerGroup size={15} />,
       action: () => onCommandSelect('createsession'),
-      shortcut: 'W',
+      shortcut: 'TS',
     },
     {
       id: 'createsnippet',
-      label: 'Snippet',
+      label: 'Text Expander',
       category: 'Data',
       icon: <FiCode size={16} />,
       action: () => onCommandSelect('createsnippet'),
-      shortcut: 'S',
+      shortcut: 'TE',
     },
     {
       id: 'createtodo',
@@ -82,18 +84,34 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
       shortcut: 'T',
     },
     {
-      id: 'ai',
+      id: 'createprompt',
       label: 'Chat Agent',
-      category: 'Automations',
+      category: 'Data',
       icon: <LuSparkles size={16} />,
-      action: () => onCommandSelect('ai'),
+      action: () => onCommandSelect('createprompt'),
       shortcut: 'C',
     },
     {
+      id: 'createworkspace',
+      label: 'Workspace',
+      category: 'Structure',
+      icon: <FaBuilding size={14} />,
+      action: () => onCommandSelect('createworkspace'),
+      shortcut: 'W',
+    },
+    {
+      id: 'createfolder',
+      label: 'Folder',
+      category: 'Structure',
+      icon: <FaRegFolder size={14} />,
+      action: () => onCommandSelect('createfolder'),
+      shortcut: 'F',
+    },
+    {
       id: 'agent',
-      label: 'Automation',
+      label: 'Automation Agent (beta)',
       category: 'Automations',
-      icon: <FiZap size={15} className="text-amber-500" />,
+      icon: <FiZap size={15} className="text-[var(--color-iconDefault)]" />,
       action: () => onCommandSelect('agent'),
       shortcut: 'A',
     },
@@ -128,6 +146,25 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       e.stopPropagation();
 
+      if (shortcutTimeoutRef.current) {
+        clearTimeout(shortcutTimeoutRef.current);
+        shortcutTimeoutRef.current = null;
+      }
+
+      const keyUpper = e.key.toUpperCase();
+
+      if (pendingActionRef.current && (keyUpper === 'E' || keyUpper === 'S')) {
+        e.preventDefault();
+        pendingActionRef.current = null;
+        const targetShortcut = keyUpper === 'E' ? 'TE' : 'TS';
+        const matchedSeq = filteredItems.find(item => item.shortcut === targetShortcut);
+        if (matchedSeq) {
+          matchedSeq.action();
+          onClose();
+          return;
+        }
+      }
+
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setSelectedMenuIndex(prev => (prev + 1) % filteredItems.length);
@@ -142,12 +179,34 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
           onClose();
         }
       } else {
-        const keyUpper = e.key.toUpperCase();
+        const num = parseInt(e.key, 10);
+        if (!isNaN(num) && num >= 1 && num <= 9) {
+          const item = filteredItems[num - 1];
+          if (item) {
+            e.preventDefault();
+            item.action();
+            onClose();
+            return;
+          }
+        }
         const matchedItem = filteredItems.find(item => item.shortcut === keyUpper);
         if (matchedItem) {
           e.preventDefault();
-          matchedItem.action();
-          onClose();
+          if (keyUpper === 'T') {
+            pendingActionRef.current = () => {
+              matchedItem.action();
+              onClose();
+            };
+            shortcutTimeoutRef.current = setTimeout(() => {
+              if (pendingActionRef.current) {
+                pendingActionRef.current();
+                pendingActionRef.current = null;
+              }
+            }, 250);
+          } else {
+            matchedItem.action();
+            onClose();
+          }
           return;
         }
       }
@@ -163,6 +222,9 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
       unregister();
+      if (shortcutTimeoutRef.current) {
+        clearTimeout(shortcutTimeoutRef.current);
+      }
     };
   }, [isOpen, filteredItems, selectedMenuIndex, onClose]);
 
@@ -256,12 +318,15 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
                           {item.label}
                         </span>
                       </div>
-                      <span 
-                        className="text-[12px] font-mono select-none px-2 py-0.5 rounded transition-colors duration-150"
-                        style={{ color: '#979799' }}
-                      >
-                        {item.shortcut}
-                      </span>
+                      <div className="flex items-center">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border select-none font-mono min-w-[20px] text-center
+                          ${isDark 
+                            ? 'border-white/10 bg-white/5 text-neutral-300' 
+                            : 'border-black/10 bg-black/5 text-[#073642]'
+                          }`}>
+                          {idx < 9 ? `${idx + 1}/${item.shortcut}` : item.shortcut}
+                        </span>
+                      </div>
                     </button>
                   </div>
                 </React.Fragment>

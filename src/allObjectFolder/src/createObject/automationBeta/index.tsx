@@ -29,6 +29,7 @@ import { runAutomation } from './utilities/automation';
 
 import { useAutomationEditor } from './useAutomationEditor';
 import { SharedPropertiesToolbar } from '../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
+import { getItemCompoundId } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { useRelativeSavedTime } from '../../../../shared-components/utils';
 
 interface AutomationBuilderProps {
@@ -61,6 +62,20 @@ const AutomationBuilder = forwardRef<AutomationBuilderRef, AutomationBuilderProp
       initialDraftName: initialTitle,
       initialDraftSteps: initialSteps,
     });
+
+    const automationCompoundId = useMemo(() => {
+      if (!state.activeAutomationId) return '';
+
+      return getItemCompoundId({
+        id: state.activeAutomationId,
+        workspace_id: state.workspaceId || undefined,
+        folder_id: state.folderId || undefined,
+        snippet: {
+          id: state.activeAutomationId,
+          category: 'automation',
+        },
+      });
+    }, [state.activeAutomationId, state.workspaceId, state.folderId]);
 
     useImperativeHandle(ref, () => ({
       handleSave: () => state.handleSave(false),
@@ -105,7 +120,7 @@ const AutomationBuilder = forwardRef<AutomationBuilderRef, AutomationBuilderProp
       return {
         workspaceId: state.workspaceId,
         folderId: state.folderId,
-        tags: state.tagIds ? state.tagIds.map((id: string) => ({ tag_id: id, name: '' })) : [],
+        tagIds: state.tagIds || [],
       };
     }, [state.workspaceId, state.folderId, state.tagIds]);
 
@@ -138,7 +153,7 @@ const AutomationBuilder = forwardRef<AutomationBuilderRef, AutomationBuilderProp
         <div className="absolute left-full top-1/2 -translate-y-1/2 z-50 flex flex-col items-center gap-1 p-1 rounded-r-2xl rounded-l-none bg-[var(--color-editorBg)] border border-l-0 border-black/10 dark:border-white/15 shadow-lg">
           <SharedPropertiesToolbar
             initialSnippet={initialProperties}
-            compoundId={state.activeAutomationId || ''}
+            compoundId={automationCompoundId}
             defaultName={state.automationName}
             onChange={state.handlePropertiesChange}
             showTodo={false}
@@ -153,7 +168,7 @@ const AutomationBuilder = forwardRef<AutomationBuilderRef, AutomationBuilderProp
           <input
             value={state.automationName}
             onChange={e => state.setAutomationName(e.target.value)}
-            placeholder="Automation Name"
+            placeholder="Title"
             className="w-full text-2xl font-bold bg-transparent border-none outline-none text-black dark:text-white placeholder-neutral-400"
           />
         </div>

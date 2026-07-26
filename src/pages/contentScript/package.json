@@ -13,7 +13,7 @@
     "clean:turbo": "rimraf .turbo",
     "clean": "pnpm clean:turbo && pnpm clean:node_modules",
     "build": "vite build",
-    "dev": "vite build --mode development",
+    "dev": "vite build --watch --mode development",
     "lint": "eslint .",
     "lint:fix": "pnpm lint --fix",
     "prettier": "prettier . --write --ignore-path ../../.prettierignore",

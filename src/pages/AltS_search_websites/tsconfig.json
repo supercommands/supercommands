@@ -5,7 +5,9 @@
     "paths": {
       "@src/*": ["src/*", "../AltS_search_newtab/src/*"],
       "@private-providers/*": ["../../storage/API/storage/providers/*", "../../storage/API/storage/providers/private-mocks/*"],
-      "@private-services/*": ["../../storage/API/services/*"]
+      "@private-services/*": ["../../storage/API/services/*"],
+      "@extension/ui": ["../../../packages/ui/index.ts"],
+      "@extension/ui/*": ["../../../packages/ui/*"]
     },
     "types": ["chrome", "node"]
   },

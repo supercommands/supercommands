@@ -1,11 +1,16 @@
 import { useCallback } from 'react';
 import { readAllShortcuts, extractSnippetIdFromCompoundId } from '../../hotkeys/utils/hotkeyUtils';
 import { checkReservedShortcut } from '../core/reservedShortcuts';
+import { getReservedShortcutReason, getShortcutTriggerFormatError, normalizeShortcutTrigger } from '../core/shortcutDbData';
 import { useConflictResolver } from '../../utils/useConflictResolver';
 import type { ValidationResult } from '../../hotkeys';
 
 export const useShortcutValidation = () => {
   const { findConflictingItemName } = useConflictResolver();
+
+  const normalizeShortcut = (value: string) => {
+    return normalizeShortcutTrigger(value);
+  };
 
   const validateShortcut = useCallback(
     async (shortcutValue: string, currentItemId: string): Promise<ValidationResult> => {
@@ -13,39 +18,76 @@ export const useShortcutValidation = () => {
         return { isValid: true, conflictId: null, errorMessage: null };
       }
 
-      let normalized = shortcutValue.trim().toLowerCase();
-      if (normalized && !normalized.startsWith('/')) {
-        normalized = `/${normalized}`;
-      }
-
-      // 1. Check if it's a reserved system command
-      const { isReserved, conflictReason } = checkReservedShortcut(normalized);
-      if (isReserved) {
+      const normalized = normalizeShortcut(shortcutValue);
+      if (!normalized) {
         return {
           isValid: false,
-          conflictId: 'reserved',
-          errorMessage: conflictReason || 'This is a reserved system shortcut',
+          conflictId: null,
+          errorMessage: 'Shortcut cannot be empty',
         };
       }
 
-      // 2. Check for duplicates
+      const formatError = getShortcutTriggerFormatError(shortcutValue);
+      if (formatError) {
+        return {
+          isValid: false,
+          conflictId: null,
+          errorMessage: formatError,
+        };
+      }
+
+      // Check Omnibox Prefixes (these are system reserved and CANNOT be overridden)
+      const reservedOmniboxReason = await getReservedShortcutReason(shortcutValue);
+      if (reservedOmniboxReason) {
+        return {
+          isValid: false,
+          conflictId: 'reserved',
+          isOverrideable: false,
+          errorMessage: reservedOmniboxReason,
+        };
+      }
+
+      // Check for duplicates dynamically against Commands table & User Shortcuts table
       const allShortcuts = await readAllShortcuts();
-      const existingEntry = Object.entries(allShortcuts).find(([id, sc]) => sc === normalized && extractSnippetIdFromCompoundId(id) !== extractSnippetIdFromCompoundId(currentItemId || ''));
+      const existingEntry = Object.entries(allShortcuts).find(([id, sc]) => {
+        if (normalizeShortcut(sc) !== normalized) return false;
+        
+        const sameItem = 
+          id === currentItemId || 
+          id.endsWith(`-${currentItemId}`) || 
+          (currentItemId && currentItemId !== 'new' && id.includes(currentItemId)) ||
+          extractSnippetIdFromCompoundId(id) === extractSnippetIdFromCompoundId(currentItemId || '');
+          
+        return !sameItem;
+      });
+
+      console.log(`[ShortcutDebug] Validating shortcut "${shortcutValue}" for currentItemId "${currentItemId}"...`);
 
       if (existingEntry) {
         const conflictingId = existingEntry[0];
         const conflictName = findConflictingItemName(conflictingId);
-        const msg = conflictName
-          ? `Shortcut "${normalized}" is already assigned to "${conflictName}"`
-          : `Shortcut "${normalized}" is already assigned`;
+        if (!conflictName) {
+          console.warn(`[ShortcutDebug] Found orphan shortcut trigger "${normalized}" for unknown ID ${conflictingId}. Auto-pruning...`);
+          try {
+            const { clearShortcut } = await import('../core/shortcutManager');
+            await clearShortcut(conflictingId, conflictingId, 'note');
+          } catch (e) {
+            console.error('Failed to auto-prune orphaned shortcut:', e);
+          }
+          return { isValid: true, conflictId: null, errorMessage: null };
+        }
 
+        console.log(`[ShortcutDebug] CONFLICT DETECTED: Shortcut "${normalized}" is currently assigned to "${conflictName}" (ID: ${conflictingId}). Override button enabled.`);
         return {
           isValid: false,
           conflictId: conflictingId,
-          errorMessage: msg,
+          conflictingItemName: conflictName,
+          isOverrideable: true,
+          errorMessage: `Shortcut "${normalized}" is already assigned to "${conflictName}"`,
         };
       }
 
+      console.log(`[ShortcutDebug] Shortcut "${normalized}" is VALID and available.`);
       return { isValid: true, conflictId: null, errorMessage: null };
     },
     [findConflictingItemName],

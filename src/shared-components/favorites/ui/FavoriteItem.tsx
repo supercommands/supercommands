@@ -32,7 +32,7 @@ type Snippet = SnippetRecord & {
   tags?: { tag_id: string; name: string }[] | null;
   snippet_id?: string;
 };
-import { FaCode, FaFlag, FaCheck, FaTimes } from 'react-icons/fa';
+import { FaCode, FaFlag, FaCheck, FaTimes, FaRobot } from 'react-icons/fa';
 import { TbNotes } from 'react-icons/tb';
 import { StorageManager } from '../../../storage/localStorage/storageManager';
 import CmdIcon from '../../icons/cmdIcon';
@@ -43,7 +43,7 @@ import { createPortal } from 'react-dom';
 import { FaCaretRight, FaCaretDown, FaRegClone, FaCaretUp } from 'react-icons/fa';
 import { useDbStore } from '../../../storage/store/useDbStore';
 
-import { getFaviconUrl } from '../../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { AI_GROUP, findCommandByAnyId, isCommandId } from '../../commands';
 
 import { FiTrash2, FiPlay, FiLayers, FiExternalLink, FiZap, FiZapOff, FiLoader, FiList, FiCheck } from 'react-icons/fi';
@@ -58,14 +58,10 @@ import NotesIcon from '../../icons/notesIcon';
 import { getItemCompoundId, extractSnippetIdFromCompoundId } from '../../hotkeys/utils/hotkeyUtils';
 import { resolveEntityById } from '../../utils/entityResolver';
 import { saveUserHotkey, deleteUserHotkeyByReference } from '../../hotkeys/core/hotkeyDbData';
+import { normalizeShortcutTrigger } from '../../shortcuts/core/shortcutDbData';
 import { saveUserShortcut, deleteUserShortcutByReference } from '../../shortcuts/core/shortcutDbData';
 import { useKeystrokeRecording } from '../../hotkeys';
 
-import { 
-  isLinkCategory as isOfficialLinkCategory,
-  isTabGroupCategory as isOfficialTabGroupCategory,
-  extractUrlsFromSnippet,
- } from '../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
 
 const HotkeyBadge: React.FC<{ hotkey: string }> = ({ hotkey }) => {
   const { theme } = useAppearance();
@@ -358,10 +354,7 @@ const CommandFavoriteItem: React.FC<FavoriteItemProps & { command: FavoriteComma
   };
 
   const handleSaveShortcut = async (value: string) => {
-    let normalized = value.trim();
-    if (normalized && !normalized.startsWith('/')) {
-      normalized = `/${normalized}`;
-    }
+    const normalized = normalizeShortcutTrigger(value);
     if (!normalized) {
       setIsEditingShortcut(false);
       return;
@@ -509,14 +502,14 @@ const CommandFavoriteItem: React.FC<FavoriteItemProps & { command: FavoriteComma
   const menuActions: MenuAction[] = [
     {
       key: 'assign-shortcut',
-      label: shortcut ? `Assign a Text Command (${shortcut})` : 'Assign a Text Command',
+      label: shortcut ? `Assign a Text Command (${normalizeShortcutTrigger(shortcut)})` : 'Assign a Text Command',
       icon: <MdOutlineShortcut size={14} className="text-green-600 dark:text-green-400" />,
 
       className: 'text-neutral-700 dark:text-neutral-300 ',
       onSelect: () => {
         // Pre-fill existing prefix if any
         const existingPrefix = (command as any).commandPrefix || '';
-        setEditValue(existingPrefix.replace(/^\//, ''));
+        setEditValue(normalizeShortcutTrigger(existingPrefix));
         setIsEditingShortcut(true);
         setIsEditing(false);
         setIsUpdating(!!existingPrefix);
@@ -688,7 +681,7 @@ const CommandFavoriteItem: React.FC<FavoriteItemProps & { command: FavoriteComma
           onClearHotkey={handleClearHotkey}
           onToggleFavorite={handleRemoveFavorite}
           isFavorite={true}
-          shortcutEditValue={isEditingShortcut ? editValue : shortcut.replace(/^\//, '')}
+          shortcutEditValue={isEditingShortcut ? editValue : normalizeShortcutTrigger(shortcut)}
           onShortcutEditChange={val => {
             setEditValue(val);
             setIsEditingShortcut(true);
@@ -867,9 +860,20 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
     urls.forEach(url => openSingleLink(url));
   };
   const categoryStr = snippet.category || snippet.type || '';
-  const rawLabel = categoryStr === 'link' ? 'Link' : categoryStr === 'prompt' ? 'Prompt' : categoryStr === 'snippet' ? 'Snippet' : categoryStr === 'automation' || categoryStr === 'agent' ? 'Automation' : 'Note';
-  const isLinkCategory = isOfficialLinkCategory(categoryStr);
-  const isTabGroupCategory = isOfficialTabGroupCategory(categoryStr);
+  const rawLabel =
+    categoryStr === 'link'
+      ? 'Link'
+      : categoryStr === 'session'
+        ? 'Tab Session'
+        : categoryStr === 'prompt'
+          ? 'AI Prompt'
+          : categoryStr === 'snippet'
+            ? 'Snippet'
+            : categoryStr === 'automation' || categoryStr === 'agent'
+              ? 'Automation'
+              : 'Note';
+  const isTabGroupCategory = categoryStr === 'session';
+  const isLinkCategory = categoryStr === 'link' || categoryStr === 'bulk_link';
   const normalizedCategory = String(categoryStr).toLowerCase();
   const displayName = snippet.key || snippet.label || snippet.title || snippet.name || 'Untitled Item';
 
@@ -932,23 +936,27 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
       );
     }
 
+    if (isTabGroupCategory) {
+      return <StackedLinkIcon urls={snippetUrls} size={18} fallback="session" />;
+    }
+
     if (isLinkCategory) {
       return <StackedLinkIcon urls={snippetUrls} size={18} fallback={isTabGroupCategory ? 'tabgroup' : 'link'} />;
     }
 
-    if (normalizedCategory === 'prompt') {
-      return <FaFlag size={16} className="text-purple-400" />;
+    if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(normalizedCategory)) {
+      return <FaRobot size={16} className="text-[var(--color-iconDefault)]" />;
     }
 
-    if (normalizedCategory === 'automation' || normalizedCategory === 'agent' || snippet.steps || snippet.automation) {
-      return <FiZap size={16} className="text-amber-400" />;
+    if (normalizedCategory === 'automation' || normalizedCategory === 'automations' || snippet.steps || snippet.automation) {
+      return <FiZap size={16} className="text-[var(--color-iconDefault)]" />;
     }
 
-    if (normalizedCategory === 'snippet') {
+    if (normalizedCategory === 'snippet' || normalizedCategory === 'snippets') {
       return <FaCode size={16} className="text-[var(--color-iconDefault)]" />;
     }
 
-    return <NotesIcon className="w-4 h-4 shrink-0 text-amber-400" />;
+    return <NotesIcon className="w-4 h-4 shrink-0 text-neutral-400" />;
   };
 
   // Get hotkey using compound ID
@@ -1189,7 +1197,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
   const menuActions: MenuAction[] = [
     {
       key: 'assign-shortcut',
-      label: shortcut ? `Assign a Text Command (${shortcut})` : 'Assign a Text Command',
+      label: shortcut ? `Assign a Text Command (${normalizeShortcutTrigger(shortcut)})` : 'Assign a Text Command',
       icon: <MdOutlineShortcut size={14} className="text-green-600 dark:text-green-400" />,
       className: 'text-neutral-700 dark:text-neutral-300 hover:bg-green-50 dark:hover:bg-green-900/20',
       onSelect: async () => {
@@ -1202,7 +1210,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
           if (entry) existingValue = entry[1] as string;
         }
 
-        const displayValue = existingValue ? existingValue.replace(/^\//, '') : '';
+        const displayValue = existingValue ? normalizeShortcutTrigger(existingValue) : '';
         setEditValue(displayValue);
         setIsUpdatingShortcut(!!existingValue);
         setIsEditingShortcut(true);
@@ -1235,7 +1243,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
   ];
 
   // Determine tooltip content (Title only)
-  const tooltipContent = displayName === 'Tab Group' ? 'Link Group' : displayName;
+  const tooltipContent = displayName;
 
   return (
     <>
@@ -1265,7 +1273,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
               const category = (snippet.category || snippet.type || '').toLowerCase();
               console.log('[FavoriteItem] runClickAction resolved category:', category, 'snippet:', snippet);
               
-              if (category === 'link') {
+              if (['link', 'links', 'tabgroup'].includes(category)) {
                 console.log('[FavoriteItem] Opening link collection');
                  const urls = snippetUrls;
                 if (urls.length > 0) {
@@ -1285,30 +1293,40 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
                     props: { editMode: true, snippet }
                   });
                 }
-              } else if (category === 'session') {
-                console.log('[FavoriteItem] Opening session editor');
-                useUIStore.getState().openEditor({
-                  type: 'session',
-                  id: snippet.id || snippet.snippet_id || 'new',
-                  props: { editMode: true, snippet }
-                });
-              } else if (category === 'prompt' || category === 'aiprompt') {
-                console.log('[FavoriteItem] Opening prompt editor');
-                setSelectedSnippetId(snippet.id);
-                setSnippetBreadcrumb({ workspace_id: '', workspace_name: '' });
-                useUIStore.getState().openEditor({
-                  type: 'aiPrompt',
-                  id: snippet.id || snippet.snippet_id || 'new',
-                  props: {}
-                });
-              } else if (category === 'automation' || category === 'agent') {
-                console.log('[FavoriteItem] Triggering automation/agent');
+              } else if (['session', 'sessions', 'tab session'].includes(category)) {
+                console.log('[FavoriteItem] Starting session');
+                if (onStartExistingSession) {
+                  onStartExistingSession({ snippet });
+                } else {
+                  useUIStore.getState().openEditor({
+                    type: 'session',
+                    id: snippet.id || snippet.snippet_id || 'new',
+                    props: { editMode: true, snippet }
+                  });
+                }
+              } else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(category)) {
                 if (isLikelySavedAgentFavorite(snippet) && onSelectSavedAgent) {
+                  console.log('[FavoriteItem] Triggering agent');
                   onSelectSavedAgent(snippet.automation || snippet);
-                } else if (onAutomationSelect) {
+                } else if (category === 'agent' && onAutomationSelect) {
+                  console.log('[FavoriteItem] Triggering agent via automation handler');
+                  onAutomationSelect(snippet.automation || snippet);
+                } else {
+                  console.log('[FavoriteItem] Opening prompt editor');
+                  setSelectedSnippetId(snippet.id);
+                  setSnippetBreadcrumb({ workspace_id: '', workspace_name: '' });
+                  useUIStore.getState().openEditor({
+                    type: 'aiPrompt',
+                    id: snippet.id || snippet.snippet_id || 'new',
+                    props: {}
+                  });
+                }
+              } else if (['automation', 'automations'].includes(category)) {
+                console.log('[FavoriteItem] Triggering automation');
+                if (onAutomationSelect) {
                   onAutomationSelect(snippet.automation || snippet);
                 }
-              } else if (category === 'snippet' || category === 'note' || category === 'notes') {
+              } else if (['snippet', 'snippets', 'note', 'notes'].includes(category)) {
                 console.log('[FavoriteItem] Opening note editor');
                 const breadcrumb = {
                   workspace_id: workspace?.workspace_id || null,
@@ -1359,12 +1377,12 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
         <div className="flex items-center gap-0 h-[29px] overflow-hidden relative">
           {/* Icon - First */}
           <div
-            className={`flex items-center justify-center flex-shrink-0 w-[22px] ml-1 mr-1.5 overflow-hidden transition-opacity duration-150 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+            className={`flex items-center justify-start flex-shrink-0 ${isLinkCategory ? 'w-auto' : 'w-[22px] overflow-hidden'} ml-1 mr-1.5 transition-opacity duration-150 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
             {overrideIcon ? (
               <div className="w-[18px] h-[18px] flex items-center justify-center">{overrideIcon}</div>
             ) : (
               <div
-                className={`w-[18px] h-[18px] flex items-center justify-center ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                className={`${isLinkCategory ? 'w-auto' : 'w-[18px] h-[18px]'} flex items-center justify-center ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
                 {renderFavoriteIcon()}
               </div>
             )}
@@ -1386,7 +1404,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
                 }`}
                 style={headingFontStyle}>
                 {(() => {
-                  const name = displayName === 'Tab Group' ? 'Link Group' : displayName;
+                  const name = displayName;
                   return name.length > 18 ? name.substring(0, 18) + '...' : name;
                 })()}
               </span>
@@ -1404,19 +1422,14 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
                 }`}
                 style={headingFontStyle}>
                 {(() => {
-                  const name = displayName === 'Tab Group' ? 'Link Group' : displayName;
+                  const name = displayName;
                   return name.length > 12 ? name.substring(0, 12) + '...' : name;
                 })()}
               </span>
               <span className={`text-[10px] ml-1 flex-shrink-0 hidden group-hover:inline-block transition-opacity duration-150 ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>
                 • {rawLabel}
               </span>
-              {subLinksCount > 0 && (
-                <span
-                  className={`text-[11px] font-bold flex-shrink-0 transition-colors duration-150 ${isDark ? 'text-neutral-600 group-hover:text-neutral-400' : 'text-neutral-400 group-hover:text-neutral-600'}`}>
-                  + {subLinksCount - 1}
-                </span>
-              )}
+
               {(snippet.hotkey || snippet.shortcut) && (
                 <div className="ml-1.5 flex-shrink-0 flex items-center">
                   <HotkeyBadge hotkey={snippet.hotkey || snippet.shortcut || ''} />
@@ -1435,7 +1448,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
                 className={`p-1 rounded-full cursor-pointer transition-colors ${
                   isDark ? 'hover:bg-white/10 text-neutral-400 hover:text-white' : 'hover:bg-black/5 text-neutral-500 hover:text-black'
                 }`}
-                title="Start Tab group mode"
+                title="Start Tab Session mode"
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onStartExistingSession) {
@@ -1520,7 +1533,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
           onClearHotkey={handleClearHotkey}
           onToggleFavorite={() => toggleFavorite(snippetId, categoryStr, displayName)}
           isFavorite={true}
-          shortcutEditValue={isEditingShortcut ? editValue : shortcut.replace(/^\//, '')}
+          shortcutEditValue={isEditingShortcut ? editValue : normalizeShortcutTrigger(shortcut)}
           onShortcutEditChange={val => {
             setEditValue(val);
             setIsEditingShortcut(true);
@@ -1550,7 +1563,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
                 }
               : undefined
           }
-          editLabel={isTabGroupCategory ? 'Edit Tab Group' : 'Edit Link'}
+          editLabel={isTabGroupCategory ? 'Edit Tab Session' : 'Edit Link'}
         />
       )}
     </>

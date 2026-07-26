@@ -1,5 +1,5 @@
 import React from 'react';
-import { getFaviconUrl } from '../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 
 type IconMode = 'single_link' | 'multi_link' | 'all_ai' | 'fallback';
 
@@ -9,6 +9,12 @@ type AutomationIconMeta = {
 };
 
 const ALL_AI_ICON_HOSTS = ['chatgpt.com', 'gemini.google.com', 'claude.ai', 'perplexity.ai'];
+const AI_FAVICON_URLS: Record<string, string> = {
+  'chatgpt.com': 'https://chatgpt.com/favicon.ico',
+  'gemini.google.com': 'https://gemini.google.com/favicon.ico',
+  'claude.ai': 'https://claude.ai/favicon.ico',
+  'perplexity.ai': 'https://www.perplexity.ai/favicon.ico',
+};
 
 const toHost = (value: string): string | null => {
   const raw = String(value || '').trim();
@@ -203,15 +209,57 @@ const AutomationDynamicIcon: React.FC<AutomationDynamicIconProps> = ({ automatio
   const iconId = React.useId().replace(/:/g, '');
   const gradientId = `automation-bolt-gradient-${iconId}`;
   const glowId = `automation-bolt-glow-${iconId}`;
+  const [fallbackMode, setFallbackMode] = React.useState<Record<string, boolean>>({});
+
+  const resolveIconSrc = (host: string) => AI_FAVICON_URLS[host] || getFaviconUrl(host);
+
+  const renderFallbackTile = (label: string, index = 0, total = 1) => {
+    const offsetRatio = 0.55;
+    const dotSize = total > 1 ? Math.floor(size / (1 + offsetRatio * (total - 1))) : size;
+    const offset = total > 1 ? dotSize * offsetRatio : 0;
+    const totalWidth = total > 1 ? dotSize + (total - 1) * offset : size;
+    const startX = total > 1 ? (size - totalWidth) / 2 : 0;
+
+    return (
+      <div
+        style={{
+          position: total > 1 ? 'absolute' : 'relative',
+          left: total > 1 ? startX + index * offset : 0,
+          top: total > 1 ? (size - dotSize) / 2 : 0,
+          width: dotSize,
+          height: dotSize,
+          borderRadius: total > 1 ? '50%' : 4,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#0E1124',
+          border: '1px solid rgba(138, 162, 255, 0.35)',
+          color: '#D7DEFF',
+          fontSize: Math.max(8, Math.floor(size / 3)),
+          fontWeight: 700,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+        }}>
+        {label}
+      </div>
+    );
+  };
 
   if (meta.mode === 'single_link' && meta.hosts[0]) {
+    const host = meta.hosts[0];
+    const isAiHost = ALL_AI_ICON_HOSTS.includes(host);
     return (
-      <img
-        src={getFaviconUrl(meta.hosts[0])}
-        alt=""
-        className={className}
-        style={{ width: size, height: size, objectFit: 'cover', borderRadius: 4 }}
-      />
+      <div className={className} style={{ width: size, height: size, position: 'relative' }}>
+        {!fallbackMode[host] ? (
+          <img
+            src={isAiHost ? resolveIconSrc(host) : getFaviconUrl(host)}
+            alt=""
+            style={{ width: size, height: size, objectFit: 'cover', borderRadius: 4 }}
+            onError={() => setFallbackMode(prev => ({ ...prev, [host]: true }))}
+          />
+        ) : (
+          renderFallbackTile(host.charAt(0).toUpperCase(), 0, 1)
+        )}
+      </div>
     );
   }
 
@@ -228,6 +276,8 @@ const AutomationDynamicIcon: React.FC<AutomationDynamicIconProps> = ({ automatio
     return (
       <div className={className} style={{ position: 'relative', width: size, height: size }}>
         {visibleHosts.map((host, index) => {
+          const isAiHost = ALL_AI_ICON_HOSTS.includes(host);
+          const failed = fallbackMode[host];
           return (
             <div
               key={`${host}-${index}`}
@@ -244,14 +294,29 @@ const AutomationDynamicIcon: React.FC<AutomationDynamicIconProps> = ({ automatio
                 boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
                 zIndex: 10 - index,
               }}>
-              <img
-                src={getFaviconUrl(host)}
-                alt=""
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                onError={event => {
-                  (event.currentTarget as HTMLImageElement).style.display = 'none';
-                }}
-              />
+              {!failed ? (
+                <img
+                  src={isAiHost ? resolveIconSrc(host) : getFaviconUrl(host)}
+                  alt=""
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                  onError={() => setFallbackMode(prev => ({ ...prev, [host]: true }))}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: Math.max(7, Math.floor(dotSize / 3)),
+                    fontWeight: 700,
+                    color: '#D7DEFF',
+                    background: '#0E1124',
+                  }}>
+                  {host.charAt(0).toUpperCase()}
+                </div>
+              )}
             </div>
           );
         })}

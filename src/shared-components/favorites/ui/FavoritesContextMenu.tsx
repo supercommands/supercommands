@@ -9,6 +9,7 @@ import { MdOutlineShortcut } from 'react-icons/md';
 import { BsKeyboard, BsPencilFill, BsCalendarCheck } from 'react-icons/bs';
 import { VisualKeyDisplay } from '../../hotkeys';
 import { format } from 'date-fns';
+import { normalizeShortcutTrigger } from '../../shortcuts/core/shortcutDbData';
 
 interface FavoritesContextMenuProps {
   x: number;
@@ -390,13 +391,12 @@ export const FavoritesContextMenu: React.FC<FavoritesContextMenuProps> = ({
                 </div>
                 <div className={getContentColStyles(0)}>
                   <div className="flex items-center justify-start gap-1.5 w-full h-7 px-4">
-                    <span className="text-neutral-400 font-mono text-[13px] shrink-0">/</span>
-                    <input
-                      ref={shortcutInputRef}
-                      type="text"
-                      placeholder="e.g. add-note"
-                      value={shortcutEditValue}
-                      onChange={e => onShortcutEditChange(e.target.value)}
+                        <input
+                          ref={shortcutInputRef}
+                          type="text"
+                          placeholder="e.g. add-note"
+                          value={normalizeShortcutTrigger(shortcutEditValue)}
+                          onChange={e => onShortcutEditChange(e.target.value)}
                       onFocus={() => {
                         setFocusedRow(0);
                         setFocusedCol(1);
@@ -563,7 +563,7 @@ export const FavoritesContextMenu: React.FC<FavoritesContextMenuProps> = ({
 
         {/* Dynamic Bottom Bar (Save / Overwrite for text/hotkey shortcuts) */}
         <AnimatePresence>
-          {((focusedRow === 0 && shortcutEditValue !== (shortcut || '').replace(/^\//, '')) ||
+          {((focusedRow === 0 && normalizeShortcutTrigger(shortcutEditValue) !== normalizeShortcutTrigger(shortcut || '')) ||
               (focusedRow === 1 && hotkeyEditValue !== hotkey)) && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}

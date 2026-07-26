@@ -81,7 +81,6 @@ const UserProfile: React.FC<UserProfileProps> = ({ user, onSignOut }) => {
             <span>{initial}</span>
           )}
         </button>
-        
       </div>
 
       <AnimatePresence>
@@ -104,9 +103,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ user, onSignOut }) => {
                     )}
                   </div>
                   <div className="text-black">
-                    <h3 className="text-sm font-semibold text-black truncate">
-                      {user.name || 'User'}
-                    </h3>
+                    <h3 className="text-sm font-semibold text-black truncate">{user.name || 'User'}</h3>
                   </div>
                 </div>
 
@@ -138,4 +135,3 @@ const UserProfile: React.FC<UserProfileProps> = ({ user, onSignOut }) => {
 };
 
 export default UserProfile;
-

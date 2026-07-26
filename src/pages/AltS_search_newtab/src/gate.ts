@@ -18,20 +18,13 @@ const applyGateDecision = ({
     return;
   }
 
-  if (!hasFocusParam && chrome.tabs?.create && chrome.tabs?.getCurrent) {
-    chrome.tabs.getCurrent(tab => {
-      if (tab && tab.id) {
-        const currentParams = new URL(window.location.href).searchParams;
-        currentParams.set('focus', 'true');
+  if (!hasFocusParam) {
+    const currentUrl = new URL(window.location.href);
 
-        const newUrl = chrome.runtime.getURL(`AltS_search_newtab/index.html?${currentParams.toString()}`);
-        chrome.tabs.create({ url: newUrl, active: true }, () => {
-          chrome.tabs.remove(tab!.id!);
-        });
-      } else {
-        showBody();
-      }
-    });
+    if (currentUrl.searchParams.get('focus') !== 'true') {
+      currentUrl.searchParams.set('focus', 'true');
+      window.location.replace(currentUrl.toString());
+    }
     return;
   }
 
@@ -70,13 +63,13 @@ document.documentElement.classList.add('dark');
       'theme',
       'new_tab_is_dark_mode',
       'new_tab_dark_mode',
-      'omnibox_override_enabled'
+      'omnibox_override_enabled',
     ]);
 
     // Apply theme immediately after await returns
-    const isDarkMode = 
-      result.theme === 'dark' || 
-      result.new_tab_is_dark_mode === true || 
+    const isDarkMode =
+      result.theme === 'dark' ||
+      result.new_tab_is_dark_mode === true ||
       result.new_tab_dark_mode === true ||
       (result.theme === undefined && result.new_tab_is_dark_mode === undefined);
 

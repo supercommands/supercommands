@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import { useAppearance } from '@extension/ui';
 import { useUIStore } from '../uiStateManager';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -30,29 +31,36 @@ import { isSameDay, format } from 'date-fns';
 import { resolveEntityById } from '../utils/entityResolver';
 import { isLocalEntityId } from '../utils';
 import NotesIcon from '../icons/notesIcon';
-import type { SuggestionState, SuggestionListItem } from '../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/userInterfaceComponents/searchBar';
-import { getFaviconUrl } from '../../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import type {
+  SuggestionState,
+  SuggestionListItem,
+} from '../searchBarMain/userInterfaceComponents/searchBar';
+import { getFaviconUrl } from '../searchBarMain/utilityFunctions/utils';
 import { PAGE_ACTION_ITEMS } from '../../pages/AltS_search_websites/src/commands/pageActions';
 
-
 import { useDbStore } from '../../storage/store/useDbStore';
-
+import { StorageManager } from '../../storage/localStorage/storageManager';
+import { CustomSearchPrefixesForOmniboxStorage } from '../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
+import { VisualKeyDisplay } from '../hotkeys/ui/VisualKeyDisplay';
+import { EditablePrefixKey } from '../shortcuts/ui/EditablePrefixKey';
 
 import { UnifiedContextMenu } from '../ui/UnifiedContextMenu';
 import { useKeystrokeRecording } from '../hotkeys';
-import {
-  getItemCompoundId,
-  extractSnippetIdFromCompoundId,
-} from '../hotkeys/utils/hotkeyUtils';
+import { getItemCompoundId, extractSnippetIdFromCompoundId } from '../hotkeys/utils/hotkeyUtils';
 
 import { saveUserHotkey, deleteUserHotkeyByReference } from '../hotkeys/core/hotkeyDbData';
-import { saveUserShortcut, deleteUserShortcutByReference } from '../shortcuts/core/shortcutDbData';
+import {
+  saveUserShortcut,
+  deleteUserShortcutByReference,
+  normalizeShortcutTrigger,
+} from '../shortcuts/core/shortcutDbData';
 import { updateTodo } from '../../allObjectFolder/src/createObject/todos/todoData';
 import { deleteAiPrompt } from '../../allObjectFolder/src/createObject/aiPrompt/aiPromptData';
 import { deleteSession } from '../../allObjectFolder/src/createObject/session/sessionData';
 import { useFavorites } from '../favorites';
 import { db } from '../../storage/indexDB/dbConfig';
 import { isCommandId } from '../commands';
+import { SHARED_ALL_COMMANDS } from '../commands/surface';
 
 import { FiPlay, FiExternalLink, FiEdit2, FiTrash2, FiStar, FiZap } from 'react-icons/fi';
 import { FaStar } from 'react-icons/fa';
@@ -63,8 +71,8 @@ import { saveShortcut as apiSaveShortcut } from '../shortcuts';
 // Helper for query highlighting
 const highlightMatch = (text: string, query: string) => {
   if (!text || !query) return text;
-  const lowerText = String(text || "").toLowerCase();
-  const lowerQuery = String(query || "").toLowerCase();
+  const lowerText = String(text || '').toLowerCase();
+  const lowerQuery = String(query || '').toLowerCase();
   const startIndex = lowerText.indexOf(lowerQuery);
   if (startIndex === -1) return text;
   const endIndex = startIndex + query.length;
@@ -79,24 +87,34 @@ const highlightMatch = (text: string, query: string) => {
 
 // ─── Slash Category Launcher (mirrors AltQ's @alias system) ──────────────────
 
-/** Alias map: slash-alias (uppercase) → board group key */
-const SLASH_SECTION_ALIASES: Record<string, string> = {
-  A: 'all',
-  T: 'todos',
-  N: 'notes',
-  S: 'snippets',
-  L: 'links',
-  SE: 'sessions',
-  C: 'commands',
-  B: 'bookmarks',
-  AU: 'automations',
-  CA: 'chat_agents',
-};
+const buildSlashSectionAliases = (
+  prefixes?: Partial<Awaited<ReturnType<typeof CustomSearchPrefixesForOmniboxStorage.getPrefixes>>> | null,
+): Record<string, string> => {
+  const aliases: Record<string, string> = {
+    A: 'all',
+    TS: 'thissite',
+    [String(prefixes?.todo || 't').trim().toUpperCase()]: 'todos',
+    [String(prefixes?.note || 'n').trim().toUpperCase()]: 'notes',
+    NM: 'notes',
+    [String(prefixes?.session || 's').trim().toUpperCase()]: 'sessions',
+    SE: 'sessions',
+    S: 'sessions',
+    [String(prefixes?.snippet || 'sn').trim().toUpperCase()]: 'snippets',
+    SN: 'snippets',
+    [String(prefixes?.link || 'l').trim().toUpperCase()]: 'links',
+    [String(prefixes?.bookmark || 'bm').trim().toUpperCase()]: 'bookmarks',
+    BM: 'bookmarks',
+    B: 'bookmarks',
+    [String(prefixes?.command || 'c').trim().toUpperCase()]: 'commands',
+    [String(prefixes?.system_command || 'sc').trim().toUpperCase()]: 'system_commands',
+    [String(prefixes?.automation || 'au').trim().toUpperCase()]: 'automations',
+    [String(prefixes?.agent || 'ca').trim().toUpperCase()]: 'chat_agents',
+    CA: 'chat_agents',
+    G: 'chat_agents',
+  };
 
-/** Reverse map: group key → alias display string */
-const SLASH_ALIAS_DISPLAY: Record<string, string> = Object.fromEntries(
-  Object.entries(SLASH_SECTION_ALIASES).map(([alias, section]) => [section, alias]),
-);
+  return Object.fromEntries(Object.entries(aliases).filter(([alias]) => alias.trim().length > 0));
+};
 
 const focusSearchbarInput = () => {
   const inputEl = document.getElementById('searchbar-input');
@@ -132,7 +150,10 @@ const getTodoDueLabel = (item: any): string => {
   const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
   const dDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
-  const isOverdue = !item.is_done && d.getTime() < now.getTime() && (dDate.getTime() < startOfToday.getTime() || (item.event_deadline && item.event_deadline.includes(':')));
+  const isOverdue =
+    !item.is_done &&
+    d.getTime() < now.getTime() &&
+    (dDate.getTime() < startOfToday.getTime() || (item.event_deadline && item.event_deadline.includes(':')));
 
   const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   let dateStr = '';
@@ -178,26 +199,35 @@ interface SlashMode {
  * Parse a board search value that starts with '/'.
  * Matches only when the alias is followed by a space, allowing partial inputs to filter the dropdown.
  */
-function parseSlashMode(value: string): SlashMode {
+function parseSlashMode(value: string, slashSectionAliases: Record<string, string>, commandPrefix: string = 'c'): SlashMode {
   const normalizedValue = value.replace(/\u00A0/g, ' ');
-  if (!normalizedValue.startsWith('/')) {
+  let textAfterPrefix = '';
+  const isSlash = normalizedValue.startsWith('/');
+  const isCmd = normalizedValue.toLowerCase().startsWith(`${commandPrefix.toLowerCase()} `);
+
+  if (isSlash) {
+    textAfterPrefix = normalizedValue.slice(1);
+  } else if (isCmd) {
+    textAfterPrefix = normalizedValue.slice(commandPrefix.length + 1);
+  } else {
     return { slashDropdown: false, activeSection: null, searchQuery: normalizedValue };
   }
-
-  const textAfterSlash = normalizedValue.slice(1);
 
   // Find the longest matching alias
   let bestAlias = '';
   let activeSection: string | null = null;
 
-  for (const [alias, section] of Object.entries(SLASH_SECTION_ALIASES)) {
-    const upperText = textAfterSlash.toUpperCase();
+  for (const [alias, section] of Object.entries(slashSectionAliases)) {
+    const upperText = textAfterPrefix.toUpperCase();
     const upperAlias = alias.toUpperCase();
 
-    // Active if matches exactly followed by a space
-    const matchWithSpace = upperText.startsWith(upperAlias + ' ');
+    // If starting with slash, allow exact match or space (e.g. /bm, /n, /s)
+    // If starting with 'c ', require space after alias (e.g. c bm , c n , c s )
+    const matchExactOrSpace = isSlash
+      ? (upperText === upperAlias || upperText.startsWith(upperAlias + ' '))
+      : upperText.startsWith(upperAlias + ' ');
 
-    if (matchWithSpace) {
+    if (matchExactOrSpace) {
       if (alias.length > bestAlias.length) {
         bestAlias = alias;
         activeSection = section;
@@ -206,11 +236,17 @@ function parseSlashMode(value: string): SlashMode {
   }
 
   if (activeSection) {
-    let query = textAfterSlash.slice(bestAlias.length);
+    let query = textAfterPrefix.slice(bestAlias.length);
     if (query.startsWith(' ')) query = query.slice(1);
+    console.log('[SlashFilter Debug][BoardView] Matched activeSection:', activeSection, 'bestAlias:', bestAlias, 'query:', query);
     return { slashDropdown: false, activeSection, searchQuery: query };
   }
 
+  if (isCmd) {
+    return { slashDropdown: false, activeSection: null, searchQuery: textAfterPrefix };
+  }
+
+  console.log('[SlashFilter Debug][BoardView] No activeSection matched for:', value, 'showing dropdown picker');
   // No match → show the dropdown picker
   return { slashDropdown: true, activeSection: null, searchQuery: '' };
 }
@@ -232,11 +268,12 @@ const SLASH_SECTION_META: Record<string, { title: string; icon: React.ReactNode 
   notes: { title: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0 text-amber-400" /> },
   snippets: { title: 'Snippets', icon: <FaCode size={16} className="text-[var(--color-iconDefault)]" /> },
   links: { title: 'Links', icon: <FaLink size={16} className="text-blue-400" /> },
-  chat_agents: { title: 'Chat Agents', icon: <FaRobot size={16} className="text-indigo-400" /> },
-  sessions: { title: 'Tab groups', icon: <FaLayerGroup size={16} className="text-purple-400" /> },
+  bookmarks: { title: 'Bookmarks', icon: <FaBookmark size={16} className="text-pink-400" /> },
+  chat_agents: { title: 'Chat Agents', icon: <FaRobot size={16} className="text-[var(--color-iconDefault)]" /> },
+  sessions: { title: 'Tab Sessions', icon: <FaLayerGroup size={16} className="text-purple-400" /> },
   commands: { title: 'Commands', icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
-  bookmarks: { title: 'Bookmarks', icon: <FaBookmark size={16} className="text-[var(--color-iconDefault)]" /> },
-  automations: { title: 'Automations', icon: <FiZap size={16} className="text-amber-400" /> },
+  system_commands: { title: 'System Commands', icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
+  automations: { title: 'Automations', icon: <FiZap size={16} className="text-[var(--color-iconDefault)]" /> },
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -254,10 +291,14 @@ interface BoardViewProps {
   onExecuteItem?: (item: any, e?: React.MouseEvent | KeyboardEvent) => boolean | void;
   hideCloseButton?: boolean;
   isEmbedded?: boolean;
+  forceNativeStyling?: boolean;
   includeWebsitePageActions?: boolean;
+  portalContainer?: HTMLElement;
+  onSheetRedirect?: () => void;
+  onBoardRedirect?: () => void;
 }
 
-const BoardView: React.FC<BoardViewProps> = ({
+const BoardView = React.forwardRef<any, BoardViewProps>(({
   state,
   searchValue = '',
   unfilteredSuggestions = [],
@@ -267,11 +308,68 @@ const BoardView: React.FC<BoardViewProps> = ({
   onExecuteItem,
   hideCloseButton = false,
   isEmbedded = false,
+  forceNativeStyling = false,
   includeWebsitePageActions = false,
-}) => {
+  portalContainer,
+  onSheetRedirect,
+  onBoardRedirect,
+}, ref) => {
+  const { theme } = useAppearance();
+
+  React.useImperativeHandle(ref, () => ({
+    openContextMenu: (x: number, y: number, fav: any) => {
+      const type = (fav.type || fav.category || '').toLowerCase();
+      let kind = type === 'note' || type === 'link' || type === 'snippet' ? 'snippet' : type;
+      if (type === 'session') kind = 'session';
+      if (type === 'command') kind = 'command';
+      if (type === 'todo') kind = 'todo';
+      if (type === 'automation') kind = 'automation';
+      if (type === 'agent' || type === 'aiprompt' || type === 'chat_agent') kind = 'chat_agent';
+
+      const item = {
+        _kind: kind,
+        snippet: kind === 'snippet' ? fav : undefined,
+        session: kind === 'session' ? fav : undefined,
+        data: fav,
+        id: fav.id || fav.snippet_id || fav.commandId,
+      };
+      setContextMenuState({ x, y, item, preferDown: true });
+    }
+  }));
   const [focus, setFocus] = useState<[number, number]>([0, 0]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollLeftRef = useRef<number>(0);
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    scrollLeftRef.current = e.currentTarget.scrollLeft;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollLeft = scrollLeftRef.current;
+    }
+  });
   const [selectedSidebarSection, setSelectedSidebarSection] = useState<string>('all');
   const [slashDropdownSelectedIndex, setSlashDropdownSelectedIndex] = useState(-1);
+  const [omniboxPrefixes, setOmniboxPrefixes] = useState<Awaited<ReturnType<typeof CustomSearchPrefixesForOmniboxStorage.getPrefixes>> | null>(null);
+
+  useEffect(() => {
+    const loadPrefixes = () => {
+      CustomSearchPrefixesForOmniboxStorage.getPrefixes()
+        .then(prefixes => {
+          setOmniboxPrefixes(prefixes);
+        })
+        .catch(console.error);
+    };
+
+    loadPrefixes();
+    window.addEventListener('omniboxPrefixesChanged', loadPrefixes);
+
+    return () => {
+      window.removeEventListener('omniboxPrefixesChanged', loadPrefixes);
+    };
+  }, []);
+
   const dbNotes = useDbStore(state => state.notes);
   const dbLinks = useDbStore(state => state.links);
   const dbSnippets = useDbStore(state => state.snippets);
@@ -283,19 +381,57 @@ const BoardView: React.FC<BoardViewProps> = ({
   const dbAiPrompts = useDbStore(state => state.aiPrompts);
   const expandedWorkspaces = useUIStore(state => state.expandedWorkspaces);
   const commands = useDbStore(state => state.commands);
+  const visibleCommands = useMemo(() => commands.filter((cmd: any) => {
+    if (cmd?.showInDashboard === false) return false;
+    if (!includeWebsitePageActions) {
+      if (cmd.surface === 'website' || cmd.category === 'thissite_action' || cmd.category === 'page_action') return false;
+    }
+    return true;
+  }), [commands, includeWebsitePageActions]);
+  const filterVisibleCommandSuggestions = (items: any[] = []) =>
+    items.filter((item: any) => {
+      const kind = item?._kind || item?.type;
+      if (kind === 'command' || item?.commandType !== undefined) {
+        if (item?.command?.showInDashboard === false || item?.showInDashboard === false) return false;
+        const cmd = item?.command || item;
+        if (cmd?.category === 'browser' && (!cmd?.prefix || cmd?.prefix.trim() === '')) return false;
+        if (!includeWebsitePageActions) {
+          if (cmd.surface === 'website' || cmd.category === 'thissite_action' || cmd.category === 'page_action') return false;
+        }
+      }
+      return true;
+    });
 
   // defaultWorkspaceId has been removed as it relied on the old architecture and is now dead code.
 
   const rawSearchValue = searchValue || state?.value || '';
   const prevSearchValueRef = useRef(rawSearchValue);
   const isSlashSelectedRef = useRef(false);
-  const slashMode = useMemo(() => parseSlashMode(rawSearchValue), [rawSearchValue]);
+  const slashSectionAliases = useMemo(() => buildSlashSectionAliases(omniboxPrefixes), [omniboxPrefixes]);
+  const slashAliasDisplay = useMemo(() => {
+    const reverse: Record<string, string> = {};
+    Object.entries(slashSectionAliases).forEach(([alias, section]) => {
+      if (!reverse[section]) {
+        reverse[section] = alias;
+      }
+    });
+    return reverse;
+  }, [slashSectionAliases]);
+  const commandPrefix = String(omniboxPrefixes?.command || 'c').trim().toLowerCase() || 'c';
+  const slashMode = useMemo(() => parseSlashMode(rawSearchValue, slashSectionAliases, commandPrefix), [rawSearchValue, slashSectionAliases, commandPrefix]);
+  const normalizedSearchValue = rawSearchValue.replace(/\u00A0/g, ' ').trimStart().toLowerCase();
+  const isBroadCommandMode =
+    !slashMode.slashDropdown &&
+    !slashMode.activeSection &&
+    normalizedSearchValue.startsWith(`${commandPrefix} `);
 
   const effectiveSidebarSection = slashMode.slashDropdown
     ? 'all'
     : slashMode.activeSection && slashMode.activeSection !== 'all'
       ? slashMode.activeSection
-      : selectedSidebarSection;
+      : isBroadCommandMode
+        ? 'commands'
+        : selectedSidebarSection;
 
   // Favorites, hotkeys and shortcuts state
 
@@ -303,10 +439,16 @@ const BoardView: React.FC<BoardViewProps> = ({
   const hotkeysMap = useDbStore(state => state.hotkeysMap);
   const shortcutsMap = useDbStore(state => state.shortcutsMap);
 
-  const [todosList, setTodosList] = useState<any[]>([]);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [boardCollapsedGroups, setBoardCollapsedGroups] = useState<Record<string, boolean>>({
+    active: false,
+    overdue: false,
+    scheduled_fut: false,
+    completed: true, // completed collapsed by default to keep the UI clean
+  });
   const [chromeBookmarks, setChromeBookmarks] = useState<any[]>([]);
 
-  const [contextMenuState, setContextMenuState] = useState<{ x: number; y: number; item: any } | null>(null);
+  const [contextMenuState, setContextMenuState] = useState<{ x: number; y: number; item: any; preferDown?: boolean } | null>(null);
   const [editingHotkeyFor, setEditingHotkeyFor] = useState<string | null>(null);
   const [editingShortcutFor, setEditingShortcutFor] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
@@ -316,8 +458,12 @@ const BoardView: React.FC<BoardViewProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflictId, setConflictId] = useState<string | null>(null);
 
-  const isMac = typeof navigator !== 'undefined' && (navigator.platform.toLowerCase().includes('mac') || navigator.userAgent.toLowerCase().includes('mac'));
-  const todoCreatePrefill = useUIStore(state => state.activeEditor?.type === 'todo' ? state.activeEditor.props?.prefill : null);
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    (navigator.platform.toLowerCase().includes('mac') || navigator.userAgent.toLowerCase().includes('mac'));
+  const todoCreatePrefill = useUIStore(state =>
+    state.activeEditor?.type === 'todo' ? state.activeEditor.props?.prefill : null,
+  );
   const { captureHotkey } = useKeystrokeRecording(editValue, isMac);
 
   const handleCancelEdit = () => {
@@ -380,62 +526,17 @@ const BoardView: React.FC<BoardViewProps> = ({
       chromeAny.bookmarks.onChanged.addListener(loadBookmarks);
     }
 
-    const deduplicateAndSetTodos = (localTodos: any[], cachedTodos: any[]) => {
-
-      const normalizeId = (t: any): string => {
-        const raw = t.snippet_id || t.id || t.todo_id;
-        if (raw !== undefined && raw !== null && String(raw) !== 'undefined') {
-          return String(raw);
-        }
-        // Fallback: use key + deadline to create a synthetic id
-        return `local-${t.key || t.title || ''}-${t.event_deadline || ''}`.replace(/\s+/g, '_');
-      };
-      const mappedLocal = localTodos.map((t: any) => ({
-        ...t,
-        snippet_id: normalizeId(t),
-        is_recurring: !!(t.is_recurring || (t as any).recurring),
-      }));
-      const mappedCached = cachedTodos.map((t: any) => ({
-        ...t,
-        snippet_id: normalizeId(t),
-        is_recurring: !!(t.is_recurring || (t as any).recurring),
-      }));
-      // local_todos takes priority: build map from local first, then add cached if not already present
-      const finalMap = new Map<string, any>();
-      mappedLocal.forEach(t => finalMap.set(t.snippet_id, t));
-      mappedCached.forEach(t => {
-        if (!finalMap.has(t.snippet_id)) {
-          finalMap.set(t.snippet_id, t);
-        }
-      });
-      const unique = Array.from(finalMap.values());
-
-      setTodosList(unique);
-    };
-
     if (chromeAny?.storage?.local) {
-      // Use IndexedDB (via fetchCloudTodos) as the single source of truth for todos.
-      // DO NOT read from chrome.storage.local cached_todos — those may be stale and will
-      // re-populate deleted todos if used.
-      fetchCloudTodosRef.current?.();
-
       const handleChange = (changes: any, areaName: string) => {
         if (areaName === 'local') {
           // Only reload bookmarks from storage changes, not todos.
-          // Todos are managed exclusively via IndexedDB + todosUpdated event.
         }
       };
 
-      const handleTodosUpdated = () => {
-        fetchCloudTodosRef.current?.();
-      };
-
       chromeAny.storage.onChanged.addListener(handleChange);
-      window.addEventListener('todosUpdated', handleTodosUpdated);
 
       return () => {
         chromeAny.storage.onChanged.removeListener(handleChange);
-        window.removeEventListener('todosUpdated', handleTodosUpdated);
         if (chromeAny?.bookmarks?.onRemoved) {
           chromeAny.bookmarks.onRemoved.removeListener(loadBookmarks);
           chromeAny.bookmarks.onCreated.removeListener(loadBookmarks);
@@ -451,9 +552,13 @@ const BoardView: React.FC<BoardViewProps> = ({
 
     // 1. Notes, Links, Snippets, Sessions from IndexedDB
     dbNotes.forEach((n: any) => items.push({ id: n.id, name: n.title || n.key, category: 'note', data: n }));
-    dbLinks.forEach((l: any) => items.push({ id: l.id, name: l.title || l.key, category: 'link', _kind: 'link', data: l }));
+    dbLinks.forEach((l: any) =>
+      items.push({ id: l.id, name: l.title || l.key, category: 'link', _kind: 'link', data: l }),
+    );
     dbSnippets.forEach((s: any) => items.push({ id: s.id, name: s.title || s.key, category: 'snippet', data: s }));
-    dbSessions.forEach((s: any) => items.push({ id: s.id, name: s.title || s.key, category: 'session', _kind: 'session', data: s }));
+    dbSessions.forEach((s: any) =>
+      items.push({ id: s.id, name: s.title || s.key, category: 'session', _kind: 'session', data: s }),
+    );
 
     // 2. Flat Dexie collections for workspaces, folders, automations, and agents
     dbWorkspaces.forEach((workspace: any) => {
@@ -502,7 +607,7 @@ const BoardView: React.FC<BoardViewProps> = ({
     });
 
     // 2. Commands
-    commands.forEach(cmd => {
+    visibleCommands.forEach(cmd => {
       items.push({
         id: `cmd-${cmd.id}`,
         name: cmd.label,
@@ -513,7 +618,17 @@ const BoardView: React.FC<BoardViewProps> = ({
 
     // 3. Local Commands
     return items;
-  }, [dbNotes, dbLinks, dbSnippets, dbWorkspaces, dbFolders, dbAutomations, dbChatAgents, dbAiPrompts, commands]);
+  }, [
+    dbNotes,
+    dbLinks,
+    dbSnippets,
+    dbWorkspaces,
+    dbFolders,
+    dbAutomations,
+    dbChatAgents,
+    dbAiPrompts,
+    visibleCommands,
+  ]);
 
   const [asyncItems, setAsyncItems] = useState<any[]>([]);
   useEffect(() => {
@@ -555,42 +670,24 @@ const BoardView: React.FC<BoardViewProps> = ({
     return [...convertibleItems, ...asyncItems];
   }, [convertibleItems, asyncItems]);
 
-  const fetchCloudTodosRef = useRef<any>(null);
+  const rawTodos = useDbStore(state => state.todos);
+  const todosList = useMemo(() => {
+    return rawTodos.map(t => ({
+      ...t,
+      _kind: 'todo',
+      type: 'todo',
+      snippet_id: t.id,
+      todo_id: t.id,
+      key: t.name,
+      title: t.name,
+      is_done: t.isDone,
+      is_todo_type: true,
+      is_recurring: !!t.recurringType,
+      event_deadline: t.scheduleTime ? new Date(t.scheduleTime).toISOString() : null,
+    }));
+  }, [rawTodos]);
 
-  const fetchCloudTodos = useCallback(async (_forceCloud = false) => {
-    // Todos are now read from IndexedDB only
-    try {
-      const allTodos = await db.todos.toArray();
-      const mapped = allTodos.map(t => ({
-        ...t,
-        _kind: 'todo',
-        type: 'todo',
-        snippet_id: t.id,
-        todo_id: t.id,
-        key: t.name,
-        title: t.name,
-        is_done: t.isDone,
-        is_todo_type: true,
-        is_recurring: !!(t.recurringType),
-        event_deadline: t.scheduleTime ? new Date(t.scheduleTime).toISOString() : null,
-      }));
-      setTodosList(mapped);
-    } catch (err) {
-      console.error('[BoardView] Failed to load todos from IndexedDB:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchCloudTodosRef.current = fetchCloudTodos;
-  }, [fetchCloudTodos]);
-
-  useEffect(() => {
-    if (isLoggedIn) {
-      fetchCloudTodos(false);
-    }
-  }, [isLoggedIn, fetchCloudTodos]);
-
-  const { favorites: userFavorites } = useFavorites();
+  const { favorites: userFavorites, toggleFavorite: toggleSharedFavorite } = useFavorites();
   const favoriteIdSet = useMemo(() => {
     const set = new Set<string>();
     userFavorites.forEach(fav => {
@@ -601,8 +698,98 @@ const BoardView: React.FC<BoardViewProps> = ({
     return set;
   }, [userFavorites]);
 
+  const getSessionReferenceIds = (item: any) => {
+    const primaryId = getItemCompoundId(item);
+    const rawId =
+      extractSnippetIdFromCompoundId(primaryId) ||
+      String(item?.session?.id || item?.snippet?.id || item?.snippet?.snippet_id || item?.id || '');
+
+    const ids = [primaryId];
+    if (rawId && rawId !== primaryId) ids.push(rawId);
+    return ids.filter(Boolean);
+  };
+
+  const toggleFavoriteForItem = async (item: any) => {
+    const kind = item._kind || item.type;
+    const category = String(item.snippet?.category || item.category || '').toLowerCase();
+    const referenceType =
+      kind === 'command'
+        ? 'command'
+        : kind === 'aiPrompt'
+          ? 'aiPrompt'
+          : kind === 'chat_agent'
+            ? 'chat_agent'
+            : category === 'automation'
+          ? 'automation'
+          : category === 'link' || kind === 'bookmark'
+            ? 'link'
+            : kind === 'session' || category === 'session'
+              ? 'session'
+              : 'note';
+
+    const compoundId = getItemCompoundId(item);
+    const rawId =
+      extractSnippetIdFromCompoundId(compoundId) ||
+      String(item.snippet?.id || item.snippet?.snippet_id || item.todo_id || item.id || '');
+    const label = getTitle(item);
+    const targetReferenceId = compoundId || rawId;
+
+    console.log('[BoardView][Favorite] Toggle requested', {
+      kind,
+      category,
+      referenceType,
+      label,
+      targetReferenceId,
+      compoundId,
+      rawId,
+      item,
+    });
+
+    try {
+      if (isEmbedded) {
+        chrome.runtime.sendMessage({
+          action: 'toggle_favorite',
+          payload: { targetReferenceId, referenceType, label },
+          userId: userId || 'local_user'
+        });
+      } else {
+        await toggleSharedFavorite(targetReferenceId, referenceType, label);
+      }
+      console.log('[BoardView][Favorite] Toggle completed', {
+        kind,
+        category,
+        referenceType,
+        label,
+        targetReferenceId,
+      });
+      useUIStore.getState().queueNotification({
+        message: `⭐ Favorite updated`,
+        type: 'info',
+      });
+    } catch (error: any) {
+      console.error('[BoardView][Favorite] Toggle failed', {
+        kind,
+        category,
+        referenceType,
+        label,
+        targetReferenceId,
+        compoundId,
+        rawId,
+        message: error?.message || String(error),
+        error,
+      });
+      throw error;
+    }
+  };
+
   const saveHotkey = async (item: any, hotkeyValue: string, shouldClose = true) => {
     const itemId = getItemCompoundId(item);
+    const kind = item._kind || item.type;
+    const category = String(item.snippet?.category || item.category || '').toLowerCase();
+    const isSessionItem = kind === 'session' || category === 'session';
+    const sessionReferenceIds = isSessionItem ? getSessionReferenceIds(item) : [itemId];
+    const [primarySessionId, legacySessionId] = sessionReferenceIds;
+
     useUIStore.getState().setCommandStatus({
       status: 'loading',
       message: !hotkeyValue ? 'Clearing...' : isUpdatingHotkey ? 'Updating...' : 'Saving...',
@@ -611,18 +798,51 @@ const BoardView: React.FC<BoardViewProps> = ({
 
     try {
       if (!hotkeyValue) {
-        await deleteUserHotkeyByReference(itemId);
+        for (const referenceId of sessionReferenceIds) {
+          if (isEmbedded) {
+            chrome.runtime.sendMessage({ action: 'delete_user_hotkey', payload: { referenceId }, userId: userId || 'local_user' });
+          } else {
+            await deleteUserHotkeyByReference(referenceId);
+          }
+        }
       } else {
-        const kind = item._kind || item.type;
-        const type = kind === 'command' ? 'command' : String(item.snippet?.category || '').toLowerCase() === 'link' ? 'link' : 'note';
-        await saveUserHotkey(hotkeyValue, itemId, type as any);
+        const type =
+          kind === 'command'
+            ? 'command'
+            : kind === 'aiPrompt' || kind === 'chat_agent' || category === 'automation'
+              ? 'automation'
+              : isSessionItem
+                ? 'session'
+                : category === 'link'
+                  ? 'link'
+                  : 'note';
+        if (legacySessionId) {
+          if (isEmbedded) {
+            chrome.runtime.sendMessage({ action: 'delete_user_hotkey', payload: { referenceId: legacySessionId }, userId: userId || 'local_user' });
+          } else {
+            await deleteUserHotkeyByReference(legacySessionId);
+          }
+        }
+        if (isEmbedded) {
+          chrome.runtime.sendMessage({ action: 'save_user_hotkey', payload: { hotkeyValue, referenceId: primarySessionId || itemId, referenceType: type }, userId: userId || 'local_user' });
+        } else {
+          await saveUserHotkey(hotkeyValue, primarySessionId || itemId, type as any);
+        }
       }
 
       useUIStore.getState().setCommandStatus({ status: 'success', message: !hotkeyValue ? 'Cleared' : 'Saved' });
+      useUIStore.getState().queueNotification({
+        message: !hotkeyValue ? '⌨️ Hotkey cleared' : '⌨️ Hotkey saved',
+        type: 'success',
+      });
       setTimeout(() => useUIStore.getState().resetCommandStatus(), 3000);
     } catch (error: any) {
       console.error('[BoardView] Failed to save/clear hotkey:', error);
       useUIStore.getState().setCommandStatus({ status: 'error', message: error.message || 'Failed to update hotkey' });
+      useUIStore.getState().queueNotification({
+        message: error.message || 'Failed to update hotkey',
+        type: 'error',
+      });
       setTimeout(() => useUIStore.getState().resetCommandStatus(), 3000);
     } finally {
       setIsSaving(false);
@@ -639,8 +859,14 @@ const BoardView: React.FC<BoardViewProps> = ({
 
   const saveShortcut = async (item: any, shortcutValue: string) => {
     const itemId = getItemCompoundId(item);
-    let normalized = String(shortcutValue || "").trim().toLowerCase();
-    if (normalized && !normalized.startsWith('/')) normalized = `/${normalized}`;
+    const kind = item._kind || item.type;
+    const category = String(item.snippet?.category || item.category || '').toLowerCase();
+    const isSessionItem = kind === 'session' || category === 'session';
+    const sessionReferenceIds = isSessionItem ? getSessionReferenceIds(item) : [itemId];
+    const [primarySessionId, legacySessionId] = sessionReferenceIds;
+    const normalized = String(shortcutValue || '')
+      .trim()
+      .toLowerCase();
 
     useUIStore.getState().setCommandStatus({
       status: 'loading',
@@ -650,24 +876,64 @@ const BoardView: React.FC<BoardViewProps> = ({
 
     try {
       if (!normalized) {
-        await deleteUserShortcutByReference(itemId);
+        for (const referenceId of sessionReferenceIds) {
+          if (isEmbedded) {
+            chrome.runtime.sendMessage({ action: 'delete_user_shortcut', payload: { referenceId }, userId: userId || 'local_user' });
+          } else {
+            await deleteUserShortcutByReference(referenceId);
+          }
+        }
       } else {
-        const kind = item._kind || item.type;
         if (kind === 'command') {
-          await apiSaveShortcut(itemId, itemId, normalized, getTitle(item), 'command');
+          if (isEmbedded) {
+            chrome.runtime.sendMessage({ action: 'api_save_shortcut', payload: { id: itemId, referenceId: itemId, trigger: normalized, label: getTitle(item), type: 'command' }, userId: userId || 'local_user' });
+          } else {
+            await apiSaveShortcut(itemId, itemId, normalized, getTitle(item), 'command');
+          }
         } else if (kind === 'aiPrompt' || kind === 'chat_agent') {
-          await apiSaveShortcut(itemId, normalized, getTitle(item), 'aiPrompt' as any);
+          if (isEmbedded) {
+            chrome.runtime.sendMessage({ action: 'api_save_shortcut', payload: { id: itemId, referenceId: itemId, trigger: normalized, label: getTitle(item), type: 'automation' }, userId: userId || 'local_user' });
+          } else {
+            await apiSaveShortcut(itemId, itemId, normalized, getTitle(item), 'automation' as any);
+          }
+        } else if (isSessionItem) {
+          if (legacySessionId) {
+            if (isEmbedded) {
+              chrome.runtime.sendMessage({ action: 'delete_user_shortcut', payload: { referenceId: legacySessionId }, userId: userId || 'local_user' });
+            } else {
+              await deleteUserShortcutByReference(legacySessionId);
+            }
+          }
+          if (isEmbedded) {
+            chrome.runtime.sendMessage({ action: 'api_save_shortcut', payload: { id: primarySessionId || itemId, referenceId: primarySessionId || itemId, trigger: normalized, label: getTitle(item), type: 'session' }, userId: userId || 'local_user' });
+          } else {
+            await apiSaveShortcut(primarySessionId || itemId, primarySessionId || itemId, normalized, getTitle(item), 'session' as any);
+          }
         } else {
-          const type = kind === 'command' ? 'command' : String(item.snippet?.category || '').toLowerCase() === 'link' ? 'link' : 'note';
-          await saveUserShortcut(normalized, itemId, type as any);
+          const type = kind === 'command' ? 'command' : category === 'link' ? 'link' : 'note';
+          if (isEmbedded) {
+            chrome.runtime.sendMessage({ action: 'save_user_shortcut', payload: { normalized, referenceId: itemId, type }, userId: userId || 'local_user' });
+          } else {
+            await saveUserShortcut(normalized, itemId, type as any);
+          }
         }
       }
 
       useUIStore.getState().setCommandStatus({ status: 'success', message: !normalized ? 'Cleared' : 'Saved' });
+      useUIStore.getState().queueNotification({
+        message: !normalized ? '⚡ Shortcut cleared' : '⚡ Shortcut saved',
+        type: 'success',
+      });
       setTimeout(() => useUIStore.getState().resetCommandStatus(), 3000);
     } catch (error: any) {
       console.error('[BoardView] Failed to save/clear shortcut:', error);
-      useUIStore.getState().setCommandStatus({ status: 'error', message: error.message || 'Failed to update shortcut' });
+      useUIStore
+        .getState()
+        .setCommandStatus({ status: 'error', message: error.message || 'Failed to update shortcut' });
+      useUIStore.getState().queueNotification({
+        message: error.message || 'Failed to update shortcut',
+        type: 'error',
+      });
       setTimeout(() => useUIStore.getState().resetCommandStatus(), 3000);
     } finally {
       setIsSaving(false);
@@ -722,24 +988,31 @@ const BoardView: React.FC<BoardViewProps> = ({
     const kind = item._kind || item.type;
     const isNote =
       kind === 'snippet' &&
-      !['link', 'tabgroup', 'tab group', 'automation', 'agent'].includes(
-        String(item.snippet?.category || "").toLowerCase(),
+      !['link', 'tabgroup', 'Tab Session', 'automation', 'agent', 'snippet'].includes(
+        String(item.snippet?.category || '').toLowerCase(),
       );
+    const isSnippet =
+      kind === 'snippet' &&
+      String(item.snippet?.category || '').toLowerCase() === 'snippet';
     const isSession =
       kind === 'session' ||
-      (kind === 'snippet' && ['session'].includes(String(item.snippet?.category || "").toLowerCase())) ||
+      (kind === 'snippet' && ['session'].includes(String(item.snippet?.category || '').toLowerCase())) ||
       (item as any).category === 'session';
     const isLink =
-      (kind === 'snippet' && ['link'].includes(String(item.snippet?.category || "").toLowerCase())) ||
+      (kind === 'snippet' && ['link'].includes(String(item.snippet?.category || '').toLowerCase())) ||
       kind === 'link' ||
       kind === 'bookmark';
     const isTabGroup =
-      kind === 'snippet' && ['tabgroup', 'tab group'].includes(String(item.snippet?.category || "").toLowerCase());
+      kind === 'snippet' && ['tabgroup', 'Tab Session'].includes(String(item.snippet?.category || '').toLowerCase());
     const isTodo = kind === 'todo';
     const isCommand = kind === 'command' || kind === 'common_command';
-    const isAutomation = kind === 'automation' || kind === 'agent' || (kind === 'snippet' && String(item.snippet?.category || "").toLowerCase() === 'automation');
+    const isAutomation =
+      kind === 'automation' ||
+      kind === 'agent' ||
+      (kind === 'snippet' && String(item.snippet?.category || '').toLowerCase() === 'automation');
 
-    const isEditable = kind === 'snippet' || kind === 'link' || kind === 'session' || kind === 'bookmark' || isTodo || isAutomation;
+    const isEditable =
+      kind === 'snippet' || kind === 'link' || kind === 'session' || kind === 'bookmark' || isTodo || isAutomation;
     const isFavoriteable = isEditable || isCommand;
     const isShortcuttable = isEditable || isCommand;
 
@@ -752,12 +1025,11 @@ const BoardView: React.FC<BoardViewProps> = ({
         icon: <FiExternalLink size={14} />,
         onSelect: () => {
           const snippetId = item.snippet?.snippet_id || item.snippet?.id;
-          if (snippetId && (window as any).chrome?.tabs?.create && (window as any).chrome?.runtime?.getURL) {
-            (window as any).chrome.tabs.create({
+          if (snippetId) {
+            openTab({
               url: (window as any).chrome.runtime.getURL(
-                `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`,
+                `AltS_search_newtab/index.html?alts_action=true&type=note&id=${encodeURIComponent(snippetId)}`,
               ),
-              active: true,
             });
           }
         },
@@ -766,14 +1038,45 @@ const BoardView: React.FC<BoardViewProps> = ({
 
     if (kind === 'snippet' || kind === 'aiPrompt' || kind === 'chat_agent' || isEditable) {
       const isChatAgent = kind === 'aiPrompt' || kind === 'chat_agent';
-      const labelText = isChatAgent ? 'Edit Agent' : isTabGroup ? 'Edit routine' : isSession ? 'Edit tab group' : isLink ? 'Edit link' : 'Edit note';
+      const labelText = isTodo
+        ? 'Edit todo'
+        : isChatAgent
+          ? 'Edit Agent'
+          : isTabGroup
+            ? 'Edit routine'
+            : isSession
+              ? 'Edit Tab Session'
+              : isLink
+                ? 'Edit link'
+                : isSnippet
+                  ? 'Edit snippet'
+                  : 'Edit note';
       actions.push({
         key: 'edit',
         label: `${labelText} ${isMac ? '(⌘+Shift+E)' : '(Alt+Shift+E)'}`,
         icon: <FiEdit2 size={14} />,
         onSelect: () => {
           if (isChatAgent) {
-            useUIStore.getState().openEditor({ type: 'aiPrompt', id: item.id || item.data?.id });
+            const mergedAgent = {
+              ...item.data,
+              favorite: item.favorite ?? item.data?.favorite,
+              tags: item.tags ?? item.data?.tags,
+              shortcut: item.shortcut ?? item.data?.shortcut,
+              hotkey: item.hotkey ?? item.data?.hotkey,
+            };
+            const originalType = (item.data?.type || item.data?.category || kind).toLowerCase();
+            const targetEditorType = (originalType === 'aiprompt' || originalType === 'prompt') ? 'aiPrompt' : 'agent';
+            if (isEmbedded && (window as any).chrome?.runtime?.getURL) {
+              const url = new URL((window as any).chrome.runtime.getURL('AltS_search_newtab/index.html'));
+              url.searchParams.set('alts_action', 'true');
+              url.searchParams.set('type', targetEditorType);
+              url.searchParams.set('entityId', String(item.id || item.data?.id));
+              url.searchParams.set('edit_mode', 'true');
+              url.searchParams.set('editorProps', JSON.stringify({ props: { item: mergedAgent, snippet: mergedAgent } }));
+              openTab({ url: url.toString() });
+            } else {
+              useUIStore.getState().openEditor({ type: targetEditorType as any, id: item.id || item.data?.id, props: { item: mergedAgent } });
+            }
             return;
           }
           const actualSnippet = item.snippet || item.session || item.data || item;
@@ -785,39 +1088,139 @@ const BoardView: React.FC<BoardViewProps> = ({
               key: actualSnippet.name || actualSnippet.title || '',
               title: actualSnippet.name || actualSnippet.title || '',
               value: actualSnippet.description || actualSnippet.value || '',
-              event_deadline: actualSnippet.scheduleTime ? new Date(actualSnippet.scheduleTime).toISOString() : (actualSnippet.event_deadline || null),
+              event_deadline: actualSnippet.scheduleTime
+                ? new Date(actualSnippet.scheduleTime).toISOString()
+                : actualSnippet.event_deadline || null,
               is_recurring: actualSnippet.scheduleType === 'recurring' || !!actualSnippet.is_recurring,
               recurring_cycle: actualSnippet.recurringType || actualSnippet.recurring_cycle || null,
               is_anytime: actualSnippet.isAnytime || actualSnippet.is_anytime || false,
               is_done: actualSnippet.isDone || actualSnippet.is_done || false,
-              config: actualSnippet.references ? {
-                id: actualSnippet.references.map((r: any) => r.id),
-                title: actualSnippet.name
-              } : (actualSnippet.config || null)
+              config: actualSnippet.references
+                ? {
+                  id: actualSnippet.references.map((r: any) => r.id),
+                  title: actualSnippet.name,
+                }
+                : actualSnippet.config || null,
+              shortcut: actualSnippet.shortcut || item.shortcut || item.data?.shortcut || '',
+              tags: actualSnippet.tags || item.tags || item.data?.tags || [],
+              favorite: actualSnippet.favorite ?? item.favorite ?? item.data?.favorite,
+              hotkey: actualSnippet.hotkey || item.hotkey || item.data?.hotkey,
             };
-            useUIStore.getState().setTodoCreatePrefill(prefill);
-            useUIStore.getState().openEditor({
-              type: 'todo',
-              id: prefill.todo_id,
-            });
+            if (isEmbedded && (window as any).chrome?.runtime?.getURL) {
+              const url = new URL((window as any).chrome.runtime.getURL('AltS_search_newtab/index.html'));
+              url.searchParams.set('alts_action', 'true');
+              url.searchParams.set('type', 'todo');
+              url.searchParams.set('entityId', prefill.todo_id);
+              url.searchParams.set('edit_mode', 'true');
+              url.searchParams.set('editorProps', JSON.stringify({ props: { prefill, item: prefill, snippet: prefill } }));
+              openTab({ url: url.toString() });
+            } else {
+              useUIStore.getState().setTodoCreatePrefill(prefill);
+              useUIStore.getState().openEditor({
+                type: 'todo',
+                id: prefill.todo_id,
+                props: { prefill },
+              });
+            }
           } else if (isSession) {
-            useUIStore.getState().openEditor({
-              type: 'session',
-              id: actualSnippet.id,
-              props: { snippet: actualSnippet }
-            });
+            const mergedSession = {
+              ...actualSnippet,
+              favorite: actualSnippet.favorite ?? item.favorite ?? item.data?.favorite,
+              tags: actualSnippet.tags || item.tags || item.data?.tags,
+              shortcut: actualSnippet.shortcut || item.shortcut || item.data?.shortcut,
+              hotkey: actualSnippet.hotkey || item.hotkey || item.data?.hotkey,
+            };
+            if (isEmbedded && (window as any).chrome?.runtime?.getURL) {
+              const url = new URL((window as any).chrome.runtime.getURL('AltS_search_newtab/index.html'));
+              url.searchParams.set('session_mode', 'true');
+              url.searchParams.set('session_id', actualSnippet.id);
+              url.searchParams.set('edit_mode', 'true');
+              url.searchParams.set('editorProps', JSON.stringify({ props: { snippet: mergedSession, session: mergedSession, item: mergedSession } }));
+              openTab({ url: url.toString() });
+            } else {
+              useUIStore.getState().openEditor({
+                type: 'session',
+                id: actualSnippet.id,
+                props: { snippet: mergedSession, session: mergedSession, item: mergedSession },
+              });
+            }
           } else if (isLink || isTabGroup) {
             const wsId = item.workspace?.workspace_id || actualSnippet?.workspaceId || actualSnippet?.workspace_id;
             const fId = item.folder?.folder_id || actualSnippet?.folderId || actualSnippet?.folder_id;
             const suggestionPayload = {
-              item: actualSnippet,
+              item: {
+                ...actualSnippet,
+                favorite: actualSnippet.favorite ?? item.favorite ?? item.data?.favorite,
+                tags: actualSnippet.tags || item.tags || item.data?.tags,
+                shortcut: actualSnippet.shortcut || item.shortcut || item.data?.shortcut,
+                hotkey: actualSnippet.hotkey || item.hotkey || item.data?.hotkey,
+              },
               workspace: item.workspace || (wsId ? { workspace_id: wsId } : null),
               folder: item.folder || (fId ? { folder_id: fId } : null),
             };
-            if (state?.onRequestEditLink) {
-              state.onRequestEditLink(suggestionPayload);
+            if (isEmbedded && (window as any).chrome?.runtime?.getURL) {
+              const url = new URL((window as any).chrome.runtime.getURL('AltS_search_newtab/index.html'));
+              url.searchParams.set('alts_action', 'true');
+              url.searchParams.set('type', 'link');
+              url.searchParams.set('entityId', String(item.id || item.data?.id));
+              url.searchParams.set('edit_mode', 'true');
+              url.searchParams.set('editorProps', JSON.stringify({ linkPrefill: suggestionPayload, props: { snippet: suggestionPayload.item, item: suggestionPayload.item } }));
+              openTab({ url: url.toString() });
+              return;
+            }
+
+            useUIStore.getState().setLinkEditPrefill(suggestionPayload);
+            useUIStore.getState().openEditor({
+              type: 'link',
+              id: actualSnippet.id || item.id,
+              props: { snippet: suggestionPayload.item }
+            });
+          } else if (isSnippet) {
+            const mergedSnippet = {
+              ...actualSnippet,
+              favorite: actualSnippet.favorite ?? item.favorite ?? item.data?.favorite,
+              tags: actualSnippet.tags || item.tags || item.data?.tags,
+              shortcut: actualSnippet.shortcut || item.shortcut || item.data?.shortcut,
+              hotkey: actualSnippet.hotkey || item.hotkey || item.data?.hotkey,
+              category: 'snippet'
+            };
+            if (isEmbedded && (window as any).chrome?.runtime?.getURL) {
+              const url = new URL((window as any).chrome.runtime.getURL('AltS_search_newtab/index.html'));
+              url.searchParams.set('alts_action', 'true');
+              url.searchParams.set('type', 'note');
+              url.searchParams.set('entityId', String(actualSnippet.snippet_id || actualSnippet.id || item.id || item.data?.id));
+              url.searchParams.set('edit_mode', 'true');
+              url.searchParams.set('editorProps', JSON.stringify({ props: { item: mergedSnippet, snippet: mergedSnippet, category: 'snippet' } }));
+              openTab({ url: url.toString() });
             } else {
-              executeItem(item);
+              useUIStore.getState().openEditor({
+                type: 'note',
+                id: String(actualSnippet.snippet_id || actualSnippet.id || item.id || item.data?.id),
+                props: { item: mergedSnippet, snippet: mergedSnippet, category: 'snippet' },
+              });
+            }
+          } else if (isNote) {
+            const mergedNote = {
+              ...actualSnippet,
+              favorite: actualSnippet.favorite ?? item.favorite ?? item.data?.favorite,
+              tags: actualSnippet.tags || item.tags || item.data?.tags,
+              shortcut: actualSnippet.shortcut || item.shortcut || item.data?.shortcut,
+              hotkey: actualSnippet.hotkey || item.hotkey || item.data?.hotkey,
+            };
+            if (isEmbedded && (window as any).chrome?.runtime?.getURL) {
+              const url = new URL((window as any).chrome.runtime.getURL('AltS_search_newtab/index.html'));
+              url.searchParams.set('alts_action', 'true');
+              url.searchParams.set('type', 'note');
+              url.searchParams.set('entityId', String(item.id || item.data?.id));
+              url.searchParams.set('edit_mode', 'true');
+              url.searchParams.set('editorProps', JSON.stringify({ props: { item: mergedNote, snippet: mergedNote } }));
+              openTab({ url: url.toString() });
+            } else {
+              useUIStore.getState().openEditor({
+                type: 'note',
+                id: String(item.id || item.data?.id),
+                props: { item: mergedNote, snippet: mergedNote },
+              });
             }
           } else {
             executeItem(item);
@@ -837,26 +1240,31 @@ const BoardView: React.FC<BoardViewProps> = ({
 
             let snippetValue = '';
             if (actualSnippet?.value) {
-              snippetValue = typeof actualSnippet.value === 'string' ? actualSnippet.value : JSON.stringify(actualSnippet.value);
+              snippetValue =
+                typeof actualSnippet.value === 'string' ? actualSnippet.value : JSON.stringify(actualSnippet.value);
             } else if (actualSnippet?.body) {
               snippetValue = actualSnippet.body;
             } else if (actualSnippet?.urls) {
               snippetValue = JSON.stringify({ urls: actualSnippet.urls.map((u: any) => u.url) });
             }
 
-            useUIStore.getState().openEditor({
-              type: 'todo',
-              id: 'new',
-              props: {
-                prefill: {
-                  snippet_id: snippetId,
-                  key: snippetKey,
-                  value: snippetValue,
-                  category: actualSnippet?.category || item.kind,
-                }
-              }
-            });
-            useUIStore.getState().setSidebar('todoSidebar', { open: true });
+            if (isEmbedded && (window as any).chrome?.runtime?.getURL) {
+              openTab({ url: (window as any).chrome.runtime.getURL(`AltS_search_newtab/index.html?create_todo=true`) });
+            } else {
+              useUIStore.getState().openEditor({
+                type: 'todo',
+                id: 'new',
+                props: {
+                  prefill: {
+                    snippet_id: snippetId,
+                    key: snippetKey,
+                    value: snippetValue,
+                    category: actualSnippet?.category || item.kind,
+                  },
+                },
+              });
+              useUIStore.getState().setSidebar('todoSidebar', { open: true });
+            }
           },
         });
       }
@@ -868,11 +1276,9 @@ const BoardView: React.FC<BoardViewProps> = ({
         className: 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
         onSelect: () => {
           if (kind === 'aiPrompt' || kind === 'chat_agent') {
-            if (confirm('Are you sure you want to delete this agent?')) {
-              const id = item.id || item.data?.id;
-              if (id) {
-                deleteAiPrompt(id).catch(console.error);
-              }
+            const id = item.id || item.data?.id;
+            if (id) {
+              deleteAiPrompt(id).catch(console.error);
             }
             return;
           }
@@ -909,12 +1315,20 @@ const BoardView: React.FC<BoardViewProps> = ({
       });
     }
 
-    if (kind === 'snippet' || kind === 'command' || kind === 'common_command' || kind === 'aiPrompt' || kind === 'chat_agent' || isFavoriteable) {
+    if (
+      !isTodo &&
+      (kind === 'snippet' ||
+        kind === 'command' ||
+        kind === 'common_command' ||
+        kind === 'aiPrompt' ||
+        kind === 'chat_agent' ||
+        isFavoriteable)
+    ) {
       actions.push({ key: `div-fav-0`, divider: true });
 
       const compoundId = getItemCompoundId(item);
-      const isFav =
-        favoriteIdSet.has(compoundId) || favoriteIdSet.has(String(item.snippet?.id || item.snippet?.snippet_id || item.todo_id || item.id || ''));
+      const rawId = extractSnippetIdFromCompoundId(compoundId);
+      const isFav = favoriteIdSet.has(compoundId) || favoriteIdSet.has(rawId);
 
       actions.push({
         key: 'favorite',
@@ -922,24 +1336,40 @@ const BoardView: React.FC<BoardViewProps> = ({
         icon: isFav ? <FaStar size={14} className="text-yellow-500" /> : <FiStar size={14} />,
         closeOnExecute: false,
         onSelect: () => {
+          console.log('[BoardView][UnifiedContextMenu][Favorite] Clicked', {
+            isFav,
+            kind,
+            category: String(item.snippet?.category || item.category || '').toLowerCase(),
+            compoundId,
+            rawId,
+            item,
+            usesExternalToggleHandler: !!state?.onToggleFavorite,
+          });
           if (state?.onToggleFavorite) {
             state.onToggleFavorite(item);
+          } else {
+            void toggleFavoriteForItem(item);
           }
         },
       });
     }
 
-    if (kind === 'snippet' || kind === 'command' || kind === 'aiPrompt' || kind === 'chat_agent' || isShortcuttable) {
+    if (
+      !isTodo &&
+      (kind === 'snippet' || kind === 'command' || kind === 'aiPrompt' || kind === 'chat_agent' || isShortcuttable)
+    ) {
       actions.push({ key: `div-assign-0`, divider: true });
 
       const compoundId = getItemCompoundId(item);
-      const currentShortcut = shortcutsMap[compoundId];
+      const sessionReferenceIds = isSession ? getSessionReferenceIds(item) : [compoundId];
+      const currentShortcut = sessionReferenceIds.map(id => shortcutsMap[id]).find(Boolean) || '';
+      const normalizedCurrentShortcut = currentShortcut ? normalizeShortcutTrigger(currentShortcut) : '';
 
       if (currentShortcut) {
         actions.push({
           key: 'remove-shortcut',
           label: `Remove command`,
-          shortcut: currentShortcut,
+          shortcut: normalizedCurrentShortcut,
           icon: <FiTrash2 size={14} />,
           className: 'hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400',
           closeOnExecute: true,
@@ -952,21 +1382,21 @@ const BoardView: React.FC<BoardViewProps> = ({
       actions.push({
         key: 'assign-shortcut',
         label: currentShortcut ? 'Edit command' : 'Assign command',
-        shortcut: currentShortcut,
+        shortcut: normalizedCurrentShortcut,
         icon: <MdOutlineShortcut size={14} className="text-green-600 dark:text-green-400" />,
         className: 'hover:bg-green-50 dark:hover:bg-green-900/20 text-neutral-700 dark:text-neutral-300',
         closeOnExecute: false,
         onSelect: async () => {
           setEditingShortcutFor(compoundId);
           setEditingHotkeyFor(null);
-          const displayValue = currentShortcut ? currentShortcut.replace(/^\//, '') : '';
+          const displayValue = normalizedCurrentShortcut;
           setEditValue(displayValue);
           setIsUpdatingShortcut(!!currentShortcut);
           setSaveError(null);
         },
       });
 
-      const currentHotkey = hotkeysMap[compoundId];
+      const currentHotkey = sessionReferenceIds.map(id => hotkeysMap[id]).find(Boolean) || '';
 
       if (currentHotkey) {
         actions.push({
@@ -1007,20 +1437,48 @@ const BoardView: React.FC<BoardViewProps> = ({
   // When query is empty OR slash mode is active, build items directly from Dexie/current team.
   // Slash mode must bypass state.suggestions because the Searchbar filters suggestions
   // using the raw text (e.g. '/L'), which matches nothing and returns 0 results.
-  const isSlashModeActive = query.startsWith('/');
+  const isSlashModeActive = query.startsWith('/') || isBroadCommandMode || !!slashMode.activeSection;
   let sourceItems: SuggestionListItem[];
   if (query.length === 0 || isSlashModeActive) {
     // Build from Dexie/current team directly
     const boardItems: SuggestionListItem[] = [];
     // Add Dexie items (notes, links,snippets)
-    dbNotes.forEach((n: any) => boardItems.push({ _kind: 'snippet', snippet: { ...n, category: n.category || 'note' }, workspace: n.workspaceId ? { workspace_id: n.workspaceId } : null, folder: n.folderId ? { folder_id: n.folderId } : null } as any));
-    dbLinks.forEach((l: any) => boardItems.push({ _kind: 'snippet', snippet: { ...l, category: l.category || 'link' }, workspace: l.workspaceId ? { workspace_id: l.workspaceId } : null, folder: l.folderId ? { folder_id: l.folderId } : null } as any));
-    dbSnippets.forEach((s: any) => boardItems.push({ _kind: 'snippet', snippet: { ...s, category: s.category || 'snippet' }, workspace: s.workspaceId ? { workspace_id: s.workspaceId } : null, folder: s.folderId ? { folder_id: s.folderId } : null } as any));
-    dbSessions.forEach((s: any) => boardItems.push({ _kind: 'session', session: s, workspace: s.workspaceId ? { workspace_id: s.workspaceId } : null, folder: s.folderId ? { folder_id: s.folderId } : null } as any));
+    dbNotes.forEach((n: any) =>
+      boardItems.push({
+        _kind: 'snippet',
+        snippet: { ...n, category: n.category || 'note' },
+        workspace: n.workspaceId ? { workspace_id: n.workspaceId } : null,
+        folder: n.folderId ? { folder_id: n.folderId } : null,
+      } as any),
+    );
+    dbLinks.forEach((l: any) =>
+      boardItems.push({
+        _kind: 'snippet',
+        snippet: { ...l, category: l.category || 'link' },
+        workspace: l.workspaceId ? { workspace_id: l.workspaceId } : null,
+        folder: l.folderId ? { folder_id: l.folderId } : null,
+      } as any),
+    );
+    dbSnippets.forEach((s: any) =>
+      boardItems.push({
+        _kind: 'snippet',
+        snippet: { ...s, category: s.category || 'snippet' },
+        workspace: s.workspaceId ? { workspace_id: s.workspaceId } : null,
+        folder: s.folderId ? { folder_id: s.folderId } : null,
+      } as any),
+    );
+    dbSessions.forEach((s: any) =>
+      boardItems.push({
+        _kind: 'session',
+        session: s,
+        workspace: s.workspaceId ? { workspace_id: s.workspaceId } : null,
+        folder: s.folderId ? { folder_id: s.folderId } : null,
+      } as any),
+    );
     dbAiPrompts.forEach((prompt: any) => boardItems.push({ _kind: 'aiPrompt', ...prompt } as any));
 
     // Add all commands from the central store
-    commands.forEach((cmd: any) => {
+    visibleCommands.forEach((cmd: any) => {
       boardItems.push({
         _kind: 'command',
         commandType: 'remote',
@@ -1046,7 +1504,7 @@ const BoardView: React.FC<BoardViewProps> = ({
     if (chromeBookmarks.length > 0) {
       boardItems.push(...chromeBookmarks);
     } else {
-      const fallbackSuggestions = unfilteredSuggestions.length > 0 ? unfilteredSuggestions : (state?.suggestions || []);
+      const fallbackSuggestions = unfilteredSuggestions.length > 0 ? unfilteredSuggestions : state?.suggestions || [];
       fallbackSuggestions.forEach((item: any) => {
         const kind = item._kind || item.type;
         if (kind === 'bookmark') {
@@ -1057,57 +1515,124 @@ const BoardView: React.FC<BoardViewProps> = ({
 
     // Add todos — show ALL non-done todos in Board View so nothing is hidden
 
-    const mappedTodos = todosList
-      .filter(t => {
-        if (t.is_done) {
-
-          return false;
-        }
-        // Include the task — Board View shows everything (today, scheduled, anytime)
-
-        return true;
-      })
-      .map(t => ({
-        ...t,
-        _kind: 'todo',
-        type: 'todo',
-        is_todo_type: true
-      }));
+    const mappedTodos = todosList.map(t => ({
+      ...t,
+      _kind: 'todo',
+      type: 'todo',
+      is_todo_type: true,
+    }));
 
     boardItems.push(...(mappedTodos as any));
 
     // If the board has data, use it; otherwise fall back to unfilteredSuggestions cache
-    sourceItems = boardItems.length > 0 ? boardItems : (unfilteredSuggestions.length > 0 ? unfilteredSuggestions : (state?.suggestions || []));
+    // When in broad command mode (c space), use suggestions from searchbar which are already filtered to user commands
+    if (isBroadCommandMode) {
+      sourceItems = filterVisibleCommandSuggestions(state?.suggestions || unfilteredSuggestions || []);
+    } else {
+      sourceItems =
+        boardItems.length > 0
+          ? boardItems
+          : unfilteredSuggestions.length > 0
+            ? filterVisibleCommandSuggestions(unfilteredSuggestions)
+            : filterVisibleCommandSuggestions(state?.suggestions || []);
+    }
   } else {
     // Filter chrome bookmarks by query
-    const lowerQuery = String(query || "").toLowerCase();
-    const filteredBookmarks = chromeBookmarks.filter(b =>
-      (b.title && String(b.title).toLowerCase().includes(lowerQuery)) ||
-      (b.url && String(b.url).toLowerCase().includes(lowerQuery))
-    );
-    sourceItems = [...(state?.suggestions || unfilteredSuggestions || []), ...filteredBookmarks];
+    const lowerQuery = String(query || '').toLowerCase();
+
+    // Check if the searchbar explicitly supplied only commands (e.g. command menu trigger)
+    const activeSuggestions = filterVisibleCommandSuggestions(state?.suggestions || unfilteredSuggestions || []);
+    const isExplicitCommandMenu =
+      !slashMode.activeSection &&
+      activeSuggestions.length > 0 &&
+      activeSuggestions.every(
+        (s: any) => s._kind === 'command' || s.commandType !== undefined || s._kind === 'workspace_item',
+      );
+
+    const filteredBookmarks = isExplicitCommandMenu
+      ? []
+      : chromeBookmarks.filter(
+        b =>
+          (b.title && String(b.title).toLowerCase().includes(lowerQuery)) ||
+          (b.url && String(b.url).toLowerCase().includes(lowerQuery)),
+      );
+    sourceItems = [...activeSuggestions, ...filteredBookmarks];
   }
 
   const handleCreateItem = (groupKey: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    console.log('[BoardView] handleCreateItem triggered:', { groupKey, isEmbedded });
+    if (isEmbedded) {
+      let param = '';
+      switch (groupKey) {
+        case 'notes':
+          param = 'create_note=true';
+          break;
+        case 'snippets':
+          param = 'create_snippet=true';
+          break;
+        case 'links':
+          param = 'create_link=true';
+          break;
+        case 'sessions':
+        case 'Tab Sessions':
+          param = 'session_mode=true';
+          break;
+        case 'todos':
+          param = 'create_todo=true';
+          break;
+        case 'chat agents':
+        case 'chat_agents':
+          param = 'create_chat_agent=true';
+          break;
+        case 'automations':
+          param = 'create_automation=true';
+          break;
+      }
+      console.log('[BoardView] Embedded mode redirecting with parameter:', param);
+      const chromeAny = (window as any).chrome;
+      if (param && chromeAny?.runtime?.getURL && chromeAny?.runtime?.sendMessage) {
+        const url = chromeAny.runtime.getURL(`AltS_search_newtab/index.html?${param}`);
+        console.log('[BoardView] Opening new tab URL via background script sendMessage:', url);
+        chromeAny.runtime.sendMessage({ action: 'open_tab', url, active: true });
+      } else {
+        console.warn('[BoardView] Chrome extension APIs not available for redirection:', {
+          hasParam: !!param,
+          hasSendMessage: !!chromeAny?.runtime?.sendMessage,
+          hasGetURL: !!chromeAny?.runtime?.getURL,
+        });
+      }
+      return;
+    }
+    console.log('[BoardView] Standard mode opening editor directly for:', groupKey);
     switch (groupKey) {
       case 'notes':
         useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'note' } });
         useUIStore.getState().openEditor({ type: 'note', id: 'new' });
         break;
       case 'snippets':
-        useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'snippet' } });
-        useUIStore.getState().openEditor({ type: 'note', id: 'new' });
+        useUIStore.getState().openEditor({ type: 'snippet', id: 'new' });
+        break;
       case 'links':
         useUIStore.getState().openEditor({ type: 'link', id: 'new' });
-        useUIStore.getState().openEditor({ type: 'note', id: 'new' });
         break;
       case 'sessions':
+      case 'Tab Sessions':
         useUIStore.getState().openEditor({ type: 'session', id: 'new' });
-        useUIStore.getState().openEditor({ type: 'note', id: 'new' });
         break;
       case 'todos':
-        useUIStore.getState().openEditor({ type: 'todo', id: 'new', props: { prefill: { isCreateModalOnly: true } as any } });
+        useUIStore
+          .getState()
+          .openEditor({ type: 'todo', id: 'new', props: { prefill: { isCreateModalOnly: true } as any } });
+        break;
+      case 'chat agents':
+      case 'chat_agents':
+        useUIStore.getState().openEditor({ type: 'aiPrompt', id: 'new', isNew: true });
+        break;
+      case 'automations':
+        useUIStore
+          .getState()
+          .openEditor({ type: 'agent', id: 'new', isNew: true, props: { editMode: false, automation: null } });
         break;
     }
   };
@@ -1117,31 +1642,133 @@ const BoardView: React.FC<BoardViewProps> = ({
     return !['history', 'ai_history', 'automation', 'open_url'].includes(kind);
   });
 
+  const builtInCommandsById = useMemo(
+    () => new Map((SHARED_ALL_COMMANDS as any[]).map((cmd: any) => [String(cmd.id), cmd])),
+    [],
+  );
+
+  const normalizeCommandPrefix = (prefix: any) => String(prefix || '').trim().replace(/^\/+/, '').toLowerCase();
+
+  const isCustomizedBuiltInCommand = (item: any) => {
+    const command = item?.command || item;
+    const commandId = String(command?.id || item?.id || '');
+    const base = builtInCommandsById.get(commandId);
+    if (!base) return false;
+
+    const currentPrefix = normalizeCommandPrefix(command?.prefix);
+    const basePrefix = normalizeCommandPrefix(base?.prefix);
+    const currentLabel = String(command?.label || '').trim();
+    const baseLabel = String(base?.label || '').trim();
+    const currentCategory = String(command?.category || '').trim().toLowerCase();
+    const baseCategory = String(base?.category || '').trim().toLowerCase();
+    const currentUrlTemplate = String(command?.urlTemplate || '').trim();
+    const baseUrlTemplate = String(base?.urlTemplate || '').trim();
+
+    return (
+      currentPrefix !== basePrefix ||
+      currentLabel !== baseLabel ||
+      currentCategory !== baseCategory ||
+      currentUrlTemplate !== baseUrlTemplate
+    );
+  };
+
+  const getCommandBucket = (item: any): 'commands' | 'system_commands' | null => {
+    const kind = item?._kind || item?.type;
+
+    if (item?.commandType === 'proxy' || kind === 'workspace_item') {
+      return 'commands';
+    }
+
+    if (!['command', 'common_command', 'module', 'aggregate', 'agent_collection'].includes(kind)) {
+      return null;
+    }
+
+    const command = item?.command || item;
+    const commandId = String(command?.id || item?.id || '');
+    const base = builtInCommandsById.get(commandId);
+    const category = String(command?.category || item?.category || base?.category || '').toLowerCase();
+
+    if (!base || isCustomizedBuiltInCommand(item)) {
+      return 'commands';
+    }
+
+    return 'system_commands';
+  };
+
   // Define our groups
   const groups = {
-    todos: { title: 'Todos', items: [] as SuggestionListItem[], icon: <BsCalendarCheck size={16} className="text-[var(--color-iconDefault)]" /> },
+    todos: {
+      title: 'Todos',
+      items: [] as SuggestionListItem[],
+      icon: <BsCalendarCheck size={16} className="text-[var(--color-iconDefault)]" />,
+    },
     notes: { title: 'Notes', items: [] as SuggestionListItem[], icon: <NotesIcon className="w-4 h-4 shrink-0" /> },
     snippets: { title: 'Snippets', items: [] as SuggestionListItem[], icon: <FaCode size={16} /> },
     links: { title: 'Links', items: [] as SuggestionListItem[], icon: <FaLink size={16} /> },
-    sessions: { title: 'Tab groups', items: [] as SuggestionListItem[], icon: <FaLayerGroup size={16} /> },
-    chat_agents: { title: 'Chat Agents', items: [] as SuggestionListItem[], icon: <FaRobot size={16} className="text-indigo-400" /> },
-    commands: { title: 'Commands', items: [] as SuggestionListItem[], icon: <FaTerminal size={16} /> },
     bookmarks: { title: 'Bookmarks', items: [] as SuggestionListItem[], icon: <FaBookmark size={16} /> },
-    automations: { title: 'Automations', items: [] as SuggestionListItem[], icon: <FiZap size={16} className="text-amber-400" /> },
+    sessions: { title: 'Tab Sessions', items: [] as SuggestionListItem[], icon: <FaLayerGroup size={16} /> },
+    chat_agents: {
+      title: 'Chat Agents',
+      items: [] as SuggestionListItem[],
+      icon: <FaRobot size={16} className="text-[var(--color-iconDefault)]" />,
+    },
+    commands: { title: 'Commands', items: [] as SuggestionListItem[], icon: <FaTerminal size={16} /> },
+    system_commands: {
+      title: 'System Commands',
+      items: [] as SuggestionListItem[],
+      icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" />,
+    },
+    automations: {
+      title: 'Automations',
+      items: [] as SuggestionListItem[],
+      icon: <FiZap size={16} className="text-[var(--color-iconDefault)]" />,
+    },
   };
 
+  const activeSuggestionsForMenu = filterVisibleCommandSuggestions(state?.suggestions || unfilteredSuggestions || []);
+  const hasAtLeastOneCommand = activeSuggestionsForMenu.some((s: any) => s._kind === 'command' || s.commandType !== undefined);
+  const isExplicitMenuState = !slashMode.activeSection && (state?.mode === 'command' || (!state &&
+    activeSuggestionsForMenu.length > 0 &&
+    hasAtLeastOneCommand &&
+    activeSuggestionsForMenu.every(
+      (s: any) => s._kind === 'command' || s.commandType !== undefined || s._kind === 'workspace_item',
+    )));
+
   filteredAllItems.forEach(item => {
+    if (isExplicitMenuState) {
+      const bucket = getCommandBucket(item);
+      if (bucket === 'system_commands') {
+        groups.system_commands.items.push(item);
+      } else {
+        groups.commands.items.push(item);
+      }
+      return;
+    }
+
     const kind = (item as any)._kind || (item as any).type;
-    if (kind === 'snippet') {
-      const cat = String((item as any).snippet?.category || "").toLowerCase();
-      if (['link'].includes(cat)) groups.links.items.push(item);
-      else if (['session'].includes(cat)) groups.sessions.items.push(item);
-      else if (cat === 'snippet') groups.snippets.items.push(item);
+    if (kind === 'snippet' || kind === 'workspace_item') {
+      const cat = String((item as any).item?.category || (item as any).snippet?.category || '').toLowerCase();
+      if (['link', 'links', 'tabgroup'].includes(cat)) groups.links.items.push(item);
+      else if (['session', 'sessions', 'tab session'].includes(cat)) groups.sessions.items.push(item);
+      else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat)) groups.chat_agents.items.push(item);
+      else if (['automation', 'automations'].includes(cat)) groups.automations.items.push(item);
+      else if (['todo', 'todos'].includes(cat)) groups.todos.items.push(item);
+      else if (['snippet', 'snippets'].includes(cat)) groups.snippets.items.push(item);
+      else if (['bookmark', 'bookmarks'].includes(cat)) groups.bookmarks.items.push(item);
+      else if (['command', 'commands'].includes(cat)) groups.commands.items.push(item);
       else groups.notes.items.push(item);
-    } else if (kind === 'aiPrompt' || kind === 'chat_agent') {
+    } else if (
+      kind === 'aiPrompt' ||
+      kind === 'chat_agent' ||
+      kind === 'prompt' ||
+      kind === 'chatAgent' ||
+      kind === 'agent'
+    ) {
       groups.chat_agents.items.push(item);
     } else if (['command', 'agent_collection', 'common_command', 'module', 'aggregate'].includes(kind)) {
-      groups.commands.items.push(item);
+      const targetBucket = getCommandBucket(item);
+      if (targetBucket === 'system_commands') groups.system_commands.items.push(item);
+      else groups.commands.items.push(item);
     } else if (kind === 'bookmark') {
       groups.bookmarks.items.push(item);
     } else if (kind === 'todo') {
@@ -1167,32 +1794,113 @@ const BoardView: React.FC<BoardViewProps> = ({
     }
   });
 
-  // Sort commands inside the commands group to match the requested priority
-  groups.commands.items.sort((a: any, b: any) => {
+  const sortCommandGroupItems = (items: any[]) => {
+    items.sort((a: any, b: any) => {
     const getCategoryPriority = (item: any) => {
       const cat = String(item.command?.category || item.category || '').toLowerCase();
       const cmdType = item.commandType;
       const id = item.id || item.command?.id || '';
+      const label = String(item.label || item.command?.label || '').toLowerCase();
 
-      if (cmdType === 'page_action' || cat === 'page_action') return 1;
-      if (cat === 'ai' && id !== 'ai') return 2;
-      if (cat === 'browser') return 3;
-      if (cat === 'thissite_action') return 5;
-      return 4; // Local app commands and other global commands
+      if (cmdType === 'proxy' || item._kind === 'workspace_item') return 0; // User shortcuts have absolute highest priority
+      if (label.startsWith('create')) return 1; // Create related commands
+      if (cat === 'browser') return 2; // Browser commands
+      if (cmdType === 'page_action' || cat === 'page_action') return 3;
+      if (cat === 'ai' && id !== 'ai') return 4;
+      if (cat === 'thissite_action') return 6;
+      return 5; // Local app commands and other global commands
     };
 
-    return getCategoryPriority(a) - getCategoryPriority(b);
-  });
+    const priorityDiff = getCategoryPriority(a) - getCategoryPriority(b);
+    if (priorityDiff !== 0) return priorityDiff;
 
+    // If priorities are exactly the same, rely on the original search ranking score as a tie-breaker
+    return (b.score || 0) - (a.score || 0);
+    });
+  };
+  sortCommandGroupItems(groups.commands.items as any[]);
+  sortCommandGroupItems(groups.system_commands.items as any[]);
+  const unwrapProxy = (item: any) => {
+    let resolved = item?.commandType === 'proxy' && item?.proxyEntity ? item.proxyEntity : item;
+    if (resolved?._kind === 'workspace_item' && resolved.item) {
+      const cat = String(resolved.item.category || 'note').toLowerCase();
+      // Map category to the correct _kind so renderIcon/getTitle/getDesc work correctly
+      let mappedKind: string;
+      if (['session', 'sessions', 'tab session'].includes(cat)) mappedKind = 'session';
+      else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat)) mappedKind = 'aiPrompt';
+      else if (['automation', 'automations'].includes(cat)) mappedKind = 'automation';
+      else if (['todo', 'todos'].includes(cat)) mappedKind = 'todo';
+      else if (['command', 'commands'].includes(cat)) mappedKind = 'command';
+      else mappedKind = 'snippet';
 
+      if (mappedKind === 'session') {
+        resolved = {
+          ...resolved,
+          ...resolved.item,
+          _kind: 'session',
+          session: resolved.item,
+          category: cat,
+        };
+      } else if (mappedKind === 'aiPrompt') {
+        resolved = {
+          ...resolved,
+          ...resolved.item,
+          _kind: 'aiPrompt',
+          category: cat,
+          title: resolved.item.title || resolved.item.key || resolved.item.name,
+        };
+      } else if (mappedKind === 'automation') {
+        resolved = {
+          ...resolved,
+          ...resolved.item,
+          _kind: 'automation',
+          category: cat,
+        };
+      } else if (mappedKind === 'command') {
+        resolved = {
+          ...resolved,
+          ...resolved.item,
+          _kind: 'command',
+          category: cat,
+        };
+      } else if (mappedKind === 'todo') {
+        resolved = {
+          ...resolved,
+          ...resolved.item,
+          _kind: 'todo',
+          category: cat,
+        };
+      } else {
+        resolved = {
+          ...resolved,
+          ...resolved.item,
+          _kind: 'snippet',
+          snippet: resolved.item,
+          category: cat,
+        };
+      }
+    }
+    return resolved;
+  };
 
   const getTitle = (item: any): string => {
     const kind = item._kind || (item as any).type;
+
     if (kind === 'todo') return item.key || item.title || item.name || 'Todo';
     if (kind === 'command' || kind === 'common_command') return item.label || item.command?.label || 'Command';
     if (kind === 'aggregate') return item.label || 'All AI Chat Agents';
-    if (kind === 'snippet') return item.snippet?.key || item.snippet?.title || item.snippet?.name || 'Snippet';
-    if (kind === 'session') return item.session?.key || item.session?.title || item.session?.name || item.data?.title || item.data?.key || item.title || 'Untitled Tab group';
+    if (kind === 'snippet')
+      return item.snippet?.key || item.snippet?.title || item.snippet?.name || item.snippet?.url || 'Snippet';
+    if (kind === 'session')
+      return (
+        item.session?.key ||
+        item.session?.title ||
+        item.session?.name ||
+        item.data?.title ||
+        item.data?.key ||
+        item.title ||
+        'Untitled Tab Session'
+      );
     if (kind === 'bookmark') return item.title || item.url || 'Link';
     if (kind === 'open_url') return item.displayUrl || item.url || 'Open URL';
     if (kind === 'workspace') return item.workspace?.workspace_name || 'Workspace';
@@ -1201,6 +1909,7 @@ const BoardView: React.FC<BoardViewProps> = ({
     if (kind === 'automation') return item.automation?.name || item.title || 'Automation';
     if (kind === 'module') return item.module?.name || item.module?.module_key || 'Module';
     if (kind === 'agent_collection') return item.title || 'Agent Collection';
+
     // Fallback for custom-shaped items (e.g. extraGroups items from AltS_search_websites)
     return item.label || item.name || item.title || item.key || 'Untitled';
   };
@@ -1210,9 +1919,9 @@ const BoardView: React.FC<BoardViewProps> = ({
     if (kind === 'todo') return 'Todo';
     if (kind === 'command' || kind === 'aggregate' || kind === 'common_command') return 'Command';
     if (kind === 'snippet') {
-      const cat = String(item.snippet?.category || "").toLowerCase();
+      const cat = String(item.snippet?.category || '').toLowerCase();
       if (['link'].includes(cat)) return 'Links';
-      if (['session'].includes(cat)) return 'Tab groups';
+      if (['session'].includes(cat)) return 'Tab Sessions';
       if (cat === 'link' || cat === 'link') return 'Link Group';
       if (cat === 'note') return 'Snippet';
       return 'Notes';
@@ -1223,9 +1932,70 @@ const BoardView: React.FC<BoardViewProps> = ({
     return 'Search';
   };
 
+  const getCategoryLabel = (item: any): string | null => {
+    const kind = item._kind || (item as any).type;
+    const normalizedCategory = String(
+      item.category ||
+      item.command?.category ||
+      item.snippet?.category ||
+      item.automation?.category ||
+      item.item?.category ||
+      kind ||
+      '',
+    ).toLowerCase();
+
+    if (kind === 'command' || kind === 'common_command') {
+      if (normalizedCategory === 'browser') return 'Browser';
+      const nestedPrefix = String(item.prefix || item.command?.prefix || '').trim();
+      if (nestedPrefix) {
+        const bucket = getCommandBucket(item);
+        if (bucket === 'system_commands') {
+          const sysPrefix = String(omniboxPrefixes?.system_command || 'sc').trim().toLowerCase() || 'sc';
+          return `${commandPrefix} ${sysPrefix} ${nestedPrefix}`;
+        }
+        return `${commandPrefix} ${nestedPrefix}`;
+      }
+      if (normalizedCategory === 'ai') return 'Prompt';
+      if (normalizedCategory === 'page_action') return 'Page Action';
+      if (normalizedCategory === 'thissite_action') return 'This Site';
+      return 'Command';
+    }
+
+    if (kind === 'bookmark') return 'Bookmark';
+    if (kind === 'open_url') return 'Link';
+    if (kind === 'session') return 'Session';
+    if (kind === 'automation') return 'Automation';
+    if (kind === 'aiPrompt' || kind === 'prompt' || kind === 'chat_agent' || kind === 'agent') return 'Prompt';
+    if (kind === 'todo') return 'Todo';
+    if (kind === 'module') return 'Module';
+
+    if (kind === 'snippet' || kind === 'note' || kind === 'link' || kind === 'workspace_item') {
+      if (['note', 'notes'].includes(normalizedCategory)) return 'Note';
+      if (['link', 'links', 'collection'].includes(normalizedCategory)) return 'Link';
+      if (['snippet', 'snippets'].includes(normalizedCategory)) return 'Snippet';
+      if (['session', 'sessions', 'tab session'].includes(normalizedCategory)) return 'Session';
+      if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(normalizedCategory)) {
+        return 'Prompt';
+      }
+      if (['automation', 'automations'].includes(normalizedCategory)) return 'Automation';
+      if (['command', 'commands'].includes(normalizedCategory)) return 'Command';
+      if (['bookmark', 'bookmarks'].includes(normalizedCategory)) return 'Bookmark';
+      if (['todo', 'todos'].includes(normalizedCategory)) return 'Todo';
+      return 'Note';
+    }
+
+    return null;
+  };
+
+  const shouldShowCategoryLabel = (item: any) => {
+    if (!isBroadCommandMode) return false;
+    return Boolean(getCategoryLabel(item));
+  };
+
   const getDesc = (item: any): string => {
     const rawDesc = (() => {
       const kind = item._kind || (item as any).type;
+
       if (kind === 'todo') {
         const dueLabel = getTodoDueLabel(item);
         let val = '';
@@ -1237,24 +2007,27 @@ const BoardView: React.FC<BoardViewProps> = ({
         }
         return dueLabel || val || '';
       }
-      if (kind === 'command' || kind === 'common_command') return item.description || '';
+      if (kind === 'command' || kind === 'common_command') return String(item.description || '').replace(/<[^>]+>/g, '');
       if (kind === 'snippet') {
         const s = item.snippet;
         if (!s) return '';
-        if (s.description) return s.description;
+        if (s.description) return String(s.description).replace(/<[^>]+>/g, '');
+        if (s.url && typeof s.url === 'string') return s.url;
         if (s.body) return s.body.replace(/<[^>]+>/g, '').trim();
         if (s.code) return s.code;
         if (s.urls && Array.isArray(s.urls)) {
-          return s.urls.map((u: any) => {
-            if (typeof u === 'object' && u !== null && u.url) return String(u.url);
-            return String(u);
-          }).join(', ');
+          return s.urls
+            .map((u: any) => {
+              if (typeof u === 'object' && u !== null && u.url) return String(u.url);
+              return String(u);
+            })
+            .join(', ');
         }
         if (typeof s.value === 'string') return s.value.replace(/<[^>]+>/g, '').trim();
         return '';
       }
       if (kind === 'bookmark') return item.url || '';
-      if (kind === 'aiPrompt') return item.prompt || item.body || '';
+      if (kind === 'aiPrompt') return String(item.prompt || item.body || '').replace(/<[^>]+>/g, '');
       if (kind === 'open_url') return item.url || '';
       if (kind === 'session') {
         const sessionUrls = item.session?.urls || item.data?.urls;
@@ -1263,7 +2036,11 @@ const BoardView: React.FC<BoardViewProps> = ({
           return `${count} tab${count !== 1 ? 's' : ''} saved`;
         }
       }
-      if (item.description) return item.description;
+      if (kind === 'note') {
+        if (item.description) return String(item.description).replace(/<[^>]+>/g, '');
+        if (item.body) return item.body.replace(/<[^>]+>/g, '').trim();
+      }
+      if (item.description) return String(item.description).replace(/<[^>]+>/g, '');
       return '';
     })();
 
@@ -1276,11 +2053,11 @@ const BoardView: React.FC<BoardViewProps> = ({
     return finalDesc;
   };
 
-  const getSnippetAllUrls = (snippet: any): string[] => {
-    if (!snippet) return [];
+  const getSnippetAllUrls = (item: any): string[] => {
+    if (!item) return [];
     let urls: any[] = [];
-    if (typeof snippet.value === 'string') {
-      const raw = snippet.value as string;
+    if (typeof item.value === 'string') {
+      const raw = item.value as string;
       try {
         const parsed = JSON.parse(raw || '{}');
         if (Array.isArray(parsed)) urls = parsed;
@@ -1289,12 +2066,15 @@ const BoardView: React.FC<BoardViewProps> = ({
       } catch {
         if (raw.startsWith('http')) urls = [raw];
       }
-    } else if (snippet && snippet.value && typeof snippet.value === 'object') {
-      if (Array.isArray(snippet.value)) urls = snippet.value;
-      else if ('urls' in (snippet.value as any)) urls = (snippet.value as any).urls || [];
+    } else if (item && item.value && typeof item.value === 'object') {
+      if (Array.isArray(item.value)) urls = item.value;
+      else if ('urls' in (item.value as any)) urls = (item.value as any).urls || [];
     }
-    if (snippet && snippet.urls && Array.isArray(snippet.urls)) {
-      urls = [...urls, ...snippet.urls];
+    if (item && item.urls && Array.isArray(item.urls)) {
+      urls = [...urls, ...item.urls];
+    }
+    if (item && item.url && typeof item.url === 'string') {
+      urls = [...urls, item.url];
     }
     // log removed
     urls = urls.map((u: any) => {
@@ -1308,7 +2088,11 @@ const BoardView: React.FC<BoardViewProps> = ({
     if (!item.event_deadline) {
       if (item.is_anytime) {
         return (
-          <span className={clsx("text-[11px] font-medium transition-colors", isFocused ? "text-neutral-300" : "text-neutral-500")}>
+          <span
+            className={clsx(
+              'text-[11px] font-medium transition-colors',
+              isFocused ? 'text-white/90' : 'text-white/70',
+            )}>
             Anytime
           </span>
         );
@@ -1316,7 +2100,11 @@ const BoardView: React.FC<BoardViewProps> = ({
       const val = typeof item.value === 'string' ? item.value.replace(/<[^>]+>/g, '').trim() : '';
       if (!val) return null;
       return (
-        <span className={clsx("text-[11px] truncate transition-colors", isFocused ? "text-neutral-300" : "text-neutral-500")}>
+        <span
+          className={clsx(
+            'text-[11px] truncate transition-colors',
+            isFocused ? 'text-white/90' : 'text-white/70',
+          )}>
           {val}
         </span>
       );
@@ -1326,8 +2114,13 @@ const BoardView: React.FC<BoardViewProps> = ({
     if (isNaN(d.getTime())) {
       const val = typeof item.value === 'string' ? item.value.replace(/<[^>]+>/g, '').trim() : '';
       return (
-        <span className={clsx("text-[11px] truncate transition-colors", isFocused ? "text-neutral-300" : "text-neutral-500")}>
-          {item.is_anytime ? 'Anytime' : ''}{val ? ` • ${val}` : ''}
+        <span
+          className={clsx(
+            'text-[11px] truncate transition-colors',
+            isFocused ? 'text-white/90' : 'text-white/70',
+          )}>
+          {item.is_anytime ? 'Anytime' : ''}
+          {val ? ` • ${val}` : ''}
         </span>
       );
     }
@@ -1337,7 +2130,10 @@ const BoardView: React.FC<BoardViewProps> = ({
     const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
     const dDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
-    const isOverdue = !item.is_done && d.getTime() < now.getTime() && (dDate.getTime() < startOfToday.getTime() || (item.event_deadline && item.event_deadline.includes(':')));
+    const isOverdue =
+      !item.is_done &&
+      d.getTime() < now.getTime() &&
+      (dDate.getTime() < startOfToday.getTime() || (item.event_deadline && item.event_deadline.includes(':')));
 
     const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     let dateStr = '';
@@ -1359,8 +2155,9 @@ const BoardView: React.FC<BoardViewProps> = ({
       <div className="flex flex-col min-w-0 w-full text-[11px] leading-relaxed">
         <div className="flex items-center gap-1.5 flex-wrap">
           {isOverdue ? (
-            <span className={clsx("font-semibold", isFocused ? "text-neutral-300" : "text-neutral-500")}>
-              {dateStr}, {timeStr} ({(() => {
+            <span className={clsx('font-semibold', isFocused ? 'text-white/90' : 'text-white/70')}>
+              {dateStr}, {timeStr} (
+              {(() => {
                 const diffMs = now.getTime() - d.getTime();
                 const diffMins = Math.floor(diffMs / (60 * 1000));
                 const diffHrs = Math.floor(diffMs / (60 * 60 * 1000));
@@ -1368,21 +2165,19 @@ const BoardView: React.FC<BoardViewProps> = ({
                 if (diffMins < 60) return `${diffMins}m overdue`;
                 if (diffHrs < 24) return `${diffHrs}h overdue`;
                 return `${diffDays}d overdue`;
-              })()})
+              })()}
+              )
             </span>
           ) : (
-            <span className={clsx("font-semibold", isFocused ? "text-neutral-300" : "text-neutral-500")}>
+            <span className={clsx('font-semibold', isFocused ? 'text-white/90' : 'text-white/70')}>
               {dateStr === 'Anytime' ? 'Anytime' : `${dateStr}, ${timeStr}`}
             </span>
           )}
-          {isRecurring && (
-            <span className="text-emerald-500 dark:text-emerald-400 font-medium">
-              • Recurring
-            </span>
-          )}
+          {isRecurring && <span className="text-emerald-500 dark:text-emerald-400 font-medium">• Recurring</span>}
         </div>
         {val && (
-          <span className={clsx("truncate mt-0.5 transition-colors", isFocused ? "text-neutral-300" : "text-neutral-500")}>
+          <span
+            className={clsx('truncate mt-0.5 transition-colors', isFocused ? 'text-white/90' : 'text-white/70')}>
             {val}
           </span>
         )}
@@ -1390,33 +2185,57 @@ const BoardView: React.FC<BoardViewProps> = ({
     );
   };
 
+  const normalizeTodoBoardItem = (item: any) => {
+    const source =
+      item?._kind === 'workspace_item' && item?.item
+        ? item.item
+        : item?.commandType === 'proxy' && item?.proxyEntity?.item
+          ? item.proxyEntity.item
+          : item;
+
+    const scheduleIso =
+      source?.event_deadline ||
+      (source?.scheduleTime ? new Date(source.scheduleTime).toISOString() : null);
+
+    return {
+      ...item,
+      ...source,
+      _kind: 'todo',
+      type: 'todo',
+      category: 'todo',
+      id: source?.id || source?.todo_id || item?.id,
+      todo_id: source?.todo_id || source?.id || item?.todo_id || item?.id,
+      key: source?.key || source?.title || source?.name || '',
+      title: source?.title || source?.key || source?.name || '',
+      name: source?.name || source?.title || source?.key || '',
+      value: source?.value || source?.description || '',
+      description: source?.description || source?.value || '',
+      is_done: source?.is_done ?? source?.isDone ?? false,
+      isDone: source?.isDone ?? source?.is_done ?? false,
+      scheduleTime: source?.scheduleTime,
+      event_deadline: scheduleIso,
+      is_recurring: source?.is_recurring ?? (source?.scheduleType === 'recurring'),
+      is_anytime: source?.is_anytime ?? false,
+    };
+  };
+
   const handleToggleTodo = async (e: React.MouseEvent, item: any) => {
     e.stopPropagation();
     const sid = String(item.id || item.snippet_id || item.todo_id);
     const newStatus = !item.is_done;
-    const chromeAny = (window as any)?.chrome;
 
-    // 1. Optimistic state update in BoardView
-    setTodosList(prev => prev.map(t => {
-      if (String(t.id || t.snippet_id || t.todo_id) === sid) {
-        return { ...t, is_done: newStatus };
-      }
-      return t;
-    }));
-
-    // 2. Persist to IndexedDB
+    // Persist to IndexedDB (useDbStore liveQuery handles the UI update automatically)
     try {
-      await updateTodo(sid, newStatus);
-      window.dispatchEvent(new CustomEvent('todosUpdated'));
+      if (isEmbedded && (window as any).chrome?.runtime?.sendMessage) {
+        (window as any).chrome.runtime.sendMessage({ action: 'db_update_todo', todoId: sid, status: newStatus }, () => {
+          window.dispatchEvent(new CustomEvent('todosUpdated'));
+        });
+      } else {
+        await updateTodo(sid, newStatus);
+        window.dispatchEvent(new CustomEvent('todosUpdated'));
+      }
     } catch (err) {
       console.warn('[BoardView] Failed to toggle todo in IndexedDB:', err);
-      // Revert optimistic update on error
-      setTodosList(prev => prev.map(t => {
-        if (String(t.id || t.snippet_id || t.todo_id) === sid) {
-          return { ...t, is_done: !newStatus };
-        }
-        return t;
-      }));
     }
   };
 
@@ -1424,17 +2243,18 @@ const BoardView: React.FC<BoardViewProps> = ({
     if (item.icon && React.isValidElement(item.icon)) return item.icon;
 
     const kind = item._kind || (item as any).type;
+    const entity = kind === 'workspace_item' ? item.item : item;
+    const entityKind = kind === 'workspace_item' ? entity.category || 'note' : kind;
 
-    if (kind === 'todo') {
+    if (entityKind === 'todo') {
       return (
         <div
           className="w-full h-full cursor-pointer flex items-center justify-center transition-transform hover:scale-110"
-          onClick={(e) => {
+          onClick={e => {
             e.stopPropagation();
             handleToggleTodo(e, item);
-          }}
-        >
-          {item.is_done ? (
+          }}>
+          {entity.is_done ? (
             <FaCheckCircle className="text-emerald-500 w-[18px] h-[18px] drop-shadow-sm" />
           ) : (
             <FaRegCircle className="text-[var(--color-iconDefault)] w-[18px] h-[18px]" />
@@ -1443,17 +2263,17 @@ const BoardView: React.FC<BoardViewProps> = ({
       );
     }
 
-    if (kind === 'command' || kind === 'common_command') {
+    if (entityKind === 'command' || entityKind === 'common_command') {
       // Page-action commands get specific icons
-      const cmdType = item.commandType;
-      const cmdId = item.id || item.command?.id || '';
+      const cmdType = entity.commandType;
+      const cmdId = entity.id || entity.command?.id || '';
       if (cmdType === 'page_action') {
         if (cmdId === 'capture_screenshot') return <FaCamera className="text-sky-400" size={16} />;
         if (cmdId === 'capture_full_screenshot') return <FaExpand className="text-sky-400" size={16} />;
         if (cmdId === 'downloadallimages') return <FaImages className="text-emerald-400" size={16} />;
         if (cmdId === 'downloadalltables') return <FaTable className="text-amber-400" size={16} />;
       }
-      const iconHost = item.command?.iconHost;
+      const iconHost = entity.command?.iconHost;
       if (iconHost)
         return (
           <img
@@ -1466,11 +2286,11 @@ const BoardView: React.FC<BoardViewProps> = ({
         );
       return <FaTerminal className="text-[var(--color-iconDefault)]" size={16} />;
     }
-    if (kind === 'aggregate' || kind === 'agent_collection')
+    if (entityKind === 'aggregate' || entityKind === 'agent_collection')
       return <FaLayerGroup className="text-[var(--color-iconDefault)]" size={16} />;
 
-    if (kind === 'session') {
-      const urls = getSnippetAllUrls(item.session || item);
+    if (entityKind === 'session') {
+      const urls = getSnippetAllUrls(entity.session || entity);
       if (urls.length > 0) {
         return (
           <div className="flex -space-x-1.5 items-center w-8">
@@ -1487,11 +2307,11 @@ const BoardView: React.FC<BoardViewProps> = ({
       return <FaLayerGroup className="text-purple-400" size={16} />;
     }
 
-    if (kind === 'snippet') {
-      const category = String(item.snippet?.category || "").toLowerCase();
-      const isTodoItem = kind === 'todo' || category === 'todo';
+    if (entityKind === 'snippet' || entityKind === 'note' || entityKind === 'link') {
+      const category = String(entity.snippet?.category || entity.category || entityKind || '').toLowerCase();
+      const isTodoItem = entityKind === 'todo' || category === 'todo';
       const isTabGroup = category === 'link';
-      const urls = getSnippetAllUrls(item.snippet);
+      const urls = getSnippetAllUrls(entity.snippet || entity);
 
       if (isTabGroup && urls.length > 0) {
         return (
@@ -1520,13 +2340,13 @@ const BoardView: React.FC<BoardViewProps> = ({
         );
       }
 
-      if (['link'].includes(category))
-        return <FaLink className="text-blue-400" size={16} />;
+      if (['link'].includes(category)) return <FaLink className="text-blue-400" size={16} />;
+      if (category === 'snippet') return <FaCode className="text-[var(--color-iconDefault)]" size={16} />;
       return <NotesIcon className="text-amber-400" size={16} />;
     }
 
-    if (kind === 'bookmark' || kind === 'open_url') {
-      const targetUrl = kind === 'open_url' ? item.url?.split(',')[0] : item.url;
+    if (entityKind === 'bookmark' || entityKind === 'open_url') {
+      const targetUrl = entityKind === 'open_url' ? entity.url?.split(',')[0] : entity.url;
       if (targetUrl)
         return (
           <img
@@ -1540,8 +2360,14 @@ const BoardView: React.FC<BoardViewProps> = ({
       return <FaLink className="text-[var(--color-iconDefault)]" size={16} />;
     }
 
-    if (kind === 'aiPrompt') {
-      const urls = Object.values(item.modelUrls || {});
+    if (
+      entityKind === 'aiPrompt' ||
+      entityKind === 'chatAgent' ||
+      entityKind === 'prompt' ||
+      entityKind === 'chat_agent' ||
+      entityKind === 'agent'
+    ) {
+      const urls = Object.values(entity.modelUrls || {});
       if (urls.length > 0) {
         return (
           <div className="flex -space-x-1.5 items-center">
@@ -1555,12 +2381,12 @@ const BoardView: React.FC<BoardViewProps> = ({
           </div>
         );
       }
-      return <FaRobot className="text-indigo-400" size={16} />;
+      return <FaRobot className="text-[var(--color-iconDefault)]" size={16} />;
     }
 
-    if (kind === 'automation') return <FaRobot className="text-purple-400" size={16} />;
-    if (kind === 'module') {
-      const iconHost = item.module?.icon_host || item.module?.parent_icon_host;
+    if (entityKind === 'automation') return <FiZap className="text-[var(--color-iconDefault)]" size={16} />;
+    if (entityKind === 'module') {
+      const iconHost = entity.module?.icon_host || entity.module?.parent_icon_host;
       if (iconHost)
         return (
           <img
@@ -1571,23 +2397,78 @@ const BoardView: React.FC<BoardViewProps> = ({
             }}
           />
         );
-      return <FaRobot className="text-purple-400" size={16} />;
+      return <FaRobot className="text-[var(--color-iconDefault)]" size={16} />;
     }
 
     return <FaSearch className="text-[var(--color-iconDefault)]" size={16} />;
   };
 
   // Define strict priority and default arrays
-  const orderedKeys = ['todos', 'notes', 'links', 'sessions', 'chat_agents', 'commands', 'bookmarks', 'snippets', 'automations'] as const;
+  const orderedKeys = [
+    'todos',
+    'notes',
+    'links',
+    'bookmarks',
+    'sessions',
+    'chat_agents',
+    'commands',
+    'system_commands',
+    'snippets',
+    'automations',
+  ] as const;
   const finalKeys = [...orderedKeys];
   const activeGroups = finalKeys.map(k => ({ ...(groups as any)[k], id: k }));
 
+
+  const openTab = (options: { url: string; active?: boolean }) => {
+    const { url, active = true } = options;
+    const chromeAny = (window as any)?.chrome;
+    if (!chromeAny) {
+      window.open(url, '_blank');
+      return;
+    }
+    if (chromeAny.tabs && chromeAny.tabs.create) {
+      chromeAny.tabs.create({ url, active });
+    } else if (chromeAny.runtime && chromeAny.runtime.sendMessage) {
+      chromeAny.runtime.sendMessage({ action: 'open_tab', url, active }, () => {
+        if (chromeAny.runtime.lastError && active) window.open(url, '_blank');
+      });
+    } else {
+      window.open(url, '_blank');
+    }
+    if (onClose && active) {
+      onClose();
+    }
+  };
+
+  const startSessionFromTodoReference = async (sessionLike: any) => {
+    const syntheticEvent = {
+      stopPropagation: () => { },
+      preventDefault: () => { },
+    } as any;
+
+    const normalizedSessionItem = {
+      _kind: 'session',
+      category: 'session',
+      session: sessionLike?.session || sessionLike?.data || sessionLike?.item || sessionLike,
+      data: sessionLike?.data || sessionLike?.session || sessionLike?.item || sessionLike,
+      sessionOpenSettings:
+        sessionLike?.sessionOpenSettings ||
+        sessionLike?.data?.sessionOpenSettings ||
+        sessionLike?.session?.sessionOpenSettings ||
+        sessionLike?.item?.sessionOpenSettings,
+    };
+
+    await handleStartSession(normalizedSessionItem, syntheticEvent);
+  };
+
   const executeTodoItem = async (todo: any, e?: React.MouseEvent | KeyboardEvent) => {
+
     if (todo.is_done) return;
 
     const chromeAny = (window as any)?.chrome;
     const { category, value, snippet_id } = todo;
-    const cat = String(category || (todo as any).snippet_category || "").toLowerCase();
+    const cat = String(category || (todo as any).snippet_category || '').toLowerCase();
 
     // Helper to extract URLs
     const extractUrls = (val: any) => {
@@ -1637,19 +2518,21 @@ const BoardView: React.FC<BoardViewProps> = ({
         });
 
         if (matched) {
-          const itemCat = String(matched.category || "").toLowerCase();
+          const itemCat = String(matched.category || '').toLowerCase();
           const itemId = matched.id;
           const itemVal = matched.data?.value || matched.data?.url || matched.data?.link || '';
-          if (['link', 'collection', 'agent_collection'].includes(itemCat)) {
-            extractUrls(itemVal).forEach(url => chromeAny?.tabs?.create({ url }));
+          if (['session', 'sessions', 'tab session', 'tabgroup'].includes(itemCat)) {
+            await startSessionFromTodoReference(matched);
+          } else if (['link', 'collection', 'agent_collection'].includes(itemCat)) {
+            extractUrls(itemVal).forEach(url => openTab({ url }));
           } else if (['note', 'snippet', 'custom'].includes(itemCat)) {
-            chromeAny?.tabs?.create({
+            openTab({
               url: chromeAny.runtime.getURL(
                 `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(itemId)}`,
               ),
             });
           } else if (['command', 'module', 'automation', 'install', 'agent', 'chat_agent'].includes(itemCat)) {
-            chromeAny?.tabs?.create({
+            openTab({
               url: chromeAny.runtime.getURL(
                 `AltS_search_newtab/index.html?trigger_hotkey=true&type=${itemCat}&id=${encodeURIComponent(itemId)}`,
               ),
@@ -1657,8 +2540,21 @@ const BoardView: React.FC<BoardViewProps> = ({
           }
         }
       }
+    } else if (['session', 'sessions', 'tab session', 'tabgroup'].includes(cat)) {
+      await startSessionFromTodoReference({
+        _kind: 'session',
+        category: 'session',
+        data: {
+          id: snippet_id || todo.id || todo.todo_id || value,
+          title: todo.key || todo.title || todo.name || 'Untitled Tab Session',
+          value,
+          urls: todo.urls,
+          sessionOpenSettings: todo.sessionOpenSettings,
+        },
+        sessionOpenSettings: todo.sessionOpenSettings,
+      });
     } else if (['link', 'collection', 'agent_collection'].includes(cat)) {
-      extractUrls(value).forEach(url => chromeAny?.tabs?.create({ url }));
+      extractUrls(value).forEach(url => openTab({ url }));
     } else if (['note', 'snippet'].includes(cat)) {
       let matchedSnippetItem: { snippet: any; workspace: any } | null = null;
       if (snippet_id) {
@@ -1671,24 +2567,30 @@ const BoardView: React.FC<BoardViewProps> = ({
         state.onSnippetSelect({
           snippet: matchedSnippetItem.snippet,
           workspace: matchedSnippetItem.workspace,
-          folder: null
+          folder: null,
         } as any);
-      } else if (chromeAny?.tabs?.create && chromeAny?.runtime?.getURL) {
-        chromeAny.tabs.create({
-          url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippet_id)}`),
+      } else if (true) {
+        openTab({
+          url: chromeAny.runtime.getURL(
+            `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippet_id)}`,
+          ),
         });
       }
       skipToggle = true; // Don't toggle done when opening note/snippet editor
     } else if (['command', 'module', 'automation', 'install', 'agent', 'chat_agent', 'custom'].includes(cat)) {
       const triggerId = value || snippet_id;
-      if (chromeAny?.tabs?.create && chromeAny?.runtime?.getURL) {
+      if (true) {
         if (cat === 'custom') {
-          chromeAny.tabs.create({
-            url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(triggerId)}`),
+          openTab({
+            url: chromeAny.runtime.getURL(
+              `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(triggerId)}`,
+            ),
           });
         } else {
-          chromeAny.tabs.create({
-            url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?trigger_hotkey=true&type=${cat}&id=${encodeURIComponent(triggerId)}`),
+          openTab({
+            url: chromeAny.runtime.getURL(
+              `AltS_search_newtab/index.html?trigger_hotkey=true&type=${cat}&id=${encodeURIComponent(triggerId)}`,
+            ),
           });
         }
       }
@@ -1708,8 +2610,24 @@ const BoardView: React.FC<BoardViewProps> = ({
       e.preventDefault();
       e.stopPropagation();
     }
-    const kind = item._kind || (item as any).type;
-    console.log('--- executeItem START ---', { kind, item });
+    const rawKind = item._kind || (item as any).type;
+    const entity = rawKind === 'workspace_item' ? item.item : item;
+
+    let kind = rawKind;
+    if (rawKind === 'workspace_item') {
+      const cat = String(entity.category || '').toLowerCase();
+      if (['link', 'links', 'tabgroup'].includes(cat)) kind = 'link';
+      else if (['session', 'sessions', 'tab session'].includes(cat)) kind = 'session';
+      else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat)) kind = 'aiPrompt';
+      else if (['automation', 'automations'].includes(cat)) kind = 'automation';
+      else if (['todo', 'todos'].includes(cat)) kind = 'todo';
+      else if (['snippet', 'snippets'].includes(cat)) kind = 'snippet';
+      else if (['command', 'commands'].includes(cat)) kind = 'command';
+      else if (['bookmark', 'bookmarks'].includes(cat)) kind = 'bookmark';
+      else kind = 'note';
+    }
+
+    console.log('--- executeItem START ---', { kind, item, entity });
 
     if (onExecuteItem) {
       const handled = onExecuteItem(item, e);
@@ -1722,7 +2640,15 @@ const BoardView: React.FC<BoardViewProps> = ({
     const chromeAny = (window as any)?.chrome;
 
     if (kind === 'todo') {
-      executeTodoItem(item, e);
+      executeTodoItem(entity, e);
+      return;
+    }
+
+    if (kind === 'static_view') {
+      const alias = slashAliasDisplay[item.id];
+      if (alias && state?.onQueryChange) {
+        state.onQueryChange(`/${alias} `);
+      }
       return;
     }
 
@@ -1731,39 +2657,91 @@ const BoardView: React.FC<BoardViewProps> = ({
       return;
     }
 
-    if (kind === 'aiPrompt') {
-      const MODEL_KIND: Record<string, string> = {
-        gpt: 'chatgpt',
-        claude: 'claude',
-        gemini: 'gemini',
-        perplexity: 'perplexity',
-      };
-      
-      const cleanPrompt = String(item.prompt || '')
+    if (kind === 'aiPrompt' || kind === 'prompt' || kind === 'chatAgent' || kind === 'chat_agent' || kind === 'agent') {
+      const defaultModels = [
+        { id: 'gpt', host: 'chatgpt.com' },
+        { id: 'claude', host: 'claude.ai' },
+        { id: 'gemini', host: 'gemini.google.com' },
+        { id: 'perplexity', host: 'perplexity.ai' },
+      ];
+
+      const allActiveModels = [
+        ...defaultModels,
+        ...(entity.customModels || [])
+      ];
+
+      const cleanPrompt = String(entity.prompt || '')
         .replace(/<\/p>/gi, '\n')
         .replace(/<\/div>/gi, '\n')
         .replace(/<br\s*\/?>/gi, '\n')
         .replace(/<[^>]+>/g, '')
         .trim();
-      const urls = Object.entries(item.modelUrls || {});
-      
-      urls.forEach(([modelId, targetUrl]) => {
-        const autoKind = MODEL_KIND[modelId] || 'chatgpt';
-        chromeAny?.runtime?.sendMessage({
-          action: 'open_tab_with_auto_submit',
-          url: targetUrl,
-          autoSubmit: { kind: autoKind, prompt: cleanPrompt },
-          forceNewTab: true,
-        });
+
+      StorageManager.getItem('aiPrompt_excludedModels').then(async (stored: any) => {
+        let excluded: string[] = [];
+        if (stored) {
+          try {
+            excluded = JSON.parse(stored);
+          } catch {
+            // ignore
+          }
+        }
+
+        const tabIds: number[] = [];
+        const trackingModels: string[] = [];
+
+        await Promise.all(
+          allActiveModels.map(async (model) => {
+            if (excluded.includes(model.id)) {
+              return;
+            }
+            const targetUrl = (entity.modelUrls && entity.modelUrls[model.id]) || `https://${model.host}`;
+
+            let autoKind = 'chatgpt';
+            if (model.id.includes('claude')) autoKind = 'claude';
+            else if (model.id.includes('gemini')) autoKind = 'gemini';
+            else if (model.id.includes('perplexity')) autoKind = 'perplexity';
+
+            try {
+              const response = await new Promise<any>((resolve) => {
+                chromeAny?.runtime?.sendMessage({
+                  action: 'open_tab_with_auto_submit',
+                  url: targetUrl,
+                  autoSubmit: { kind: autoKind, prompt: cleanPrompt },
+                  forceNewTab: true,
+                }, (res: any) => {
+                  resolve(res);
+                });
+              });
+
+              if (response?.tabId) {
+                tabIds.push(response.tabId);
+                trackingModels.push(model.id);
+              }
+            } catch (err) {
+              console.error('[BoardView] Failed to launch model:', model.id, err);
+            }
+          })
+        );
+
+        if (tabIds.length > 0 && chromeAny?.runtime?.sendMessage) {
+          chromeAny.runtime.sendMessage({
+            action: 'track_ai_session',
+            prompt: cleanPrompt,
+            tabIds,
+            models: trackingModels,
+            aiPromptId: entity.id,
+          });
+        }
       });
       return;
     }
 
-    if (kind === 'snippet') {
-      const rawCategory = item.snippet?.category || item.category || (item.data && item.data.category) || '';
+    if (kind === 'snippet' || kind === 'note' || kind === 'link') {
+      const rawCategory = entity.snippet?.category || entity.category || (entity.data && entity.data.category) || '';
       const category = String(rawCategory).toLowerCase();
-      const urls = getSnippetAllUrls(item.snippet || item.data || item);
-      console.log('--- executeItem snippet ---', { category, item, urls });
+      const urls = getSnippetAllUrls(entity.snippet || entity.data || entity);
+      console.log('--- executeItem snippet ---', { category, entity, urls });
 
       if (isCtrl) {
         if (urls.length > 0) {
@@ -1771,15 +2749,17 @@ const BoardView: React.FC<BoardViewProps> = ({
             if (url.startsWith('note:')) {
               const sid = url.substring(5);
               if (chromeAny?.runtime?.getURL) {
-                chromeAny.tabs.create({
-                  url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(sid)}`),
+                openTab({
+                  url: chromeAny.runtime.getURL(
+                    `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(sid)}`,
+                  ),
                   active: false,
                 });
               }
             } else if (url.startsWith('agent_chat?id=')) {
               const agentId = url.split('id=')[1];
               if (chromeAny?.runtime?.getURL) {
-                chromeAny.tabs.create({
+                openTab({
                   url: chromeAny.runtime.getURL(
                     `AltS_search_newtab/index.html?lock_command=ai&agent_id=${encodeURIComponent(agentId)}`,
                   ),
@@ -1787,14 +2767,16 @@ const BoardView: React.FC<BoardViewProps> = ({
                 });
               }
             } else {
-              chromeAny?.tabs?.create({ url, active: false });
+              openTab({ url, active: false });
             }
           });
         } else {
-          const sid = item.snippet?.snippet_id || item.snippet?.id;
+          const sid = entity.snippet?.snippet_id || entity.snippet?.id || entity.id;
           if (sid && chromeAny?.runtime?.getURL) {
-            chromeAny.tabs.create({
-              url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(sid)}`),
+            openTab({
+              url: chromeAny.runtime.getURL(
+                `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(sid)}`,
+              ),
               active: false,
             });
           }
@@ -1802,8 +2784,8 @@ const BoardView: React.FC<BoardViewProps> = ({
         return;
       }
 
-      const actualSnippet = item.snippet || item.session || item.data || item;
-      const actualId = String(actualSnippet.snippet_id || actualSnippet.id || item.id || '');
+      const actualSnippet = entity.snippet || entity.session || entity.data || entity;
+      const actualId = String(actualSnippet.snippet_id || actualSnippet.id || entity.id || '');
 
       let inferredCategory = category;
       if (!inferredCategory) {
@@ -1814,15 +2796,46 @@ const BoardView: React.FC<BoardViewProps> = ({
       }
 
       if (['snippet', 'note', 'session'].includes(inferredCategory) || inferredCategory === 'notes') {
-        const actualType = inferredCategory === 'notes' ? 'note' : inferredCategory;
+        const actualType = (inferredCategory === 'notes' || inferredCategory === 'snippet') ? 'note' : inferredCategory;
 
-        useUIStore.getState().openEditor({
-          type: actualType as 'note' | 'snippet' | 'session',
-          id: actualId,
-          props: {
-            item: actualSnippet,
+        if (isEmbedded && chromeAny?.runtime?.getURL) {
+          if (inferredCategory === 'snippet') {
+            const mergedSnippet = {
+              ...actualSnippet,
+              favorite: actualSnippet.favorite ?? item.favorite ?? item.data?.favorite,
+              tags: actualSnippet.tags ?? item.tags ?? item.data?.tags,
+              shortcut: actualSnippet.shortcut ?? item.shortcut ?? item.data?.shortcut,
+              hotkey: actualSnippet.hotkey ?? item.hotkey ?? item.data?.hotkey,
+            };
+            const url = new URL(chromeAny.runtime.getURL('AltS_search_newtab/index.html'));
+            url.searchParams.set('alts_action', 'true');
+            url.searchParams.set('type', 'note');
+            url.searchParams.set('entityId', String(actualId));
+            url.searchParams.set('edit_mode', 'true');
+            url.searchParams.set('editorProps', JSON.stringify({ props: { item: mergedSnippet, snippet: mergedSnippet, category: 'snippet' } }));
+            openTab({ url: url.toString(), active: true });
+          } else {
+            openTab({
+              url: chromeAny.runtime.getURL(
+                `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(actualId)}`
+              ),
+              active: true,
+            });
           }
-        });
+        } else {
+          if (actualType === 'todo') {
+            useUIStore.getState().setTodoCreatePrefill(actualSnippet);
+          }
+          useUIStore.getState().openEditor({
+            type: actualType as 'note' | 'session' | 'todo',
+            id: actualId,
+            props: {
+              category: inferredCategory === 'snippet' ? 'snippet' : undefined,
+              snippet: inferredCategory === 'snippet' ? { ...actualSnippet, category: 'snippet' } : actualSnippet,
+              item: actualSnippet,
+            },
+          });
+        }
         return;
       }
 
@@ -1830,8 +2843,8 @@ const BoardView: React.FC<BoardViewProps> = ({
       // (bypassing state.onRequestOpenUrls which silently skips already-open URLs)
       if (urls.length > 0) {
         urls.forEach((url, i) => {
-          if (chromeAny?.tabs?.create) {
-            chromeAny.tabs.create({ url, active: i === 0 });
+          if (true) {
+            openTab({ url, active: i === 0 });
           } else {
             window.open(url, '_blank');
           }
@@ -1848,9 +2861,11 @@ const BoardView: React.FC<BoardViewProps> = ({
       return;
     } else if (kind === 'command' || kind === 'common_command' || kind === 'aggregate') {
       if (isCtrl) {
-        if (chromeAny?.tabs?.create && chromeAny?.runtime?.getURL) {
-          const extUrl = chromeAny.runtime.getURL(`AltS_search_newtab/index.html?lock_command=${encodeURIComponent(item.id)}`);
-          chromeAny.tabs.create({ url: extUrl, active: false });
+        if (true) {
+          const extUrl = chromeAny.runtime.getURL(
+            `AltS_search_newtab/index.html?lock_command=${encodeURIComponent(item.id)}`,
+          );
+          openTab({ url: extUrl, active: false });
         }
         return;
       }
@@ -1868,68 +2883,85 @@ const BoardView: React.FC<BoardViewProps> = ({
       const urlTemplate: string = cmdDef.urlTemplate || '';
 
       // ─── Local app commands — trigger in-app UI exactly like the create panel ───
-      // These mirror the same calls in handleCreateItem and the left sidebar panels.
       const localResult = (() => {
-        switch (cmdId) {
-          case 'createnotes':
-            useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'note' } });
-            useUIStore.getState().openEditor({ type: 'note', id: 'new' });
-            return true;
-          case 'createsnippet':
-            useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'snippet' } });
-            useUIStore.getState().openEditor({ type: 'note', id: 'new' });
-            return true;
-          case 'createlinks':
-            useUIStore.getState().openEditor({ type: 'link', id: 'new' });
-            useUIStore.getState().openEditor({ type: 'note', id: 'new' });
-            return true;
-          case 'createsession':
-            useUIStore.getState().openEditor({ type: 'session', id: 'new' });
-            useUIStore.getState().openEditor({ type: 'note', id: 'new' });
-            return true;
+        const targetCommand = SHARED_ALL_COMMANDS.find((c: any) => c.id === cmdId);
 
-          case 'todo':
-            useUIStore.getState().openEditor({ type: 'todo', id: 'new', props: { prefill: { isCreateModalOnly: true } as any } });
-            return true;
-          case 'agent':
-            useUIStore.getState().setSidebar('agentSidebar' as any, { open: true });
-            return true;
-          case 'shortcuts':
-            useUIStore.getState().setSidebar('commandListSidebar' as any, { open: true });
-            return true;
-          case 'bookmarks':
-            setSelectedSidebarSection('bookmarks');
-            return true;
-          case 'profile':
-            useUIStore.getState().setSidebar('settingsSidebar' as any, { open: true });
-            return true;
-          case 'store':
-            useUIStore.getState().setSidebar('storeSidebar' as any, { open: true });
-            return true;
-          case 'saved-automation':
-            useUIStore.getState().setSidebar('automationSidebar' as any, { open: true });
-            return true;
-          case 'dashboard':
-            chromeAny?.tabs?.create({ url: 'https://app.cmdos.io' });
-            return true;
-          case 'tutorials':
-            chromeAny?.tabs?.create({ url: 'https://docs.cmdos.io' });
-            return true;
-          case 'refresh':
-            window.location.reload();
-            return true;
-          case 'toggle-dark-mode': {
-            const root = document.documentElement;
-            root.classList.toggle('dark');
-            return true;
-          }
+        // If it's a URL-based command (browser commands, etc.), let the later logic handle it
+        if (targetCommand && targetCommand.urlTemplate && !['dashboard', 'tutorials'].includes(cmdId)) {
+          return false;
+        }
+
+        // If embedded, route UI-based commands to the New Tab page
+        if (targetCommand && isEmbedded && chromeAny?.runtime?.getURL) {
+          openTab({
+            url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?trigger_hotkey=true&type=command&id=${encodeURIComponent(cmdId)}`)
+          });
+          return true;
+        }
+
+        // If NOT embedded and the command exists in ALL_COMMANDS, execute it directly
+        if (targetCommand && targetCommand.execute) {
+          targetCommand.execute({
+            services: {
+              navigation: (args: any) => {
+                if (args.kind === 'noteEditor') {
+                  const cat = args.noteProps?.category || 'note';
+                  useUIStore.getState().openEditor({ type: cat === 'snippet' ? 'snippet' : 'note', id: 'new', props: { category: cat } });
+                } else if (args.kind === 'linkEditor') {
+                  useUIStore.getState().openEditor({ type: 'link', id: 'new' });
+                } else if (args.kind === 'sessionEditor') {
+                  useUIStore.getState().openEditor({ type: 'session', id: 'new' });
+                } else if (args.kind === 'commandList') {
+                  useUIStore.getState().setSidebar('commandListSidebar' as any, { open: true });
+                } else if (args.kind === 'folderEditor') {
+                  useUIStore.getState().openCreateItem('folder' as any, { id: 'new' });
+                } else if (args.kind === 'createWorkspace') {
+                  useUIStore.getState().openCreateItem('workspace' as any, { id: 'new' });
+                } else if (args.kind === 'home') {
+                  useUIStore.getState().setView({ type: 'home' });
+                } else if (args.kind === 'custom') {
+                  useUIStore.getState().openEditor({ type: 'aiPrompt' as any, id: 'new' }); // Fallback for custom prompt editor
+                }
+              },
+              reload: () => window.location.reload(),
+              clearDraftAutomation: () => { },
+            } as any
+          } as any);
+          return true;
+        }
+
+        // Fallback ONLY for special buttons that don't exist in allCommands.tsx
+        switch (cmdId) {
+          case 'dashboard': openTab({ url: 'https://app.cmdos.io' }); return true;
+          case 'tutorials': openTab({ url: 'https://docs.cmdos.io' }); return true;
+          case 'refresh': window.location.reload(); return true;
+          case 'toggle-dark-mode': document.documentElement.classList.toggle('dark'); return true;
           case 'calendar':
             chromeAny?.runtime?.sendMessage?.({
-              action: 'open_tab_with_auto_submit',
-              url: 'https://gemini.google.com/app',
-              autoSubmit: { kind: 'gemini', prompt: 'Help me manage my calendar and schedule.' },
-              forceNewTab: true,
+              action: 'open_tab_with_auto_submit', url: 'https://gemini.google.com/app',
+              autoSubmit: { kind: 'gemini', prompt: 'Help me manage my calendar and schedule.' }, forceNewTab: true,
             });
+            return true;
+          // Sidebars that aren't defined as official commands but exist in UI buttons
+          case 'bookmarks':
+            if (isEmbedded) openTab({ url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?trigger_hotkey=true&type=command&id=${cmdId}`) });
+            else setSelectedSidebarSection('bookmarks');
+            return true;
+          case 'shortcuts':
+            if (isEmbedded) openTab({ url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?trigger_hotkey=true&type=command&id=${cmdId}`) });
+            else useUIStore.getState().setSidebar('commandListSidebar' as any, { open: true });
+            return true;
+          case 'profile':
+            if (isEmbedded) openTab({ url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?trigger_hotkey=true&type=command&id=${cmdId}`) });
+            else useUIStore.getState().setSidebar('settingsSidebar' as any, { open: true });
+            return true;
+          case 'store':
+            if (isEmbedded) openTab({ url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?trigger_hotkey=true&type=command&id=${cmdId}`) });
+            else useUIStore.getState().setSidebar('storeSidebar' as any, { open: true });
+            return true;
+          case 'saved-automation':
+            if (isEmbedded) openTab({ url: chromeAny.runtime.getURL(`AltS_search_newtab/index.html?trigger_hotkey=true&type=command&id=${cmdId}`) });
+            else useUIStore.getState().setSidebar('automationSidebar' as any, { open: true });
             return true;
           default:
             return false;
@@ -1945,27 +2977,28 @@ const BoardView: React.FC<BoardViewProps> = ({
 
       // Browser chrome:// pages (no query needed) — open immediately
       const needsQuery = urlTemplate.includes('{query}');
-      const isAiCmd = cmdId === 'ai' || ['gpt', 'claude', 'perplexity', 'gemini'].includes(cmdId) || cmdDef.category === 'ai';
-      
+      const isAiCmd =
+        cmdId === 'ai' || ['gpt', 'claude', 'perplexity', 'gemini'].includes(cmdId) || cmdDef.category === 'ai';
+
       if (!needsQuery && !isAiCmd) {
-        chromeAny?.tabs?.create({ url: urlTemplate });
+        openTab({ url: urlTemplate });
         onClose?.();
         return;
       }
 
       // Search commands: open the newtab and pre-lock the command so the user can type
-      if (chromeAny?.tabs?.create && chromeAny?.runtime?.getURL) {
+      if (true) {
         const extUrl = chromeAny.runtime.getURL(
           `AltS_search_newtab/index.html?lock_command=${encodeURIComponent(item.id || cmdDef.id)}`,
         );
-        chromeAny.tabs.create({ url: extUrl });
+        openTab({ url: extUrl });
         onClose?.();
       }
     } else if (kind === 'bookmark' || kind === 'open_url') {
       const urlsToOpen = item.url ? item.url.split(',').filter(Boolean) : [];
       if (isCtrl) {
         urlsToOpen.forEach((url: string) => {
-          chromeAny?.tabs?.create({ url, active: false });
+          openTab({ url, active: false });
         });
         return;
       }
@@ -1975,7 +3008,7 @@ const BoardView: React.FC<BoardViewProps> = ({
         }
       } else if (urlsToOpen.length > 0) {
         // Standalone fallback: open directly
-        chromeAny?.tabs?.create({ url: urlsToOpen[0] });
+        openTab({ url: urlsToOpen[0] });
         onClose?.();
       }
     } else if (kind === 'automation' && state?.onAutomationSelect) {
@@ -1994,34 +3027,55 @@ const BoardView: React.FC<BoardViewProps> = ({
     e.stopPropagation();
     e.preventDefault();
 
-    const record = item.data || item.session || item.snippet;
+    const record = item.data || item.session || item.snippet || item.item || item;
     if (!record) return;
 
-    const isActualSession = !!item.session || item._kind === 'session';
-    const sessionId = isActualSession ? record.id : (record.snippet_id || record.id);
-    const sessionName = isActualSession ? record.title : (record.key || record.name || record.title || 'Untitled Tab group');
-    const workspaceId = isActualSession ? record.workspaceId : (record.workspace_id || null);
-    const folderId = isActualSession ? record.folderId : (record.folder_id || null);
+    const isActualSession = !!item.session || item._kind === 'session' || (item._kind === 'workspace_item' && record.category?.toLowerCase().includes('session'));
+    const sessionId = isActualSession ? record.id : record.snippet_id || record.id;
+    const sessionName = isActualSession
+      ? record.title || record.key || record.name || 'Untitled Tab Session'
+      : record.key || record.name || record.title || 'Untitled Tab Session';
+    const workspaceId = isActualSession ? record.workspaceId : record.workspace_id || null;
+    const folderId = isActualSession ? record.folderId : record.folder_id || null;
 
     let initialUrls: string[] = [];
     let initialNames: string[] = [];
     let openSettings = record.sessionOpenSettings || item.sessionOpenSettings;
+    const extractSessionUrlPayload = (entries: any[] | undefined | null) => {
+      if (!Array.isArray(entries)) {
+        return { urls: [] as string[], names: [] as string[] };
+      }
+
+      const urls: string[] = [];
+      const names: string[] = [];
+
+      entries.forEach((entry: any) => {
+        const url = typeof entry === 'string' ? entry : entry?.url;
+        if (!url) return;
+        urls.push(url);
+        names.push(typeof entry === 'string' ? '' : entry?.title || entry?.name || '');
+      });
+
+      return { urls, names };
+    };
 
     try {
       const resolved = await resolveEntityById(sessionId);
       const sessionRecord = resolved?.entity as any;
       if (sessionRecord) {
         openSettings = sessionRecord.sessionOpenSettings || openSettings;
-        if (Array.isArray(sessionRecord.urls)) {
-          initialUrls = sessionRecord.urls.map((u: any) => u.url);
-          initialNames = sessionRecord.urls.map((u: any) => u.title || u.name || '');
+        const resolvedPayload = extractSessionUrlPayload(sessionRecord.urls);
+        if (resolvedPayload.urls.length > 0) {
+          initialUrls = resolvedPayload.urls;
+          initialNames = resolvedPayload.names;
         }
       }
-    } catch (err) {}
+    } catch (err) { }
 
     if (initialUrls.length === 0 && isActualSession) {
-      initialUrls = record.urls?.map((l: any) => l.url) || [];
-      initialNames = record.urls?.map((l: any) => l.name || l.title || '') || [];
+      const recordPayload = extractSessionUrlPayload(record.urls);
+      initialUrls = recordPayload.urls;
+      initialNames = recordPayload.names;
     } else {
       try {
         const parsed = typeof record.value === 'string' ? JSON.parse(record.value) : record.value;
@@ -2033,57 +3087,83 @@ const BoardView: React.FC<BoardViewProps> = ({
           if (Array.isArray(parsed.names)) initialNames = parsed.names;
         }
       } catch (err) { }
-  
+
       if (initialUrls.length === 0) {
         initialUrls = getSnippetAllUrls(record);
       }
     }
 
-    // Save prefill to local storage perfectly mimicking create session
-    await new Promise<void>((resolve) => {
-      chrome.storage.local.set({
-        pending_session_prefill: {
-          title: sessionName,
-          sessionId: sessionId,
-          urls: initialUrls,
-          names: initialNames,
-        }
-      }, () => resolve());
-    });
-
-    chrome.runtime.sendMessage({
-      action: 'start_session',
-      sessionId,
-      sessionName,
-      workspaceId,
-      folderId: folderId || null,
-      teamId: undefined,
-      storageMode: 'cloud',
-      initialUrls,
-      initialNames,
-      openSettings,
-      isInlineCreation: true,
-    }, (response) => {
-
-      if (response?.ok && openSettings?.openMode === 'same_window') {
-        const encodedName = encodeURIComponent(sessionName);
-        window.history.replaceState(null, '', `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`);
-        useUIStore.getState().openEditor({ type: 'session', id: 'new' });
+    const activeTabContext = await new Promise<{ currentTabId: number | null; currentWindowId: number | null; currentPageUrl: string }>((resolve) => {
+      const chromeAny = (window as any)?.chrome;
+      if (!chromeAny?.tabs?.query) {
+        resolve({
+          currentTabId: null,
+          currentWindowId: null,
+          currentPageUrl: window.location.href,
+        });
+        return;
       }
+
+      chromeAny.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+        const activeTab = tabs?.[0];
+        resolve({
+          currentTabId: activeTab?.id ?? null,
+          currentWindowId: activeTab?.windowId ?? null,
+          currentPageUrl: activeTab?.url || window.location.href,
+        });
+      });
     });
+
+    chrome.runtime.sendMessage(
+      {
+        action: 'start_session',
+        sessionId,
+        sessionName,
+        workspaceId,
+        folderId: folderId || null,
+        teamId: 'local',
+        storageMode: 'local',
+        initialUrls,
+        initialNames,
+        openSettings,
+        isInlineCreation: true,
+        ...activeTabContext,
+      },
+      response => {
+        if (response?.ok && openSettings?.openMode === 'same_window') {
+          if (response?.reused || response?.reusedCurrentTab) {
+            return;
+          }
+          const encodedName = encodeURIComponent(sessionName);
+          window.history.replaceState(
+            null,
+            '',
+            `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`,
+          );
+          useUIStore.getState().openEditor({
+            type: 'session',
+            id: sessionId,
+            props: {
+              session: {
+                id: sessionId,
+                title: sessionName,
+              },
+            },
+          });
+        }
+      },
+    );
   };
-
-
 
   // Click outside or ESC to close context menu
   useEffect(() => {
     if (!contextMenuState) return;
 
     const handleMouseDown = (event: MouseEvent) => {
-      // Use composedPath to support portal-mounted menus
+      // Use composedPath to support portal-mounted menus and cross Shadow DOM boundaries
       const path = event.composedPath();
-      const menuEl = document.querySelector('[data-unified-menu="true"]');
-      if (menuEl && path.includes(menuEl)) return; // click was inside menu
+      const isInsideMenu = path.some((el: any) => el.getAttribute && el.getAttribute('data-unified-menu') === 'true');
+      if (isInsideMenu) return; // click was inside menu
       setContextMenuState(null);
     };
     document.addEventListener('mousedown', handleMouseDown, true);
@@ -2117,8 +3197,8 @@ const BoardView: React.FC<BoardViewProps> = ({
 
     if (!rawSearchValue.startsWith('/')) return;
 
-    const isExactlyAlias = Object.keys(SLASH_SECTION_ALIASES).some(
-      alias => rawSearchValue.toUpperCase() === `/${alias.toUpperCase()}`
+    const isExactlyAlias = Object.keys(slashSectionAliases).some(
+      alias => rawSearchValue.toUpperCase() === `/${alias.toUpperCase()}`,
     );
 
     if (isExactlyAlias) {
@@ -2161,9 +3241,9 @@ const BoardView: React.FC<BoardViewProps> = ({
   useEffect(() => {
     if (!slashMode.slashDropdown) return;
 
-    const filterText = String(rawSearchValue.slice(1) || "").toLowerCase();
+    const filterText = String(rawSearchValue.slice(1) || '').toLowerCase();
     const visibleOptions = Object.keys(SLASH_SECTION_META).filter(name => {
-      const alias = SLASH_ALIAS_DISPLAY[name] || '';
+      const alias = slashAliasDisplay[name] || '';
       return String(name).toLowerCase().includes(filterText) || String(alias).toLowerCase().includes(filterText);
     });
 
@@ -2181,7 +3261,7 @@ const BoardView: React.FC<BoardViewProps> = ({
         e.stopPropagation();
         const chosen = visibleOptions[slashDropdownSelectedIndex];
         if (chosen) {
-          const alias = SLASH_ALIAS_DISPLAY[chosen] || '';
+          const alias = slashAliasDisplay[chosen] || '';
           state?.onQueryChange?.(`/${alias} `);
           setSlashDropdownSelectedIndex(-1);
           requestAnimationFrame(() => {
@@ -2214,9 +3294,22 @@ const BoardView: React.FC<BoardViewProps> = ({
   // Override the activeGroups items with slash search query filtering
   const finalGroupsBase = (() => {
     const combinedGroups = [...extraGroups, ...activeGroups];
-    if (!slashSearchQuery.trim()) return combinedGroups;
-    const lower = String(slashSearchQuery || "").toLowerCase();
-    return combinedGroups.map(g => ({
+
+    // Check if the searchbar explicitly supplied only commands (e.g. command menu trigger)
+    const activeSuggestions = filterVisibleCommandSuggestions(state?.suggestions || unfilteredSuggestions || []);
+    const hasAtLeastOneCommand = activeSuggestions.some((s: any) => s._kind === 'command' || s.commandType !== undefined);
+    const isExplicitCommandMenu =
+      activeSuggestions.length > 0 &&
+      hasAtLeastOneCommand &&
+      activeSuggestions.every(
+        (s: any) => s._kind === 'command' || s.commandType !== undefined || s._kind === 'workspace_item',
+      );
+
+    if (isExplicitCommandMenu || !slashMode.activeSection || !slashSearchQuery.trim() || state?.mode === 'command')
+      return combinedGroups;
+
+    const lower = String(slashSearchQuery || '').toLowerCase();
+    const filteredGroups = combinedGroups.map(g => ({
       ...g,
       items: g.items.filter((item: any) => {
         const t = String(getTitle(item)).toLowerCase();
@@ -2224,6 +3317,7 @@ const BoardView: React.FC<BoardViewProps> = ({
         return t.includes(lower) || d.includes(lower);
       }),
     }));
+    return filteredGroups;
   })();
 
   // ESC to clear search globally when active, as long as context menus aren't open
@@ -2249,7 +3343,6 @@ const BoardView: React.FC<BoardViewProps> = ({
   //  - slash alias matched (e.g. '/L') → show only that column
   //  - normal sidebar click → use selectedSidebarSection
 
-
   // Normalize a group title to its sidebar ID for matching (e.g. "This Site" → "thissite")
   const toSidebarId = (title: string) => String(title).toLowerCase().replace(/\s+/g, '');
 
@@ -2258,29 +3351,31 @@ const BoardView: React.FC<BoardViewProps> = ({
   const finalGroups = (
     effectiveSidebarSection === 'all'
       ? finalGroupsBase
-      : finalGroupsBase.filter(g =>
-        // Built-in groups: match by their exact ID
-        (g as any).id === effectiveSidebarSection ||
-        // Built-in groups: match by their exact key (todos, notes, etc.)
-        String(g.title).toLowerCase() === effectiveSidebarSection ||
-        // Extra groups: match by sanitized ID (e.g. "This Site" → "thissite")
-        toSidebarId(g.title) === effectiveSidebarSection
+      : finalGroupsBase.filter(
+        g =>
+          // Built-in groups: match by their exact ID
+          (g as any).id === effectiveSidebarSection ||
+          // Built-in groups: match by their exact key (todos, notes, etc.)
+          String(g.title).toLowerCase() === effectiveSidebarSection ||
+          // Extra groups: match by sanitized ID (e.g. "This Site" → "thissite")
+          toSidebarId(g.title) === effectiveSidebarSection,
       )
   ).filter(g => {
+    if (!g || !Array.isArray(g.items)) return false;
     // If user is actively searching (with actual query text), hide columns that have 0 results
     if (slashMode.searchQuery.trim() !== '') {
-      return g.items.length > 0;
+      return (g.items?.length ?? 0) > 0;
     }
     return true;
   });
 
   // Automatically focus the first available result item when query changes or result set updates
-  const groupItemCounts = useMemo(() => finalGroups.map(g => g.items.length).join(','), [finalGroups]);
+  const groupItemCounts = useMemo(() => finalGroups.map(g => g.items?.length ?? 0).join(','), [finalGroups]);
 
   useEffect(() => {
     let firstValidCol = -1;
     for (let c = 0; c < finalGroups.length; c++) {
-      if (finalGroups[c].items.length > 0) {
+      if ((finalGroups[c]?.items?.length ?? 0) > 0) {
         firstValidCol = c;
         break;
       }
@@ -2292,18 +3387,11 @@ const BoardView: React.FC<BoardViewProps> = ({
     }
   }, [rawSearchValue, groupItemCounts]);
 
-
   useEffect(() => {
     if (finalGroups.length === 0) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (
-        state?.isAtMenuOpen ||
-
-        state?.isContextualPopupOpen ||
-        state?.showAIHistoryPanel ||
-        slashMode.slashDropdown
-      ) {
+      if (state?.isAtMenuOpen || state?.isContextualPopupOpen || state?.showAIHistoryPanel || slashMode.slashDropdown) {
         return;
       }
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key)) {
@@ -2347,17 +3435,6 @@ const BoardView: React.FC<BoardViewProps> = ({
   }, [finalGroups, focus, state, slashMode.slashDropdown]);
 
   const totalItems = [...activeGroups, ...extraGroups].reduce((acc, g) => acc + (g?.items?.length ?? 0), 0);
-  if (totalItems === 0) {
-    return (
-      <div className="mx-auto w-full max-w-sm h-full flex flex-col items-center justify-center bg-[var(--color-containerBg)] rounded-xl border border-[#eee8d5] dark:border-white/10 shadow-sm transition-all duration-300 ease-in-out">
-        <FaSearch
-          size={24}
-          className="text-neutral-300 dark:text-neutral-700 mb-2 transition-transform duration-300 hover:scale-110"
-        />
-        <span className="text-sm font-medium text-neutral-400 dark:text-neutral-600">No suggestions</span>
-      </div>
-    );
-  }
 
   const SIDEBAR_ITEMS = [
     {
@@ -2384,13 +3461,14 @@ const BoardView: React.FC<BoardViewProps> = ({
       id: String(eg.title).toLowerCase().replace(/\s+/g, ''),
       label: eg.title,
       icon: (isSelected: boolean) => (
-        <div className={clsx(
-          'w-4 h-4 shrink-0 transition-colors flex items-center justify-center',
-          isSelected ? 'text-white' : 'text-neutral-400'
-        )}>
+        <div
+          className={clsx(
+            'w-4 h-4 shrink-0 transition-colors flex items-center justify-center',
+            isSelected ? 'text-white' : 'text-neutral-400',
+          )}>
           {eg.icon}
         </div>
-      )
+      ),
     })),
     {
       id: 'todos',
@@ -2399,7 +3477,7 @@ const BoardView: React.FC<BoardViewProps> = ({
         <BsCalendarCheck
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-neutral-400' : 'text-neutral-400/70 group-hover:text-neutral-400',
+            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
           )}
         />
       ),
@@ -2411,7 +3489,7 @@ const BoardView: React.FC<BoardViewProps> = ({
         <NotesIcon
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-amber-400' : 'text-amber-400/70 group-hover:text-amber-400',
+            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
           )}
         />
       ),
@@ -2436,42 +3514,6 @@ const BoardView: React.FC<BoardViewProps> = ({
         <FaLink
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-blue-400' : 'text-blue-400/70 group-hover:text-blue-400',
-          )}
-        />
-      ),
-    },
-    {
-      id: 'sessions',
-      label: 'Tab groups',
-      icon: (isSelected: boolean) => (
-        <FaLayerGroup
-          className={clsx(
-            "w-4 h-4 shrink-0 transition-colors",
-            isSelected ? "text-white" : "text-[var(--color-iconDefault)] group-hover:text-white"
-          )}
-        />
-      ),
-    },
-    {
-      id: 'chat_agents',
-      label: 'Chat Agents',
-      icon: (isSelected: boolean) => (
-        <FaRobot
-          className={clsx(
-            "w-4 h-4 shrink-0 transition-colors",
-            isSelected ? "text-white" : "text-[var(--color-iconDefault)] group-hover:text-white"
-          )}
-        />
-      ),
-    },
-    {
-      id: 'commands',
-      label: 'Commands',
-      icon: (isSelected: boolean) => (
-        <FaTerminal
-          className={clsx(
-            'w-4 h-4 shrink-0 transition-colors',
             isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
           )}
         />
@@ -2490,13 +3532,61 @@ const BoardView: React.FC<BoardViewProps> = ({
       ),
     },
     {
+      id: 'sessions',
+      label: 'Tab Sessions',
+      icon: (isSelected: boolean) => (
+        <FaLayerGroup
+          className={clsx(
+            'w-4 h-4 shrink-0 transition-colors',
+            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+          )}
+        />
+      ),
+    },
+    {
+      id: 'chat_agents',
+      label: 'Chat Agents',
+      icon: (isSelected: boolean) => (
+        <FaRobot
+          className={clsx(
+            'w-4 h-4 shrink-0 transition-colors',
+            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+          )}
+        />
+      ),
+    },
+    {
+      id: 'commands',
+      label: 'Commands',
+      icon: (isSelected: boolean) => (
+        <FaTerminal
+          className={clsx(
+            'w-4 h-4 shrink-0 transition-colors',
+            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+          )}
+        />
+      ),
+    },
+    {
+      id: 'system_commands',
+      label: 'System Commands',
+      icon: (isSelected: boolean) => (
+        <FaTerminal
+          className={clsx(
+            'w-4 h-4 shrink-0 transition-colors',
+            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+          )}
+        />
+      ),
+    },
+    {
       id: 'automations',
       label: 'Automations',
       icon: (isSelected: boolean) => (
         <FiZap
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-amber-400' : 'text-amber-400/70 group-hover:text-amber-400',
+            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
           )}
         />
       ),
@@ -2504,17 +3594,18 @@ const BoardView: React.FC<BoardViewProps> = ({
   ];
 
   // Slash picker visible options
-  const slashPickerFilterText = String(rawSearchValue.slice(1) || "").toLowerCase();
+  const slashPickerFilterText = String(rawSearchValue.slice(1) || '').toLowerCase();
   const slashPickerOptions = Object.keys(SLASH_SECTION_META).filter(name => {
-    const alias = SLASH_ALIAS_DISPLAY[name] || '';
-    return String(name).toLowerCase().includes(slashPickerFilterText) || String(alias).toLowerCase().includes(slashPickerFilterText);
+    const alias = slashAliasDisplay[name] || '';
+    return (
+      String(name).toLowerCase().includes(slashPickerFilterText) ||
+      String(alias).toLowerCase().includes(slashPickerFilterText)
+    );
   });
-
-
 
   return (
     <div
-      className="mx-auto w-full max-w-[1400px] h-full relative"
+      className={clsx('mx-auto w-full max-w-[1400px] relative', isEmbedded ? 'flex flex-col flex-1 min-h-0' : 'h-full')}
       onPointerDown={e => e.stopPropagation()}
       onPointerUp={e => e.stopPropagation()}
       onMouseDown={e => e.stopPropagation()}
@@ -2522,24 +3613,32 @@ const BoardView: React.FC<BoardViewProps> = ({
       onClick={e => {
         // log removed
         e.stopPropagation();
-      }}
-    >
+      }}>
       {onClose && !slashMode.slashDropdown && !hideCloseButton && (
         <button
           onClick={onClose}
-          className="absolute -top-10 right-0 z-[60] p-2 flex items-center justify-center text-red-500 hover:text-red-400 transition-transform hover:scale-110 cursor-pointer"
-          title="Close Board View (Esc)"
-        >
+          className="absolute -top-10 right-0 z-[60] p-2 flex items-center justify-center text-neutral-500 hover:text-neutral-300 hover:bg-white/5 rounded-lg transition-all hover:scale-110 cursor-pointer focus:outline-none"
+          title="Close Board View (Esc)">
           <FiX size={22} strokeWidth={2.5} />
         </button>
       )}
-      <div className={clsx(
-        "w-full h-[600px] flex items-stretch overflow-hidden transition-all duration-300 ease-in-out relative",
-        (slashMode.slashDropdown || isEmbedded) ? "bg-transparent border-transparent shadow-none" : "bg-[var(--color-editorBg)] rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl"
-      )}>
+      <div
+        className={clsx(
+          'w-full flex items-stretch overflow-hidden transition-all duration-300 ease-in-out relative',
+          isEmbedded ? 'flex-1 min-h-0' : 'h-[600px]',
+          slashMode.slashDropdown || (isEmbedded && !forceNativeStyling)
+            ? 'border-transparent shadow-none'
+            : 'rounded-2xl border border-white/10 shadow-2xl',
+        )}
+        style={{
+          backgroundColor: theme?.tokens?.sheetBg || 'var(--color-sheetBg)',
+          opacity: 1,
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+        }}>
         {/* Left Sidebar */}
         {!slashMode.slashDropdown && (
-          <div className="w-[150px] shrink-0 flex flex-col border-r border-neutral-200 dark:border-neutral-800/60 py-4 px-3 overflow-y-auto hover-scrollbar">
+          <div className="w-[220px] shrink-0 flex flex-col border-r border-white/10 py-4 px-3 overflow-y-auto hover-scrollbar group/sidebar">
             {SIDEBAR_ITEMS.map(item => {
               const isSelected = effectiveSidebarSection === item.id;
               return (
@@ -2564,7 +3663,7 @@ const BoardView: React.FC<BoardViewProps> = ({
                         }
                       }
 
-                      const alias = SLASH_ALIAS_DISPLAY[item.id];
+                      const alias = slashAliasDisplay[item.id];
                       let newQuery = searchText;
                       if (alias) {
                         newQuery = `/${alias} ${searchText}`;
@@ -2586,140 +3685,466 @@ const BoardView: React.FC<BoardViewProps> = ({
                     {item.icon(isSelected)}
                   </div>
                   <span className="flex-1 tracking-tight truncate leading-tight">{item.label}</span>
+                  {omniboxPrefixes &&
+                    (item.id === 'notes' ||
+                      item.id === 'links' ||
+                      item.id === 'bookmarks' ||
+                      item.id === 'snippets' ||
+                      item.id === 'commands' ||
+                      item.id === 'system_commands' ||
+                      item.id === 'sessions' ||
+                      item.id === 'automations' ||
+                      item.id === 'todos' ||
+                      item.id === 'chat_agents') && (
+                      <span className="ml-2 flex items-center gap-1">
+                        <EditablePrefixKey
+                          category={
+                            item.id === 'notes'
+                              ? 'note'
+                              : item.id === 'snippets'
+                                ? 'snippet'
+                                : item.id === 'commands'
+                                  ? 'command'
+                                  : item.id === 'system_commands'
+                                    ? 'system_command'
+                                  : item.id === 'links'
+                                    ? 'link'
+                                    : item.id === 'bookmarks'
+                                      ? 'bookmark'
+                                      : item.id === 'sessions'
+                                        ? 'session'
+                                        : item.id === 'automations'
+                                          ? 'automation'
+                                          : item.id === 'todos'
+                                            ? 'todo'
+                                            : item.id === 'chat_agents'
+                                              ? 'agent'
+                                              : 'note'
+                          }
+                          currentValue={
+                            item.id === 'notes'
+                              ? omniboxPrefixes.note
+                              : item.id === 'snippets'
+                                ? omniboxPrefixes.snippet || ''
+                                : item.id === 'links'
+                                  ? omniboxPrefixes.link
+                                  : item.id === 'bookmarks'
+                                    ? omniboxPrefixes.bookmark || ''
+                                    : item.id === 'commands'
+                                      ? omniboxPrefixes.command
+                                      : item.id === 'system_commands'
+                                        ? omniboxPrefixes.system_command || ''
+                                      : item.id === 'sessions'
+                                        ? omniboxPrefixes.session || ''
+                                        : item.id === 'automations'
+                                          ? omniboxPrefixes.automation || ''
+                                          : item.id === 'todos'
+                                            ? omniboxPrefixes.todo || ''
+                                          : item.id === 'chat_agents'
+                                            ? omniboxPrefixes.agent || ''
+                                            : ''
+                          }
+                        />
+                      </span>
+                    )}
                 </button>
               );
             })}
+            {(onSheetRedirect || onBoardRedirect) && (
+              <>
+                <div className="flex-grow" />
+                <div className="pt-2 mt-auto flex items-center gap-2 pl-1 select-none shrink-0">
+                  {onSheetRedirect && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSheetRedirect();
+                      }}
+                      className="w-[28px] h-[28px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white focus:outline-none"
+                      title="Table (SpreadSheet)"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" strokeWidth="2" fill="none" />
+                        <line x1="8" y1="7" x2="18" y2="7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        <line x1="8" y1="12" x2="18" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        <line x1="8" y1="17" x2="18" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        <circle cx="5" cy="7" r="1" fill="currentColor" />
+                        <circle cx="5" cy="12" r="1" fill="currentColor" />
+                        <circle cx="5" cy="17" r="1" fill="currentColor" />
+                      </svg>
+                    </button>
+                  )}
+                  {onBoardRedirect && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onBoardRedirect();
+                      }}
+                      className="w-[28px] h-[28px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white focus:outline-none"
+                      title="Board (Kanaban)"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" strokeWidth="2" fill="none" />
+                        <line x1="9" y1="2" x2="9" y2="22" stroke="currentColor" strokeWidth="1.5" />
+                        <line x1="15" y1="2" x2="15" y2="22" stroke="currentColor" strokeWidth="1.5" />
+                        <rect x="4" y="5" width="3" height="4" rx="0.5" fill="currentColor" />
+                        <rect x="4" y="11" width="3" height="6" rx="0.5" fill="currentColor" />
+                        <rect x="10" y="5" width="3" height="7" rx="0.5" fill="currentColor" />
+                        <rect x="10" y="14" width="3" height="5" rx="0.5" fill="currentColor" />
+                        <rect x="17" y="5" width="3" height="5" rx="0.5" fill="currentColor" />
+                        <rect x="17" y="12" width="3" height="4" rx="0.5" fill="currentColor" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 
         {/* Main Board Content */}
         {!slashMode.slashDropdown && (
-          <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-stretch gap-0 board-scrollbar">
-            {finalGroups.map((group, colIdx) => (
-              <div
-                key={group.title}
-                className={clsx(
-                  "flex flex-col items-start flex-1 min-w-[260px] max-w-[400px] bg-transparent pr-4 pl-4 pt-4 pb-4 box-border",
-                  !isEmbedded && "border-r border-neutral-200 dark:border-neutral-800/60 last:border-r-0"
-                )}>
-                {/* Header */}
-                <div className="w-full pb-1 mb-1 justify-between min-h-[32px] shrink-0 flex items-center box-border">
-                  <div className="flex items-center min-w-0 flex-1">
-                    <div className="text-white/80 shrink-0 mr-3 flex items-center justify-center">{group.icon}</div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <h2 className="text-[14px] font-medium text-[var(--color-textPrimary)] tracking-tight leading-tight capitalize truncate flex items-center gap-1.5">
-                        {group.title}
-                        <span className="text-neutral-500 font-normal">· {group.items.length}</span>
-                      </h2>
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-x-auto overflow-y-hidden flex items-stretch gap-0 board-scrollbar pb-2.5">
+            {finalGroups.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center bg-transparent">
+                <FaSearch
+                  size={24}
+                  className="text-neutral-300 dark:text-neutral-700 mb-2 transition-transform duration-300 hover:scale-110"
+                />
+                <span className="text-sm font-medium text-neutral-400 dark:text-neutral-600">No suggestions found</span>
+              </div>
+            ) : (
+              finalGroups.map((group, colIdx) => (
+                <div
+                  key={group.title}
+                  className={clsx(
+                    'flex flex-col items-start flex-1 min-w-[260px] max-w-[400px] bg-transparent pr-4 pl-4 pt-4 pb-4 box-border',
+                    'border-r border-white/10 last:border-r-0',
+                  )}>
+                  {/* Header */}
+                  <div className="w-full pb-1 mb-1 justify-between min-h-[32px] shrink-0 flex items-center box-border">
+                    <div className="flex items-center min-w-0 flex-1">
+                      <div className="text-white/80 shrink-0 mr-3 flex items-center justify-center">{group.icon}</div>
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <h2 className="text-[14px] font-medium text-[var(--color-textPrimary)] tracking-tight leading-tight capitalize truncate flex items-center gap-1.5">
+                          {group.title}
+                          <span className="text-neutral-500 font-normal">· {group.items.length}</span>
+                        </h2>
+                      </div>
                     </div>
+                    {isLoggedIn &&
+                      ['todos', 'notes', 'snippets', 'links', 'Tab Sessions', 'chat agents', 'automations'].includes(
+                        String(group.title).toLowerCase(),
+                      ) && (
+                        <button
+                          onClick={e => handleCreateItem(String(group.title).toLowerCase(), e)}
+                          className="shrink-0 p-1.5 rounded-md text-neutral-500 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                          title={`Create new ${String(group.title).toLowerCase().slice(0, -1)}`}>
+                          <FaPlus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                   </div>
-                  {isLoggedIn && ['todos', 'notes', 'snippets', 'links', 'sessions'].includes(String(group.title).toLowerCase()) && (
-                    <button
-                      onClick={e => handleCreateItem(String(group.title).toLowerCase(), e)}
-                      className="shrink-0 p-1.5 rounded-md text-neutral-500 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                      title={`Create new ${String(group.title).toLowerCase().slice(0, -1)}`}>
-                      <FaPlus className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
 
-                {/* Cards Scrollable Area */}
-                <div className="flex-1 min-w-0 flex py-1 scroll-smooth box-border flex-col items-center overflow-y-auto overflow-x-hidden w-full gap-0 hide-scrollbar">
-                  {group.items.length === 0 ? null : (
-                    group.items.map((item: any, idx: number) => {
-                      const rawTitle = getTitle(item);
-                      const desc = getDesc(item);
-                      const isFocused = focus[0] === colIdx && focus[1] === idx;
-                      const kind = item._kind || item.type;
+                  {/* Cards Scrollable Area */}
+                  <div className="flex-1 min-w-0 flex py-1 scroll-smooth box-border flex-col items-center overflow-y-auto overflow-x-hidden w-full gap-0 hide-scrollbar">
+                    {(() => {
+                      if (group.title.toLowerCase() !== 'todos') {
+                        if (group.items.length === 0) return null;
+                        return group.items.map((item: any, idx: number) => {
+                          const unwrappedItem = unwrapProxy(item);
+                          const rawTitle = getTitle(unwrappedItem);
+                          const categoryLabel = getCategoryLabel(unwrappedItem);
+                          const desc = getDesc(unwrappedItem);
+                          const isFocused = focus[0] === colIdx && focus[1] === idx;
+                          const compoundId = getItemCompoundId(unwrappedItem);
+                          const displayedShortcut =
+                            unwrappedItem._displayShortcut ||
+                            unwrappedItem.item?._displayShortcut ||
+                            (shortcutsMap[compoundId] ? normalizeShortcutTrigger(shortcutsMap[compoundId]) : '') ||
+                            hotkeysMap[compoundId] ||
+                            '';
 
-                      return (
-                        <div
-                          key={idx}
-                          id={`board-item-${colIdx}-${idx}`}
-                          style={{ pointerEvents: 'all' }}
-                          onPointerDown={e => {
-                            if (e.button === 2) return; // Allow right click for context menu
-                            e.stopPropagation();
-                            e.preventDefault();
-                            executeItem(item, e as any);
-                          }}
-                          onMouseDown={e => {
-                            if (e.button === 2) return;
-                            e.stopPropagation();
-                            e.preventDefault();
-                          }}
-                          onContextMenu={e => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setContextMenuState({
-                              x: e.clientX,
-                              y: e.clientY,
-                              item,
-                            });
-                          }}
-                          className="shrink-0 flex flex-col group cursor-pointer box-border relative w-full h-auto min-h-[32px] py-0.5 items-center">
-                          <div
-                            className={clsx(
-                              "rounded-xl transition-all duration-200 overflow-hidden box-border h-full py-2 px-3 w-full flex flex-col justify-center text-left",
-                              isFocused
-                                ? "bg-white/10 shadow-md border border-white/10"
-                                : "bg-transparent hover:bg-white/5 border border-transparent"
-                            )}>
-                            <div className="flex items-center justify-between min-w-0 w-full gap-2">
-                              <div className="flex items-center gap-3 min-w-0 flex-1">
-                                <div className="shrink-0 w-[22px] h-[22px] flex items-center justify-center">
-                                  {renderIcon(item)}
+                          return (
+                            <div
+                              key={idx}
+                              id={`board-item-${colIdx}-${idx}`}
+                              style={{ pointerEvents: 'all' }}
+                              onPointerDown={e => {
+                                if (e.button === 2) return;
+                                e.stopPropagation();
+                                e.preventDefault();
+                                executeItem(unwrappedItem, e as any);
+                              }}
+                              onMouseDown={e => {
+                                if (e.button === 2) return;
+                                e.stopPropagation();
+                                e.preventDefault();
+                              }}
+                              onContextMenu={e => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setContextMenuState({
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                  item: unwrappedItem,
+                                });
+                              }}
+                              className="shrink-0 flex flex-col group cursor-pointer box-border relative w-full h-auto min-h-[32px] py-0.5 items-center">
+                              <div
+                                className={clsx(
+                                  'rounded-xl transition-all duration-200 overflow-hidden box-border h-full py-2 px-3 w-full flex flex-col justify-center text-left',
+                                  isFocused
+                                    ? 'bg-white/10 shadow-md border border-white/10'
+                                    : 'bg-transparent hover:bg-white/5 border border-transparent',
+                                )}>
+                                <div className="flex items-center justify-between min-w-0 w-full gap-2">
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                                    <div className="shrink-0 w-[22px] h-[22px] flex items-center justify-center">
+                                      {renderIcon(unwrappedItem)}
+                                    </div>
+                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                      <span
+                                        className={clsx(
+                                          'text-[13px] tracking-tight truncate leading-tight flex-1 min-w-0 font-medium transition-colors duration-200',
+                                          isFocused ? 'text-white' : 'text-white/90 group-hover:text-white',
+                                        )}>
+                                      {highlightMatch(rawTitle, query)}
+                                    </span>
+                                    {shouldShowCategoryLabel(unwrappedItem) && categoryLabel && (
+                                      <span
+                                        className={clsx(
+                                            'shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium tracking-tight border',
+                                            isFocused
+                                              ? 'text-white/80 border-white/15 bg-white/10'
+                                              : 'text-white/65 border-white/10 bg-white/[0.04] group-hover:text-white/75 group-hover:border-white/15',
+                                          )}>
+                                          {categoryLabel}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {displayedShortcut && (
+                                    <div className="shrink-0 ml-2">
+                                      <span className="px-1.5 py-0.5 rounded text-[10px]  text-[var(--color-textSecondary)] 
+                                     border border-neutral-200 dark:border-neutral-700 ">
+                                        {displayedShortcut.toLowerCase()}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
-                                <span
-                                  className={clsx(
-                                    "text-[13px] tracking-tight truncate leading-tight flex-1 min-w-0 font-medium transition-colors duration-200",
-                                    isFocused ? "text-white" : "text-neutral-200 group-hover:text-white"
-                                  )}>
-                                  {highlightMatch(rawTitle, query)}
-                                </span>
+                                {desc && (
+                                  <div className="flex min-w-0 w-full pl-[34px] mt-0.5">
+                                    <span
+                                      className={clsx(
+                                        'text-[11px] truncate w-full leading-relaxed transition-colors duration-200',
+                                        isFocused ? 'text-white/90' : 'text-white/70',
+                                      )}>
+                                      {desc}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
-                              {(kind === 'aiPrompt' || kind === 'chat_agent') && (
-                                <div
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    useUIStore.getState().openEditor({ type: 'aiPrompt', id: item.id || item.data?.id });
-                                  }}
-                                  className="text-neutral-400 hover:text-white transition-colors duration-150 cursor-pointer z-20 opacity-0 group-hover:opacity-100 mr-1.5"
-                                  title="Edit Chat Agent"
-                                >
-                                  <FiEdit2 size={12} />
-                                </div>
-                              )}
-                              {group.title === 'All' && (
-                                <div className="shrink-0 bg-white/10 px-1.5 py-0.5 rounded text-[9px] text-neutral-400 capitalize tracking-wider font-medium">
-                                  {getSuggestionLabel(item)}
-                                </div>
-                              )}
                             </div>
-                            {kind === 'todo' ? (
+                          );
+                        });
+                      }
+
+                      // Otherwise, it is the Todos column! Group it into collapsible sections
+                      const todoItems = group.items.map((t: any) => normalizeTodoBoardItem(t));
+                      const allActive = todoItems.filter((t: any) => !t.isDone && !t.is_done);
+                      const allDone = todoItems.filter((t: any) => t.isDone || t.is_done);
+
+                      const nowVal = new Date();
+                      const parseTaskDateLocal = (t: any) => {
+                        if (t.scheduleTime) return new Date(t.scheduleTime);
+                        if (t.event_deadline) return new Date(String(t.event_deadline).replace(' ', 'T'));
+                        return new Date(0);
+                      };
+
+                      const overdueItems = allActive.filter((t: any) => {
+                        const d = parseTaskDateLocal(t);
+                        const isRecurring = t.scheduleType === 'recurring' || !!(t.is_recurring || t.recurring);
+                        return (
+                          !isRecurring &&
+                          d.getTime() > 0 &&
+                          d.getTime() < nowVal.getTime() &&
+                          (!isSameDay(d, nowVal) ||
+                            (t.event_deadline && String(t.event_deadline).includes(':')) ||
+                            t.scheduleTime)
+                        );
+                      });
+
+                      const scheduledItems = allActive.filter((t: any) => {
+                        if (overdueItems.includes(t)) return false;
+                        const d = parseTaskDateLocal(t);
+                        const isRecurring = t.scheduleType === 'recurring' || !!(t.is_recurring || t.recurring);
+                        if (isRecurring) return false;
+                        return d.getTime() > nowVal.getTime() && !isSameDay(d, nowVal);
+                      });
+
+                      const activeItems = allActive.filter((t: any) => {
+                        if (overdueItems.includes(t)) return false;
+                        if (scheduledItems.includes(t)) return false;
+                        return true;
+                      });
+
+                      const sorted = (arr: any[]) =>
+                        [...arr].sort((a, b) => parseTaskDateLocal(a).getTime() - parseTaskDateLocal(b).getTime());
+
+                      const renderTodoRowLocal = (item: any, idx: number) => {
+                        const rawTitle = getTitle(item);
+                        const isFocused = focus[0] === colIdx && focus[1] === idx;
+                        return (
+                          <div
+                            key={`todo-${item.id}-${idx}`}
+                            id={`board-item-${colIdx}-${idx}`}
+                            style={{ pointerEvents: 'all' }}
+                            onPointerDown={e => {
+                              if (e.button === 2) return;
+                              e.stopPropagation();
+                              e.preventDefault();
+                              executeItem(item, e as any);
+                            }}
+                            onMouseDown={e => {
+                              if (e.button === 2) return;
+                              e.stopPropagation();
+                              e.preventDefault();
+                            }}
+                            onContextMenu={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setContextMenuState({
+                                x: e.clientX,
+                                y: e.clientY,
+                                item,
+                              });
+                            }}
+                            className="shrink-0 flex flex-col group cursor-pointer box-border relative w-full h-auto min-h-[32px] py-0.5 items-center">
+                            <div
+                              className={clsx(
+                                'rounded-xl transition-all duration-200 overflow-hidden box-border h-full py-2 px-3 w-full flex flex-col justify-center text-left',
+                                isFocused
+                                  ? 'bg-white/10 shadow-md border border-white/10'
+                                  : 'bg-transparent hover:bg-white/5 border border-transparent',
+                              )}>
+                              <div className="flex items-center justify-between min-w-0 w-full gap-2">
+                                <div className="flex items-center gap-3 min-w-0 flex-1">
+                                  <div className="shrink-0 w-[22px] h-[22px] flex items-center justify-center">
+                                    {renderIcon(item)}
+                                  </div>
+                                  <span
+                                    className={clsx(
+                                      'text-[13px] tracking-tight truncate leading-tight flex-1 min-w-0 font-medium transition-colors duration-200',
+                                      isFocused ? 'text-white' : 'text-white/90 group-hover:text-white',
+                                    )}>
+                                    {highlightMatch(rawTitle, query)}
+                                  </span>
+                                </div>
+                              </div>
                               <div className="flex flex-col min-w-0 w-full pl-[34px] mt-0.5 gap-0.5">
                                 {renderTodoMetadata(item, isFocused)}
                               </div>
-                            ) : desc ? (
-                              <div className="flex min-w-0 w-full pl-[34px] mt-0.5">
-                                <span
-                                  className={clsx(
-                                    "text-[11px] truncate w-full leading-relaxed transition-colors duration-200",
-                                    isFocused ? "text-neutral-300" : "text-neutral-500"
-                                  )}>
-                                  {desc}
-                                </span>
-                              </div>
-                            ) : null}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })
-                  )}
+                        );
+                      };
+
+                      const makeHeaderLocal = (key: string, label: string, count: number) => {
+                        const isCollapsed = boardCollapsedGroups[key];
+                        return (
+                          <div
+                            key={`${key}-header`}
+                            className="w-full py-2 px-3 flex items-center gap-1.5 select-none cursor-pointer hover:bg-white/[0.02] rounded-lg transition-all"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setBoardCollapsedGroups(prev => ({ ...prev, [key]: !prev[key] }));
+                            }}>
+                            <span className="text-[10px] font-bold tracking-[0.08em] text-[#8b949e] uppercase flex items-center gap-1.5">
+                              {isCollapsed ? '▶' : '▼'} {label} ({count})
+                            </span>
+                          </div>
+                        );
+                      };
+
+                      const rows: React.ReactNode[] = [];
+                      let localIdx = 0;
+
+                      // 1. Overdue
+                      if (overdueItems.length > 0) {
+                        rows.push(makeHeaderLocal('overdue', 'Overdue', overdueItems.length));
+                        if (!boardCollapsedGroups.overdue) {
+                          sorted(overdueItems).forEach(t => {
+                            rows.push(renderTodoRowLocal(t, localIdx++));
+                          });
+                        }
+                      }
+
+                      // 2. Active
+                      rows.push(makeHeaderLocal('active', 'Active', activeItems.length));
+                      if (!boardCollapsedGroups.active) {
+                        if (activeItems.length === 0) {
+                          rows.push(
+                            <div
+                              key="active-empty"
+                              className="px-8 py-1 text-[11px] text-neutral-600 italic w-full text-left">
+                              No active tasks
+                            </div>,
+                          );
+                        } else {
+                          sorted(activeItems).forEach(t => {
+                            rows.push(renderTodoRowLocal(t, localIdx++));
+                          });
+                        }
+                      }
+
+                      // 3. Scheduled
+                      rows.push(makeHeaderLocal('scheduled_fut', 'Scheduled', scheduledItems.length));
+                      if (!boardCollapsedGroups.scheduled_fut) {
+                        if (scheduledItems.length === 0) {
+                          rows.push(
+                            <div
+                              key="scheduled-empty"
+                              className="px-8 py-1 text-[11px] text-neutral-600 italic w-full text-left">
+                              No scheduled tasks
+                            </div>,
+                          );
+                        } else {
+                          sorted(scheduledItems).forEach(t => {
+                            rows.push(renderTodoRowLocal(t, localIdx++));
+                          });
+                        }
+                      }
+
+                      // 4. Completed
+                      rows.push(makeHeaderLocal('completed', 'Completed', allDone.length));
+                      if (!boardCollapsedGroups.completed) {
+                        if (allDone.length === 0) {
+                          rows.push(
+                            <div
+                              key="completed-empty"
+                              className="px-8 py-1 text-[11px] text-neutral-600 italic w-full text-left">
+                              No completed tasks
+                            </div>,
+                          );
+                        } else {
+                          [...allDone]
+                            .sort((a, b) => parseTaskDateLocal(b).getTime() - parseTaskDateLocal(a).getTime())
+                            .forEach(t => {
+                              rows.push(renderTodoRowLocal(t, localIdx++));
+                            });
+                        }
+                      }
+
+                      return <div className="w-full flex flex-col gap-0">{rows}</div>;
+                    })()}
+                  </div>
+                  {/* end Cards Scrollable Area */}
                 </div>
-                {/* end Cards Scrollable Area */}
-              </div>
-            ))}
+              ))
+            )}
           </div>
         )}
         {/* end Main Board Content */}
@@ -2750,7 +4175,6 @@ const BoardView: React.FC<BoardViewProps> = ({
               transition={{ duration: 0.13, ease: [0.16, 1, 0.3, 1] }}
               className="absolute top-[-16px] left-0 right-0 z-[70] flex justify-center px-6 pt-0">
               <div className="w-full max-w-[480px] min-[1600px]:max-w-[540px] min-[1800px]:max-w-2xl max-[1480px]:max-w-[440px] max-[1370px]:max-w-[400px] max-[1270px]:max-w-[360px] bg-[var(--color-containerBg)] border border-white/10 rounded-b-xl rounded-t-none shadow-2xl overflow-hidden flex flex-col">
-
                 {/* Options */}
                 <div className="flex flex-col py-1.5">
                   {slashPickerOptions.length === 0 ? (
@@ -2758,7 +4182,7 @@ const BoardView: React.FC<BoardViewProps> = ({
                   ) : (
                     slashPickerOptions.map((optName, idx) => {
                       const meta = SLASH_SECTION_META[optName];
-                      const alias = SLASH_ALIAS_DISPLAY[optName] || '';
+                      const alias = slashAliasDisplay[optName] || '';
                       const isSelected = slashDropdownSelectedIndex === idx;
                       return (
                         <div
@@ -2808,6 +4232,8 @@ const BoardView: React.FC<BoardViewProps> = ({
         <UnifiedContextMenu
           x={contextMenuState.x}
           y={contextMenuState.y}
+          portalContainer={portalContainer}
+          preferDown={contextMenuState.preferDown}
           onClose={() => {
             setContextMenuState(null);
             handleCancelEdit();
@@ -2861,6 +4287,6 @@ const BoardView: React.FC<BoardViewProps> = ({
       )}
     </div>
   );
-};
+});
 
 export default BoardView;

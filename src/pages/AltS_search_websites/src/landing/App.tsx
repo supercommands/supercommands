@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useAppData } from '@src/hooks/useAppData';
-import AutomationDynamicIcon from '../../../../shared-components/icons/automationDynamicIcon';
+import { useAppData } from '../hooks/useAppData';
+import { useAppearance } from '@extension/ui';
+import WallpaperLayer from '../../../../settings/uiPersonalization/WallpaperLayer';
 import {
   FiZap,
   FiPlus,
@@ -18,10 +19,7 @@ import {
   FaCode,
   FaLink,
   FaCheckCircle,
-  FaRegCircle,
   FaCheck,
-  FaRegCalendarAlt,
-  FaPaperclip,
   FaRegFileAlt,
   FaTerminal,
   FaBookmark,
@@ -47,27 +45,58 @@ import {
   FaImages,
   FaTable,
 } from 'react-icons/fa';
-import NotesIcon from '@src/components/NotesIcon';
-import { getFaviconUrl } from '../../../AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
+import NotesIcon from '../components/NotesIcon';
+import { getFaviconUrl } from '../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { extractUrlsFromSnippet } from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
-import { createSnippet as createLocalSnippet } from '../../../../allObjectFolder/src/createObject/snippets/snippetData';
 import { getUserId } from '../../../../storage/API/core/api';
-import { CMDOS_SIGN_UP_URL, CMDOS_SIGN_IN_URL } from '../../../../storage/API/core/api';
-import { buildUrl } from '../../../../shared-components/commands';
+import { buildUrl, SHARED_ALL_COMMANDS, THIS_SECTION_ACTION_PREFIXES } from '../../../../shared-components/commands';
+import { extractSnippetIdFromCompoundId } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { db } from '../../../../storage/indexDB/dbConfig';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import cmdOSLogo from '../../../../shared-components/assets/tasklabs_logo.png';
-import { TerminalIcon } from '../../../../shared-components/icons/terminalIcon';
-import { UnifiedContextMenu, MenuAction } from '../../../../shared-components/ui/UnifiedContextMenu';
 import { useUIStore } from '../../../../shared-components/uiStateManager';
+import NotificationContainer from '../../../../shared-components/notifications/NotificationContainer';
+
+const showWebsiteToast = (message: string, bg = '#1a73e8') => {
+  const container = (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body;
+  const toastId = `alts-website-toast-${Date.now()}`;
+  const toast = document.createElement('div');
+  toast.id = toastId;
+  toast.textContent = message;
+  toast.style.cssText = [
+    'position:fixed',
+    'bottom:24px',
+    'left:50%',
+    'transform:translateX(-50%)',
+    `background:${bg}`,
+    'color:white',
+    'padding:10px 22px',
+    'border-radius:20px',
+    'z-index:2147483647',
+    'font-family:system-ui,sans-serif',
+    'font-size:13px',
+    'font-weight:600',
+    'box-shadow:0 8px 24px rgba(0,0,0,0.4)',
+    'pointer-events:none',
+    'transition:opacity 0.2s ease-in-out',
+  ].join(';');
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 200);
+  }, 2500);
+};
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { resolveEntityById } from '../../../../shared-components/utils/entityResolver';
 
 import { BsKeyboard } from 'react-icons/bs';
 import { LuSparkles } from 'react-icons/lu';
-import { resolveWebPageContext } from '@src/utils/context';
-import { PAGE_ACTION_ITEMS, executePageActionCommand, type AltQPageActionItem } from '@src/commands/pageActions';
+import { PAGE_ACTION_ITEMS, executePageActionCommand, type AltQPageActionItem } from '../commands/pageActions';
+import { CustomSearchPrefixesForOmniboxStorage } from '../../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
 import BoardView from '../../../../shared-components/BoardView/BoardView';
+import SpreadsheetMainContainer from '../../../../shared-components/spreadsheetUi/ui/spreadsheetMainContainer';
+import { EditablePrefixKey } from '../../../../shared-components/shortcuts/ui/EditablePrefixKey';
 
 // Map command IDs to specific React Icons
 const BROWSER_ICONS: Record<string, React.ReactNode> = {
@@ -90,24 +119,28 @@ const BROWSER_ICONS: Record<string, React.ReactNode> = {
 
 // Icons for page-action commands (screenshot / download)
 const PAGE_ACTION_ICONS: Record<string, React.ReactNode> = {
-  capture_screenshot: <FaCamera size={14} className="text-sky-400" />,
-  capture_full_screenshot: <FaExpand size={14} className="text-sky-400" />,
-  downloadallimages: <FaImages size={14} className="text-emerald-400" />,
-  downloadalltables: <FaTable size={14} className="text-amber-400" />,
+  capture_screenshot: <FaCamera size={14} className="text-[#A1A6B3]" />,
+  capture_full_screenshot: <FaExpand size={14} className="text-[#A1A6B3]" />,
+  downloadallimages: <FaImages size={14} className="text-[#A1A6B3]" />,
+  downloadalltables: <FaTable size={14} className="text-[#A1A6B3]" />,
 };
 
-// Alias map: alias (uppercase) → section name
+// Alias map: alias (uppercase) to section name
 const SECTION_ALIASES: Record<string, string> = {
   A: 'all',
-  S: 'thissite',
+  TS: 'thissite',
   T: 'todos',
   C: 'commands',
   L: 'links',
   N: 'notes',
   AU: 'automations',
-  B: 'bookmarks',
+  SE: 'sessions',
+  S: 'sessions',
   SN: 'snippets',
   P: 'prompts',
+  CA: 'chat_agents',
+  SC: 'system_commands',
+  BM: 'bookmarks',
 };
 // Reverse map: section name → alias display string
 const SECTION_ALIAS_DISPLAY: Record<string, string> = Object.fromEntries(
@@ -116,52 +149,77 @@ const SECTION_ALIAS_DISPLAY: Record<string, string> = Object.fromEntries(
 
 const mapFullNameToShortcut = (text: string): string => {
   const mapping: Record<string, string> = {
-    '/all': '/a',
-    '/todos': '/t',
-    '/notes': '/n',
-    '/automations': '/au',
-    '/snippets': '/sn',
-    '/prompts': '/p',
-    '/links': '/l',
-    '/commands': '/c',
-    '/bookmarks': '/b',
+    all: 'a',
+    todos: 't',
+    notes: 'n',
+    automations: 'au',
+    snippets: 'sn',
+    prompts: 'p',
+    links: 'l',
+    commands: 'c',
+    bookmarks: 'bm',
   };
   const lower = text.toLowerCase();
   for (const [fullName, shortcut] of Object.entries(mapping)) {
-    if (lower.startsWith(fullName)) {
+    if (lower === fullName || lower.startsWith(fullName + ' ')) {
       return shortcut + text.slice(fullName.length);
     }
   }
   return text;
 };
 
-// All valid filter shortcuts derived from SECTION_ALIASES (prefixed with /)
-const FILTER_SHORTCUTS: string[] = Object.keys(SECTION_ALIASES).map(a => '/' + a.toLowerCase());
+// All valid filter shortcuts derived from SECTION_ALIASES
+const FILTER_SHORTCUTS: string[] = Object.keys(SECTION_ALIASES).map(a => a.toLowerCase());
 
 const FILTER_LABELS: Record<string, string> = {
-  '/a': '/All',
-  '/s': '/This Site',
-  '/t': '/Todos',
-  '/c': '/Commands',
-  '/l': '/Links',
-  '/n': '/Notes',
-  '/au': '/Automations',
-  '/b': '/Bookmarks',
-  '/sn': '/Snippets',
-  '/p': '/Prompts',
+  a: 'All',
+  ts: 'This Site',
+  s: 'Tab Sessions',
+  t: 'Todos',
+  c: 'Commands',
+  sc: 'System Commands',
+  l: 'Links',
+  n: 'Notes',
+  au: 'Automations',
+  b: 'Bookmarks',
+  bm: 'Bookmarks',
+  sn: 'Snippets',
+  p: 'Prompts',
 };
 
-/** Returns tag label if current searchValue has an active tag, otherwise null */
-function getActiveTagInfo(searchValue: string): { prefix: string; label: string; query: string } | null {
-  const match = searchValue.match(/^\/[a-zA-Z]+/);
+function getActiveTagInfo(
+  searchValue: string,
+  commandPrefix = 'c',
+): { prefix: string; label: string; query: string } | null {
+  const hasLeadingSlash = searchValue.startsWith('/');
+  const textToMatch = hasLeadingSlash ? searchValue.slice(1) : searchValue;
+  const match = textToMatch.match(/^[a-zA-Z]+/);
   if (!match) return null;
   const prefix = match[0];
-  const rest = searchValue.slice(prefix.length);
+  const rest = textToMatch.slice(prefix.length);
   const lowerPrefix = prefix.toLowerCase();
-  if (FILTER_SHORTCUTS.includes(lowerPrefix) && rest.startsWith(' ')) {
-    return { prefix, label: FILTER_LABELS[lowerPrefix] || prefix, query: rest.slice(1) };
+  if (!hasLeadingSlash && lowerPrefix === commandPrefix.toLowerCase()) return null;
+  if (lowerPrefix === 'a') return null;
+  if (FILTER_SHORTCUTS.includes(lowerPrefix) && (rest === '' || rest.startsWith(' '))) {
+    return {
+      prefix: hasLeadingSlash ? `/${prefix}` : prefix,
+      label: FILTER_LABELS[lowerPrefix] || prefix,
+      query: rest.startsWith(' ') ? rest.slice(1) : '',
+    };
   }
   return null;
+}
+
+function getSidebarSectionTagInfo(section: string): { prefix: string; label: string; query: string } | null {
+  if (section === 'all') return null;
+  const alias = SECTION_ALIAS_DISPLAY[section];
+  if (!alias) return null;
+  const label = SECTION_META[section]?.title || section;
+  return {
+    prefix: `/${alias.toLowerCase()}`,
+    label,
+    query: '',
+  };
 }
 
 const normalizeUrl = (urlStr: unknown): string => {
@@ -187,9 +245,9 @@ const getDomain = (urlStr: string) => {
 };
 
 /**
- * Parse the current search value to determine the / mode state:
+ * Parse the current search value to determine the mode state:
  *   - atDropdown: true when we show the category picker (no space yet)
- *   - activeSection: category activated by /ALIAS+Space, or null
+ *   - activeSection: category activated by ALIAS+Space, or null
  *   - searchQuery: text typed after the space for within-category search
  */
 function parseAtMode(searchValue: string): {
@@ -197,30 +255,24 @@ function parseAtMode(searchValue: string): {
   activeSection: string | null;
   searchQuery: string;
 } {
-  if (!searchValue.startsWith('/')) {
-    return { atDropdown: false, activeSection: null, searchQuery: searchValue };
-  }
-
-  const textAfterAt = searchValue.slice(1);
+  const textAfterAt = searchValue;
 
   // Find longest matching alias prefix
   let bestAlias = '';
   let activeSection: string | null = null;
 
+  // Support both with and without leading slash (e.g. "N " or "/N ")
+  const hasLeadingSlash = textAfterAt.startsWith('/');
+  const textToMatch = hasLeadingSlash ? textAfterAt.slice(1) : textAfterAt;
+
   for (const [alias, section] of Object.entries(SECTION_ALIASES)) {
-    const upperText = textAfterAt.toUpperCase();
+    const upperText = textToMatch.toUpperCase();
     const upperAlias = alias.toUpperCase();
 
     // Active if matches exactly followed by a space
     const matchWithSpace = upperText.startsWith(upperAlias + ' ');
 
-    // Active if matches exactly with no space, but there is no longer alias starting with it
-    const isPrefixOfLonger = Object.keys(SECTION_ALIASES).some(
-      other => other.toUpperCase().startsWith(upperAlias) && other.length > alias.length,
-    );
-    const matchExactNoAmbiguity = upperText === upperAlias && !isPrefixOfLonger;
-
-    if (matchWithSpace || matchExactNoAmbiguity) {
+    if (matchWithSpace) {
       if (alias.length > bestAlias.length) {
         bestAlias = alias;
         activeSection = section;
@@ -229,27 +281,164 @@ function parseAtMode(searchValue: string): {
   }
 
   if (activeSection) {
-    let query = textAfterAt.slice(bestAlias.length);
+    // Slice off the alias (+ optional slash prefix) + trailing space
+    let query = textToMatch.slice(bestAlias.length);
     if (query.startsWith(' ')) {
       query = query.slice(1);
     }
     return { atDropdown: false, activeSection, searchQuery: query };
   }
 
-  return { atDropdown: true, activeSection: null, searchQuery: '' };
+  return { atDropdown: false, activeSection: null, searchQuery: searchValue };
+}
+
+type WebsiteCommandSpaceCategory =
+  | 'note'
+  | 'link'
+  | 'snippet'
+  | 'session'
+  | 'prompt'
+  | 'automation'
+  | 'agent'
+  | 'todo'
+  | 'system_command'
+  | 'command';
+
+type WebsiteCommandSpaceState = {
+  isActive: boolean;
+  commandPrefix: string;
+  activeCategoryFilter: WebsiteCommandSpaceCategory | null;
+  actualQuery: string;
+  normalizedInput: string;
+  exactThisSectionActionId: string | null;
+};
+
+const normalizeCommandSpaceText = (value: string): string =>
+  value
+    .replace(/\u00A0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+const isExtractionCommandItem = (item: any): boolean => item?.category === 'page_action';
+
+/** Build a { actionId -> prefix } map from current omniboxPrefixes (falls back to empty string). */
+const getActionPrefixMap = (omniboxPrefixes: any): Record<string, string> => {
+  const ACTION_KEYS = [
+    'capture_screenshot',
+    'capture_full_screenshot',
+    'downloadallimages',
+    'downloadalltables',
+    'save_link',
+    'save_session',
+    'save_chat',
+    'add_to_existing',
+    'add_to_existing_session',
+    'summarize_page',
+  ] as const;
+  const map: Record<string, string> = {};
+  for (const key of ACTION_KEYS) {
+    if (omniboxPrefixes?.[key]) map[key] = omniboxPrefixes[key];
+  }
+  return map;
+};
+
+function parseWebsiteCommandSpace(searchValue: string, omniboxPrefixes: any): WebsiteCommandSpaceState {
+  const normalizedValue = searchValue.replace(/\u00A0/g, ' ');
+  const commandPrefix = omniboxPrefixes?.command?.trim().toLowerCase() || 'c';
+
+  if (!normalizedValue.toLowerCase().startsWith(`${commandPrefix} `)) {
+    return {
+      isActive: false,
+      commandPrefix,
+      activeCategoryFilter: null,
+      actualQuery: '',
+      normalizedInput: normalizeCommandSpaceText(normalizedValue),
+      exactThisSectionActionId: null,
+    };
+  }
+
+  const queryAfterCommand = normalizedValue.slice(commandPrefix.length + 1);
+  const queryAfterCommandLower = queryAfterCommand.toLowerCase();
+
+  const nestedPrefixes: Array<{ key: WebsiteCommandSpaceCategory; prefix: string }> = [
+    { key: 'snippet', prefix: omniboxPrefixes?.snippet?.trim().toLowerCase() || 'sn' },
+    { key: 'note', prefix: omniboxPrefixes?.note?.trim().toLowerCase() || 'n' },
+    { key: 'link', prefix: omniboxPrefixes?.link?.trim().toLowerCase() || 'l' },
+    { key: 'session', prefix: omniboxPrefixes?.session?.trim().toLowerCase() || 's' },
+    { key: 'prompt', prefix: omniboxPrefixes?.prompt?.trim().toLowerCase() || 'p' },
+    { key: 'automation', prefix: omniboxPrefixes?.automation?.trim().toLowerCase() || 'a' },
+    { key: 'agent', prefix: omniboxPrefixes?.agent?.trim().toLowerCase() || 'g' },
+    { key: 'todo', prefix: omniboxPrefixes?.todo?.trim().toLowerCase() || 't' },
+    { key: 'system_command', prefix: omniboxPrefixes?.system_command?.trim().toLowerCase() || 'sc' },
+    { key: 'command', prefix: commandPrefix },
+  ];
+
+  let activeCategoryFilter: WebsiteCommandSpaceCategory | null = null;
+  let actualQuery = queryAfterCommand.trim();
+
+  for (const { key, prefix } of nestedPrefixes) {
+    if (queryAfterCommandLower === prefix || queryAfterCommandLower.startsWith(`${prefix} `)) {
+      activeCategoryFilter = key;
+      actualQuery = queryAfterCommand.slice(prefix.length).trim();
+      break;
+    }
+  }
+
+  let exactThisSectionActionId: string | null = null;
+  if (!activeCategoryFilter) {
+    const normalizedShortcut = normalizeCommandSpaceText(queryAfterCommand);
+    const actionPrefixMap = getActionPrefixMap(omniboxPrefixes);
+    const exactMatchEntry = Object.entries(actionPrefixMap).find(
+      ([, shortcut]) => normalizeCommandSpaceText(shortcut) === normalizedShortcut,
+    );
+    exactThisSectionActionId = exactMatchEntry?.[0] || null;
+  }
+
+  return {
+    isActive: true,
+    commandPrefix,
+    activeCategoryFilter,
+    actualQuery,
+    normalizedInput: normalizeCommandSpaceText(normalizedValue),
+    exactThisSectionActionId,
+  };
 }
 
 const SECTION_META: Record<string, { title: string; icon: React.ReactNode }> = {
   thissite: { title: 'This Site', icon: <FaRegFileAlt className="w-4 h-4 shrink-0" /> },
   todos: { title: 'Todos', icon: <FaCheckCircle className="w-4 h-4 shrink-0" /> },
-  prompts: { title: 'Prompts', icon: <FaFlag className="w-4 h-4 shrink-0" /> },
   automations: { title: 'Automations', icon: <FiZap className="w-4 h-4 shrink-0" /> },
   notes: { title: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0" /> },
   links: { title: 'Links', icon: <FaLink className="w-4 h-4 shrink-0" /> },
+  sessions: { title: 'Tab Sessions', icon: <FaLayerGroup className="w-4 h-4 shrink-0" /> },
   snippets: { title: 'Snippets', icon: <FaCode className="w-4 h-4 shrink-0" /> },
-  bookmarks: { title: 'Bookmarks', icon: <FaBookmark className="w-4 h-4 shrink-0" /> },
   commands: { title: 'Commands', icon: <FaTerminal className="w-4 h-4 shrink-0" /> },
+  system_commands: { title: 'System Commands', icon: <FaTerminal className="w-4 h-4 shrink-0" /> },
+  chat_agents: { title: 'Chat Agents', icon: <FaRobot className="w-4 h-4 shrink-0" /> },
 };
+
+const DROPDOWN_SECTION_HEADER_CLASS = 'mx-2 px-1 py-0.5 flex items-center justify-between mt-1';
+const DROPDOWN_SECTION_HEADER_TEXT_CLASS = 'text-[14px] font-medium text-[#A1A6B3] tracking-tight';
+const DROPDOWN_ITEM_BASE_CLASS =
+  'w-full appearance-none border-0 bg-transparent px-4 py-2 flex items-center justify-between cursor-pointer transition-colors mx-2 rounded-lg font-normal text-left group';
+const DROPDOWN_ITEM_SELECTED_CLASS = 'bg-[#eee8d5]/50 dark:bg-white/10 text-[var(--color-textPrimary)]';
+const DROPDOWN_ITEM_UNSELECTED_CLASS =
+  'text-[#A1A6B3] hover:bg-[#eee8d5]/30 dark:hover:bg-white/5 hover:text-[var(--color-textPrimary)]';
+const DROPDOWN_ITEM_LABEL_CLASS = 'text-[13px] font-normal truncate';
+const DROPDOWN_ITEM_SHORTCUT_CLASS =
+  'shrink-0 inline-flex items-center justify-center px-1.5 py-0 rounded border border-white/5 bg-white/5 text-[13px] font-light font-mono text-[var(--color-textPrimary)] lowercase opacity-70';
+
+function DropdownSectionHeader({ title }: { title: string }) {
+  return (
+    <div className="flex flex-col w-full">
+      <div className={DROPDOWN_SECTION_HEADER_CLASS}>
+        <span className={DROPDOWN_SECTION_HEADER_TEXT_CLASS}>{title}</span>
+      </div>
+      <div className="h-[1px] bg-white/10 mx-6 mt-1 mb-2" />
+    </div>
+  );
+}
 
 const formatTodoDate = (deadlineStr?: string, isDone?: boolean) => {
   if (!deadlineStr) return { text: 'No due date', badge: 'Anytime', isToday: false };
@@ -318,26 +507,142 @@ const extractTodoMetadata = (item: any) => {
   return { linkCount, autoCount, noteCount };
 };
 
+// ── Multi-strategy fuzzy search ──────────────────────────────────────────────
+/**
+ * Returns a relevance score (0 = no match) for `query` against `text`.
+ * Higher score = better match.
+ *
+ * Strategy (in priority order):
+ *  1. Exact substring     → 100
+ *  2. Word-prefix match   → 80  (any query word prefixes a text word)
+ *  3. Acronym/initials    → 60  (query chars match word initials)
+ *  4. Levenshtein fuzzy   → 40  (edit-distance ≤ 2 on individual words)
+ */
+function fuzzyScore(text: string, query: string): number {
+  if (!text || !query) return 0;
+  const t = text.toLowerCase();
+  const q = query.toLowerCase().trim();
+  if (!q) return 0;
+
+  // 1. Exact substring
+  if (t.includes(q)) return 100;
+
+  const words = t.split(/[\s\-_/.,;:]+/).filter(Boolean);
+  const qWords = q.split(/\s+/).filter(Boolean);
+
+  // 2. Every query word prefixes at least one text word
+  const allPrefixMatch = qWords.every(qw => words.some(tw => tw.startsWith(qw)));
+  if (allPrefixMatch) return 80;
+
+  // 3. Acronym / initials match (single-token query)
+  if (qWords.length === 1) {
+    const initials = words.map(w => w[0] || '').join('');
+    if (initials.includes(q)) return 60;
+  }
+
+  // 4. Levenshtein fuzzy: every query word must be close to some text word
+  const levenshtein = (a: string, b: string): number => {
+    if (a === b) return 0;
+    if (a.length === 0) return b.length;
+    if (b.length === 0) return a.length;
+    const dp: number[][] = [];
+    for (let i = 0; i <= b.length; i++) dp[i] = [i];
+    for (let j = 0; j <= a.length; j++) dp[0][j] = j;
+    for (let i = 1; i <= b.length; i++) {
+      for (let j = 1; j <= a.length; j++) {
+        dp[i][j] =
+          b[i - 1] === a[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[b.length][a.length];
+  };
+
+  const maxDist = (qw: string) => (qw.length <= 3 ? 1 : 2);
+  const allFuzzyMatch = qWords.every(qw =>
+    words.some(tw => {
+      // Anchor: first character must match — prevents "testg" from matching "best"
+      // (they share e,s,t but start differently, giving a false distance-2 match)
+      if (!tw || tw[0] !== qw[0]) return false;
+      return levenshtein(qw, tw.slice(0, qw.length + maxDist(qw))) <= maxDist(qw);
+    }),
+  );
+  if (allFuzzyMatch) return 40;
+
+  return 0;
+}
+
+/**
+ * Build a composite searchable string from an item, covering all relevant fields:
+ * name/title/key/label, description, value, URLs (inside link collections),
+ * tags, and rich-text body/content.
+ */
+function getItemSearchText(item: any): string {
+  const parts: string[] = [];
+  // Primary identifiers
+  if (item.name) parts.push(String(item.name));
+  if (item.key) parts.push(String(item.key));
+  if (item.title) parts.push(String(item.title));
+  if (item.label) parts.push(String(item.label));
+  // Secondary
+  if (item.description) parts.push(String(item.description));
+  if (typeof item.value === 'string') parts.push(item.value);
+  // Body / rich-text content
+  if (item.content) parts.push(String(item.content));
+  if (item.body) parts.push(String(item.body));
+  // Direct URL
+  if (item.url) parts.push(String(item.url));
+  // URL arrays inside link/session collections
+  if (Array.isArray(item.urls)) {
+    item.urls.forEach((u: any) => {
+      if (typeof u === 'string') parts.push(u);
+      else {
+        if (u.url) parts.push(String(u.url));
+        if (u.title) parts.push(String(u.title));
+        if (u.name) parts.push(String(u.name));
+      }
+    });
+  }
+  // Tags
+  if (Array.isArray(item.tags)) {
+    item.tags.forEach((tag: any) => {
+      if (typeof tag === 'string') parts.push(tag);
+      else if (tag?.name) parts.push(String(tag.name));
+    });
+  }
+  return parts.join(' ');
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface AppProps {
   isOpen: boolean;
   onClose: () => void;
   theme?: 'dark' | 'light';
 }
 
-
 const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
+  const { theme: appearanceTheme } = useAppearance();
+  const hasWallpaper = !!appearanceTheme?.wallpaper?.src;
   const [searchValue, setSearchValue] = useState('');
+  const [debouncedSearchValue, setDebouncedSearchValue] = useState('');
+  const [showSpreadsheet, setShowSpreadsheet] = useState(false);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchValue(searchValue);
+    }, 100);
+    return () => clearTimeout(handler);
+  }, [searchValue]);
+
   const [autoTriggerDropdown, setAutoTriggerDropdown] = useState(true);
 
-  const updateSearchValueAndFocus = (val: string) => {
+  const updateSearchValue = (val: string) => {
     setSearchValue(val);
-    setTimeout(() => {
-      if (searchInputRef.current) {
-        searchInputRef.current.focus();
-        const len = searchInputRef.current.value.length;
-        searchInputRef.current.setSelectionRange(len, len);
-      }
-    }, 10);
+  };
+
+  const shouldShowDefaultPopup = (val: string) => val.trim() === '';
+
+  const showDropdownIfNotFiltered = (val: string) => {
+    setIsDropdownVisible(shouldShowDefaultPopup(val));
   };
 
   // Load autoTriggerDropdown and view mode preference on mount
@@ -351,12 +656,26 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     });
   }, []);
 
-  // Autofill search bar with '/' when opened if auto-trigger is enabled
+  const [isDropdownVisible, setIsDropdownVisible] = useState(true);
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Click outside listener for search dropdown container
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setIsDropdownVisible(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Autofill search bar when opened if auto-trigger is enabled
   useEffect(() => {
     if (isOpen) {
-      setGithubOrgSubAction(null); // Reset active Github Org flow on open
+      setIsDropdownVisible(true);
       if (autoTriggerDropdown) {
-        setSearchValue('/');
+        setSearchValue('');
         // Focus the input and position cursor at the end
         setTimeout(() => {
           if (searchInputRef.current) {
@@ -368,8 +687,6 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
       } else {
         setSearchValue('');
       }
-    } else {
-      setGithubOrgSubAction(null); // Reset active Github Org flow on close
     }
   }, [isOpen, autoTriggerDropdown]);
 
@@ -400,18 +717,34 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
   }, [isSettingsDropdownOpen]);
   const [allBookmarks, setAllBookmarks] = useState<any[]>([]);
   const [showAddExistingModal, setShowAddExistingModal] = useState(false);
+  const [showAddExistingSessionModal, setShowAddExistingSessionModal] = useState(false);
   const [addExistingUrl, setAddExistingUrl] = useState('');
   const [addExistingTitle, setAddExistingTitle] = useState('');
 
   const [activeTabUrl, setActiveTabUrl] = useState('');
   const [activeTabTitle, setActiveTabTitle] = useState('');
 
-  // Track current GitHub Org subAction selection state
-  // We use this to override search results with extracted repository options
-  const [githubOrgSubAction, setGithubOrgSubAction] = useState<{
-    orgName: string;
-    subAction: 'open' | 'issue' | 'settings';
-  } | null>(null);
+  const [omniboxPrefixes, setOmniboxPrefixes] = useState<any>(null);
+
+  useEffect(() => {
+    const loadPrefixes = async () => {
+      try {
+        const p = await CustomSearchPrefixesForOmniboxStorage.getPrefixes();
+        setOmniboxPrefixes(p);
+      } catch (err) {
+        console.error('Failed to load omnibox prefixes:', err);
+      }
+    };
+    loadPrefixes();
+
+    const handlePrefixChange = () => {
+      loadPrefixes();
+    };
+    window.addEventListener('omniboxPrefixesChanged', handlePrefixChange);
+    return () => {
+      window.removeEventListener('omniboxPrefixesChanged', handlePrefixChange);
+    };
+  }, []);
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userId, setUserId] = useState('local_user');
@@ -423,6 +756,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
 
   const selectedTeam = useUIStore((s: any) => s.selectedTeam) as any;
   const allWorkspaces = useDbStore(state => state.workspaces);
+  const dbSessions = useDbStore(state => state.sessions);
 
   // Derive the workspace to save new links into.
   // Prefer the selected team's first workspace, otherwise fall back to the first Dexie workspace.
@@ -436,13 +770,11 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
   const { automations, notes, snippets, todos, links, toggleTodoOptimistic } = useAppData();
   const globalCommands = useDbStore(state => state.commands);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const boardViewRef = useRef<any>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
   const isBackspaceHandlingRef = useRef(false);
-
-  const [contextMenuState, setContextMenuState] = useState<{ x: number; y: number; item: any; title: string } | null>(
-    null,
-  );
+  const dropdownActionGuardRef = useRef<{ id: string; ts: number } | null>(null);
 
   // Fetch bookmarks from Chrome API when popup opens
   useEffect(() => {
@@ -514,6 +846,62 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     }
   }, [isOpen]);
 
+  const syncDbFromBackground = () => {
+    console.log('[WebsitePopup] syncDbFromBackground: Sending db_get_all_records message...');
+    chrome.runtime.sendMessage({ action: 'db_get_all_records' }, res => {
+      console.log('[WebsitePopup] syncDbFromBackground: Received response:', res);
+      if (res && res.success) {
+        const hkMap: Record<string, string> = {};
+        (res.userHotkeys || []).forEach((hk: any) => {
+          hkMap[hk.referenceId] = hk.combination;
+        });
+        const scMap: Record<string, string> = {};
+        (res.userShortcuts || []).forEach((sc: any) => {
+          scMap[sc.referenceId] = sc.trigger;
+        });
+
+        useDbStore.setState({
+          workspaces: res.workspaces || [],
+          links: res.links || [],
+          notes: res.notes || [],
+          tags: res.tags || [],
+          snippets: res.snippets || [],
+          todos: res.todos || [],
+          folders: res.folders || [],
+          automations: res.automations || [],
+          chatAgents: res.chatAgents || [],
+          aiPrompts: res.aiPrompts || [],
+          favorites: res.favorites || [],
+          userHotkeys: res.userHotkeys || [],
+          userShortcuts: res.userShortcuts || [],
+          hotkeysMap: hkMap,
+          shortcutsMap: scMap,
+          sessions: res.sessions || [],
+          commands: res.commands || [],
+          isInitialized: true,
+        });
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      syncDbFromBackground();
+
+      const dbChangedListener = (message: any) => {
+        if (message && message.action === 'db_changed') {
+          syncDbFromBackground();
+        }
+      };
+
+      chrome.runtime.onMessage.addListener(dbChangedListener);
+      return () => {
+        chrome.runtime.onMessage.removeListener(dbChangedListener);
+      };
+    }
+    return undefined;
+  }, [isOpen]);
+
   useEffect(() => {
     chrome.storage.local.get(['accessToken'], res => {
       setIsLoggedIn(!!res.accessToken);
@@ -556,9 +944,19 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
   }, []);
 
   const safeList = (list: any) => (Array.isArray(list) ? list : []);
+  const commandSpace = useMemo(
+    () => parseWebsiteCommandSpace(searchValue, omniboxPrefixes),
+    [searchValue, omniboxPrefixes],
+  );
+  const debouncedCommandSpace = useMemo(
+    () => parseWebsiteCommandSpace(debouncedSearchValue, omniboxPrefixes),
+    [debouncedSearchValue, omniboxPrefixes],
+  );
+  const autoTriggeredThisSectionInputRef = useRef<string | null>(null);
 
   const allCommands = useMemo(() => {
     const map = new Map();
+    SHARED_ALL_COMMANDS.forEach(c => map.set(c.id, { ...c, isGlobal: false, name: c.label }));
     globalCommands.forEach(c => map.set(c.id, { ...c, isGlobal: true, name: c.label }));
     // Page-action commands (screenshot, download) — always available, run in current page context
     PAGE_ACTION_ITEMS.forEach(c => map.set(c.id, c));
@@ -567,11 +965,21 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
   }, [globalCommands]);
 
   const filteredCommands = useMemo(() => {
+    if (
+      debouncedCommandSpace.isActive &&
+      debouncedCommandSpace.activeCategoryFilter &&
+      debouncedCommandSpace.activeCategoryFilter !== 'command'
+    ) {
+      return [];
+    }
+
     // Always separate page-action commands — they must never be sliced away
     const pageActionCmds = allCommands.filter(c => (c as any).category === 'page_action');
     const otherCmds = allCommands.filter(c => (c as any).category !== 'page_action');
 
-    const effectiveSearchValue = searchValue.startsWith('/') ? '' : searchValue;
+    const effectiveSearchValue = debouncedCommandSpace.isActive
+      ? debouncedCommandSpace.actualQuery
+      : debouncedSearchValue;
 
     const getCategoryPriority = (c: any) => {
       const cat = (c.category || '').toLowerCase();
@@ -600,6 +1008,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         c.label.toLowerCase().includes(core) ||
         c.prefix.toLowerCase().includes(core) ||
         String(c.id).toLowerCase().includes(core) ||
+        (THIS_SECTION_ACTION_PREFIXES[c.id]?.toLowerCase().startsWith(core) ?? false) ||
         ((c as any).keywords as string[] | undefined)?.some((kw: string) => kw.toLowerCase().includes(core)),
     );
 
@@ -616,40 +1025,43 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     });
 
     return matchedAll.slice(0, 40);
-  }, [allCommands, searchValue]);
+  }, [allCommands, debouncedSearchValue, debouncedCommandSpace]);
 
   const filtered = useMemo(() => {
-    const { atDropdown, activeSection, searchQuery } = parseAtMode(searchValue);
+    const { atDropdown, activeSection, searchQuery } = debouncedCommandSpace.isActive
+      ? { atDropdown: false, activeSection: null, searchQuery: debouncedSearchValue }
+      : parseAtMode(debouncedSearchValue);
 
     // When a section is activated via /ALIAS+Space, use searchQuery for filtering
     // When normal search, use searchValue directly
-    const effectiveSearchValue = atDropdown
-      ? ''
-      : activeSection !== null
-        ? searchQuery
-        : searchValue.startsWith('/')
-          ? ''
-          : searchValue;
+    const effectiveSearchValue = atDropdown ? '' : activeSection !== null ? searchQuery : debouncedSearchValue;
 
-    const filter = (list: any[]) => {
-      if (!effectiveSearchValue.trim()) return list;
-      const lower = effectiveSearchValue.toLowerCase();
-      return list.filter(
-        item =>
-          (item.name || item.key || item.title || '').toLowerCase().includes(lower) ||
-          (item.description || (typeof item.value === 'string' ? item.value : '') || '').toLowerCase().includes(lower),
-      );
+    const fuzzyFilter = (list: any[], queryOverride?: string) => {
+      const query = (queryOverride ?? effectiveSearchValue).trim();
+      if (!query) return list;
+      return list
+        .map(item => ({ item, score: fuzzyScore(getItemSearchText(item), query) }))
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map(({ item }) => item);
     };
+    // Keep 'filter' as an alias so call-sites below don't need renaming
+    const filter = fuzzyFilter;
 
     const allSnippets = safeList(snippets);
     const actualSnippets = allSnippets.filter(s => (s.category || '').toLowerCase() !== 'prompt');
     const actualPrompts = allSnippets.filter(s => (s.category || '').toLowerCase() === 'prompt');
+    const allSessions = safeList(dbSessions);
 
     const activeDomain = getDomain(activeTabUrl);
     const activeNormalized = normalizeUrl(activeTabUrl);
 
     // Detect AI chat sites
-    const isChatSite = activeDomain && ['chatgpt.com', 'claude.ai', 'gemini.google.com', 'chat.openai.com', 'perplexity.ai'].some(domain => activeDomain.includes(domain));
+    const isChatSite =
+      activeDomain &&
+      ['chatgpt.com', 'claude.ai', 'gemini.google.com', 'chat.openai.com', 'perplexity.ai'].some(domain =>
+        activeDomain.includes(domain),
+      );
 
     // Use raw links (not filtered) so saved-state is NEVER affected by search input.
     const allRawLinks = safeList(links);
@@ -660,233 +1072,256 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
       activeNormalized &&
       (optimisticSavedUrls.some(u => normalizeUrl(u) === activeNormalized) ||
         allRawLinks.some(link => {
-          const urls = extractUrlsFromSnippet(link);
+          const urls = [...extractUrlsFromSnippet(link), ...(link.urls || []).map((u: any) => u.url || u)];
           return urls.some((u: string) => normalizeUrl(u) === activeNormalized);
         }))
     );
 
     const thisSiteItems: any[] = [];
     if (activeNormalized && activeDomain && !activeTabUrl.startsWith('chrome-extension://')) {
-      if (isLoggedIn) {
-        if (isAlreadySaved) {
-          thisSiteItems.push({ 
-            id: 'saved_indicator', 
-            name: 'Already Saved', 
-            category: 'thissite_indicator',
-            icon: <FaCheck className="w-4 h-4 shrink-0 text-gray-400" />
-          });
-        } else {
-          if (isChatSite) {
-            thisSiteItems.push({ 
-              id: 'save_chat', 
-              name: 'Do you want to save the current chat? (Chatagent)', 
-              category: 'thissite_action',
-              icon: <FaLink className="w-4 h-4 shrink-0 text-gray-400" />
-            });
-          }
-          thisSiteItems.push({ 
-            id: 'save_link', 
-            name: 'Save This Link', 
-            category: 'thissite_action',
-            icon: <FaLink className="w-4 h-4 shrink-0 text-gray-400" />
-          });
-        }
-        thisSiteItems.push({ 
-          id: 'add_to_existing', 
-          name: 'Add to Existing', 
+      if (isChatSite) {
+        thisSiteItems.push({
+          id: 'save_chat',
+          name: 'Chat agent',
           category: 'thissite_action',
-          icon: <FiPlus className="w-4 h-4 shrink-0 text-gray-400" />
+          icon: <FaLink className="w-4 h-4 shrink-0 text-gray-400" />,
         });
       }
-      thisSiteItems.push({ 
-        id: 'summarize_page', 
-        name: 'Summarize This Page', 
+      thisSiteItems.push({
+        id: 'save_link',
+        name: 'Link collection',
         category: 'thissite_action',
-        icon: <FaInfoCircle className="w-4 h-4 shrink-0 text-gray-400" />
+        icon: <FaLink className="w-4 h-4 shrink-0 text-gray-400" />,
+      });
+      thisSiteItems.push({
+        id: 'save_session',
+        name: 'Tab Session',
+        category: 'thissite_action',
+        icon: <FaLayerGroup className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />,
+      });
+      thisSiteItems.push({
+        id: 'add_to_existing',
+        name: 'Existing link collection',
+        category: 'thissite_action',
+        icon: <FiPlus className="w-4 h-4 shrink-0 text-gray-400" />,
+      });
+      thisSiteItems.push({
+        id: 'add_to_existing_session',
+        name: 'Existing Session',
+        category: 'thissite_action',
+        icon: <FaLayerGroup className="w-4 h-4 shrink-0 text-gray-400" />,
+      });
+      // Directly include page action extraction commands under "This Site"
+      PAGE_ACTION_ITEMS.forEach((item: any) => {
+        thisSiteItems.push({
+          id: item.id,
+          name: item.name,
+          category: 'page_action',
+          item: item,
+          icon: PAGE_ACTION_ICONS[item.id] || <FaRegFileAlt className="w-4 h-4 shrink-0 text-gray-400" />,
+        });
       });
 
-      if (recordingState?.active) {
-        thisSiteItems.push({
-          id: 'recording-action',
-          name: 'Click the element to add in automations',
-          category: 'thissite_action',
-          centerBadge: 'Draft Automation',
-          rightBadge: draftStepsCount,
-          icon: <FaLayerGroup className="w-4 h-4 shrink-0 text-gray-400" />
-        });
-      }
+      thisSiteItems.push({
+        id: 'summarize_page',
+        name: 'Summarize This Page',
+        category: 'page_action',
+        icon: <FaInfoCircle className="w-4 h-4 shrink-0 text-gray-400" />,
+      });
+    }
 
-      // Resolve webpage context (e.g., GitHub repo page details)
-      const webContext = resolveWebPageContext(activeTabUrl, activeTabTitle);
+    const actionPrefixMap = getActionPrefixMap(omniboxPrefixes);
+    const visibleThisSiteItems = thisSiteItems.map(item => {
+      const actionPrefix = actionPrefixMap[item.id];
+      if (!actionPrefix) return item;
+      return {
+        ...item,
+        _displayShortcut: `${debouncedCommandSpace.commandPrefix} ${actionPrefix.toLowerCase()}`,
+      };
+    });
 
-      // Add custom GitHub actions if on any github.com page
-      if (webContext.site === 'github') {
-        const username = document.querySelector('meta[name="user-login"]')?.getAttribute('content') || '';
-        thisSiteItems.push(
-          {
-            id: 'github_open_settings',
-            name: 'Open Settings',
-            category: 'thissite_action',
-            url: 'https://github.com/settings',
-          },
-          {
-            id: 'github_create_repo',
-            name: 'Create Repository',
-            category: 'thissite_action',
-            url: 'https://github.com/new',
-          },
-          {
-            id: 'github_open_profile',
-            name: 'Open Profile',
-            category: 'thissite_action',
-            url: username ? `https://github.com/${username}` : 'https://github.com',
-          },
-          {
-            id: 'github_create_org',
-            name: 'Create an Organization',
-            category: 'thissite_action',
-            url: 'https://github.com/organizations/new',
-          },
+    if (debouncedCommandSpace.isActive) {
+      const commandQuery = debouncedCommandSpace.actualQuery;
+      const matchThisSiteItems = (items: any[]) => {
+        if (!commandQuery.trim()) return items;
+        const lower = commandQuery.toLowerCase();
+        return items.filter(
+          item =>
+            item.name.toLowerCase().includes(lower) ||
+            (THIS_SECTION_ACTION_PREFIXES[item.id]?.toLowerCase().startsWith(lower) ?? false),
         );
-      }
+      };
 
-      // If we are on a recognized GitHub repository page, pull matching registered commands
-      if (webContext.site === 'github' && webContext.pageType === 'repository') {
-        const owner = webContext.metadata.owner;
-        const repo = webContext.metadata.repo;
-        const repoPath = `${owner}/${repo}`;
+      const emptyResult = {
+        thissite: [] as any[],
+        automations: [] as any[],
+        notes: [] as any[],
+        todos: [] as any[],
+        links: [] as any[],
+        snippets: [] as any[],
+        prompts: [] as any[],
+        sessions: [] as any[],
+        bookmarks: [] as any[],
+        commands: [] as any[],
+        system_commands: [] as any[],
+      };
 
-        const contextCmds = globalCommands.filter((cmd: any) => cmd.site === 'github' && cmd.pageType === 'repository');
-
-        contextCmds.forEach(cmd => {
-          let urlPattern = '';
-          if (cmd.id === 'github_create_issue') {
-            urlPattern = `https://github.com/${repoPath}/issues/new`;
-          } else if (cmd.id === 'github_create_pr') {
-            urlPattern = `https://github.com/${repoPath}/compare`;
-          } else if (cmd.id === 'github_open_settings') {
-            urlPattern = `https://github.com/${repoPath}/settings`;
-          }
-
-          if (urlPattern) {
-            thisSiteItems.push({
-              id: cmd.id,
-              name: `${cmd.label} in ${repoPath}`,
-              category: 'thissite_action',
-              url: urlPattern,
-              executeId: cmd.id,
-            });
-          }
-        });
-      }
-
-      // If we are on a recognized GitHub organization page, add org repository search workflows
-      if (webContext.site === 'github' && webContext.pageType === 'organization') {
-        const orgName = webContext.metadata.organization;
-        thisSiteItems.push(
-          {
-            id: 'github_org_open_repo',
-            name: `Open Repository...`,
-            category: 'thissite_action',
-            executeId: 'github_org_action',
-            orgName,
-            subAction: 'open',
-          },
-          {
-            id: 'github_org_create_issue',
-            name: `Create Issue In...`,
-            category: 'thissite_action',
-            executeId: 'github_org_action',
-            orgName,
-            subAction: 'issue',
-          },
-          {
-            id: 'github_org_open_settings',
-            name: `Open Repository Settings...`,
-            category: 'thissite_action',
-            executeId: 'github_org_action',
-            orgName,
-            subAction: 'settings',
-          },
-        );
+      switch (debouncedCommandSpace.activeCategoryFilter) {
+        case 'note':
+          return { ...emptyResult, notes: filter(safeList(notes), commandQuery).slice(0, 30) };
+        case 'link':
+          return { ...emptyResult, links: filter(allRawLinks, commandQuery).slice(0, 30) };
+        case 'snippet':
+          return { ...emptyResult, snippets: filter(actualSnippets, commandQuery).slice(0, 30) };
+        case 'session':
+          return { ...emptyResult, sessions: filter(allSessions, commandQuery).slice(0, 30) };
+        case 'prompt':
+          return { ...emptyResult, prompts: filter(actualPrompts, commandQuery).slice(0, 30) };
+        case 'automation':
+          return { ...emptyResult, automations: filter(safeList(automations), commandQuery).slice(0, 30) };
+        case 'agent':
+          return emptyResult;
+        case 'system_command':
+          return {
+            ...emptyResult,
+            system_commands: filter(allCommands, commandQuery).slice(0, 40),
+          };
+        case 'command':
+          return {
+            ...emptyResult,
+            thissite: matchThisSiteItems(visibleThisSiteItems),
+            commands: filteredCommands,
+          };
+        default:
+          return {
+            ...emptyResult,
+            thissite: matchThisSiteItems(visibleThisSiteItems),
+            commands: filteredCommands,
+          };
       }
     }
 
-    // If user is inside a GitHub organization sub-action flow, we override
-    // the returned data mapping so that only organization repositories show up
-    if (githubOrgSubAction) {
-      const webContext = resolveWebPageContext(activeTabUrl, activeTabTitle);
-      const rawRepos = webContext.metadata.repositories || [];
-
-      const filterText = (searchValue.startsWith('/') ? '' : searchValue).toLowerCase().trim();
-      const matchedRepos = filterText ? rawRepos.filter(r => r.name.toLowerCase().includes(filterText)) : rawRepos;
-
-      const mappedRepoActions = matchedRepos.map(repo => {
-        let repoUrl = repo.url;
-        if (githubOrgSubAction.subAction === 'issue') {
-          repoUrl = `${repo.url}/issues/new`;
-        } else if (githubOrgSubAction.subAction === 'settings') {
-          repoUrl = `${repo.url}/settings`;
-        }
-
-        return {
-          id: `gh_org_repo_${repo.name}`,
-          name: repo.name,
-          category: 'thissite_action',
-          url: repoUrl,
-        };
-      });
-
-      return {
-        thissite: mappedRepoActions,
-        automations: [],
-        notes: [],
-        todos: [],
-        links: [],
-        snippets: [],
-        prompts: [],
-        bookmarks: [],
-        commands: [],
+    if (activeSection && activeSection !== 'all') {
+      const emptyResult = {
+        thissite: [] as any[],
+        automations: [] as any[],
+        notes: [] as any[],
+        todos: [] as any[],
+        links: [] as any[],
+        snippets: [] as any[],
+        prompts: [] as any[],
+        sessions: [] as any[],
+        bookmarks: [] as any[],
+        commands: [] as any[],
+        system_commands: [] as any[],
       };
+
+      switch (activeSection) {
+        case 'thissite':
+          return {
+            ...emptyResult,
+            thissite: effectiveSearchValue.trim() ? filter(visibleThisSiteItems, searchQuery) : visibleThisSiteItems,
+          };
+        case 'todos':
+          return {
+            ...emptyResult,
+            todos: filter(
+              safeList(todos).filter(t => !t.is_done),
+              searchQuery,
+            ).slice(0, 30),
+          };
+        case 'commands':
+          return {
+            ...emptyResult,
+            commands: filter(allCommands, searchQuery).slice(0, 40),
+          };
+        case 'system_commands':
+          return {
+            ...emptyResult,
+            system_commands: filter(allCommands, searchQuery).slice(0, 40),
+          };
+        case 'links':
+          return {
+            ...emptyResult,
+            links: filter(allRawLinks, searchQuery).slice(0, 30),
+          };
+        case 'notes':
+          return {
+            ...emptyResult,
+            notes: filter(safeList(notes), searchQuery).slice(0, 30),
+          };
+        case 'sessions':
+          return {
+            ...emptyResult,
+            sessions: filter(allSessions, searchQuery).slice(0, 30),
+          };
+        case 'automations':
+          return {
+            ...emptyResult,
+            automations: filter(safeList(automations), searchQuery).slice(0, 30),
+          };
+        case 'bookmarks':
+          return {
+            ...emptyResult,
+            bookmarks: filter(safeList(allBookmarks), searchQuery).slice(0, 30),
+          };
+        case 'snippets':
+          return {
+            ...emptyResult,
+            snippets: filter(actualSnippets, searchQuery).slice(0, 30),
+          };
+        case 'prompts':
+          return {
+            ...emptyResult,
+            prompts: filter(actualPrompts, searchQuery).slice(0, 30),
+          };
+        default:
+          return emptyResult;
+      }
     }
 
     return {
-      thissite: thisSiteItems,
+      thissite: effectiveSearchValue.trim() ? filter(visibleThisSiteItems) : visibleThisSiteItems,
       automations: filter(safeList(automations)).slice(0, 30),
       notes: filter(safeList(notes)).slice(0, 30),
       todos: filter(safeList(todos).filter(t => !t.is_done)).slice(0, 30),
       links: filteredLinks.slice(0, 30),
       snippets: filter(actualSnippets).slice(0, 30),
       prompts: filter(actualPrompts).slice(0, 30),
+      sessions: filter(allSessions).slice(0, 30),
       bookmarks: filter(safeList(allBookmarks)).slice(0, 30),
       commands: filteredCommands,
+      system_commands: [],
     };
   }, [
     automations,
+    allCommands,
     notes,
     snippets,
     todos,
     links,
-    searchValue,
+    debouncedSearchValue,
     allBookmarks,
     filteredCommands,
     activeTabUrl,
     optimisticSavedUrls,
     isLoggedIn,
-    githubOrgSubAction,
+    dbSessions,
+    debouncedCommandSpace,
   ]);
 
   const sections = useMemo(() => {
     let currentStart = 0;
     const result: { name: string; start: number; count: number }[] = [];
-    const { atDropdown, activeSection, searchQuery } = parseAtMode(searchValue);
-    const effectiveSearchValue = atDropdown
-      ? ''
-      : activeSection !== null
-        ? searchQuery
-        : searchValue.startsWith('/')
-          ? ''
-          : searchValue;
+
+    // When command-space is active (e.g. "c n "), parseAtMode would mis-read
+    // "c" as the 'commands' alias — so skip slash-mode parsing in that case.
+    const { activeSection: slashActiveSection, searchQuery } = debouncedCommandSpace.isActive
+      ? { activeSection: null, searchQuery: debouncedSearchValue }
+      : parseAtMode(debouncedSearchValue);
+
+    // The query that is actually used for filtering content
+    const effectiveSearchValue = slashActiveSection !== null ? searchQuery : debouncedSearchValue;
 
     const addSection = (name: string) => {
       if (result.some(s => s.name === name)) return;
@@ -897,7 +1332,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         return;
       }
 
-      const hasNewButton = name !== 'bookmarks' && name !== 'commands';
+      const hasNewButton = name !== 'bookmarks' && name !== 'commands' && name !== 'system_commands';
       // During search, don't add "new" button slot — only real items count
       const count = effectiveSearchValue.trim() ? itemsLength : itemsLength + (hasNewButton ? 1 : 0);
 
@@ -907,69 +1342,80 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
       }
     };
 
-    if (githubOrgSubAction) {
-      // Show only 'thissite' repository list during github organization flows
-      result.push({ name: 'thissite', start: 0, count: filtered.thissite.length });
-      return result;
-    }
+    const allKeys = [
+      'thissite',
+      'todos',
+      'commands',
+      'system_commands',
+      'links',
+      'notes',
+      'sessions',
+      'automations',
+      'bookmarks',
+      'snippets',
+      'prompts',
+    ];
 
-    if (effectiveSearchValue.trim() || showAllSections || activeSection === 'all') {
-      const allKeys = [
-        'thissite',
-        'todos',
-        'commands',
-        'links',
-        'notes',
-        'automations',
-        'bookmarks',
-        'snippets',
-        'prompts',
-      ];
-      allKeys.forEach(name => {
-        addSection(name);
-      });
-    } else if (activeSection && activeSection !== 'all') {
-      // @ALIAS+Space activated — show only that section
-      addSection(activeSection);
+    if (slashActiveSection && slashActiveSection !== 'all') {
+      // /ALIAS+Space mode (e.g. "/N ") — show ONLY that one section
+      addSection(slashActiveSection);
+    } else if (
+      showAllSections ||
+      slashActiveSection === 'all' ||
+      effectiveSearchValue.trim() ||
+      debouncedCommandSpace.isActive
+    ) {
+      // Normal search, "all" alias, command-space mode — show all sections that have items
+      allKeys.forEach(name => addSection(name));
     } else {
-      // 1. Show priority sections if they have data (or always for commands)
-      const primary = ['thissite', 'todos', 'commands', 'links', 'notes', 'automations'];
-      primary.forEach(name => {
-        if (result.length >= 5) return;
-        if (name === 'commands' || (filtered[name as keyof typeof filtered]?.length || 0) > 0) {
-          addSection(name);
-        }
-      });
-
-      // 2. Fill up to 5 slots with fallbacks
-      const fillers = ['bookmarks', 'snippets', 'prompts'];
-      fillers.forEach(name => {
-        if (result.length >= 5) return;
-        addSection(name);
-      });
+      // Empty search, no alias — only show This Site contextual actions
+      if ((filtered.thissite?.length || 0) > 0) {
+        addSection('thissite');
+      }
     }
 
     return result;
-  }, [filtered, showAllSections, searchValue, githubOrgSubAction]);
+  }, [filtered, showAllSections, debouncedSearchValue, debouncedCommandSpace]);
 
   const dropdownOptions = useMemo(() => {
-    const { atDropdown } = parseAtMode(searchValue);
-    if (!atDropdown) return { thisSiteActions: [], categories: [], totalList: [] };
+    const cleanSearch = debouncedCommandSpace.isActive
+      ? debouncedCommandSpace.actualQuery.trim()
+      : debouncedSearchValue.startsWith('/')
+        ? debouncedSearchValue.slice(1)
+        : debouncedSearchValue;
+    const filterText = cleanSearch.toLowerCase();
 
-    const filterText = searchValue.slice(1).toLowerCase();
+    const baseSiteItems = filtered.thissite || [];
 
-    // 1. "This Site" action items - Only show when input is exactly '/'
-    const thisSiteActions =
-      filterText !== ''
-        ? []
-        : (filtered.thissite || []).map((item: any) => ({
-          type: 'action',
-          id: item.id,
-          name: item.name,
-          item: item,
-        }));
+    const actionPrefixMap = getActionPrefixMap(omniboxPrefixes);
 
-    // 2. Categories (excluding 'thissite' since it's displayed directly as actions)
+    const matchedSiteItems = baseSiteItems.filter((item: any) => {
+      if (!filterText) return true;
+      const nameMatch = item.name.toLowerCase().includes(filterText);
+      const shortPrefix = actionPrefixMap[item.id]?.toLowerCase() || '';
+      const prefixMatch = shortPrefix && shortPrefix.startsWith(filterText);
+      return nameMatch || prefixMatch;
+    });
+
+    const siteCommandActions = matchedSiteItems
+      .filter((item: any) => !isExtractionCommandItem(item))
+      .map((item: any) => ({
+        type: 'site-action',
+        id: item.id,
+        name: item.name,
+        item,
+      }));
+
+    const extractionActions = matchedSiteItems
+      .filter((item: any) => isExtractionCommandItem(item))
+      .map((item: any) => ({
+        type: 'extraction-action',
+        id: item.id,
+        name: item.name,
+        item: item.item || item,
+        wrappedItem: item,
+      }));
+
     const categoryNames = [
       'all',
       'todos',
@@ -979,28 +1425,32 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
       'automations',
       'bookmarks',
       'snippets',
-      'prompts',
+      'sessions',
+      'chat_agents',
     ];
-    const categories = categoryNames
-      .filter(name => {
-        if (!filterText) return true;
-        const alias = SECTION_ALIAS_DISPLAY[name] || '';
-        return name.toLowerCase().startsWith(filterText) || alias.toLowerCase().startsWith(filterText);
-      })
-      .map(name => ({
-        type: 'category',
-        id: name,
-        name: name,
-      }));
+    const categories = debouncedCommandSpace.isActive
+      ? []
+      : categoryNames
+          .filter(name => {
+            if (!filterText) return true;
+            return name.toLowerCase().startsWith(filterText);
+          })
+          .map(name => ({
+            type: 'category',
+            id: name,
+            name: name,
+          }));
+
+    const thisSiteActions = [...siteCommandActions, ...extractionActions];
 
     return {
       thisSiteActions,
+      siteCommandActions,
+      extractionActions,
       categories,
-      totalList: [...categories, ...thisSiteActions],
+      totalList: [...thisSiteActions, ...categories],
     };
-  }, [searchValue, filtered.thissite]);
-
-
+  }, [debouncedSearchValue, filtered.thissite, debouncedCommandSpace, omniboxPrefixes]);
 
   // Reset dropdown selected index when search value changes so that it always starts at the first item (Categories)
   useEffect(() => {
@@ -1011,7 +1461,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
   useEffect(() => {
     if (dropdownSelectedIndex < 0) return;
     const timer = setTimeout(() => {
-      const el = document.getElementById(`altq-dropdown-item-${dropdownSelectedIndex}`);
+      const el = document.getElementById(`alts-dropdown-item-${dropdownSelectedIndex}`);
       if (el) {
         el.scrollIntoView({
           behavior: 'auto',
@@ -1040,7 +1490,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     async (item: any, e?: React.MouseEvent) => {
       e?.stopPropagation();
       const sessionId = item.snippet_id || item.id;
-      const sessionName = item.key || item.name || item.title || 'Untitled Tab group';
+      const sessionName = item.key || item.name || item.title || 'Untitled Tab Session';
       const workspaceId = item.workspace_id || defaultWorkspaceId;
       const folderId = item.folder_id || null;
 
@@ -1070,25 +1520,12 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
             if (Array.isArray(parsed.urls)) initialUrls = parsed.urls;
             if (Array.isArray(parsed.names)) initialNames = parsed.names;
           }
-        } catch (err) { }
+        } catch (err) {}
       }
 
       if (initialUrls.length === 0) {
         initialUrls = extractUrlsFromSnippet(item);
       }
-
-      // Save prefill to local storage perfectly mimicking create session
-      await new Promise<void>(resolve => {
-        chrome.storage.local.set(
-          {
-            pending_session_prefill: {
-              title: sessionName,
-              sessionId: sessionId,
-            },
-          },
-          () => resolve(),
-        );
-      });
 
       chrome.runtime.sendMessage(
         {
@@ -1104,18 +1541,15 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
           openSettings,
         },
         response => {
-          // Show a toast
-          const toastId = `altq-session-toast-${Date.now()}`;
-          const toast = document.createElement('div');
-          toast.id = toastId;
           const count = initialUrls.length;
-          toast.textContent = `🚀 Tab group "${sessionName}" started with ${count} tab${count !== 1 ? 's' : ''}`;
-          toast.style.cssText =
-            'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#10b981;color:white;padding:8px 20px;border-radius:20px;z-index:2147483647;font-family:system-ui,sans-serif;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.4);';
-          document.body.appendChild(toast);
-          setTimeout(() => {
-            toast.remove();
-          }, 2500);
+          showWebsiteToast(
+            `🚀 Tab Session "${sessionName}" started with ${count} tab${count !== 1 ? 's' : ''}`,
+            '#10b981',
+          );
+          useUIStore.getState().queueNotification({
+            message: `🚀 Tab Session "${sessionName}" started with ${count} tab${count !== 1 ? 's' : ''}`,
+            type: 'success',
+          });
         },
       );
 
@@ -1125,6 +1559,8 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
   );
 
   const handleExecute = (item: any, e?: React.MouseEvent | KeyboardEvent) => {
+    console.log('[handleExecute] Raw item received:', item);
+
     e?.preventDefault();
     const isCtrl = e && 'ctrlKey' in e && (e.ctrlKey || e.metaKey);
 
@@ -1133,13 +1569,14 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     // They cannot be routed through AltS_search_newtab/index.html.
     if (item.category === 'page_action') {
       e?.stopPropagation();
-      executePageActionCommand(item as AltQPageActionItem, onClose);
+      const actualItem = item.item || item;
+      executePageActionCommand(actualItem as AltQPageActionItem, onClose);
       return true;
     }
 
     if (item.category === 'thissite_indicator') {
       e?.stopPropagation();
-      return;
+      return true;
     }
 
     if (item.category === 'thissite_action') {
@@ -1164,14 +1601,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
             });
           });
         }
-        return;
-      }
-
-      // Handle GitHub Org subaction selection workflow
-      if (item.executeId === 'github_org_action' && item.subAction) {
-        setGithubOrgSubAction({ orgName: item.orgName, subAction: item.subAction });
-        setSearchValue(''); // Clear query to display the matching repos
-        return;
+        return true;
       }
 
       let tabUrl = activeTabUrl;
@@ -1181,7 +1611,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         try {
           tabUrl = (window.top as any)?.location?.href || window.location.href || '';
           tabTitle = (window.top as any)?.document?.title || document.title || 'Untitled Page';
-        } catch (_) { }
+        } catch (_) {}
       }
 
       const getFallbackWorkspaceId = (): string | null => defaultWorkspaceId || allWorkspaces[0]?.id || null;
@@ -1193,38 +1623,77 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
               window.open(item.url, '_blank');
             }
           });
-          setGithubOrgSubAction(null); // Clear active flow
           onClose();
           return;
         }
 
-        if (item.id === 'save_link' || item.id === 'save_chat') {
+        if (item.id === 'save_link') {
+          const targetUrl = chrome.runtime.getURL(
+            `AltS_search_newtab/index.html?create_link=true&active_tab_url=${encodeURIComponent(url)}&active_tab_title=${encodeURIComponent(title)}`,
+          );
+          try {
+            chrome.runtime.sendMessage({ action: 'open_tab', url: targetUrl, active: true });
+          } catch {
+            window.open(targetUrl, '_blank');
+          }
+          onClose();
+          return;
+        }
+
+        if (item.id === 'save_session') {
+          const targetUrl = chrome.runtime.getURL('newtab.html?omnibox=true&type=command&id=createsession');
+          try {
+            chrome.runtime.sendMessage({ action: 'open_tab', url: targetUrl, active: true });
+          } catch {
+            window.open(targetUrl, '_blank');
+          }
+          onClose();
+          return;
+        }
+
+        if (item.id === 'save_chat') {
           try {
             setOptimisticSavedUrls(prev => [...prev, url]);
-            let wsId = getFallbackWorkspaceId();
-            await createLocalSnippet({
-              workspaceId: wsId || undefined,
-              title,
-              config: JSON.stringify({ urls: [url] }),
-              tagIds: [],
+            const wsId = getFallbackWorkspaceId();
+            const response: any = await new Promise(resolve => {
+              chrome.runtime.sendMessage(
+                {
+                  action: 'db_create_chat_agent',
+                  input: {
+                    workspaceId: wsId || undefined,
+                    title,
+                    urls: [url],
+                    tagIds: [],
+                  },
+                },
+                resolve,
+              );
             });
-            const toastId = `altq-toast-${Date.now()}`;
-            const toast = document.createElement('div');
-            toast.id = toastId;
-            toast.textContent = item.id === 'save_chat' ? '💬 Chat saved successfully' : '🔖 Link saved to this site';
-            toast.style.cssText =
-              'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1a73e8;color:white;padding:8px 20px;border-radius:20px;z-index:2147483647;font-family:system-ui,sans-serif;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.4);';
-            document.body.appendChild(toast);
-            setTimeout(() => {
-              toast.remove();
-            }, 2500);
+            if (response && response.success && response.agent) {
+              const targetUrl = chrome.runtime.getURL(
+                `AltS_search_newtab/index.html?edit_agent=${encodeURIComponent(response.agent.id)}`,
+              );
+              try {
+                chrome.runtime.sendMessage({ action: 'open_tab', url: targetUrl, active: true });
+              } catch {
+                window.open(targetUrl, '_blank');
+              }
+            } else {
+              throw new Error(response?.error || 'Failed to create chat agent via background');
+            }
           } catch (err) {
-            console.warn('[AltQ-Trigger] updateSnippetRealtime failed:', err);
+            console.warn('[AltQ-Trigger] createChatAgent failed:', err);
           }
+          onClose();
+          return;
         } else if (item.id === 'add_to_existing') {
           setAddExistingUrl(url);
           setAddExistingTitle(title);
           setShowAddExistingModal(true);
+        } else if (item.id === 'add_to_existing_session') {
+          setAddExistingUrl(url);
+          setAddExistingTitle(title);
+          setShowAddExistingSessionModal(true);
         } else if (item.id === 'summarize_page') {
           // Perform full context scraping and AI dispatching
           const defaultPrompt = 'Summarize the main points, key takeaways, and outline of this page.';
@@ -1244,12 +1713,14 @@ ${pageContent}
               : `Summarize this page for me: ${url}`;
 
             chrome.storage.local.get('selectedAIs', (result: any) => {
-              const selection =
-                result.selectedAIs && Array.isArray(result.selectedAIs) && result.selectedAIs.length > 0
-                  ? result.selectedAIs
-                  : ['gpt'];
-
-              const finalIds = selection.filter((id: string) => id !== 'ai');
+              const finalIds = ['gpt'];
+              const aiFallbacks: Record<string, { url: string; kind: 'chatgpt' | 'claude' | 'gemini' | 'perplexity' }> =
+                {
+                  gpt: { url: 'https://chatgpt.com/', kind: 'chatgpt' },
+                  claude: { url: 'https://claude.ai/new', kind: 'claude' },
+                  gemini: { url: 'https://gemini.google.com/app', kind: 'gemini' },
+                  perplexity: { url: 'https://www.perplexity.ai/', kind: 'perplexity' },
+                };
 
               const getBaseAIUrl = (kind?: string): string => {
                 if (kind === 'chatgpt') return 'https://chatgpt.com/';
@@ -1260,7 +1731,22 @@ ${pageContent}
               };
 
               const links = finalIds
-                .map((id: string) => globalCommands.find(c => c.id === id))
+                .map((id: string) => {
+                  const fallback = aiFallbacks[id];
+                  if (fallback) {
+                    return {
+                      id,
+                      label: id,
+                      urlTemplate: fallback.url,
+                      autoSubmit: fallback.kind,
+                    };
+                  }
+
+                  const cmd = globalCommands.find(c => c.id === id);
+                  if (cmd) return cmd;
+
+                  return null;
+                })
                 .filter((cmd: any): cmd is any => Boolean(cmd))
                 .map((cmd: any) => {
                   const targetUrl = cmd.autoSubmit
@@ -1317,172 +1803,166 @@ ${pageContent}
           },
         );
       }
-      return;
+      return true;
     }
 
     if (item.isNew) {
       handleCreateNew(item.section);
-      return;
-    }
-
-    // ── BoardView command items (gpt, claude, gemini, perplexity, history, downloads, etc.) ──
-    // These items have _kind: 'command' and store their full definition in item.command
-    if (item._kind === 'command') {
-      const cmdDef = item.command || item;
-      const cmdId: string = cmdDef.id || item.id || '';
-      const urlTemplate: string = cmdDef.urlTemplate || '';
-      const cmdCategory: string = (cmdDef.category || '').toLowerCase();
-
-      console.log('[handleExecute] BoardView command item clicked:', {
-        cmdId,
-        cmdCategory,
-        urlTemplate,
-        commandType: item.commandType,
-        hasQueryPlaceholder: urlTemplate.includes('{query}'),
-      });
-
-      if (cmdCategory === 'browser' && urlTemplate && !urlTemplate.includes('{query}')) {
-        // Browser chrome:// pages — open directly (history, downloads, extensions, etc.)
-        console.log('[handleExecute] → Opening browser page directly:', urlTemplate);
-        chrome.runtime.sendMessage({ action: 'open_tab', url: urlTemplate, active: !isCtrl }, () => {
-          if (chrome.runtime.lastError && !isCtrl) window.open(urlTemplate, '_blank');
-          if (!isCtrl) onClose();
-        });
-      } else if (urlTemplate && urlTemplate.includes('{query}')) {
-        // Query-based command (gpt, claude, gemini, perplexity, google, youtube, etc.)
-        // Open newtab with command locked so the user can type their query
-        const lockUrl = chrome.runtime.getURL(`AltS_search_newtab/index.html?lock_command=${encodeURIComponent(cmdId)}`);
-        console.log('[handleExecute] → Locking command in new tab:', lockUrl);
-        chrome.runtime.sendMessage({ action: 'open_tab', url: lockUrl, active: !isCtrl }, () => {
-          if (chrome.runtime.lastError && !isCtrl) window.open(lockUrl, '_blank');
-          if (!isCtrl) onClose();
-        });
-      } else {
-        // Local commands (createnotes, createlinks, agent, profile, etc.)
-        console.log('[handleExecute] → Local command, opening newtab to trigger:', cmdId);
-        const triggerUrl = chrome.runtime.getURL(
-          `AltS_search_newtab/index.html?trigger_hotkey=true&type=command&id=${encodeURIComponent(cmdId)}`
-        );
-        chrome.runtime.sendMessage({ action: 'open_tab', url: triggerUrl, active: !isCtrl }, () => {
-          if (chrome.runtime.lastError && !isCtrl) window.open(triggerUrl, '_blank');
-          if (!isCtrl) onClose();
-        });
-      }
-      /* removed sync onClose */
       return true;
     }
 
-    if (item.is_todo_type || (item.category || '').toLowerCase() === 'todo') {
-      const url = chrome.runtime.getURL('AltS_search_newtab/index.html?open_create=true');
-      chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-        if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-        if (!isCtrl) onClose();
-      });
-      /* removed sync onClose */
-      return;
-    }
-
-    let cat = (item.category || item.snippet_category || '').toLowerCase();
-
-    if (item.isGlobal !== undefined && !cat) {
-      cat = 'command';
-    }
-
-    if (!cat && item.url) {
-      cat = 'bookmark';
-    }
-    if (cat === 'bookmark' || cat === 'open_url') {
-      const urlsToOpen = item.url ? item.url.split(',').filter(Boolean) : [];
-      if (urlsToOpen.length > 0) {
-        urlsToOpen.forEach((url: string) => {
-          chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-            if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-            if (!isCtrl) onClose();
-          });
-        });
-      }
-    } else if (
-      ['link', 'collection', 'agent_collection'].includes(cat)
-    ) {
-      const urls = extractUrlsFromSnippet(item);
-      if (urls && urls.length > 0) {
-        urls.forEach((url: string) => {
-          chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-            if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-            if (!isCtrl) onClose();
-          });
-        });
-      }
-    } else if (['note', 'snippet'].includes(cat)) {
-      const snippetId = String(item.snippet_id || item.id || item.todo_id || '');
-      const url = chrome.runtime.getURL(
-        `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`,
-      );
-      chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-        if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-        if (!isCtrl) onClose();
-      });
-    } else if (
-      ['command', 'module', 'automation', 'install', 'agent', 'chat_agent', 'custom', 'ai'].includes(cat) ||
-      !!(item.automation_steps || item.steps || item.automation)
-    ) {
-      const triggerId = String(item.value || item.snippet_id || item.id || item.todo_id || '');
-      const triggerType = cat === 'custom' || cat === 'ai' ? 'note' : cat || 'automation';
-      // Preserve Global URL template commands (like /google)
-      if (cat === 'command' && item.isGlobal && item.urlTemplate) {
-        const url = buildUrl(item.urlTemplate, searchValue);
-        if (url) {
-          chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-            if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-            if (!isCtrl) onClose();
-          });
-        }
-      } else if (cat === 'ai' || ['gpt', 'claude', 'gemini', 'perplexity'].includes(item.id)) {
-        // Matches BoardView behavior for ChatGPT, Claude, etc.
-        const url = chrome.runtime.getURL(`AltS_search_newtab/index.html?lock_command=${encodeURIComponent(item.id)}`);
-        chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-          if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-          if (!isCtrl) onClose();
-        });
-      } else {
-        const url = chrome.runtime.getURL(
-          `AltS_search_newtab/index.html?trigger_hotkey=true&type=${triggerType}&id=${encodeURIComponent(triggerId)}`,
-        );
-        chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-          if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-          if (!isCtrl) onClose();
-        });
-      }
-    } else {
-      // Fallback
-      const urls = extractUrlsFromSnippet(item);
-      if (urls && urls.length > 0) {
-        urls.forEach((url: string) => {
-          chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-            if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-            if (!isCtrl) onClose();
-          });
-        });
-      } else {
-        const snippetId = String(item.snippet_id || item.id || item.todo_id || '');
-        const url = chrome.runtime.getURL(
-          `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`,
-        );
-        chrome.runtime.sendMessage({ action: 'open_tab', url, active: !isCtrl }, () => {
-          if (chrome.runtime.lastError && !isCtrl) window.open(url, '_blank');
-          if (!isCtrl) onClose();
-        });
-      }
-    }
-
-    /* removed sync onClose */
-    return true;
+    // Delegate all standard items (todos, commands, notes, links, sessions, ai, etc.)
+    // to BoardView.tsx to avoid duplication and maintain a single source of truth.
+    return false;
   };
+
+  const executeDropdownItem = useCallback(
+    (item: any) => {
+      const itemId = String(item?.id || item?.snippet_id || item?.todo_id || '');
+      const now = Date.now();
+      const last = dropdownActionGuardRef.current;
+      if (last && last.id === itemId && now - last.ts < 400) {
+        return;
+      }
+
+      dropdownActionGuardRef.current = { id: itemId, ts: now };
+      handleExecute(item);
+      setSearchValue('');
+      setDropdownSelectedIndex(-1);
+      setIsDropdownVisible(false);
+
+      window.setTimeout(() => {
+        if (dropdownActionGuardRef.current?.id === itemId) {
+          dropdownActionGuardRef.current = null;
+        }
+      }, 0);
+    },
+    [handleExecute],
+  );
 
   const handleContextMenu = useCallback((e: React.MouseEvent, item: any, title: string) => {
     e.preventDefault();
-    setContextMenuState({ x: e.clientX, y: e.clientY, item, title });
+    e.stopPropagation();
+    if (boardViewRef.current) {
+      boardViewRef.current.openContextMenu(e.clientX, e.clientY, item);
+    }
   }, []);
+
+  const handleToggleFavorite = useCallback(
+    async (item: any) => {
+      if (!userId) {
+        return;
+      }
+
+      try {
+        const actualItem = item?.item || item?.snippet || item?.session || item?.data || item;
+        const category = String(
+          actualItem?.category || item?.category || item?._kind || item?.type || '',
+        ).toLowerCase();
+        console.log('[AltS-Website][BoardView][Favorite] handleToggleFavorite start', {
+          item,
+          actualItem,
+          derivedCategory: category,
+          userId,
+        });
+        const isCommand =
+          item?.source === 'last_used' ||
+          item?.id === 'ai' ||
+          item?.type === 'command' ||
+          item?._kind === 'command' ||
+          item?.category === 'command';
+
+        let itemType = 'snippet';
+        let itemId = '';
+
+        if (isCommand) {
+          itemType = 'command';
+          itemId = item?.id || actualItem?.id || '';
+        } else if (category === 'link') {
+          itemType = 'link';
+          itemId = actualItem?.snippet_id || actualItem?.id || actualItem?.todo_id || '';
+        } else if (category === 'note') {
+          itemType = 'note';
+          itemId = actualItem?.snippet_id || actualItem?.id || actualItem?.todo_id || '';
+        } else if (category === 'session' || category === 'sessions' || category === 'tabgroup') {
+          itemType = 'session';
+          itemId = actualItem?.id || actualItem?.session_id || item?.session?.id || '';
+        } else if (category === 'snippet') {
+          itemType = 'snippet';
+          itemId = actualItem?.snippet_id || actualItem?.id || actualItem?.todo_id || '';
+        } else if (category === 'chat_agent' || category === 'agent') {
+          itemType = 'chat_agent';
+          itemId = actualItem?.id || '';
+        } else if (category === 'aiprompt' || category === 'prompt') {
+          itemType = 'aiPrompt';
+          itemId = actualItem?.id || '';
+        } else if (category === 'automation') {
+          itemType = 'automation';
+          itemId = actualItem?.id || '';
+        } else {
+          itemType = 'note';
+          itemId = actualItem?.snippet_id || actualItem?.id || actualItem?.todo_id || '';
+        }
+
+        console.log('[AltS-Website][BoardView][Favorite] resolved target', {
+          itemType,
+          itemIdBeforeNormalize: itemId,
+          actualItem,
+        });
+
+        itemId = extractSnippetIdFromCompoundId(itemId);
+        if (!itemId) {
+          console.warn('[AltS-Website][BoardView][Favorite] aborting because itemId is empty after normalization', {
+            item,
+            actualItem,
+            category,
+            itemType,
+          });
+          return;
+        }
+
+        const label =
+          item?.label ||
+          item?.snippet?.key ||
+          item?.snippet?.title ||
+          item?.snippet?.name ||
+          item?.key ||
+          item?.title ||
+          item?.name ||
+          actualItem?.title ||
+          actualItem?.name ||
+          '';
+
+        chrome.runtime.sendMessage(
+          {
+            action: 'db_toggle_favorite',
+            userId: userId || 'local_user',
+            referenceId: itemId,
+            referenceType: itemType,
+            label,
+          },
+          res => {
+            console.log('[AltS-Website][BoardView][Favorite] db_toggle_favorite response', {
+              itemType,
+              itemId,
+              label,
+              response: res,
+              runtimeError: chrome.runtime?.lastError?.message || null,
+            });
+            if (res && res.success) {
+              syncDbFromBackground();
+            }
+          },
+        );
+
+        showWebsiteToast('Favorites updated');
+        useUIStore.getState().queueNotification({ message: 'Favorites updated', type: 'info' });
+      } catch (error) {
+        console.error('[AltQ] Failed to update favorites:', error);
+      }
+    },
+    [userId],
+  );
 
   const handleToggleTodo = async (e: React.MouseEvent, item: any) => {
     e.stopPropagation();
@@ -1519,6 +1999,32 @@ ${pageContent}
   };
 
   useEffect(() => {
+    if (!commandSpace.isActive || commandSpace.activeCategoryFilter || !commandSpace.exactThisSectionActionId) {
+      if (!commandSpace.isActive) {
+        autoTriggeredThisSectionInputRef.current = null;
+      }
+      return;
+    }
+
+    const normalizedInput = commandSpace.normalizedInput;
+    if (autoTriggeredThisSectionInputRef.current === normalizedInput) {
+      return;
+    }
+
+    const exactAction =
+      PAGE_ACTION_ITEMS.find(item => item.id === commandSpace.exactThisSectionActionId) ||
+      filtered.thissite.find((item: any) => item.id === commandSpace.exactThisSectionActionId);
+
+    if (!exactAction) {
+      return;
+    }
+
+    autoTriggeredThisSectionInputRef.current = normalizedInput;
+    setSearchValue('');
+    handleExecute((exactAction as any).item || exactAction);
+  }, [commandSpace, filtered.thissite, handleExecute]);
+
+  useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1544,6 +2050,18 @@ ${pageContent}
   if (!isOpen) return null;
 
   const isDropdownActive = parseAtMode(searchValue).atDropdown;
+  const [isExplicitlyExpanded, setIsExplicitlyExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsExplicitlyExpanded(false);
+    }
+  }, [isOpen]);
+
+  const isExpanded =
+    isExplicitlyExpanded ||
+    searchValue.trim().length > 0 ||
+    (selectedSidebarSection !== 'all' && selectedSidebarSection !== '');
 
   return (
     <AnimatePresence>
@@ -1552,7 +2070,12 @@ ${pageContent}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
-        className="fixed inset-0 flex items-center justify-center z-[2147483647] bg-black/60 backdrop-blur-[1px]">
+        className={clsx(
+          'fixed inset-0 flex z-[2147483647]',
+          isExpanded
+            ? 'items-center justify-center bg-black/60 backdrop-blur-[1px]'
+            : 'items-start justify-center pt-[12vh] bg-transparent pointer-events-auto',
+        )}>
         <div className="absolute inset-0" onClick={onClose} />
 
         <motion.div
@@ -1561,563 +2084,714 @@ ${pageContent}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.96, opacity: 0, y: 15 }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
-          className="w-[75vw] min-w-[900px] max-w-[95vw] h-[85vh] flex flex-col bg-[#0B0C10] border border-[#2A2B33] rounded-none shadow-2xl overflow-hidden relative font-['Inter',_sans-serif] text-[14px] leading-normal text-left text-white antialiased box-border m-0 p-0 popup-main-container">
-          {/* Top Left Branding */}
-          <div className="absolute top-7 left-8 flex items-center z-50 select-none">
-            <img src={cmdOSLogo} alt="cmdOS" className="h-6 w-auto" />
-            <span className="text-lg font-bold text-white tracking-wide ml-2">cmdOS</span>
-          </div>
+          className={clsx(
+            "relative font-['Inter',_sans-serif] text-[14px] leading-normal text-left text-white antialiased box-border m-0 p-0 transition-all duration-200",
+            isExpanded
+              ? 'w-[75vw] min-w-[900px] max-w-[95vw] h-[85vh] max-h-[800px] rounded-none shadow-2xl popup-main-container'
+              : 'w-[650px] max-w-[90vw] h-auto shadow-2xl',
+          )}>
+          {/* Layer 1: Wallpaper image — sits behind everything, outside overflow:hidden */}
+          {isExpanded && <WallpaperLayer />}
 
-          {/* Left Sidebar (Board View Only) */}
-          {!isDropdownActive && false && (
-            <div className="absolute left-0 top-20 bottom-0 w-[160px] flex flex-col px-4 z-40 border-r border-[#2A2B33] overflow-y-auto hover-scrollbar">
-              <div className="flex flex-col space-y-1 mt-4 pb-8">
-                {/* All Option */}
-                <button
-                  onClick={() => setSelectedSidebarSection('all')}
-                  className={clsx(
-                    'flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer',
-                    selectedSidebarSection === 'all'
-                      ? 'text-white bg-white/10 font-medium'
-                      : 'text-[#A1A6B3] font-normal hover:text-white hover:bg-white/5',
-                  )}>
-                  <svg
-                    className="w-4 h-4 shrink-0"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2">
-                    <rect x="3" y="3" width="7" height="7" rx="1" />
-                    <rect x="14" y="3" width="7" height="7" rx="1" />
-                    <rect x="14" y="14" width="7" height="7" rx="1" />
-                    <rect x="3" y="14" width="7" height="7" rx="1" />
-                  </svg>
-                  All
-                </button>
-                {[
-                  'thissite',
-                  'todos',
-                  'commands',
-                  'links',
-                  'notes',
-                  'automations',
-                  'bookmarks',
-                  'snippets',
-                  'prompts',
-                ].map(sectionName => {
-                  const meta = SECTION_META[sectionName] || {
-                    title: sectionName,
-                    icon: <FaCheckCircle className="w-4 h-4 shrink-0" />,
-                  };
-                  const isSelected = selectedSidebarSection === sectionName;
-                  return (
-                    <button
-                      key={sectionName}
-                      onClick={() => setSelectedSidebarSection(sectionName)}
-                      className={clsx(
-                        'flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer',
-                        isSelected
-                          ? 'text-white bg-white/10 font-medium'
-                          : 'text-[#A1A6B3] font-normal hover:text-white hover:bg-white/5',
-                      )}>
-                      {meta.icon}
-                      {meta.title}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Top Right Action Buttons */}
-          <div className="absolute top-6 right-6 flex items-center gap-1.5 z-[100]">
-
-            {/* Settings Dropdown Button */}
-            <div ref={settingsDropdownRef} className="relative">
-              <button
-                onClick={e => {
-                  e.preventDefault();
-                  setIsSettingsDropdownOpen(!isSettingsDropdownOpen);
-                }}
-                className={clsx(
-                  'w-9 h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer focus:outline-none',
-                  isSettingsDropdownOpen
-                    ? 'bg-white/15 text-white'
-                    : 'bg-transparent hover:bg-white/10 text-[#A1A6B3] hover:text-white',
-                )}
-                title="Settings">
-                <FiSettings className="w-5 h-5" />
-              </button>
-
-              {isSettingsDropdownOpen && (
-                <div className="absolute top-full right-0 mt-1.5 w-[280px] rounded-xl shadow-2xl z-[9999] p-3 flex flex-col gap-3 border border-[#2A2B33] bg-[#171821] animate-in fade-in slide-in-from-top-1 zoom-in-95 duration-150 text-left">
-
-
-                  <div className="flex flex-col gap-2 px-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-semibold text-white">Command-first search</span>
-                        <span className="text-[9px] font-medium bg-neutral-800 text-[#A1A6B3] px-1.5 py-0.5 rounded border border-[#2A2B33]">
-                          Suggested
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const newVal = !autoTriggerDropdown;
-                          setAutoTriggerDropdown(newVal);
-                          chrome.storage.local.set({ rtq_focus_on: newVal });
-                        }}
-                        className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-200 focus:outline-none cursor-pointer flex items-center ${autoTriggerDropdown ? 'bg-emerald-500' : 'bg-[#2A2B33]'
-                          }`}>
-                        <div
-                          className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 transform ${autoTriggerDropdown ? 'translate-x-4' : 'translate-x-0'
-                            }`}
-                        />
-                      </button>
-                    </div>
-                    <div className="flex items-start gap-2 text-[10px] text-[#A1A6B3] leading-normal">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 mt-1" />
-                      <div className="flex flex-col gap-1">
-                        <span>Clicking search opens command-first results so you can narrow choices faster.</span>
-                        <span className="text-[9px] text-[#8B8F9D]">Turn off to use normal search results.</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={onClose}
-              className="w-9 h-9 flex items-center justify-center bg-transparent hover:bg-red-500/10 text-red-500 hover:text-red-400 transition-colors rounded-lg cursor-pointer focus:outline-none"
-              title="Close (Esc)">
-              <FiX className="w-5 h-5" />
-            </button>
-          </div>
-          {/* Ultra-Compact Search Bar */}
-          <div
-            className={clsx(
-              'px-8 pt-6 pb-4 shrink-0 flex justify-center relative',
-              false && 'ml-[160px]',
-            )}>
-            <div className="relative flex items-center bg-[#0B0C10] border border-[#2A2B33] h-[52px] rounded-[16px] px-6 group w-full max-w-xl transition-colors shadow-2xl focus-within:border-white/30 z-[60]">
-              <FiSearch className="w-4 h-4 text-[#A1A6B3] mr-3 shrink-0" />
-              <div className="relative flex-1 h-full flex items-center">
-                {/* Active Tag Pill — real DOM node so cursor positions correctly after it */}
-                {(() => {
-                  const tagInfo = getActiveTagInfo(searchValue);
-                  if (!tagInfo) return null;
-                  return (
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: 'rgba(156, 163, 175, 0.15)',
-                        border: '1.5px solid #9ca3af',
-                        color: '#9ca3af',
-                        borderRadius: '6px',
-                        padding: '1px 6px',
-                        fontWeight: 700,
-                        marginRight: '6px',
-                        fontFamily: 'sans-serif',
-                        fontSize: '12px',
-                        lineHeight: 1,
-                        height: '20px',
-                        flexShrink: 0,
-                        userSelect: 'none',
-                      }}>
-                      {tagInfo.label}
-                    </span>
-                  );
-                })()}
-
-                {/* Highlight Overlay — only when no active tag (colours the /prefix text) */}
-                {
-                  !getActiveTagInfo(searchValue) &&
-                  (() => {
-                    const prefixMatch = searchValue.match(/^\/[a-zA-Z]+/);
-                    return (
-                      <div className="absolute inset-0 pointer-events-none select-none whitespace-pre flex items-center text-[15px] font-semibold text-transparent font-sans">
-                        {prefixMatch ? (
-                          <>
-                            <span className="text-white align-middle font-bold">{prefixMatch[0]}</span>
-                            <span className="text-white align-middle">{searchValue.slice(prefixMatch[0].length)}</span>
-                          </>
-                        ) : (
-                          <span className="text-white align-middle">{searchValue}</span>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={getActiveTagInfo(searchValue)?.query ?? searchValue}
-                  onChange={e => {
-                    const tagInfo = getActiveTagInfo(searchValue);
-                    if (tagInfo) {
-                      // Tag is active — update only the query portion
-                      setSearchValue(tagInfo.prefix + ' ' + e.target.value);
-                      return;
-                    }
-
-                    let val = mapFullNameToShortcut(e.target.value);
-                    const prevVal = searchValue;
-                    let spaceAppended = false;
-
-                    if (val.length > prevVal.length) {
-                      const m = val.match(/^\/([a-zA-Z]+)$/);
-                      if (m) {
-                        const typedAlias = m[1].toUpperCase();
-                        const isPrefixOfLongerAlias = Object.keys(SECTION_ALIASES).some(
-                          otherAlias => otherAlias.startsWith(typedAlias) && otherAlias.length > typedAlias.length,
-                        );
-                        if (SECTION_ALIASES[typedAlias] && !isPrefixOfLongerAlias) {
-                          val = val + ' ';
-                          spaceAppended = true;
-                        }
-                      }
-                    }
-
-                    setSearchValue(val);
-
-                    if (spaceAppended) {
-                      setTimeout(() => {
-                        if (searchInputRef.current) {
-                          const len = searchInputRef.current.value.length;
-                          searchInputRef.current.setSelectionRange(len, len);
-                        }
-                      }, 10);
-                    }
-
-                    if (val === '') {
-                      setSelectedSidebarSection('all');
-                    } else if (val === '/' && prevVal.startsWith('/') && prevVal.length > 1) {
-                      setSelectedSidebarSection('all');
-                    } else {
-                      const { activeSection } = parseAtMode(val);
-                      if (activeSection) {
-                        setSelectedSidebarSection(activeSection);
-                      }
-                    }
-                  }}
-                  onKeyDown={e => {
-                    e.stopPropagation();
-
-                    const tagInfo = getActiveTagInfo(searchValue);
-                    // Backspace on empty query → unlock tag back to its prefix (e.g. "/l")
-                    if (e.key === 'Backspace' && tagInfo && tagInfo.query === '') {
-                      e.preventDefault();
-                      updateSearchValueAndFocus(tagInfo.prefix);
-                      return;
-                    }
-
-                    const { atDropdown, activeSection, searchQuery } = parseAtMode(searchValue);
-
-                    if (e.key === 'Enter' && activeSection && !searchQuery.trim()) {
-                      e.preventDefault();
-                      setSearchValue('');
-                      return;
-                    }
-
-                    if (atDropdown) {
-                      const totalList = dropdownOptions.totalList;
-                      if (e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        setDropdownSelectedIndex(prev => (prev + 1) % totalList.length);
-                      } else if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        setDropdownSelectedIndex(prev => (prev - 1 + totalList.length) % totalList.length);
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (totalList.length > 0) {
-                          const selectedIdx = Math.max(0, Math.min(dropdownSelectedIndex, totalList.length - 1));
-                          const chosen = totalList[selectedIdx];
-                          if (chosen.type === 'action') {
-                            handleExecute((chosen as any).item);
-                            setSearchValue('');
-                            setDropdownSelectedIndex(-1);
-                          } else {
-                            const alias = SECTION_ALIAS_DISPLAY[chosen.id] || '';
-                            updateSearchValueAndFocus(`/${alias} `);
-                            setDropdownSelectedIndex(-1);
-                          }
-                        }
-                      } else if (e.key === 'Escape') {
-                        e.preventDefault();
-                        setSearchValue('');
-                        setDropdownSelectedIndex(-1);
-                      }
-                    }
-                  }}
-                  onKeyUp={e => e.stopPropagation()}
-                  placeholder={searchValue ? '' : 'Search across spaces & apps'}
-                  className={clsx(
-                    'flex-1 min-w-0 bg-transparent border-none text-[15px] font-semibold caret-white placeholder-[#8B8F9D] focus:outline-none focus:ring-0 h-full z-10',
-                    !!getActiveTagInfo(searchValue) ? 'text-white' : 'text-transparent',
-                  )}
-                />
-              </div>
-              {(
-                <div className="relative group/dot shrink-0 ml-2">
-                  {/* Small slash button */}
-                  <button
-                    onMouseEnter={() => setIsSettingsDropdownOpen(true)}
-                    onClick={() => {
-                      const newVal = !autoTriggerDropdown;
-                      setAutoTriggerDropdown(newVal);
-                      chrome.storage.local.set({ rtq_focus_on: newVal });
-                    }}
-                    className="relative w-7 h-7 flex items-center justify-center rounded-md bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-colors text-sm font-semibold focus:outline-none">
-                    <span>/</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* At Command Dropdown — shown only when typing alias and no matching category yet */}
-            {parseAtMode(searchValue).atDropdown && (
-              <div className="absolute top-[80px] left-1/2 -translate-x-1/2 w-full max-w-xl bg-[#171821] border border-white/10 rounded-xl shadow-2xl z-[70] overflow-hidden flex flex-col pt-0 pb-2 backdrop-blur-xl max-h-[360px] overflow-y-auto custom-scrollbar">
-                {(() => {
-                  if (dropdownOptions.totalList.length === 0) {
-                    return <div className="px-4 py-3 text-sm text-neutral-500">No matching categories or actions</div>;
-                  }
-
-                  return (
-                    <>
-                      {/* 1. "Categories" Heading and Category Options */}
-                      {dropdownOptions.categories.length > 0 && (
-                        <>
-                          <div className="px-4 py-1 flex items-center justify-between border-b border-white/5 mb-1">
-                            <span className="text-[10px] text-neutral-400 font-bold tracking-wide ">Categories</span>
-                          </div>
-                          {dropdownOptions.categories.map((opt, idx) => {
-                            const globalIdx = idx;
-                            const isSelected = dropdownSelectedIndex === globalIdx;
-                            const optName = opt.name;
-                            const isAll = optName === 'all';
-                            const meta = isAll
-                              ? {
-                                title: 'All',
-                                icon: (
-                                  <svg
-                                    className="w-4 h-4 shrink-0"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2">
-                                    <rect x="3" y="3" width="7" height="7" rx="1" />
-                                    <rect x="14" y="3" width="7" height="7" rx="1" />
-                                    <rect x="14" y="14" width="7" height="7" rx="1" />
-                                    <rect x="3" y="14" width="7" height="7" rx="1" />
-                                  </svg>
-                                ),
-                              }
-                              : SECTION_META[optName] || {
-                                title: optName,
-                                icon: <FaCheckCircle className="w-4 h-4 shrink-0" />,
-                              };
-                            const alias = SECTION_ALIAS_DISPLAY[optName] || '';
-
-                            return (
-                              <div
-                                key={optName}
-                                id={`altq-dropdown-item-${globalIdx}`}
-                                onClick={() => {
-                                  updateSearchValueAndFocus(`/${alias} `);
-                                  setDropdownSelectedIndex(-1);
-                                }}
-                                onMouseEnter={() => setDropdownSelectedIndex(globalIdx)}
-                                className={clsx(
-                                  'px-4 py-2 flex items-center justify-between cursor-pointer transition-colors mx-2 rounded-lg font-medium',
-                                  isSelected
-                                    ? 'bg-white/5 text-white'
-                                    : 'text-neutral-400 hover:bg-white/5 hover:text-white',
-                                )}>
-                                <div className="flex items-center gap-3">
-                                  {meta.icon}
-                                  <span className="text-sm font-medium">{meta.title}</span>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {alias && (
-                                    <span
-                                      className={clsx(
-                                        'text-[11px] font-mono px-2 py-0.5 rounded-md border font-semibold tracking-wider min-w-[28px] text-center',
-                                        isSelected
-                                          ? 'border-white/20 bg-white/10 text-white'
-                                          : 'border-white/10 bg-white/5 text-neutral-400',
-                                      )}>
-                                      /{alias}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </>
-                      )}
-
-                      {/* 2. "This Section" Heading and Action Items */}
-                      {dropdownOptions.thisSiteActions.length > 0 && (
-                        <>
-                          <div className="px-4 py-1 flex items-center justify-between border-b border-white/5 mb-1 mt-2">
-                            <span className="text-[10px] text-neutral-400 font-bold tracking-wide ">This Section</span>
-                          </div>
-                          {dropdownOptions.thisSiteActions.map((opt, idx) => {
-                            const globalIdx = dropdownOptions.categories.length + idx;
-                            const isSelected = dropdownSelectedIndex === globalIdx;
-                            const icon =
-                              opt.id === 'save_link' ? (
-                                <FaLink className="w-4 h-4 shrink-0 text-[#A1A6B3]" />
-                              ) : opt.id === 'saved_indicator' ? (
-                                <FaCheck className="w-4 h-4 shrink-0 text-emerald-400" />
-                              ) : opt.id === 'add_to_existing' ? (
-                                <FaLink className="w-4 h-4 shrink-0 text-[#A1A6B3]" />
-                              ) : opt.id === 'summarize_page' ? (
-                                <LuSparkles className="w-4 h-4 shrink-0 text-purple-400" />
-                              ) : (
-                                <FaRegFileAlt className="w-4 h-4 shrink-0 text-neutral-400" />
-                              );
-
-                            return (
-                              <div
-                                key={opt.id}
-                                id={`altq-dropdown-item-${globalIdx}`}
-                                onClick={() => {
-                                  handleExecute(opt.item);
-                                  setSearchValue('');
-                                  setDropdownSelectedIndex(-1);
-                                }}
-                                onMouseEnter={() => setDropdownSelectedIndex(globalIdx)}
-                                className={clsx(
-                                  'px-4 py-2 flex items-center justify-between cursor-pointer transition-colors mx-2 rounded-lg font-medium',
-                                  isSelected
-                                    ? 'bg-white/5 text-white'
-                                    : 'text-neutral-400 hover:bg-white/5 hover:text-white',
-                                )}>
-                                <div className="flex items-center gap-3">
-                                  {icon}
-                                  <span className="text-sm font-medium">{opt.name}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-          {/* Scrollable Content Area */}
-          {!parseAtMode(searchValue).atDropdown && (
-            <BoardView
-              hideCloseButton={true}
-              isEmbedded={true}
-              includeWebsitePageActions={true}
-              searchValue={searchValue}
-              unfilteredSuggestions={[]}
-              isLoggedIn={isLoggedIn}
-              onClose={onClose}
-              onExecuteItem={handleExecute}
-              state={{
-                value: searchValue,
-                isVisible: true,
-                suggestions: [
-                  ...filtered.todos.map(t => ({ ...t, _kind: 'todo', type: 'todo' })),
-                  ...filtered.notes.map(n => ({ ...n, _kind: 'snippet', type: 'snippet', snippet: n })),
-                  ...filtered.links.map(l => ({ ...l, _kind: 'bookmark', type: 'bookmark' })),
-                  ...filtered.snippets.map(s => ({ ...s, _kind: 'snippet', type: 'snippet', snippet: s })),
-                  ...filtered.commands.map(c => ({ ...c, _kind: 'command', command: c })),
-                  ...filtered.automations.map(a => ({ ...a, _kind: 'automation', type: 'automation', snippet: a })),
-                  ...filtered.bookmarks.map(b => ({ ...b, _kind: 'bookmark', type: 'bookmark' })),
-                  ...filtered.prompts.map(p => ({ ...p, _kind: 'snippet', type: 'snippet', snippet: p })),
-                ],
-                highlightIndex: 0,
-                mode: 'mixed',
-                onQueryChange: (val: string) => {
-                  const mapped = mapFullNameToShortcut(val);
-                  updateSearchValueAndFocus(mapped);
-                },
-                onSnippetSelect: (item: any) => handleExecute(item),
-                onCommonCommandSelect: (item: any) => handleExecute(item),
-                onRequestOpenUrls: (urls: string[], title?: string) => {
-                  if (urls && urls.length > 0) {
-                    chrome.tabs.create({ url: urls[0] });
-                    if (onClose) onClose();
-                  }
-                }
-              } as any}
-              extraGroups={[
-                {
-                  title: 'This Site',
-                  items: filtered.thissite,
-                  icon: <FaRegFileAlt className="w-4 h-4 shrink-0 text-sky-400" />,
-                },
-              ]}
+          {/* Layer 2: Heavy blur overlay — blurs the wallpaper at 60px so it's atmospheric but not distracting */}
+          {isExpanded && hasWallpaper && (
+            <div
+              className="absolute inset-0 z-[1] pointer-events-none"
+              style={{
+                backdropFilter: 'blur(60px) saturate(1.4)',
+                WebkitBackdropFilter: 'blur(60px) saturate(1.4)',
+              }}
             />
           )}
 
-          {/* Footer Indications */}
-          {!isDropdownActive && (
+          {/* Layer 3: Content container */}
+          <div
+            className={clsx(
+              'z-[2] flex flex-col transition-all duration-200',
+              isExpanded
+                ? 'absolute inset-0 rounded-none overflow-hidden border border-[var(--color-borderDefault)] bg-[#171821]'
+                : 'relative w-full rounded-xl bg-transparent overflow-visible border-none shadow-none',
+            )}
+            style={{
+              background: isExpanded ? '#171821' : 'transparent',
+              opacity: 1,
+              backdropFilter: 'none',
+              WebkitBackdropFilter: 'none',
+            }}>
+            {/* Top Left Branding */}
+            {isExpanded && !showSpreadsheet && (
+              <div className="absolute top-7 left-8 flex items-center z-50 select-none">
+                <img src={cmdOSLogo} alt="cmdOS" className="h-6 w-auto" />
+                <span className="text-lg font-bold text-white tracking-wide ml-2">cmdOS</span>
+              </div>
+            )}
+
+            {/* Top Right Action Buttons */}
+            {isExpanded && (
+              <div className="absolute top-6 right-6 flex items-center gap-1.5 z-[100]">
+                <button
+                  onClick={onClose}
+                  className="w-9 h-9 flex items-center justify-center bg-transparent hover:bg-white/5 text-neutral-500 hover:text-neutral-300 transition-colors rounded-lg cursor-pointer focus:outline-none"
+                  title="Close (Esc)">
+                  <FiX className="w-5 h-5" />
+                </button>
+              </div>
+            )}
             <div
               className={clsx(
-                'relative flex items-center justify-between gap-3 px-8 py-2.5 border-t border-[#2A2B33] bg-[#0E0F14]/85 backdrop-blur text-[10px] font-medium flex-shrink-0 text-[#8B8F9D]',
-                'pl-[188px]',
+                'shrink-0 relative w-full',
+                isExpanded ? 'pt-6 pb-0 px-8' : 'p-0',
+                showSpreadsheet ? 'hidden' : 'flex justify-center',
               )}>
-              {/* Left: Keyboard shortcuts */}
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-semibold text-[#A1A6B3]">Navigate</span>
-                  <span className="flex items-center gap-0.5">
-                    <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
-                      ↑
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
-                      ↓
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
-                      ←
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
-                      →
-                    </span>
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-semibold text-[#A1A6B3]">Select</span>
-                  <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
-                    Enter
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-semibold text-[#A1A6B3]">Close</span>
-                  <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
-                    Esc
-                  </span>
-                </div>
-              </div>
+              <div
+                ref={searchContainerRef}
+                className={clsx(
+                  'relative flex items-center border border-[var(--color-borderDefault)] min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px] px-6 group transition-colors shadow-none focus-within:ring-1 focus-within:ring-white/10 z-[60]',
+                  isExpanded ? 'w-[50%] bg-[var(--color-inputBg)] backdrop-blur-xl' : 'w-full bg-[#171821] shadow-2xl',
+                  isDropdownVisible &&
+                    (dropdownOptions.totalList.length > 0 ||
+                      (searchValue.startsWith('/') &&
+                        searchValue.trim() !== '' &&
+                        !parseAtMode(searchValue).activeSection))
+                    ? 'rounded-t-xl'
+                    : 'rounded-xl',
+                )}>
+                <div className="relative flex-1 h-full flex items-center">
+                  {(() => {
+                    const activeTag =
+                      getActiveTagInfo(searchValue, commandSpace.commandPrefix) ||
+                      (searchValue.trim() === '' ? getSidebarSectionTagInfo(selectedSidebarSection) : null);
+                    if (!activeTag) {
+                      return (
+                        <input
+                          ref={searchInputRef}
+                          type="text"
+                          value={searchValue}
+                          onFocus={() => showDropdownIfNotFiltered(searchValue)}
+                          onClick={() => showDropdownIfNotFiltered(searchValue)}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setSearchValue(val);
+                            setIsDropdownVisible(shouldShowDefaultPopup(val));
+                            if (val === '') {
+                              setSelectedSidebarSection('all');
+                            }
+                          }}
+                          onKeyDown={e => {
+                            e.stopPropagation();
+                            if (e.key === 'Backspace') {
+                              const trimmed = searchValue.trim();
+                              const lower = trimmed.toLowerCase();
+                              const isShortcut =
+                                FILTER_SHORTCUTS.includes(lower) ||
+                                (lower.startsWith('/') && FILTER_SHORTCUTS.includes(lower.slice(1)));
+                              if (isShortcut && (searchValue === trimmed || searchValue === trimmed + ' ')) {
+                                e.preventDefault();
+                                setSearchValue('');
+                                setSelectedSidebarSection('all');
+                                return;
+                              }
+                            }
+                            if (dropdownOptions.totalList.length > 0) {
+                              const totalList = dropdownOptions.totalList;
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                setIsDropdownVisible(true);
+                                setDropdownSelectedIndex(prev => (prev + 1) % totalList.length);
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                setIsDropdownVisible(true);
+                                setDropdownSelectedIndex(prev => (prev - 1 + totalList.length) % totalList.length);
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (totalList.length > 0) {
+                                  const selectedIdx = Math.max(
+                                    0,
+                                    Math.min(dropdownSelectedIndex, totalList.length - 1),
+                                  );
+                                  const chosen = totalList[selectedIdx];
+                                  if (chosen.type.includes('action')) {
+                                    handleExecute((chosen as any).item || chosen);
+                                    setSearchValue('');
+                                    setDropdownSelectedIndex(-1);
+                                    setIsDropdownVisible(false);
+                                  } else {
+                                    setSelectedSidebarSection(chosen.id);
+                                    const alias = SECTION_ALIAS_DISPLAY[chosen.id];
+                                    const newSearchValue =
+                                      chosen.id === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
+                                    setSearchValue(newSearchValue);
+                                    setDropdownSelectedIndex(-1);
+                                    setIsDropdownVisible(false);
+                                  }
+                                }
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setSearchValue('');
+                                setDropdownSelectedIndex(-1);
+                                setIsDropdownVisible(false);
+                              }
+                            }
+                          }}
+                          onKeyUp={e => e.stopPropagation()}
+                          placeholder="Type to search"
+                          className="flex-1 min-w-0 bg-transparent border-none text-[16px] min-[1680px]:text-[18px] min-[1880px]:text-[20px] font-medium caret-white placeholder-[var(--color-textPlaceholder)] focus:outline-none focus:ring-0 h-full z-10 text-[var(--color-textPrimary)]"
+                        />
+                      );
+                    }
 
-              {/* Right: Options */}
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-[#A1A6B3]">Options</span>
-                <span className="flex items-center gap-0.5">
-                  <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
-                    Right Click
-                  </span>
-                </span>
+                    return (
+                      <div className="flex-1 flex items-center h-full">
+                        <div className="flex items-center gap-1.5 mr-2 bg-[#eee8d5]/10 dark:bg-white/10 border border-[#eee8d5]/20 dark:border-white/20 rounded-lg px-2.5 py-0.5 shadow-sm text-white select-none">
+                          <span className="text-xs font-medium">{activeTag.label}</span>
+                        </div>
+                        <input
+                          ref={searchInputRef}
+                          type="text"
+                          value={activeTag.query}
+                          onFocus={() => showDropdownIfNotFiltered(searchValue)}
+                          onClick={() => showDropdownIfNotFiltered(searchValue)}
+                          onChange={e => {
+                            const val = e.target.value;
+                            const newVal = activeTag.prefix + ' ' + val;
+                            setSearchValue(newVal);
+                            setIsDropdownVisible(shouldShowDefaultPopup(newVal));
+                          }}
+                          onKeyDown={e => {
+                            e.stopPropagation();
+                            if (e.key === 'Backspace' && activeTag.query === '') {
+                              e.preventDefault();
+                              setSearchValue('');
+                              setSelectedSidebarSection('all');
+                              return;
+                            }
+                            if (dropdownOptions.totalList.length > 0) {
+                              const totalList = dropdownOptions.totalList;
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                setIsDropdownVisible(true);
+                                setDropdownSelectedIndex(prev => (prev + 1) % totalList.length);
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                setIsDropdownVisible(true);
+                                setDropdownSelectedIndex(prev => (prev - 1 + totalList.length) % totalList.length);
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (totalList.length > 0) {
+                                  const selectedIdx = Math.max(
+                                    0,
+                                    Math.min(dropdownSelectedIndex, totalList.length - 1),
+                                  );
+                                  const chosen = totalList[selectedIdx];
+                                  if (chosen.type === 'action') {
+                                    handleExecute((chosen as any).item);
+                                    setSearchValue('');
+                                    setDropdownSelectedIndex(-1);
+                                    setIsDropdownVisible(false);
+                                  } else {
+                                    setSelectedSidebarSection(chosen.id);
+                                    const alias = SECTION_ALIAS_DISPLAY[chosen.id];
+                                    const newSearchValue =
+                                      chosen.id === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
+                                    setSearchValue(newSearchValue);
+                                    setDropdownSelectedIndex(-1);
+                                    setIsDropdownVisible(false);
+                                  }
+                                }
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setSearchValue('');
+                                setDropdownSelectedIndex(-1);
+                                setIsDropdownVisible(false);
+                              }
+                            }
+                          }}
+                          onKeyUp={e => e.stopPropagation()}
+                          className="flex-1 min-w-0 bg-transparent border-none text-[16px] min-[1680px]:text-[18px] min-[1880px]:text-[20px] font-medium caret-white placeholder-[var(--color-textPlaceholder)] focus:outline-none focus:ring-0 h-full z-10 text-[var(--color-textPrimary)]"
+                        />
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {isDropdownVisible &&
+                  (dropdownOptions.totalList.length > 0 ||
+                    (searchValue.startsWith('/') &&
+                      searchValue.trim() !== '' &&
+                      !parseAtMode(searchValue).activeSection)) && (
+                    <div
+                      className={clsx(
+                        'absolute top-[100%] left-0 w-full border border-[var(--color-borderDefault)] rounded-b-xl shadow-2xl z-[70] overflow-hidden flex flex-col pt-0 pb-2 max-h-[360px] overflow-y-auto custom-scrollbar group/sidebar',
+                        isExpanded ? 'bg-[var(--color-containerBg)] backdrop-blur-xl' : 'bg-[#171821]',
+                      )}>
+                      {(() => {
+                        if (dropdownOptions.totalList.length === 0) {
+                          return (
+                            <div className="px-4 py-3 text-[13px] text-[var(--color-textSecondary)]">
+                              No matching categories or actions
+                            </div>
+                          );
+                        }
+
+                        const DROPDOWN_ITEM_BASE_CLASS =
+                          'w-full appearance-none border-0 px-3 py-2 flex items-center justify-between cursor-pointer transition-colors mx-2 rounded-xl font-normal text-left text-[13px] group';
+                        const DROPDOWN_ITEM_SELECTED_CLASS = 'bg-white/10 text-white shadow-md border border-white/10';
+                        const DROPDOWN_ITEM_UNSELECTED_CLASS =
+                          'bg-transparent text-[#d1d5db] hover:bg-white/5 hover:text-white border border-transparent';
+                        const DROPDOWN_ITEM_LABEL_CLASS = 'truncate';
+                        const DROPDOWN_ITEM_SHORTCUT_CLASS =
+                          'ml-auto flex items-center justify-center gap-1 px-1.5 py-0 rounded border border-white/5 bg-white/5 text-[13px] font-light font-mono text-[var(--color-textPrimary)] opacity-70 select-none lowercase';
+
+                        const DropdownSectionHeader = ({ title }: { title: string }) => (
+                          <div className="text-[10px] font-bold tracking-[0.08em] text-[#8b949e] px-4 py-1 mt-1">
+                            {title}
+                          </div>
+                        );
+
+                        return (
+                          <>
+                            {/* 1. "Site Commands" Heading and Action Items */}
+                            {dropdownOptions.siteCommandActions.length > 0 &&
+                              (() => {
+                                return (
+                                  <>
+                                    <DropdownSectionHeader title=" Save as Commands (Current tab)" />
+                                    {dropdownOptions.siteCommandActions.map((opt: any, idx: number) => {
+                                      const globalIdx = idx;
+                                      const isSelected = dropdownSelectedIndex === globalIdx;
+                                      const allowContextMenu = opt.id !== 'saved_indicator';
+                                      const icon =
+                                        PAGE_ACTION_ICONS[opt.id] ||
+                                        (opt.id === 'save_link' ? (
+                                          <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'save_session' ? (
+                                          <FaLayerGroup className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'saved_indicator' ? (
+                                          <FaCheck className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'add_to_existing' ? (
+                                          <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'add_to_existing_session' ? (
+                                          <FaLayerGroup className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'summarize_page' ? (
+                                          <LuSparkles className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : (
+                                          <FaRegFileAlt className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ));
+
+                                      const actionPrefixVal =
+                                        THIS_SECTION_ACTION_PREFIXES[opt.id] || opt.item?.prefix || '';
+                                      const actionShortcutDisplay = actionPrefixVal
+                                        ? `${commandSpace.commandPrefix} ${actionPrefixVal.toLowerCase()}`
+                                        : '';
+
+                                      return (
+                                        <button
+                                          type="button"
+                                          key={opt.id}
+                                          id={`alts-dropdown-item-${globalIdx}`}
+                                          onPointerDown={e => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            executeDropdownItem(opt.item);
+                                          }}
+                                          onClick={e => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            executeDropdownItem(opt.item);
+                                          }}
+                                          onContextMenu={
+                                            allowContextMenu
+                                              ? e => {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  handleContextMenu(e, opt.item, opt.name);
+                                                }
+                                              : undefined
+                                          }
+                                          onMouseEnter={() => setDropdownSelectedIndex(globalIdx)}
+                                          className={clsx(
+                                            DROPDOWN_ITEM_BASE_CLASS,
+                                            isSelected ? DROPDOWN_ITEM_SELECTED_CLASS : DROPDOWN_ITEM_UNSELECTED_CLASS,
+                                          )}>
+                                          <div className="flex items-center gap-3 min-w-0">
+                                            {icon}
+                                            <span className={clsx(DROPDOWN_ITEM_LABEL_CLASS, 'w-[230px] shrink-0')}>
+                                              {opt.name}
+                                            </span>
+                                            {actionShortcutDisplay && (
+                                              <span className={DROPDOWN_ITEM_SHORTCUT_CLASS}>
+                                                {actionShortcutDisplay}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                );
+                              })()}
+
+                            {/* 2. "Extraction Commands" Heading and Action Items */}
+                            {dropdownOptions.extractionActions.length > 0 &&
+                              (() => {
+                                return (
+                                  <>
+                                    <DropdownSectionHeader title="Extraction Commands" />
+                                    {dropdownOptions.extractionActions.map((opt: any, idx: number) => {
+                                      const globalIdx = dropdownOptions.siteCommandActions.length + idx;
+                                      const isSelected = dropdownSelectedIndex === globalIdx;
+                                      const allowContextMenu = opt.id !== 'saved_indicator';
+                                      const icon =
+                                        PAGE_ACTION_ICONS[opt.id] ||
+                                        (opt.id === 'save_link' ? (
+                                          <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'save_session' ? (
+                                          <FaLayerGroup className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'saved_indicator' ? (
+                                          <FaCheck className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'add_to_existing' ? (
+                                          <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'add_to_existing_session' ? (
+                                          <FaLayerGroup className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : opt.id === 'summarize_page' ? (
+                                          <LuSparkles className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ) : (
+                                          <FaRegFileAlt className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                        ));
+
+                                      const actionPrefixVal =
+                                        THIS_SECTION_ACTION_PREFIXES[opt.id] || opt.item?.prefix || '';
+                                      const actionShortcutDisplay = actionPrefixVal
+                                        ? `${commandSpace.commandPrefix} ${actionPrefixVal.toLowerCase()}`
+                                        : '';
+
+                                      return (
+                                        <button
+                                          type="button"
+                                          key={opt.id}
+                                          id={`alts-dropdown-item-${globalIdx}`}
+                                          onPointerDown={e => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            executeDropdownItem(opt.item);
+                                          }}
+                                          onClick={e => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            executeDropdownItem(opt.item);
+                                          }}
+                                          onContextMenu={
+                                            allowContextMenu
+                                              ? e => {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  handleContextMenu(e, opt.item, opt.name);
+                                                }
+                                              : undefined
+                                          }
+                                          onMouseEnter={() => setDropdownSelectedIndex(globalIdx)}
+                                          className={clsx(
+                                            DROPDOWN_ITEM_BASE_CLASS,
+                                            isSelected ? DROPDOWN_ITEM_SELECTED_CLASS : DROPDOWN_ITEM_UNSELECTED_CLASS,
+                                          )}>
+                                          <div className="flex items-center gap-3 min-w-0">
+                                            {icon}
+                                            <span className={clsx(DROPDOWN_ITEM_LABEL_CLASS, 'w-[230px] shrink-0')}>
+                                              {opt.name}
+                                            </span>
+                                            {actionShortcutDisplay && (
+                                              <span className={DROPDOWN_ITEM_SHORTCUT_CLASS}>
+                                                {actionShortcutDisplay}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                );
+                              })()}
+
+                            {/* 3. "Categories" Heading and Category Options */}
+                            {dropdownOptions.categories.length > 0 && (
+                              <>
+                                <DropdownSectionHeader title="Categories" />
+                                {(() => {
+                                  return dropdownOptions.categories.map((opt: any, idx: number) => {
+                                    const globalIdx = dropdownOptions.thisSiteActions.length + idx;
+                                    const isSelected = dropdownSelectedIndex === globalIdx;
+                                    const optName = opt.name;
+                                    const isAll = optName === 'all';
+                                    const meta = isAll
+                                      ? {
+                                          title: 'All',
+                                          icon: (
+                                            <svg
+                                              className="w-4 h-4 shrink-0"
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="2">
+                                              <rect x="3" y="3" width="7" height="7" rx="1" />
+                                              <rect x="14" y="3" width="7" height="7" rx="1" />
+                                              <rect x="14" y="14" width="7" height="7" rx="1" />
+                                              <rect x="3" y="14" width="7" height="7" rx="1" />
+                                            </svg>
+                                          ),
+                                        }
+                                      : SECTION_META[optName] || {
+                                          title: optName,
+                                          icon: <FaCheckCircle className="w-4 h-4 shrink-0" />,
+                                        };
+
+                                    const categoryPrefixMap: Record<string, string> = {
+                                      todos: 'todo',
+                                      notes: 'note',
+                                      links: 'link',
+                                      save_session: 'save_session',
+                                      commands: 'command',
+                                      sessions: 'session',
+                                      automations: 'automation',
+                                      chat_agents: 'agent',
+                                      snippets: 'snippet',
+                                      prompts: 'prompt',
+                                    };
+                                    const categoryKey = categoryPrefixMap[optName];
+                                    const prefixVal =
+                                      categoryKey && omniboxPrefixes ? omniboxPrefixes[categoryKey] : '';
+
+                                    return (
+                                      <div
+                                        key={optName}
+                                        id={`alts-dropdown-item-${globalIdx}`}
+                                        onPointerDown={e => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setSelectedSidebarSection(optName);
+                                          setIsExplicitlyExpanded(true);
+                                          const alias = SECTION_ALIAS_DISPLAY[optName];
+                                          const newSearchValue =
+                                            optName === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
+                                          setSearchValue(newSearchValue);
+                                          setDropdownSelectedIndex(-1);
+                                          setIsDropdownVisible(false);
+                                        }}
+                                        onClick={e => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setSelectedSidebarSection(optName);
+                                          setIsExplicitlyExpanded(true);
+                                          const alias = SECTION_ALIAS_DISPLAY[optName];
+                                          const newSearchValue =
+                                            optName === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
+                                          setSearchValue(newSearchValue);
+                                          setDropdownSelectedIndex(-1);
+                                          setIsDropdownVisible(false);
+                                        }}
+                                        onMouseDown={e => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setSelectedSidebarSection(optName);
+                                          setIsExplicitlyExpanded(true);
+                                          const alias = SECTION_ALIAS_DISPLAY[optName];
+                                          const newSearchValue =
+                                            optName === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
+                                          setSearchValue(newSearchValue);
+                                          setDropdownSelectedIndex(-1);
+                                          setIsDropdownVisible(false);
+                                        }}
+                                        onMouseEnter={() => setDropdownSelectedIndex(globalIdx)}
+                                        className={clsx(
+                                          DROPDOWN_ITEM_BASE_CLASS,
+                                          isSelected ? DROPDOWN_ITEM_SELECTED_CLASS : DROPDOWN_ITEM_UNSELECTED_CLASS,
+                                        )}>
+                                        <div className="flex items-center gap-3 min-w-0">
+                                          {meta.icon}
+                                          <span className={clsx(DROPDOWN_ITEM_LABEL_CLASS, 'w-[230px] shrink-0')}>
+                                            {meta.title}
+                                          </span>
+                                          {prefixVal && (
+                                            <div
+                                              onClick={e => e.stopPropagation()}
+                                              onMouseDown={e => e.stopPropagation()}
+                                              className="flex items-center gap-1 select-none">
+                                              <EditablePrefixKey
+                                                category={categoryKey as any}
+                                                currentValue={prefixVal}
+                                              />
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
               </div>
             </div>
-          )}
+            {/* Scrollable Content Area */}
+            {isExpanded &&
+              !(
+                isDropdownVisible &&
+                (dropdownOptions.totalList.length > 0 ||
+                  (searchValue.startsWith('/') && searchValue.trim() !== '' && !parseAtMode(searchValue).activeSection))
+              ) && (
+              <div className={clsx('flex-1 min-h-0 w-full flex flex-col', showSpreadsheet ? 'p-0' : 'px-8 py-6')}>
+                {showSpreadsheet ? (
+                  <SpreadsheetMainContainer
+                    isEmbedded={true}
+                    onClose={onClose}
+                    isLoggedIn={isLoggedIn}
+                    onBoardViewRedirect={() => setShowSpreadsheet(false)}
+                    onCreateOrganization={() => {
+                      const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
+                      chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
+                    }}
+                    onOrganizationSettings={(orgId, orgName) => {
+                      const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
+                      chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
+                    }}
+                    onCreateWorkspace={() => {
+                      const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
+                      chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
+                    }}
+                  />
+                ) : (
+                  <BoardView
+                    ref={boardViewRef}
+                    hideCloseButton={true}
+                    isEmbedded={true}
+                    forceNativeStyling={true}
+                    includeWebsitePageActions={true}
+                    searchValue={debouncedSearchValue}
+                    unfilteredSuggestions={[]}
+                    isLoggedIn={isLoggedIn}
+                    onClose={onClose}
+                    onExecuteItem={handleExecute}
+                    onSheetRedirect={() => {
+                      setShowSpreadsheet(true);
+                    }}
+                    state={
+                      {
+                        value: debouncedSearchValue,
+                        isVisible: true,
+                        suggestions: [
+                          ...filtered.todos.map(t => ({ ...t, _kind: 'todo', type: 'todo' })),
+                          ...filtered.notes.map(n => ({ ...n, _kind: 'note', type: 'note', note: n })),
+                          ...filtered.links.map(l => ({ ...l, _kind: 'link', type: 'link' })),
+                          ...filtered.sessions.map((s: any) => ({
+                            ...s,
+                            _kind: 'session',
+                            type: 'session',
+                            session: s,
+                            data: s,
+                            category: 'session',
+                          })),
+                          ...filtered.snippets.map(s => ({ ...s, _kind: 'snippet', type: 'snippet', snippet: s })),
+                          ...filtered.commands.map(c => ({ ...c, _kind: 'command', command: c })),
+                          ...filtered.system_commands.map((c: any) => ({ ...c, _kind: 'command', command: c })),
+                          ...filtered.automations.map(a => ({
+                            ...a,
+                            _kind: 'automation',
+                            type: 'automation',
+                            automation: a,
+                          })),
+                          ...filtered.bookmarks.map(b => ({ ...b, _kind: 'bookmark', type: 'bookmark' })),
+                          ...filtered.prompts.map(p => ({ ...p, _kind: 'prompt', type: 'prompt', prompt: p })),
+                        ],
+                        highlightIndex: 0,
+                        mode: 'mixed',
+                        onQueryChange: (val: string) => {
+                          updateSearchValue(val);
+                        },
+                        onSnippetSelect: (item: any) => handleExecute(item),
+                        onCommonCommandSelect: (item: any) => handleExecute(item),
+                        onToggleFavorite: handleToggleFavorite,
+                        onRequestOpenUrls: (urls: string[], title?: string) => {
+                          if (urls && urls.length > 0) {
+                            chrome.tabs.create({ url: urls[0] });
+                            if (onClose) onClose();
+                          }
+                        },
+                      } as any
+                    }
+                    extraGroups={[
+                      {
+                        title: 'This Site',
+                        items: filtered.thissite,
+                        icon: <FaRegFileAlt className="w-4 h-4 shrink-0 text-[#A1A6B3]" />,
+                      },
+                    ]}
+                    portalContainer={
+                      (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body
+                    }
+                  />
+                )}
+              </div>
+            )}
+            {/* Footer Indications */}
+            {!isDropdownActive &&
+              !showSpreadsheet &&
+              !(
+                dropdownOptions.totalList.length > 0 ||
+                (searchValue.startsWith('/') && searchValue.trim() !== '' && !parseAtMode(searchValue).activeSection)
+              ) && (
+                <div
+                  className={clsx(
+                    'relative flex items-center justify-between gap-3 px-8 py-2.5 border-t border-[#2A2B33] bg-[#0E0F14]/85 backdrop-blur text-[10px] font-medium flex-shrink-0 text-[#8B8F9D]',
+                  )}>
+                  {/* Left: Keyboard shortcuts */}
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-[#A1A6B3]">Navigate</span>
+                      <span className="flex items-center gap-0.5">
+                        <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
+                          ↑
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
+                          ↓
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
+                          ←
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
+                          →
+                        </span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-[#A1A6B3]">Select</span>
+                      <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
+                        Enter
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-[#A1A6B3]">Close</span>
+                      <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
+                        Esc
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Right: Options */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-[#A1A6B3]">Options</span>
+                    <span className="flex items-center gap-0.5">
+                      <span className="px-1.5 py-0.5 rounded border border-[#2A2B33] bg-[#171821] font-mono text-[9px] font-bold text-white">
+                        Right Click
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              )}
+          </div>
         </motion.div>
-
-
 
         <style
           dangerouslySetInnerHTML={{
@@ -2143,57 +2817,158 @@ ${pageContent}
           }}
         />
       </motion.div>
+      {showAddExistingModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-[2147483647] bg-black/60 backdrop-blur-[1px]">
+          <div className="absolute inset-0" onClick={() => setShowAddExistingModal(false)} />
+          <div className="bg-[#171821] border border-white/10 rounded-2xl w-[400px] max-w-[90vw] p-6 shadow-2xl flex flex-col gap-4 text-white font-sans animate-in fade-in zoom-in-95 duration-150 z-10 relative">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold">Existing Links</h3>
+              <button
+                onClick={() => setShowAddExistingModal(false)}
+                className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-white/5 transition-colors cursor-pointer">
+                <FiX size={18} />
+              </button>
+            </div>
 
-      {contextMenuState && (
-        <UnifiedContextMenu
-          x={contextMenuState.x}
-          y={contextMenuState.y}
-          showSearch={true}
-          portalContainer={(window as any).__ALTQ_PORTAL_HOST__ || document.body}
-          onClose={() => setContextMenuState(null)}
-          actions={[
-            {
-              key: 'run',
-              label: 'Run command',
-              icon: <FiPlay size={14} />,
-              onSelect: () => handleExecute(contextMenuState.item),
-            },
-            { key: 'div-0', label: '', icon: null, onSelect: () => { }, divider: true },
-            {
-              key: 'favorite',
-              label: 'Mark as favorite',
-              icon: <FiStar size={14} />,
-              onSelect: () => {
-                // Implementation for toggle favorite via postMessage to parent
-              },
-            },
-            { key: 'div-1', label: '', icon: null, onSelect: () => { }, divider: true },
-            {
-              key: 'assign-shortcut',
-              label: 'Assign command',
-              icon: <FiCommand size={14} className="text-green-600 dark:text-green-400" />,
-              className: 'hover:bg-green-50 dark:hover:bg-green-900/20 text-neutral-700 dark:text-neutral-300',
-              onSelect: () => { },
-            },
-            {
-              key: 'assign-hotkey',
-              label: 'Assign hotkey',
-              icon: <BsKeyboard size={14} className="text-green-600 dark:text-green-400" />,
-              className: 'hover:bg-green-50 dark:hover:bg-green-900/20 text-neutral-700 dark:text-neutral-300',
-              onSelect: () => { },
-            },
-            {
-              key: 'create-todo',
-              label: 'Create Todo',
-              icon: <FiCheckSquare size={14} className="text-neutral-500 dark:text-neutral-400" />,
-              onSelect: () => { },
-            },
-          ]}
-        />
+            <div className="flex flex-col gap-1.5 max-h-[250px] overflow-y-auto custom-scrollbar pr-1">
+              {links.length === 0 ? (
+                <div className="text-neutral-500 text-sm py-6 text-center">No existing link collections found.</div>
+              ) : (
+                links.map(linkItem => (
+                  <button
+                    key={linkItem.id}
+                    onClick={async () => {
+                      try {
+                        const currentUrls = linkItem.urls || [];
+                        const response: any = await new Promise(resolve => {
+                          chrome.runtime.sendMessage(
+                            {
+                              action: 'db_update_link',
+                              linkId: linkItem.id,
+                              input: {
+                                urls: [
+                                  ...currentUrls,
+                                  {
+                                    id: 'link_item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                                    title: addExistingTitle,
+                                    url: addExistingUrl,
+                                  },
+                                ],
+                              },
+                            },
+                            resolve,
+                          );
+                        });
+                        if (response && !response.success) {
+                          throw new Error(response.error || 'Failed to update link via background');
+                        }
+                        syncDbFromBackground();
+                        setShowAddExistingModal(false);
+
+                        // Show success toast
+                        showWebsiteToast(`Added to "${linkItem.title}" successfully`);
+                        useUIStore.getState().queueNotification({
+                          message: `Added to "${linkItem.title}" successfully`,
+                          type: 'success',
+                        });
+                      } catch (err) {
+                        console.error('Failed to add url to existing link:', err);
+                      }
+                    }}
+                    className="w-full text-left px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-neutral-300 hover:text-white transition-all text-sm font-medium flex items-center justify-between cursor-pointer">
+                    <span className="truncate">{linkItem.title}</span>
+                    <span className="text-xs text-neutral-500 font-mono">({linkItem.urls?.length || 0})</span>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowAddExistingModal(false)}
+              className="w-full mt-2 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-neutral-400 hover:text-white transition-colors text-sm font-semibold cursor-pointer">
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
+
+      {showAddExistingSessionModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-[2147483647] bg-black/60 backdrop-blur-[1px]">
+          <div className="absolute inset-0" onClick={() => setShowAddExistingSessionModal(false)} />
+          <div className="bg-[#171821] border border-white/10 rounded-2xl w-[400px] max-w-[90vw] p-6 shadow-2xl flex flex-col gap-4 text-white font-sans animate-in fade-in zoom-in-95 duration-150 z-10 relative">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold">Existing Session</h3>
+              <button
+                onClick={() => setShowAddExistingSessionModal(false)}
+                className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-white/5 transition-colors cursor-pointer">
+                <FiX size={18} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1.5 max-h-[250px] overflow-y-auto custom-scrollbar pr-1">
+              {dbSessions.length === 0 ? (
+                <div className="text-neutral-500 text-sm py-6 text-center">No existing sessions found.</div>
+              ) : (
+                dbSessions.map(sessionItem => (
+                  <button
+                    key={sessionItem.id}
+                    onClick={async () => {
+                      try {
+                        const currentUrls = sessionItem.urls || [];
+                        const response: any = await new Promise(resolve => {
+                          chrome.runtime.sendMessage(
+                            {
+                              action: 'db_update_session',
+                              sessionId: sessionItem.id,
+                              input: {
+                                urls: [
+                                  ...currentUrls,
+                                  {
+                                    id: 'link_item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                                    title: addExistingTitle,
+                                    url: addExistingUrl,
+                                  },
+                                ],
+                              },
+                            },
+                            resolve,
+                          );
+                        });
+                        if (response && !response.success) {
+                          throw new Error(response.error || 'Failed to update session via background');
+                        }
+                        syncDbFromBackground();
+                        setShowAddExistingSessionModal(false);
+
+                        // Show success toast
+                        showWebsiteToast(`Added to "${sessionItem.title}" successfully`);
+                        useUIStore.getState().queueNotification({
+                          message: `Added to "${sessionItem.title}" successfully`,
+                          type: 'success',
+                        });
+                      } catch (err) {
+                        console.error('Failed to add url to existing session:', err);
+                      }
+                    }}
+                    className="w-full text-left px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-neutral-300 hover:text-white transition-all text-sm font-medium flex items-center justify-between cursor-pointer">
+                    <span className="truncate">{sessionItem.title}</span>
+                    <span className="text-xs text-neutral-500 font-mono">({sessionItem.urls?.length || 0})</span>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowAddExistingSessionModal(false)}
+              className="w-full mt-2 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-neutral-400 hover:text-white transition-colors text-sm font-semibold cursor-pointer">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      <NotificationContainer />
     </AnimatePresence>
   );
 };
 
 export default App;
-

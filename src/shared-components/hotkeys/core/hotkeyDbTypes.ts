@@ -1,4 +1,4 @@
-export type HotkeyReferenceType = 'note' | 'link' | 'snippet' | 'command' | 'automation' | 'module';
+export type HotkeyReferenceType = 'note' | 'link' | 'snippet' | 'session' | 'command' | 'automation' | 'module';
 
 export interface UserHotkeyRecord {
   id: string; // Unique generated ID

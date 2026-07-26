@@ -1,5 +1,5 @@
 import { nowUtc } from '../../../shared-components/utils';
-import '@src/Popup.css';
+import './Popup.css';
 import { useStorage, withErrorBoundary, withSuspense } from '@extension/shared';
 import { exampleThemeStorage } from '@extension/storage';
 import { useEffect, useState, useRef } from 'react';
@@ -130,10 +130,6 @@ const Popup = () => {
     }
   };
 
-
-
-
-
   // Function to process key (replace spaces with underscores)
   const processKey = (key: string) => {
     const trailingMatch = key.match(/(\s*)$/);
@@ -165,8 +161,6 @@ const Popup = () => {
   const fetchUserInfo = async (_id: string) => {
     return null;
   };
-
-
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -200,7 +194,6 @@ const Popup = () => {
               if (cachedEmail) {
                 setUserEmail(cachedEmail);
               }
-
             });
           };
 
@@ -236,8 +229,6 @@ const Popup = () => {
 
     checkAuth();
   }, []);
-
-
 
   const resetSelections = () => {
     setShowSavePanel(false);
@@ -518,8 +509,6 @@ const Popup = () => {
               <span className="ml-2 text-neutral-600 dark:text-neutral-300">Loading...</span>
             </div>
           )}
-
-
         </div>
       )}
 
@@ -533,4 +522,3 @@ export default withErrorBoundary(
   withSuspense(Popup, <div className="p-4 text-center">Loading...</div>),
   <div className="p-4 text-center text-red-500">An error occurred. Please try again.</div>,
 );
-

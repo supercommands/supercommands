@@ -23,6 +23,7 @@ export const useConvertibleItems = () => {
   const automations = useDbStore(state => state.automations);
   const chatAgents = useDbStore(state => state.chatAgents);
   const aiPrompts = useDbStore(state => state.aiPrompts);
+  const sessions = useDbStore(state => state.sessions);
 
   return useMemo(() => {
     try {
@@ -48,10 +49,13 @@ export const useConvertibleItems = () => {
         items.push({ id: `auto-${a.id}`, name: (a as any).name || 'Untitled Automation', category: cat, data: a });
       });
       chatAgents.forEach(a => {
-        items.push({ id: `agent-${a.id}`, name: (a as any).name || 'Untitled Agent', category: 'agent', data: a });
+        items.push({ id: `agent-${a.id}`, name: (a as any).title || (a as any).name || 'Untitled Agent', category: 'agent', data: a });
       });
       aiPrompts.forEach(p => {
-        items.push({ id: `prompt-${p.id}`, name: (p as any).name || 'Untitled Prompt', category: 'prompt', data: p });
+        items.push({ id: `prompt-${p.id}`, name: (p as any).title || (p as any).name || 'Untitled Prompt', category: 'prompt', data: p });
+      });
+      sessions.forEach(s => {
+        items.push({ id: `session-${s.id}`, name: (s as any).title || (s as any).name || 'Untitled Tab Session', category: 'tabgroup', data: s });
       });
 
       return items;
@@ -59,7 +63,7 @@ export const useConvertibleItems = () => {
       console.warn('Failed to compute convertible items from useDbStore', e);
       return [];
     }
-  }, [notes, snippets, links, automations, chatAgents, aiPrompts]);
+  }, [notes, snippets, links, automations, chatAgents, aiPrompts, sessions]);
 };
 
 export const parseTaskDate = (d: string | number | undefined) => {

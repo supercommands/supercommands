@@ -1,6 +1,6 @@
 import { saveUserHotkey, deleteUserHotkeyByReference } from './hotkeyDbData';
 
-export type HotkeyItemType = 'note' | 'command' | 'link' | 'automation' | 'module' | 'snippet';
+export type HotkeyItemType = 'note' | 'command' | 'link' | 'automation' | 'module' | 'snippet' | 'session' | 'todo';
 export type StorageMode = 'local' | 'cloud';
 
 

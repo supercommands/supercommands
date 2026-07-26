@@ -3,9 +3,10 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import { FaChevronRight, FaMoon, FaCheck, FaUsers, FaClock, FaRocket, FaChevronLeft, FaKeyboard, FaLink, FaTrash, FaExpand, FaCompress, FaShieldHalved } from 'react-icons/fa6';
-import { FaTimes, FaPlus, FaChevronDown, FaArrowRight, FaPlusSquare } from 'react-icons/fa';
+import { FaTimes, FaPlus, FaChevronDown, FaArrowRight, FaPlusSquare, FaGithub } from 'react-icons/fa';
 import { useDispatch } from 'react-redux';
-import { TutorialDashboard } from './TutorialCards';
+
+import { FeaturePresentationCard } from './featurePresentationCard';
 import { useAppearance } from '@extension/ui';
 import { useDbStore } from '../storage/store/useDbStore';
 import { createWorkspace } from '../settings/allWorkspaceManager/workspaces/workspaceData';
@@ -28,15 +29,15 @@ const computeBackupSummary = (backupData: any) => ({
 });
 
 import clsx from 'clsx';
-import { getFaviconUrl } from '../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/utilityFunctions/utils';
-import type { CommandDefinition } from '../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/commandConfigurations/commands';
-import { COMMANDS, AI_GROUP } from '../pages/AltS_search_newtab/src/components/searchSystemComponents/searchBarMain/commandConfigurations/commands';
+import { getFaviconUrl } from '../shared-components/searchBarMain/utilityFunctions/utils';
+import type { CommandDefinition } from '../shared-components/searchBarMain/commandConfigurations/commands';
+import { COMMANDS, AI_GROUP } from '../shared-components/searchBarMain/commandConfigurations/commands';
 
 import { saveHotkey as apiSaveHotkey } from '../shared-components/hotkeys';
 
 import { getUserId, CMDOS_SIGN_UP_URL, checkHasCloudData } from '../storage/API/core/api';
 import { useHotkeyValidation } from '../shared-components/hotkeys';
-import { SpreadsheetMultiLinkInput } from '../pages/AltS_search_newtab/src/components/spreadsheetUi/ui/spreadsheetMultiLinkInput';
+import { SpreadsheetMultiLinkInput } from '../shared-components/spreadsheetUi/ui/spreadsheetMultiLinkInput';
 import { FEATURE_FLAGS } from '../pages/AltS_search_newtab/src/utils/featureFlags';
 import { useUIStore } from '../shared-components/uiStateManager';
 
@@ -543,6 +544,111 @@ const styles = `
   @keyframes fadeSlideUp {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+
+  .onboarding-standard-content {
+    width: clamp(560px, 46vw, 820px);
+    max-width: calc(100vw - 40px);
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .onboarding-body {
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(24px, 4vh, 56px) 20px;
+    width: 100%;
+  }
+
+  .ob-fluid-h1 {
+    font-size: clamp(20px, 1.35vw, 30px) !important;
+    line-height: 1.2 !important;
+  }
+
+  .ob-fluid-hero-text {
+    font-size: clamp(32px, 2.25vw, 48px) !important;
+    line-height: 1.15 !important;
+  }
+
+  .ob-fluid-subtext {
+    font-size: clamp(14px, 0.9vw, 18px) !important;
+    line-height: 1.5 !important;
+  }
+
+  .ob-fluid-feature-text {
+    font-size: clamp(14px, 0.85vw, 17px) !important;
+    line-height: 1.4 !important;
+  }
+
+  .ob-fluid-feature-icon {
+    width: clamp(16px, 1vw, 21px) !important;
+    height: clamp(16px, 1vw, 21px) !important;
+    font-size: clamp(16px, 1vw, 21px) !important;
+    flex-shrink: 0 !important;
+  }
+
+  .ob-fluid-note-box {
+    width: 100% !important;
+    font-size: clamp(13px, 0.78vw, 16px) !important;
+    padding: clamp(12px, 0.85vw, 17px) clamp(14px, 1.1vw, 22px) !important;
+  }
+
+  .ob-fluid-note-text {
+    font-size: clamp(13px, 0.78vw, 16px) !important;
+    line-height: 1.5 !important;
+  }
+
+  .ob-fluid-gap-container {
+    gap: clamp(18px, 1.4vw, 30px);
+  }
+
+  .ob-fluid-feature-list {
+    gap: clamp(12px, 0.8vw, 18px);
+  }
+
+  .ob-theme-item {
+    width: clamp(160px, 12vw, 220px) !important;
+    height: clamp(95px, 7vw, 125px) !important;
+  }
+
+  .ob-wallpaper-item {
+    width: clamp(140px, 10.5vw, 185px) !important;
+    height: clamp(85px, 6.2vw, 115px) !important;
+  }
+
+  .ob-fluid-input-container {
+    max-width: clamp(340px, 26vw, 480px) !important;
+  }
+
+  .ob-fluid-input {
+    font-size: clamp(13px, 0.85vw, 16px) !important;
+    padding-top: clamp(8px, 0.7vw, 14px) !important;
+    padding-bottom: clamp(8px, 0.7vw, 14px) !important;
+  }
+
+  @media (max-width: 700px) {
+    .onboarding-standard-content {
+      width: calc(100vw - 32px);
+    }
+  }
+
+  @media (max-height: 760px) {
+    .ob-fluid-gap-container {
+      gap: 14px !important;
+    }
+
+    .ob-fluid-feature-list {
+      gap: 9px !important;
+    }
+
+    .ob-fluid-note-box {
+      padding-top: 10px !important;
+      padding-bottom: 10px !important;
+    }
   }
 `;
 
@@ -2000,12 +2106,84 @@ interface OnboardingCardsProps {
   onClose: () => void;
   isLoggedIn?: boolean;
   isReturningUser?: boolean;
+  initialStep?: Step;
 }
 
-type Step = 'quote' | 'get_started' | 'theme' | 'organization' | 'onboarding' | 'restore_options' | 'restore_success' | 'cloud_migration_onboarding' | 'tutorial';
+type Step = 'quote' | 'get_started' | 'theme' | 'organization' | 'onboarding' | 'restore_options' | 'restore_success' | 'cloud_migration_onboarding' | 'presentation';
 
-const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>(({ onClose, isLoggedIn, isReturningUser }, ref) => {
-  const [step, setStep] = useState<Step>('quote');
+const OnboardingHeader: React.FC<{ currentStep: number }> = ({ currentStep }) => {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <span className="text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">
+        Step {currentStep} of 4
+      </span>
+      <div className="flex gap-1.5 w-32">
+        <div className={`h-1 flex-1 rounded-full ${currentStep >= 1 ? 'bg-[#5f5eff]' : 'bg-neutral-800'}`}></div>
+        <div className={`h-1 flex-1 rounded-full ${currentStep >= 2 ? 'bg-[#5f5eff]' : 'bg-neutral-800'}`}></div>
+        <div className={`h-1 flex-1 rounded-full ${currentStep >= 3 ? 'bg-[#5f5eff]' : 'bg-neutral-800'}`}></div>
+        <div className={`h-1 flex-1 rounded-full ${currentStep >= 4 ? 'bg-[#5f5eff]' : 'bg-neutral-800'}`}></div>
+      </div>
+    </div>
+  );
+};
+
+interface OnboardingFooterProps {
+  currentStep: number;
+  onBack?: () => void;
+  onNext?: () => void;
+  nextLabel?: string;
+  isNextDisabled?: boolean;
+}
+
+const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
+  currentStep,
+  onBack,
+  onNext,
+  nextLabel = 'Next →',
+  isNextDisabled
+}) => {
+  const { theme } = useAppearance();
+  const isDark = theme.isDark;
+  return (
+    <div className="relative flex items-center justify-between w-full mt-auto h-12">
+      {/* Left Back Button */}
+      {onBack ? (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-neutral-500 hover:text-neutral-300 font-semibold text-xs md:text-sm transition-colors px-4 py-2"
+        >
+          <FaChevronLeft size={12} /> Back
+        </button>
+      ) : (
+        <div className="w-16"></div>
+      )}
+
+      {/* Center Progress Dots */}
+      <div className="absolute left-1/2 transform -translate-x-1/2 flex gap-2">
+        <span className={`w-2 h-2 rounded-full ${currentStep === 1 ? 'bg-[#8b5cf6]' : 'bg-neutral-800'}`}></span>
+        <span className={`w-2 h-2 rounded-full ${currentStep === 2 ? 'bg-[#8b5cf6]' : 'bg-neutral-800'}`}></span>
+        <span className={`w-2 h-2 rounded-full ${currentStep === 3 ? 'bg-[#8b5cf6]' : 'bg-neutral-800'}`}></span>
+        <span className={`w-2 h-2 rounded-full ${currentStep === 4 ? 'bg-[#8b5cf6]' : 'bg-neutral-800'}`}></span>
+      </div>
+
+      {/* Right Next Button */}
+      {onNext ? (
+        <button
+          onClick={onNext}
+          disabled={isNextDisabled}
+          className="flex items-center gap-2 bg-[#5f5eff] hover:bg-[#5f5eff]/95 text-white px-5 py-2 rounded-full text-xs md:text-sm font-semibold transition-all shadow-lg shadow-[#5f5eff]/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+        >
+          {nextLabel}
+        </button>
+      ) : (
+        <div className="w-16"></div>
+      )}
+    </div>
+  );
+};
+
+const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>(({ onClose, isLoggedIn, isReturningUser, initialStep }, ref) => {
+  const [step, setStep] = useState<Step>(initialStep ?? 'quote');
   const dispatch = useDispatch();
   const { themeId, setTheme: setThemeProfile, wallpaperId, setWallpaper } = useAppearance();
 
@@ -2180,7 +2358,7 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
       console.error('[TutorialOverlay] Failed to setup workspace:', err);
     } finally {
       setIsCreating(false);
-      setStep('tutorial');
+      setStep('presentation');
     }
   };
 
@@ -2190,17 +2368,20 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
       .replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
   };
 
-  const wallpaperModules = (import.meta as any).glob('../pages/AltS_search_newtab/public/images/wallappear/*.{png,jpg,jpeg,webp,gif}');
+  // Wallpaper list static hardcoded to avoid duplicate bundle assets
   const wallpapers = [
     { id: 'none', label: 'None', src: '' },
-    ...Object.keys(wallpaperModules).map(path => {
-      const filename = path.split('/').pop() || '';
+    ...['car-race.png', 'Evermist.png', 'sky.png'].map(filename => {
       const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
       return {
         id: filename,
         label: toTitleCase(nameWithoutExt),
         src: `AltS_search_newtab/images/wallappear/${filename}`,
       };
+    }).sort((a, b) => {
+      if (a.label === 'Default Wallpaper') return -1;
+      if (b.label === 'Default Wallpaper') return 1;
+      return a.label.localeCompare(b.label);
     })
   ];
 
@@ -2225,10 +2406,42 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
       }}
       className="fixed inset-0 z-[9999] h-screen w-screen max-h-screen max-w-screen flex flex-col items-center justify-between text-neutral-300 font-sans select-none overflow-hidden py-6 md:py-8 px-6 md:px-12">
       <style>{scrollbarStyles}</style>
+      <style>{styles}</style>
       
       {/* Ambient background glows */}
-      <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-[#8b5cf6]/5 blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-[#5f5eff]/5 blur-[120px] pointer-events-none" />
+        <AnimatePresence>
+          {step === 'organization' && (
+            <motion.div 
+              key="auth-buttons"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={{ duration: 0.3 }}
+              className="fixed top-8 right-10 flex items-center gap-1.5 text-[11px] select-none z-50"
+            >
+              <span className="text-neutral-400 font-medium">Existing user?</span>
+              <button 
+                onClick={() => {
+                  if (typeof chrome !== 'undefined' && chrome.tabs) {
+                    chrome.tabs.create({ url: CMDOS_SIGN_UP_URL });
+                  } else {
+                    window.open(CMDOS_SIGN_UP_URL, '_blank');
+                  }
+                }} 
+                className="text-[#8b5cf6] hover:text-[#8b5cf6]/80 font-semibold bg-transparent border-none p-0 cursor-pointer transition-colors"
+              >
+                Sign In
+              </button>
+              <span className="text-white/10 mx-0.5">|</span>
+              <button 
+                onClick={() => setStep('restore_options')} 
+                className="text-[#8b5cf6] hover:text-[#8b5cf6]/80 font-semibold bg-transparent border-none p-0 cursor-pointer transition-colors"
+              >
+                Import Backup
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <AnimatePresence mode="wait">
           {/* ── Step 1: Quote screen ── */}
@@ -2239,34 +2452,22 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.3 }}
-              className="flex-1 flex flex-col items-center justify-between w-full max-w-[1100px] max-h-full gap-4 md:gap-6"
-              style={{ zoom: 1.25 }}
+              className="flex-1 flex flex-col items-center justify-between w-full h-full max-h-full"
               onClick={e => e.stopPropagation()}>
               
-              {/* Top progress area */}
-              <div className="flex flex-col items-center gap-2">
-                <span className="text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">
-                  Step 1 of 3
-                </span>
-                <div className="flex gap-1.5 w-24">
-                  <div className="h-1 flex-1 rounded-full bg-[#5f5eff]"></div>
-                  <div className="h-1 flex-1 rounded-full bg-neutral-800"></div>
-                  <div className="h-1 flex-1 rounded-full bg-neutral-800"></div>
-                </div>
-              </div>
+              <OnboardingHeader currentStep={1} />
 
               {/* Centered layout for quote contents */}
-              <div className="flex-grow flex flex-col items-center justify-center w-full max-w-[600px] my-auto max-h-[75vh]">
-                
-                {/* Centered Text content */}
-                <div className="flex flex-col justify-center items-center gap-5 w-full text-center">
-                  <div className="space-y-3">
-                    <h1 className="text-xl md:text-2xl font-bold tracking-tight text-center" style={{ color: 'var(--color-tutorialTextTitle)' }}>
+              <div className="onboarding-body">
+                <div className="onboarding-standard-content flex flex-col justify-center items-center ob-fluid-gap-container text-center">
+                  
+                  <div className="space-y-3 w-full">
+                    <h1 className="ob-fluid-h1 font-bold tracking-tight text-center" style={{ color: 'var(--color-tutorialTextTitle)' }}>
                       Save time on repeat browser work.
                     </h1>
                     <div className="flex items-center justify-center">
                       <span 
-                        className="text-3xl md:text-4xl font-bold tracking-tight bg-gradient-to-r bg-clip-text text-transparent"
+                        className="ob-fluid-hero-text font-bold tracking-tight bg-gradient-to-r bg-clip-text text-transparent"
                         style={{
                           backgroundImage: 'linear-gradient(to right, var(--color-tutorialTextGradientStart), var(--color-tutorialTextGradientEnd))',
                           WebkitBackgroundClip: 'text'
@@ -2275,38 +2476,38 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
                         3 - 4 hours / week
                       </span>
                     </div>
-                    <p className="text-xs md:text-sm font-normal text-center" style={{ color: 'var(--color-tutorialTextDescription)' }}>
+                    <p className="ob-fluid-subtext font-normal text-center" style={{ color: 'var(--color-tutorialTextDescription)' }}>
                       Built for power users who choose <span style={{ color: 'var(--color-tutorialTextTitle)' }} className="font-semibold">efficiency.</span>
                     </p>
                   </div>
 
-                  <div className="flex flex-col gap-3 mt-2 items-start mx-auto w-fit">
+                  <div className="flex flex-col ob-fluid-feature-list items-start mx-auto w-fit">
                     {/* Point 1 */}
                     <div className="flex items-center gap-3">
-                      <div style={{ color: 'var(--color-tutorialAccent)' }} className="shrink-0">
-                        <FaKeyboard size={16} />
+                      <div style={{ color: 'var(--color-tutorialAccent)' }} className="shrink-0 flex items-center justify-center ob-fluid-feature-icon">
+                        <FaKeyboard className="w-full h-full" />
                       </div>
-                      <p className="text-xs md:text-sm font-medium" style={{ color: 'var(--color-tutorialTextTitle)' }}>
+                      <p className="ob-fluid-feature-text font-medium" style={{ color: 'var(--color-tutorialTextTitle)' }}>
                         Keyboard-first
                       </p>
                     </div>
 
                     {/* Point 2 */}
                     <div className="flex items-center gap-3">
-                      <div style={{ color: 'var(--color-tutorialAccent)' }} className="shrink-0">
-                        <FiLayers size={16} />
+                      <div style={{ color: 'var(--color-tutorialAccent)' }} className="shrink-0 flex items-center justify-center ob-fluid-feature-icon">
+                        <FiLayers className="w-full h-full" />
                       </div>
-                      <p className="text-xs md:text-sm font-medium" style={{ color: 'var(--color-tutorialTextTitle)' }}>
+                      <p className="ob-fluid-feature-text font-medium" style={{ color: 'var(--color-tutorialTextTitle)' }}>
                         Less tab switching, more flow
                       </p>
                     </div>
 
                     {/* Point 3 */}
                     <div className="flex items-center gap-3">
-                      <div style={{ color: 'var(--color-tutorialAccent)' }} className="shrink-0">
-                        <FiZap size={16} />
+                      <div style={{ color: 'var(--color-tutorialAccent)' }} className="shrink-0 flex items-center justify-center ob-fluid-feature-icon">
+                        <FiZap className="w-full h-full" />
                       </div>
-                      <p className="text-xs md:text-sm font-medium" style={{ color: 'var(--color-tutorialTextTitle)' }}>
+                      <p className="ob-fluid-feature-text font-medium" style={{ color: 'var(--color-tutorialTextTitle)' }}>
                         Create command shortcuts for everything in your browser
                       </p>
                     </div>
@@ -2314,31 +2515,24 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
 
                   {/* Note Box */}
                   <div 
-                    className="w-full p-3 rounded-xl border flex items-start gap-2.5 mt-2 text-left"
+                    className="ob-fluid-note-box rounded-xl border flex items-start text-left"
                     style={{
                       backgroundColor: 'rgba(139, 92, 246, 0.03)',
                       borderColor: 'rgba(139, 92, 246, 0.15)'
                     }}
                   >
-                    <div style={{ color: 'var(--color-tutorialAccent)' }} className="mt-0.5 shrink-0">
-                      <FiInfo size={14} />
+                    <div style={{ color: 'var(--color-tutorialAccent)' }} className="mt-0.5 shrink-0 flex items-center justify-center ob-fluid-feature-icon mr-2.5">
+                      <FiInfo className="w-full h-full" />
                     </div>
-                    <p className="text-[11px] md:text-xs leading-relaxed" style={{ color: 'var(--color-tutorialTextDescription)' }}>
+                    <p className="ob-fluid-note-text leading-relaxed" style={{ color: 'var(--color-tutorialTextDescription)' }}>
                       <span className="font-semibold" style={{ color: 'var(--color-tutorialTextTitle)' }}>Note:</span> The product may take 3 - 4 days to get used to. Once you're comfortable with the product, <span className="font-semibold" style={{ color: 'var(--color-tutorialTextTitle)' }}>you'll feel the speed.</span>
                     </p>
                   </div>
+
                 </div>
-
               </div>
 
-              {/* Bottom Navigation */}
-              <div className="relative flex items-center justify-end w-full mt-auto h-12">
-                <button
-                  onClick={() => setStep('theme')}
-                  className="flex items-center gap-2 bg-[#5f5eff] hover:bg-[#5f5eff]/95 text-white px-5 py-2 rounded-full text-xs md:text-sm font-semibold transition-all shadow-lg shadow-[#5f5eff]/20 hover:scale-[1.02] active:scale-[0.98]">
-                  Next →
-                </button>
-              </div>
+              <OnboardingFooter currentStep={1} onNext={() => setStep('theme')} />
             </motion.div>
           )}
 
@@ -2530,7 +2724,7 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
 
                 <button
                   disabled={isRestoring}
-                  onClick={() => setStep('tutorial')}
+                  onClick={() => setStep('presentation')}
                   className="text-neutral-500 hover:text-neutral-300 text-xs md:text-sm font-semibold transition-colors px-4 py-2 disabled:opacity-50">
                   Skip for Now
                 </button>
@@ -2592,7 +2786,7 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
 
               <div className="w-full flex justify-center mt-auto">
                 <button
-                  onClick={() => setStep('tutorial')}
+                  onClick={() => setStep('presentation')}
                   className="w-full max-w-sm flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-600/20 hover:scale-[1.02] active:scale-[0.98]">
                   Next →
                 </button>
@@ -2608,165 +2802,137 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.3 }}
-              className="flex-1 flex flex-col items-center justify-between w-full max-w-[800px] max-h-full gap-4 md:gap-6"
-              style={{ zoom: 1.05 }}
+              className="flex-1 flex flex-col items-center justify-between w-full h-full max-h-full"
               onClick={e => e.stopPropagation()}>
               
-              {/* Top progress area */}
-              <div className="flex flex-col items-center gap-2">
-                <span className="text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">
-                  Step 2 of 3
-                </span>
-                <div className="flex gap-1.5 w-24">
-                  <div className="h-1 flex-1 rounded-full bg-[#5f5eff]"></div>
-                  <div className="h-1 flex-1 rounded-full bg-[#5f5eff]"></div>
-                  <div className="h-1 flex-1 rounded-full bg-neutral-800"></div>
-                </div>
-              </div>
+              <OnboardingHeader currentStep={2} />
 
               {/* Theme & Wallpaper Customization Content */}
-              <div className="flex-grow flex flex-col justify-start items-center gap-6 mt-4 mb-auto w-full max-h-[75vh]">
-                <div className="text-center max-w-[700px] flex flex-col gap-2">
-                  <h1 className="text-xl md:text-2xl font-medium text-neutral-200">
-                    Customize <span className="text-[#8b5cf6]">Appearance</span>
-                  </h1>
-                  <p className="text-neutral-400 text-xs md:text-sm leading-relaxed">
-                    Personalize your cmdOS experience by picking a theme profile and background wallpaper.
-                  </p>
-                </div>
-
-                <div className="w-full max-w-[620px] space-y-6 mt-4 text-left">
-                  {/* Theme Selection Row */}
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-bold text-neutral-400 tracking-wider uppercase text-left">
-                      Select Theme
-                    </h3>
-                    <div className="flex gap-4 justify-start">
-                      {['default-dark', 'ocean-blue'].map(id => {
-                        const isSelected = themeId === id;
-                        const label = id === 'default-dark' ? 'Dark Mode' : 'Ocean Blue';
-                        const bgColor = id === 'default-dark' ? '#000000' : '#090e1a';
-                        
-                        return (
-                          <motion.div
-                            key={id}
-                            whileHover={{ scale: 1.03, y: -2 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={() => setThemeProfile(id)}
-                            style={{ backgroundColor: bgColor }}
-                            className={`cursor-pointer border rounded-xl w-[160px] h-[95px] transition-all relative overflow-hidden shadow-lg ${
-                              isSelected
-                                ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500'
-                                : 'border-white/10 hover:border-white/20'
-                            }`}
-                          >
-                            {/* Subtle inner border for contrast */}
-                            <div className="absolute inset-0 border border-white/5 rounded-xl pointer-events-none" />
-
-                            {/* Mini Mockup layout illustration inside the card */}
-                            <div className="absolute inset-2 flex gap-1.5 opacity-40 pointer-events-none">
-                              {/* Sidebar */}
-                              <div className="w-6 h-full rounded bg-white/10" />
-                              {/* Content area */}
-                              <div className="flex-1 flex flex-col gap-1">
-                                <div className="h-3 w-12 rounded bg-white/20" />
-                                <div className="h-2 w-full rounded bg-white/10" />
-                                <div className="h-2 w-2/3 rounded bg-white/10" />
-                              </div>
-                            </div>
-
-                            {/* Active Indicator Checkmark */}
-                            {isSelected && (
-                              <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-md z-10 animate-in zoom-in-50 duration-150">
-                                <FaCheck size={9} />
-                              </div>
-                            )}
-
-                            {/* Name Pill (Bottom Left Overlay) */}
-                            <div className="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-md border border-white/10 z-10 select-none">
-                              <span className="text-[10px] font-bold text-white tracking-wide">{label}</span>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
+              <div className="onboarding-body">
+                <div className="onboarding-standard-content flex flex-col items-center justify-center ob-fluid-gap-container text-center">
+                  <div className="text-center w-full flex flex-col gap-2">
+                    <h1 className="ob-fluid-h1 font-medium text-neutral-200">
+                      Customize <span className="text-[#8b5cf6]">Appearance</span>
+                    </h1>
+                    <p className="ob-fluid-subtext text-neutral-400 leading-relaxed">
+                      Personalize your cmdOS experience by picking a theme profile and background wallpaper.
+                    </p>
                   </div>
 
-                  {/* Wallpaper Selection Row */}
-                  <div className="space-y-3 pt-6 border-t border-white/10">
-                    <h3 className="text-xs font-bold text-neutral-400 tracking-wider uppercase text-left">
-                      Select Wallpaper
-                    </h3>
-                    <div className="flex flex-wrap gap-4 w-full">
-                      {wallpapers.map(wall => {
-                        const isSelected = wallpaperId === wall.id;
-                        const bgStyle = wall.id === 'none'
-                          ? { backgroundColor: '#111115' }
-                          : {
-                              backgroundImage: `url('${
-                                typeof chrome !== 'undefined' && chrome.runtime?.getURL 
-                                  ? chrome.runtime.getURL(wall.src) 
-                                  : '/' + wall.src
-                              }')`,
-                              backgroundSize: 'cover',
-                              backgroundPosition: 'center',
-                            };
+                  <div className="w-full space-y-6 mt-2 text-left">
+                    {/* Theme Selection Row */}
+                    <div className="space-y-3">
+                      <h3 className="ob-fluid-subtext font-bold text-neutral-400 tracking-wider uppercase text-left">
+                        Select Theme
+                      </h3>
+                      <div className="flex gap-4 justify-start">
+                        {['default-dark', 'ocean-blue'].map(id => {
+                          const isSelected = themeId === id;
+                          const label = id === 'default-dark' ? 'Dark Mode' : 'Ocean Blue';
+                          const bgColor = id === 'default-dark' ? '#000000' : '#090e1a';
+                          
+                          return (
+                            <motion.div
+                              key={id}
+                              whileHover={{ scale: 1.03, y: -2 }}
+                              whileTap={{ scale: 0.98 }}
+                              onClick={() => setThemeProfile(id)}
+                              style={{ backgroundColor: bgColor }}
+                              className={`ob-theme-item cursor-pointer border rounded-xl transition-all relative overflow-hidden shadow-lg ${
+                                isSelected
+                                  ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500'
+                                  : 'border-white/10 hover:border-white/20'
+                              }`}
+                            >
+                              {/* Subtle inner border for contrast */}
+                              <div className="absolute inset-0 border border-white/5 rounded-xl pointer-events-none" />
 
-                        return (
-                          <motion.div
-                            key={wall.id}
-                            whileHover={{ scale: 1.03, y: -2 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={() => setWallpaper(wall.id)}
-                            style={bgStyle}
-                            className={`cursor-pointer border rounded-xl w-[140px] h-[85px] transition-all relative overflow-hidden shadow-lg ${
-                              isSelected
-                                ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500'
-                                : 'border-white/10 hover:border-white/20'
-                            }`}
-                          >
-                            {/* Subtle inner border for contrast */}
-                            <div className="absolute inset-0 border border-white/5 rounded-xl pointer-events-none" />
-
-                            {/* Active Indicator Checkmark */}
-                            {isSelected && (
-                              <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-md z-10 animate-in zoom-in-50 duration-150">
-                                <FaCheck size={9} />
+                              {/* Mini Mockup layout illustration inside the card */}
+                              <div className="absolute inset-2 flex gap-1.5 opacity-40 pointer-events-none">
+                                {/* Sidebar */}
+                                <div className="w-6 h-full rounded bg-white/10" />
+                                {/* Content area */}
+                                <div className="flex-1 flex flex-col gap-1">
+                                  <div className="h-3 w-12 rounded bg-white/20" />
+                                  <div className="h-2 w-full rounded bg-white/10" />
+                                  <div className="h-2 w-2/3 rounded bg-white/10" />
+                                </div>
                               </div>
-                            )}
 
-                            {/* Name Pill (Bottom Left Overlay) */}
-                            <div className="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-md border border-white/10 z-10 select-none">
-                              <span className="text-[10px] font-bold text-white tracking-wide">{wall.label}</span>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
+                              {/* Active Indicator Checkmark */}
+                              {isSelected && (
+                                <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-md z-10 animate-in zoom-in-50 duration-150">
+                                  <FaCheck size={9} />
+                                </div>
+                              )}
+
+                              {/* Name Pill (Bottom Left Overlay) */}
+                              <div className="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-md border border-white/10 z-10 select-none">
+                                <span className="text-[10px] font-bold text-white tracking-wide">{label}</span>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Wallpaper Selection Row */}
+                    <div className="space-y-3 pt-6 border-t border-white/10">
+                      <h3 className="ob-fluid-subtext font-bold text-neutral-400 tracking-wider uppercase text-left">
+                        Select Wallpaper
+                      </h3>
+                      <div className="flex flex-wrap gap-4 w-full">
+                        {wallpapers.map(wall => {
+                          const isSelected = wallpaperId === wall.id;
+                          const bgStyle = wall.id === 'none'
+                            ? { backgroundColor: '#111115' }
+                            : {
+                                backgroundImage: `url('${
+                                  typeof chrome !== 'undefined' && chrome.runtime?.getURL 
+                                    ? chrome.runtime.getURL(wall.src) 
+                                    : '/' + wall.src
+                                }')`,
+                                backgroundSize: 'cover',
+                                backgroundPosition: 'center',
+                              };
+
+                          return (
+                            <motion.div
+                              key={wall.id}
+                              whileHover={{ scale: 1.03, y: -2 }}
+                              whileTap={{ scale: 0.98 }}
+                              onClick={() => setWallpaper(wall.id)}
+                              style={bgStyle}
+                              className={`ob-wallpaper-item cursor-pointer border rounded-xl transition-all relative overflow-hidden shadow-lg ${
+                                isSelected
+                                  ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500'
+                                  : 'border-white/10 hover:border-white/20'
+                              }`}
+                            >
+                              {/* Subtle inner border for contrast */}
+                              <div className="absolute inset-0 border border-white/5 rounded-xl pointer-events-none" />
+
+                              {/* Active Indicator Checkmark */}
+                              {isSelected && (
+                                <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-md z-10 animate-in zoom-in-50 duration-150">
+                                  <FaCheck size={9} />
+                                </div>
+                              )}
+
+                              {/* Name Pill (Bottom Left Overlay) */}
+                              <div className="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-md border border-white/10 z-10 select-none">
+                                <span className="text-[10px] font-bold text-white tracking-wide">{wall.label}</span>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Bottom Navigation */}
-              <div className="relative flex items-center justify-between w-full mt-auto h-12">
-                <button
-                  onClick={() => setStep('quote')}
-                  className="flex items-center gap-2 text-neutral-500 hover:text-neutral-300 font-semibold text-xs md:text-sm transition-colors px-4 py-2">
-                  <FaChevronLeft size={12} /> Back
-                </button>
-
-                <div className="absolute left-1/2 transform -translate-x-1/2 flex gap-2">
-                  <span className="w-2 h-2 rounded-full bg-neutral-800"></span>
-                  <span className="w-2 h-2 rounded-full bg-[#8b5cf6]"></span>
-                  <span className="w-2 h-2 rounded-full bg-neutral-800"></span>
-                </div>
-
-                <button
-                  onClick={() => setStep('organization')}
-                  className="flex items-center gap-2 bg-[#5f5eff] hover:bg-[#5f5eff]/95 text-white px-5 py-2 rounded-full text-xs md:text-sm font-semibold transition-all shadow-lg shadow-[#5f5eff]/20 hover:scale-[1.02] active:scale-[0.98]">
-                  Next →
-                </button>
-              </div>
+              <OnboardingFooter currentStep={2} onBack={() => setStep('quote')} onNext={() => setStep('organization')} />
             </motion.div>
           )}
 
@@ -2778,170 +2944,111 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.3 }}
-              className="flex-1 flex flex-col items-center justify-between w-full max-w-[600px] max-h-full gap-3 md:gap-4"
-              style={{ zoom: 1.05 }}
+              className="flex-1 flex flex-col items-center justify-between w-full h-full max-h-full relative"
               onClick={e => e.stopPropagation()}>
               
-              {/* Top progress area */}
-              <div className="flex flex-col items-center gap-1.5">
-                <span className="text-[11px] font-semibold tracking-wider text-neutral-500 uppercase">
-                  Step 3 of 3
-                </span>
-                <div className="flex gap-1.5 w-24">
-                  <div className="h-1 flex-1 rounded-full bg-[#5f5eff]"></div>
-                  <div className="h-1 flex-1 rounded-full bg-[#5f5eff]"></div>
-                  <div className="h-1 flex-1 rounded-full bg-[#5f5eff]"></div>
-                </div>
-              </div>
+              <OnboardingHeader currentStep={3} />
 
               {/* Centered Form Layout with a card-like container */}
-              <div className="flex-grow flex flex-col justify-center items-center mt-2 mb-auto w-full max-h-[75vh] max-w-[700px]">
-                
-                {/* Auth/Restore buttons positioned above/outside the card borderline (top right) */}
-                <div className="w-full flex justify-end mb-2 pr-1">
-                  <div className="flex items-center gap-1.5 text-[11px] select-none">
-                    {FEATURE_FLAGS.ENABLE_SHARING && (
-                      <>
-                        {isLoggedIn ? (
-                          <button 
-                            onClick={async () => {
-                              await StorageManager.setItem('tutorial_watched', true);
-                              onClose();
-                              useUIStore.getState().setView({ type: 'settings', section: 'importCloudData' });
-                            }} 
-                            className="text-[#8b5cf6] hover:text-[#8b5cf6]/80 font-semibold bg-transparent border-none p-0 cursor-pointer transition-colors"
-                          >
-                            Import Cloud Data
-                          </button>
-                        ) : (
-                          <>
-                            <span className="text-neutral-400 font-medium">Existing user?</span>
-                            <button 
-                              onClick={() => {
-                                if (typeof chrome !== 'undefined' && chrome.tabs) {
-                                  chrome.tabs.create({ url: CMDOS_SIGN_UP_URL });
-                                } else {
-                                  window.open(CMDOS_SIGN_UP_URL, '_blank');
-                                }
-                              }} 
-                              className="text-[#8b5cf6] hover:text-[#8b5cf6]/80 font-semibold bg-transparent border-none p-0 cursor-pointer transition-colors"
-                            >
-                              Sign In
-                            </button>
-                          </>
-                        )}
-                        <span className="text-white/10">|</span>
-                      </>
-                    )}
-                    <button 
-                      onClick={() => setStep('restore_options')} 
-                      className="text-[#8b5cf6] hover:text-[#8b5cf6]/80 font-semibold bg-transparent border-none p-0 cursor-pointer transition-colors"
+              <div className="onboarding-body">
+                <div className="onboarding-standard-content flex flex-col items-center justify-center">
+                  
+                  {/* Card container with a thin border */}
+                  <div className="w-full border border-white/10 rounded-2xl p-6 flex flex-col ob-fluid-gap-container">
+                    <div className="text-center space-y-1.5">
+                      <h2 className="ob-fluid-h1 font-semibold text-white tracking-tight">
+                        Create <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Workspace</span>
+                      </h2>
+                    </div>
+
+                    {/* Workspace Name Input (reduced width and centered) */}
+                    <div className="space-y-1.5 text-left w-full ob-fluid-input-container mx-auto">
+                      <label className="ob-fluid-note-text font-bold text-neutral-400 tracking-wider uppercase block text-left">
+                        Workspace Name <span className="text-red-500 font-normal ml-0.5">*</span>
+                      </label>
+                      <div className="relative flex items-center">
+                        <input
+                          type="text"
+                          value={orgName}
+                          onChange={(e) => setOrgName(e.target.value)}
+                          placeholder="John Doe"
+                          className="ob-fluid-input w-full pl-4 pr-[130px] bg-white/[0.02] border border-white/10 rounded-xl text-white placeholder-neutral-500 outline-none focus:border-[#8b5cf6]/50 focus:ring-1 focus:ring-[#8b5cf6]/20 transition-all font-medium shadow-inner"
+                        />
+                        <div className="absolute right-3 flex items-center gap-1.5 text-[10px] text-neutral-500 font-medium select-none pointer-events-none">
+                          <FiLock size={10} />
+                          <span>Private • Stored locally</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Create Workspace CTA Button (Reduced width & centered) */}
+                    <button
+                      disabled={isCreating}
+                      onClick={handleCreateOrgAndWorkspace}
+                      className="w-fit mx-auto px-10 flex items-center justify-center gap-2 py-2.5 ob-fluid-feature-text font-bold text-white rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 transition-all active:scale-[0.98] shadow-lg shadow-purple-600/20 disabled:opacity-75 cursor-pointer mt-1"
                     >
-                      Import Backup
+                      {isCreating ? (
+                        <>
+                          <FiLoader className="animate-spin" /> Creating...
+                        </>
+                      ) : (
+                        <>
+                          Create Workspace <FaChevronRight size={9} className="ml-1" />
+                        </>
+                      )}
                     </button>
-                  </div>
-                </div>
 
-                {/* Card container with a thin border */}
-                <div className="w-full border border-white/10 rounded-2xl p-6 bg-white/[0.02] backdrop-blur-md flex flex-col gap-6">
-                  <div className="text-center space-y-1.5">
-                    <h2 className="text-xl md:text-2xl font-semibold text-white tracking-tight">
-                      Create <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Workspace</span>
-                    </h2>
-                    <p className="text-[11px] text-neutral-400">Private by default. No account required.</p>
-                  </div>
+                    {/* Trust Badges - aligned bottom under the form layout inside the card */}
+                    <div className="grid grid-cols-3 gap-0 mt-2 select-none w-full pt-5 border-t border-white/5 divide-x divide-white/10">
+                      
+                      {/* Column 1 */}
+                      <div className="flex items-start gap-2.5 px-4">
+                        <div className="w-7 h-7 rounded-full bg-neutral-800/40 text-neutral-400 flex items-center justify-center shrink-0 mt-0.5 border border-white/5">
+                          <FaShieldHalved size={11} />
+                        </div>
+                        <div className="flex flex-col text-left">
+                          <strong className="text-neutral-200 font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Local-first</strong>
+                          <span className="text-[9.5px] md:text-[10.5px] text-neutral-500 mt-0.5">Stored on this device</span>
+                          <span className="text-[9.5px] md:text-[10.5px] text-neutral-500">Private • Stored locally</span>
+                        </div>
+                      </div>
 
-                  {/* Workspace Name Input (reduced width and centered) */}
-                  <div className="space-y-1.5 text-left w-full max-w-[300px] mx-auto">
-                    <label className="text-[10px] font-bold text-neutral-400 tracking-wider uppercase block text-center">
-                      Workspace Name
-                    </label>
-                    <div className="relative flex items-center">
-                      <FaUsers size={14} className="absolute left-4 text-neutral-500" />
-                      <input
-                        type="text"
-                        value={orgName}
-                        onChange={(e) => setOrgName(e.target.value)}
-                        placeholder="e.g. My Awesome Team"
-                        className="w-full pl-10 pr-4 py-2 bg-white/[0.02] border border-white/10 rounded-xl text-white placeholder-neutral-500 outline-none focus:border-[#8b5cf6]/50 focus:ring-1 focus:ring-[#8b5cf6]/20 transition-all font-medium text-xs shadow-inner"
-                      />
-                    </div>
-                  </div>
+                      {/* Column 2 */}
+                      <div className="flex items-start gap-2.5 px-4">
+                        <div className="w-7 h-7 rounded-full bg-neutral-800/40 text-neutral-400 flex items-center justify-center shrink-0 mt-0.5 border border-white/5">
+                          <FiCloud size={12} />
+                        </div>
+                        <div className="flex flex-col text-left">
+                          <strong className="text-neutral-200 font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Optional backup</strong>
+                          <span className="text-[9.5px] md:text-[10.5px] text-neutral-500 mt-0.5">Connect Drive anytime</span>
+                        </div>
+                      </div>
 
-                  {/* Create Workspace CTA Button (Reduced width & centered) */}
-                  <button
-                    disabled={isCreating}
-                    onClick={handleCreateOrgAndWorkspace}
-                    className="w-fit mx-auto px-10 flex items-center justify-center gap-2 py-2 text-xs font-bold text-white rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 transition-all active:scale-[0.98] shadow-lg shadow-purple-600/20 disabled:opacity-75 cursor-pointer mt-1"
-                  >
-                    {isCreating ? (
-                      <>
-                        <FiLoader className="animate-spin" /> Creating...
-                      </>
-                    ) : (
-                      <>
-                        Create Workspace <FaChevronRight size={9} className="ml-1" />
-                      </>
-                    )}
-                  </button>
+                      {/* Column 3 */}
+                      <div className="flex items-start gap-2.5 px-4">
+                        <div className="w-7 h-7 rounded-full bg-neutral-800/40 text-neutral-400 flex items-center justify-center shrink-0 mt-0.5 border border-white/5">
+                          <FiCode size={12} />
+                        </div>
+                        <div className="flex flex-col text-left">
+                          <strong className="text-neutral-200 font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Open source</strong>
+                          <span className="text-[9.5px] md:text-[10.5px] text-neutral-500 mt-0.5">Built with community love ❤️</span>
+                          <a 
+                            href="https://github.com/cmdOS-App/cmdOS" 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-neutral-400 hover:text-neutral-300 font-medium flex items-center justify-start gap-1.5 mt-1 transition-colors cursor-pointer text-[9.5px]"
+                          >
+                            <FaGithub size={10} className="mb-[0.5px] opacity-80" /> Explore source code <FiArrowUpRight size={9} />
+                          </a>
+                        </div>
+                      </div>
 
-                  {/* Trust Badges - aligned bottom under the form layout inside the card */}
-                  <div className="grid grid-cols-3 gap-4 px-1 mt-2 select-none w-full text-center pt-3">
-                    <div className="flex flex-col items-center gap-1.5">
-                      <div className="w-7 h-7 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                        <FaShieldHalved size={13} />
-                      </div>
-                      <div className="text-[9.5px] md:text-[10.5px] text-neutral-400 leading-normal">
-                        <strong className="text-white font-semibold block text-[10.5px] md:text-xs mb-0.5">100% secure</strong> All data stays on this device.
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-center gap-1.5">
-                      <div className="w-7 h-7 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                        <FiCloud size={13} />
-                      </div>
-                      <div className="text-[9.5px] md:text-[10.5px] text-neutral-400 leading-normal">
-                        <strong className="text-white font-semibold block text-[10.5px] md:text-xs mb-0.5">Back up later</strong> Connect your Google Drive anytime.
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-center gap-1.5">
-                      <div className="w-7 h-7 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                        <FiCode size={13} />
-                      </div>
-                      <div className="text-[9.5px] md:text-[10.5px] text-neutral-400 leading-normal">
-                        <strong className="text-white font-semibold block text-[10.5px] md:text-xs mb-0.5">Open source</strong>
-                        <span className="block whitespace-nowrap text-[9px] md:text-[10px]">Built with community love ❤️</span>
-                        <a 
-                          href="https://github.com/cmdOS-App/cmdOS" 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="text-emerald-400 hover:text-emerald-300 font-semibold flex items-center justify-center gap-1 mt-1 transition-colors cursor-pointer text-[9px]"
-                        >
-                          <span className="text-white hover:text-white/90">GitHub</span> · Explore source code <FiArrowUpRight size={9} />
-                        </a>
-                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Bottom Navigation */}
-              <div className="relative flex items-center justify-between w-full mt-auto h-12">
-                <button
-                  onClick={() => setStep('theme')}
-                  className="flex items-center gap-2 text-neutral-500 hover:text-neutral-300 font-semibold text-xs md:text-sm transition-colors px-4 py-2">
-                  <FaChevronLeft size={12} /> Back
-                </button>
-
-                <div className="absolute left-1/2 transform -translate-x-1/2 flex gap-2">
-                  <span className="w-2 h-2 rounded-full bg-neutral-800"></span>
-                  <span className="w-2 h-2 rounded-full bg-neutral-800"></span>
-                  <span className="w-2 h-2 rounded-full bg-[#8b5cf6]"></span>
-                </div>
-
-                <div className="w-16"></div> {/* Spacer to align */}
-              </div>
+              <OnboardingFooter currentStep={3} onBack={() => setStep('theme')} />
             </motion.div>
           )}
 
@@ -2973,18 +3080,18 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
           )}
 
 
-          {/* ── Step 5: Tutorial Dashboard ── */}
-          {step === 'tutorial' && (
+          {/* ── Step 5: Presentation Card ── */}
+          {step === 'presentation' && (
             <motion.div
-              key="tutorial"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="absolute inset-0 z-[100000] h-screen w-screen flex flex-col items-center justify-center"
+              key="presentation"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="absolute inset-0 z-[100000] h-screen w-screen flex flex-col items-center justify-start overflow-hidden bg-transparent"
               onClick={(e) => e.stopPropagation()}
             >
-              <TutorialDashboard onClose={onClose} isLoggedIn={isLoggedIn} isEmbedded={true} />
+              <FeaturePresentationCard onClose={onClose} onBack={isReturningUser || initialStep === 'presentation' ? undefined : () => setStep('organization')} />
             </motion.div>
           )}
         </AnimatePresence>

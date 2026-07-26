@@ -1,5 +1,6 @@
 import { CommandModule, CommandContext, EntitySelection } from './types';
 import { ALL_COMMANDS } from './allCommands';
+import { normalizePrefix } from './utils';
 
 /**
  * Central registry of all commands
@@ -37,7 +38,7 @@ constructor() {
     return this.getAll().map(cmd => ({
       id: cmd.id,
       label: cmd.label,
-      prefix: cmd.prefix,
+      prefix: normalizePrefix(cmd.prefix),
       behavior: cmd.behavior,
       keywords: cmd.keywords,
       scope: cmd.scope,
@@ -161,8 +162,9 @@ constructor() {
   search(query: string): CommandModule[] {
     const lowerQuery = query.toLowerCase();
     return this.getAll().filter(cmd => {
+      if (cmd.showInDashboard === false) return false;
       // Match by prefix
-      if (cmd.prefix.toLowerCase().includes(lowerQuery)) return true;
+      if (normalizePrefix(cmd.prefix).toLowerCase().includes(lowerQuery.replace(/^\/+/, ''))) return true;
       // Match by label
       if (cmd.label.toLowerCase().includes(lowerQuery)) return true;
       // Match by keywords

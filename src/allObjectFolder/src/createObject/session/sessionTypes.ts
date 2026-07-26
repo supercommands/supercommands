@@ -1,7 +1,7 @@
 /**
  * @file sessionTypes.ts
  * @description Defines TypeScript types and interfaces for saved Session entities 
- * (tab groups), including metadata fields, window preferences, and CRUD inputs.
+ * (Tab Sessions), including metadata fields, window preferences, and CRUD inputs.
  * 
  * @usage
  * ```ts

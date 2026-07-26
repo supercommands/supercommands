@@ -42,30 +42,10 @@ const stripHtmlTags = (html: string): string => {
     .trim();
 };
 
-export const isNoteCategory = (category: string | null | undefined) => {
-  const normalized = (category || '').toLowerCase();
-  return normalized === 'snippet' || normalized === 'note';
-};
-
-
-export const isTabGroupCategory = (category: string | null | undefined) => {
-  const normalized = (category || '').toLowerCase();
-  return normalized === 'tabgroup' || normalized === 'tab group' || normalized === 'link group';
-};
-
-export const isLinkCategory = (category: string | null | undefined) => {
-  const normalized = (category || '').toLowerCase();
-  return (
-    normalized === 'link' ||
-    normalized === 'bulk_link' ||
-    normalized === 'bulk link' ||
-    isTabGroupCategory(category)
-  );
-};
-
-export const resolveSnippetIcon = (category: string | null | undefined): 'note' | 'link' | 'tabgroup' => {
-  if (isTabGroupCategory(category)) return 'tabgroup';
-  if (isLinkCategory(category)) return 'link';
+export const resolveSnippetIcon = (category: string | null | undefined): 'note' | 'link' | 'session' => {
+  const cat = String(category || '').toLowerCase();
+  if (['session', 'sessions', 'tab session'].includes(cat)) return 'session';
+  if (['link', 'links', 'tabgroup'].includes(cat)) return 'link';
   return 'note';
 };
 
@@ -73,14 +53,15 @@ export const resolveSnippetIcon = (category: string | null | undefined): 'note' 
 export type NodeActionKind = 'view_note' | 'edit_link' | 'open_multiple_links';
 
 export const resolvePrimaryAction = (category: string | null | undefined): NodeActionKind => {
-  if (isTabGroupCategory(category)) return 'open_multiple_links';
-  if (isLinkCategory(category)) return 'edit_link';
+  const cat = String(category || '').toLowerCase();
+  if (['session', 'sessions', 'tab session'].includes(cat)) return 'open_multiple_links';
+  if (['link', 'links', 'tabgroup'].includes(cat)) return 'edit_link';
   return 'view_note';
 };
 
 export const buildSnippetDeleteDetail = (
   suggestion: SnippetSuggestion,
-  itemKind: 'note' | 'link' | 'tabgroup',
+  itemKind: 'note' | 'link' | 'session',
 ): SnippetActionDetail | null => {
   const snippet = suggestion.snippet;
   const workspace = suggestion.workspace;
@@ -89,7 +70,7 @@ export const buildSnippetDeleteDetail = (
   if (!snippetId) return null;
 
   let commandId: 'delete_snippet' | 'delete_link' | 'delete_folder' = 'delete_snippet';
-  if (itemKind === 'link' || itemKind === 'tabgroup') commandId = 'delete_link';
+  if (itemKind === 'link' || itemKind === 'session') commandId = 'delete_link';
 
   return {
     snippetId,

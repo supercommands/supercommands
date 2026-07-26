@@ -1,7 +1,6 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
 @layer base {
   :host {
     display: block;
@@ -74,4 +73,39 @@
 }
 .hover-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
+}
+
+/* Custom scrollbar for BoardView (always visible, thin, matching cmdOS dark theme) */
+.board-scrollbar {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(255, 255, 255, 0.45) rgba(255, 255, 255, 0.08) !important;
+}
+
+.board-scrollbar::-webkit-scrollbar {
+  width: 6px !important;
+  height: 8px !important;
+  display: block !important;
+}
+
+.board-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-radius: 10px !important;
+}
+
+.board-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.45) !important;
+  border-radius: 10px !important;
+}
+
+.board-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Hide scrollbar utility */
+.hide-scrollbar {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none !important;
 }

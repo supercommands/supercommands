@@ -14,7 +14,7 @@ import Dexie from 'dexie';
 
 import type { AiPromptRecord, CreateAiPromptInput, UpdateAiPromptInput } from './aiPromptTypes';
 import { generateEntityId } from '../../../../shared-components/utils';
-import { db } from '../../../../storage/indexDB/dbConfig';
+import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 
 export async function createAiPrompt(input: CreateAiPromptInput): Promise<AiPromptRecord> {
@@ -44,6 +44,7 @@ export async function createAiPrompt(input: CreateAiPromptInput): Promise<AiProm
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
+    customModels: input.customModels ?? [],
   };
 
   try {
@@ -69,6 +70,7 @@ export async function updateAiPrompt(aiPromptId: string, input: UpdateAiPromptIn
   if (input.workspaceId !== undefined) changes.workspaceId = input.workspaceId;
   if (input.folderId !== undefined) changes.folderId = input.folderId;
   if (input.tagIds !== undefined) changes.tagIds = input.tagIds;
+  if (input.customModels !== undefined) changes.customModels = input.customModels;
 
   try {
     const existing = await db.aiPrompts.get(aiPromptId);
@@ -140,6 +142,7 @@ export async function getAiPromptsForFolder(workspaceId: string, folderId: strin
 
 export async function deleteAiPrompt(aiPromptId: string): Promise<void> {
   try {
+    await deleteItemAssociations(aiPromptId);
     await db.aiPrompts.delete(aiPromptId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';

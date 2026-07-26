@@ -14,12 +14,14 @@ const WallpaperLayer: React.FC = () => {
 
   // Strip leading slash if present for chrome.runtime.getURL
   const isCustom = wallpaperId === 'custom';
-  const srcPath = !isCustom && wallpaper.src.startsWith('/') ? wallpaper.src.slice(1) : wallpaper.src;
+  // Normalize legacy filename mismatch: 'Car Race.png' was renamed to 'car-race.png' on disk
+  const normalizedSrc = wallpaper.src.replace('Car Race.png', 'car-race.png');
+  const srcPath = !isCustom && normalizedSrc.startsWith('/') ? normalizedSrc.slice(1) : normalizedSrc;
   const resolvedUrl = isCustom
     ? wallpaper.src
     : (typeof chrome !== 'undefined' && chrome.runtime?.getURL 
         ? chrome.runtime.getURL(srcPath) 
-        : wallpaper.src);
+        : normalizedSrc);
 
   return (
     <div

@@ -9,6 +9,7 @@ import type { AiPromptRecord } from '../../allObjectFolder/src/createObject/aiPr
 import type { SnippetRecord } from '../../allObjectFolder/src/createObject/snippets/snippetTypes';
 import type { TodoRecord } from '../../allObjectFolder/src/createObject/todos/todoTypes';
 import type { TagRecord } from '../../allObjectFolder/src/createObject/tags/tagTypes';
+import type { FavoriteCategoryRecord } from '../../allObjectFolder/src/createObject/favoriteCategory/favoriteCategoryTypes';
 
 import type { UserHotkeyRecord } from '../../shared-components/hotkeys/core/hotkeyDbTypes';
 import type { UserShortcutRecord } from '../../shared-components/shortcuts/core/shortcutDbTypes';
@@ -27,6 +28,7 @@ export class CmdOSDatabase extends Dexie {
   snippets!: Table<SnippetRecord, string>;
   todos!: Table<TodoRecord, string>;
   tags!: Table<TagRecord, string>;
+  favoriteCategories!: Table<FavoriteCategoryRecord, string>;
   userHotkeys!: Table<UserHotkeyRecord, string>;
   userShortcuts!: Table<UserShortcutRecord, string>;
   favorites!: Table<FavoriteRecord, string>;
@@ -47,9 +49,10 @@ export class CmdOSDatabase extends Dexie {
       aiPrompts: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId]',
       todos: 'id, scheduleTime, updatedAt',
       tags: 'id, workspaceId, name, updatedAt, [workspaceId+updatedAt]',
+      favoriteCategories: 'id, userId, name, updatedAt, [userId+updatedAt]',
       userHotkeys: 'id, userId, combination, referenceId, referenceType, updatedAt',
       userShortcuts: 'id, userId, trigger, referenceId, referenceType, updatedAt',
-      favorites: 'id, user_id, reference_id, reference_type, updatedAt, [user_id+reference_id], [user_id+updatedAt]',
+      favorites: 'id, user_id, reference_id, reference_type, favoriteCategoryId, updatedAt, [user_id+reference_id], [user_id+favoriteCategoryId], [user_id+updatedAt]',
       commands: 'id, prefix, label, behavior, surface, enabled, updatedAt',
     });
 
@@ -60,12 +63,70 @@ export class CmdOSDatabase extends Dexie {
     this.version(3).stores({
       sessions: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId]',
     });
+
+    this.version(4).stores({
+      favoriteCategories: 'id, userId, name, updatedAt, [userId+updatedAt]',
+    });
+
+    this.version(5).stores({
+      favoriteCategories: 'id, userId, name, updatedAt, [userId+updatedAt]',
+    }).upgrade(async tx => {
+      await tx.table('favoriteCategories').toCollection().modify((cat: any) => {
+        if (!cat.userId && cat.workspaceId) {
+          cat.userId = cat.workspaceId;
+        }
+        delete cat.workspaceId;
+      });
+    });
+
+    this.version(6).stores({
+      favorites: 'id, user_id, reference_id, reference_type, favoriteCategoryId, updatedAt, [user_id+reference_id], [user_id+favoriteCategoryId], [user_id+updatedAt]',
+    }).upgrade(async tx => {
+      await tx.table('favorites').toCollection().modify((fav: any) => {
+        if (fav.favoriteCategoryId === undefined) {
+          fav.favoriteCategoryId = null;
+        }
+      });
+    });
   }
 }
 
 export const db = new CmdOSDatabase();
 
-// Open the database immediately so it creates the schema and is visible in Chrome DevTools
-db.open().catch(err => {
-  console.error('[Dexie] Failed to open database cmdOS:', err);
-});
+if (typeof indexedDB !== 'undefined') {
+  // Open the database immediately so it creates the schema and is visible in Chrome DevTools
+  db.open().catch(err => {
+    console.error('[Dexie] Failed to open database cmdOS:', err);
+  });
+}
+
+export async function deleteItemAssociations(itemId: string): Promise<void> {
+  if (!itemId) return;
+  try {
+    // 1. Delete matching favorites (reference_id matches itemId, or ends with itemId)
+    const favsToDelete = await db.favorites
+      .filter(f => f.reference_id === itemId || f.reference_id.endsWith(`-${itemId}`))
+      .toArray();
+    if (favsToDelete.length > 0) {
+      await db.favorites.bulkDelete(favsToDelete.map(f => f.id));
+    }
+
+    // 2. Delete matching hotkeys (referenceId matches itemId, or ends with itemId)
+    const hotkeysToDelete = await db.userHotkeys
+      .filter(hk => hk.referenceId === itemId || hk.referenceId.endsWith(`-${itemId}`))
+      .toArray();
+    if (hotkeysToDelete.length > 0) {
+      await db.userHotkeys.bulkDelete(hotkeysToDelete.map(h => h.id));
+    }
+
+    // 3. Delete matching shortcuts (referenceId matches itemId, or ends with itemId)
+    const shortcutsToDelete = await db.userShortcuts
+      .filter(sc => sc.referenceId === itemId || sc.referenceId.endsWith(`-${itemId}`))
+      .toArray();
+    if (shortcutsToDelete.length > 0) {
+      await db.userShortcuts.bulkDelete(shortcutsToDelete.map(s => s.id));
+    }
+  } catch (error) {
+    console.error(`[dbConfig.deleteItemAssociations] Failed for ${itemId}:`, error);
+  }
+}

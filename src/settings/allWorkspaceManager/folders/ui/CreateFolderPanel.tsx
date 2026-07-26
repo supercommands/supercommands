@@ -80,12 +80,11 @@ const CreateFolderPanel: React.FC<CreateFolderPanelProps> = ({ onClose, onSucces
 
   return (
     <div
-      style={{ backgroundColor: 'var(--color-editorBg)' }}
-      className="relative flex h-full w-full flex-col overflow-hidden outline-none backdrop-blur-md rounded-xl border border-[var(--color-borderDefault)] shadow-2xl text-[var(--color-textPrimary)] select-none"
+      className="relative flex h-full w-full flex-col overflow-hidden outline-none text-[var(--color-textPrimary)] select-none"
     >
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 p-1 rounded-md text-[var(--color-textSecondary)] hover:text-[var(--color-textError)] hover:bg-[var(--color-hoverBg)] transition-colors z-20"
+        className="absolute top-2.5 right-2 md:top-2.5 md:right-2 p-2 rounded-md text-[var(--color-textSecondary)] hover:text-[var(--color-textError)] hover:bg-[var(--color-hoverBg)] transition-colors z-50 cursor-pointer"
       >
         <FaTimes size={16} />
       </button>
@@ -102,28 +101,26 @@ const CreateFolderPanel: React.FC<CreateFolderPanelProps> = ({ onClose, onSucces
           </div>
 
           <div className="flex flex-col gap-4 mb-4 w-full">
-            <div>
-              <label className="block text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase mb-2">Folder Name</label>
+            <div className="relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-4 py-2.5 flex items-center">
               <input
                 type="text"
                 value={folderName}
                 onChange={e => setFolderName(e.target.value)}
-                placeholder="Enter folder name"
-                className="w-full text-sm font-medium text-[var(--color-textPrimary)] bg-[var(--color-inputBg)]/60 border border-[var(--color-borderDefault)] rounded-lg px-4 py-2.5 outline-none focus:border-[var(--color-borderActive)] placeholder:text-[var(--color-textMuted)] transition-colors duration-150"
+                placeholder="Give your folder a name..."
+                className="flex-1 text-sm font-medium text-black dark:text-white placeholder-[var(--color-textPlaceholder)]/70 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0"
                 autoFocus
               />
             </div>
             
-            <div>
-              <label className="block text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase mb-2">Select Workspace / Space</label>
+            <div className="relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-4 py-2.5 flex items-center">
               <select
                 value={selectedWorkspaceId}
                 onChange={e => setSelectedWorkspaceId(e.target.value)}
-                className="w-full text-sm font-medium text-[var(--color-textPrimary)] bg-[var(--color-inputBg)]/60 border border-[var(--color-borderDefault)] rounded-lg px-4 py-2.5 outline-none focus:border-[var(--color-borderActive)] cursor-pointer"
+                className="flex-1 text-sm font-medium text-black dark:text-white bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 cursor-pointer"
               >
-                <option value="" disabled>Select a workspace...</option>
+                <option value="" disabled className="text-gray-500">Select workspace / space...</option>
                 {workspaces.map(workspace => (
-                  <option key={workspace.id} value={workspace.id}>
+                  <option key={workspace.id} value={workspace.id} className="text-black dark:text-white bg-white dark:bg-[#1a1b1e]">
                     {workspace.workspaceName}
                   </option>
                 ))}

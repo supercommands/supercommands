@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDistanceToNow } from 'date-fns';
-import { FaFolder, FaTimes, FaCheckCircle } from 'react-icons/fa';
-import { FiStar, FiTag, FiChevronLeft, FiChevronRight, FiLoader } from 'react-icons/fi';
+import { FaFolder, FaTimes, FaCheckCircle, FaStar, FaKeyboard } from 'react-icons/fa';
+import { FiStar, FiTag, FiChevronLeft, FiChevronRight, FiLoader, FiCopy } from 'react-icons/fi';
 import type { SnippetRecord } from './snippetTypes';
 import type { WorkspaceData } from '../../../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 import type { FolderData } from '../../../../settings/allWorkspaceManager/folders/folderTypes';
@@ -32,6 +32,18 @@ import { useDbStore } from '../../../../storage/store/useDbStore';
 import { useSnippetEditor } from './useSnippetEditor';
 import useNotification from '../../../../shared-components/notifications/useNotification';
 import { AutoSaveIndicator } from '../../../../shared-components/autoSaveEngine/autoSave';
+import { useFavorites } from '../../../../shared-components/favorites/favoriteHooks';
+import { getItemCompoundId } from '../../../../shared-components/utils/idGenerator';
+import { readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { ExistingItemsTable } from '../../../../shared-components/editorContainer/ExistingItemsTable';
+import { WorkspaceEditorLayout } from '../../../../shared-components/editorContainer/WorkspaceEditorLayout';
+import { EditorTitleShortcutInput } from '../../../../shared-components/editorContainer/EditorTitleShortcutInput';
+import { EditorContentWorkspace } from '../../../../shared-components/editorContainer/EditorContentWorkspace';
+import { FiSearch } from 'react-icons/fi';
+import { updateSnippet } from './snippetData';
+import { createTag } from '../tags';
+import { saveShortcut, clearShortcut, useShortcutValidation } from '../../../../shared-components/shortcuts';
+import { SharedPropertiesToolbar } from '../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
 
 /**
  * Helper to convert an AST JSON string into readable plain text.
@@ -109,20 +121,54 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   const snippets = useDbStore(state => state.snippets);
   const workspaces = useDbStore(state => state.workspaces);
+  const folders = useDbStore(state => state.folders);
+  const hotkeysMap = useDbStore(state => state.hotkeysMap);
+  const tags = useDbStore(state => state.tags);
+
+  const tagNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    tags.forEach(t => {
+      map[t.id] = t.name;
+    });
+    return map;
+  }, [tags]);
+
+  const folderNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    folders.forEach(f => {
+      map[f.id] = f.folderName;
+    });
+    return map;
+  }, [folders]);
+
+  const workspaceNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    workspaces.forEach(w => {
+      map[w.id] = w.workspaceName;
+    });
+    return map;
+  }, [workspaces]);
 
   const triggerNotification = useNotification();
+  const [snippetToDeleteId, setSnippetToDeleteId] = useState<string | null>(null);
   const {
     snippetTitle,
     snippetConfig,
+    snippetShortcut,
     activeSnippetId,
     workspaceId,
     folderId,
     tagIds,
     saveStatus,
+    setSaveStatus,
     lastSavedAt,
+    setLastSavedAt,
+    lastSavedTitleRef,
+    lastSavedShortcutRef,
     isDirty,
     setSnippetTitle,
     setSnippetConfig,
+    setSnippetShortcut,
     handleSave,
     handleDelete,
     handleClose,
@@ -131,6 +177,9 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     isUnsavedChangesDialogOpen,
     setIsUnsavedChangesDialogOpen,
     handlePropertiesChange,
+    loadSnippet,
+    isInitialized,
+    isShortcutInitialized,
   } = useSnippetEditor({
     snippetId: selectedSnippet?.id || (selectedSnippet as any)?.snippet_id,
     onBack,
@@ -138,6 +187,10 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     initialDraftConfig: initialDraftContent,
   });
 
+
+  const sortedSnippets = useMemo(() => {
+    return [...snippets].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [snippets]);
 
   const [showToolbar, setShowToolbar] = useState(true);
   const isUserKeyManuallySetRef = useRef(false);
@@ -151,15 +204,54 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [isToolbarVisible, setIsToolbarVisible] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(category !== 'snippet');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false); // Sidebar always visible
+
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const [shortcutsMap, setShortcutsMap] = useState<Record<string, string>>({});
+
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredSnippets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return sortedSnippets;
+    return sortedSnippets.filter(s => {
+      const compoundId = getItemCompoundId({
+        snippet: s,
+        workspace: s.workspaceId ? { workspace_id: s.workspaceId } : null,
+        folder: s.folderId ? { folder_id: s.folderId } : null
+      });
+      const sc = shortcutsMap[compoundId] || '';
+      const titleMatch = (s.title || '').toLowerCase().includes(query);
+      const shortcutMatch = sc.toLowerCase().includes(query);
+      const contentMatch = (typeof s.config === 'string' ? s.config : JSON.stringify(s.config)).toLowerCase().includes(query);
+      return titleMatch || shortcutMatch || contentMatch;
+    });
+  }, [sortedSnippets, searchQuery, shortcutsMap]);
+
+  const fetchAllShortcuts = useCallback(async () => {
+    try {
+      const map = await readAllShortcuts();
+      setShortcutsMap(map);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAllShortcuts();
+  }, [fetchAllShortcuts, activeSnippetId, saveStatus]);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const shortcutInputRef = useRef<HTMLInputElement>(null);
   const hotkeyButtonRef = useRef<HTMLButtonElement>(null);
   const toolbarBtnRef = useRef<HTMLButtonElement>(null);
   const fullscreenBtnRef = useRef<HTMLButtonElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const [footerStatus, setFooterStatus] = useState<FooterStatus>({ type: 'idle', message: '' });
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [searchtags, setSearchtags] = useState('');
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
   const rawSearchTagsRef = useRef<Record<string, string[]>>({});
 
   const isDuplicateTitle = useMemo(() => {
@@ -196,10 +288,167 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     underline: false,
   });
 
-  const handleFormatToggle = (format: keyof typeof formatState) => {
-    const newState = { ...formatState, [format]: !formatState[format] };
-    setFormatState(newState);
-  };
+  const handleUpdateItemField = useCallback(async (id: string, field: 'title' | 'shortcut' | 'tags', value: string) => {
+    try {
+      const existing = snippets.find(s => s.id === id);
+      if (!existing) return;
+
+      if (field === 'title') {
+        const updatedTitle = value.trim() || 'Untitled Snippet';
+        await updateSnippet(id, { title: updatedTitle });
+
+        const wsObj = existing.workspaceId ? { workspace_id: existing.workspaceId } : null;
+        const fldObj = existing.folderId ? { folder_id: existing.folderId } : null;
+        const compoundId = getItemCompoundId({ snippet: { id }, workspace: wsObj, folder: fldObj });
+        const sc = shortcutsMap[compoundId] || '';
+        if (sc) {
+          await saveShortcut(id, compoundId, sc.toLowerCase(), updatedTitle, 'snippet');
+        }
+        if (id === activeSnippetId) {
+          setSnippetTitle(updatedTitle);
+          if (lastSavedTitleRef) lastSavedTitleRef.current = updatedTitle;
+        }
+      } else if (field === 'shortcut') {
+        const finalShortcut = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+        const wsObj = existing.workspaceId ? { workspace_id: existing.workspaceId } : null;
+        const fldObj = existing.folderId ? { folder_id: existing.folderId } : null;
+        const compoundId = getItemCompoundId({ snippet: { id }, workspace: wsObj, folder: fldObj });
+        if (finalShortcut) {
+          await saveShortcut(id, compoundId, finalShortcut, existing.title, 'snippet');
+        } else {
+          await clearShortcut(id, compoundId, 'snippet');
+        }
+        if (id === activeSnippetId) {
+          setSnippetShortcut(finalShortcut);
+          if (lastSavedShortcutRef) lastSavedShortcutRef.current = finalShortcut;
+        }
+      } else if (field === 'tags') {
+        const tagNames = value.split(',').map(t => t.trim()).filter(Boolean);
+        const activeWorkspaceId = existing.workspaceId;
+        const resolvedTags: any[] = [];
+
+        for (const name of tagNames) {
+          const matchedTag = tags.find(t => t.name.toLowerCase() === name.toLowerCase() && t.workspaceId === activeWorkspaceId);
+          if (matchedTag) {
+            resolvedTags.push(matchedTag);
+          } else if (activeWorkspaceId) {
+            const newTag = await createTag(name, activeWorkspaceId);
+            resolvedTags.push(newTag);
+          }
+        }
+
+        const resolvedTagIds = resolvedTags.map(t => t.id);
+        await updateSnippet(id, { tagIds: resolvedTagIds });
+
+        if (id === activeSnippetId) {
+          handlePropertiesChange({ selectedTags: resolvedTags });
+        }
+      }
+
+      if (id === activeSnippetId) {
+        if (setSaveStatus) setSaveStatus('saved');
+        if (setLastSavedAt) setLastSavedAt(new Date());
+      }
+
+      await fetchAllShortcuts();
+    } catch (e) {
+      console.error('[handleUpdateItemField] Failed:', e);
+    }
+  }, [snippets, activeSnippetId, shortcutsMap, setSnippetTitle, setSnippetShortcut, setSaveStatus, setLastSavedAt, lastSavedTitleRef, lastSavedShortcutRef, fetchAllShortcuts, tags, handlePropertiesChange]);
+
+  const handleCopyTitleToShortcut = useCallback(() => {
+    if (!snippetTitle.trim()) return;
+    const sanitized = snippetTitle.toLowerCase().replace(/[^a-z0-9]/g, '');
+    setSnippetShortcut(sanitized);
+
+    setTimeout(() => {
+      const editorDom = containerRef.current?.querySelector('.ProseMirror') as HTMLElement | null;
+      editorDom?.focus();
+    }, 50);
+  }, [snippetTitle, setSnippetShortcut]);
+
+  const { validateShortcut } = useShortcutValidation();
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const [isShortcutOverrideable, setIsShortcutOverrideable] = useState<boolean>(false);
+  const [shortcutConflictId, setShortcutConflictId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const checkShortcut = async () => {
+      if (snippetShortcut) {
+        const currentCompound = getItemCompoundId({
+          id: activeSnippetId,
+          workspace_id: workspaceId || null,
+          folder_id: folderId || null,
+          snippet: { id: activeSnippetId, category: 'snippet' },
+        });
+        if (shortcutsMap && shortcutsMap[currentCompound] === snippetShortcut) {
+          if (active) {
+            setShortcutError(null);
+            setIsShortcutOverrideable(false);
+            setShortcutConflictId(null);
+          }
+          return;
+        }
+        const res = await validateShortcut(snippetShortcut, activeSnippetId || 'new');
+        if (active) {
+          if (!res.isValid) {
+            setShortcutError(res.errorMessage || 'This shortcut is already taken.');
+            setIsShortcutOverrideable(!!res.isOverrideable);
+            setShortcutConflictId(res.conflictId || null);
+          } else {
+            setShortcutError(null);
+            setIsShortcutOverrideable(false);
+            setShortcutConflictId(null);
+          }
+        }
+      } else {
+        if (active) {
+          setShortcutError(null);
+          setIsShortcutOverrideable(false);
+          setShortcutConflictId(null);
+        }
+      }
+    };
+    void checkShortcut();
+    return () => {
+      active = false;
+    };
+  }, [snippetShortcut, activeSnippetId, shortcutsMap, workspaceId, folderId, validateShortcut]);
+
+  const handleOverrideShortcut = useCallback(async () => {
+    if (!snippetShortcut) return;
+    console.log('[ShortcutDebug][SnippetEditor] Executing handleOverrideShortcut for snippetShortcut:', snippetShortcut);
+    let targetId = activeSnippetId;
+    if (!targetId) {
+      console.log('[ShortcutDebug][SnippetEditor] Saving new snippet to get real ID before shortcut reassignment...');
+      const saved = await handleSave();
+      if (!saved) return;
+      targetId = activeSnippetId;
+    }
+    if (!targetId) return;
+
+    if (shortcutConflictId) {
+      console.log('[ShortcutDebug][SnippetEditor] Explicitly clearing conflicting shortcut reference:', shortcutConflictId);
+      await clearShortcut(shortcutConflictId, shortcutConflictId, 'snippet');
+    }
+
+    const currentCompound = getItemCompoundId({
+      id: targetId,
+      workspace_id: workspaceId || null,
+      folder_id: folderId || null,
+      snippet: { id: targetId, category: 'snippet' },
+    });
+    console.log(`[ShortcutDebug][SnippetEditor] Saving shortcut "${snippetShortcut}" to target ID "${targetId}" (compound: ${currentCompound})...`);
+    await saveShortcut(targetId, currentCompound, snippetShortcut, snippetTitle || 'Snippet', 'snippet');
+    console.log('[ShortcutDebug][SnippetEditor] Shortcut reassignment saved to DB. Clearing validation error.');
+    setShortcutError(null);
+    setIsShortcutOverrideable(false);
+    setShortcutConflictId(null);
+    const saved = await handleSave();
+    if (saved) fetchAllShortcuts();
+  }, [snippetShortcut, activeSnippetId, workspaceId, folderId, snippetTitle, shortcutConflictId, handleSave, fetchAllShortcuts]);
 
 
 
@@ -303,8 +552,19 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
 
 
 
+  const handleCreateNew = useCallback(async () => {
+    if (isDirty) {
+      await handleSave();
+    }
+    loadSnippet(null);
+    setShowTooltip(false);
+    if (titleInputRef.current) {
+      titleInputRef.current.focus();
+    }
+  }, [isDirty, handleSave, loadSnippet]);
+
   const closeEditor = useCallback(() => {
-    
+
     // Reset Focus Mode when leaving
     useUIStore.getState().toggleFocusMode(false);
     useUIStore.getState().setSelectedWorkspaceId(null);
@@ -325,7 +585,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
       return true; // Indicate we intercepted the escape
     } else {
       // Don't closeEditor here, uiStateManager will do it if we return false
-      return false; 
+      return false;
     }
   }, [isDirty, setIsUnsavedChangesDialogOpen]);
 
@@ -357,27 +617,31 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     const handleKeyDown = (event: KeyboardEvent) => {
 
       // Ctrl+Enter (Win) or Cmd+Enter (Mac) for Save
-      const isSaveShortcut = (isMac ? event.metaKey : event.ctrlKey) && event.key === 'Enter';
+      const isCtrlEnter = (isMac ? event.metaKey : event.ctrlKey) && event.key === 'Enter';
 
-      if (isSaveShortcut) {
+      if (isCtrlEnter) {
         event.preventDefault();
         if (saveStatus === 'saving') return;
 
-        handleSave(false);
+        if (event.shiftKey) {
+          void handleCreateNew();
+        } else {
+          void handleSave(false);
+        }
       }
 
       // Alt+Enter to toggle Location Picker
       const isLocationPickerShortcut = event.altKey && event.key === 'Enter';
-      
+
 
       if (isLocationPickerShortcut) {
-        
+
         event.preventDefault();
         if (workspaces.length === 0) {
           triggerNotification('Create a workspace or folder before saving.', 'info');
           return;
         }
-        
+
         setIsLocationPickerOpen(prev => !prev);
       }
     };
@@ -399,6 +663,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     isUnsavedChangesDialogOpen,
     handleEscapeSaveAndClose,
     isLinkEditModalOpen,
+    handleCreateNew,
   ]);
 
   // Browser-level warning for unsaved changes (e.g., closing tab/window)
@@ -546,192 +811,245 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   };
 
   // Determine placeholder based on category
-  const titlePlaceholder = 'Enter the title for Snippet';
+  const titlePlaceholder = 'Title';
+
+  const initialProperties = useMemo(() => {
+    const base: any = selectedSnippet || {};
+    return {
+      ...base,
+      id: activeSnippetId || base.id,
+      workspaceId: workspaceId || base.workspaceId,
+      folderId: folderId || base.folderId,
+      tagIds: tagIds !== undefined ? tagIds : (base.tagIds || []),
+      category: 'snippet',
+    };
+  }, [selectedSnippet, activeSnippetId, workspaceId, folderId, tagIds]);
+
+  const snippetCompoundId = useMemo(() => {
+    if (!activeSnippetId || activeSnippetId === 'new') return '';
+    const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
+    const fldObj = folderId ? { folder_id: folderId } : null;
+    const snipObj = selectedSnippet || { id: activeSnippetId, category: 'snippet', key: snippetTitle || '' };
+    return getItemCompoundId({ snippet: snipObj as any, workspace: wsObj as any, folder: fldObj as any });
+  }, [activeSnippetId, selectedSnippet, workspaceId, folderId, snippetTitle]);
 
   const editorContentNode = (
-    <div
-      className={`w-full h-full flex flex-col gap-1 text-left text-neutral-900 dark:text-white bg-transparent ${isFullScreenMode ? '' : 'px-6 md:px-12 lg:px-24 py-6 md:py-10'}`}>
-      <div
-        className={`flex-1 flex flex-col relative ${isSidebarCollapsed ? 'overflow-visible' : 'overflow-hidden'} ${isFullScreenMode ? 'w-full rounded-none' : 'w-full max-w-[1300px] mx-auto rounded-xl'} bg-[var(--color-editorBg)] ${isFocusMode || isFullScreenMode ? 'border-none' : 'border border-black/5 dark:border-white/10'}`}>
-        <div
-          className={`flex-1 min-h-0 flex ${isSidebarCollapsed ? 'overflow-visible' : 'overflow-hidden'} flex-col gap-3 bg-transparent text-neutral-900 dark:text-white`}>
+    <WorkspaceEditorLayout
+      title={activeSnippetId ? 'Edit snippet' : 'Create a snippet'}
+      isDirty={isDirty}
+      saveStatus={saveStatus}
+      lastSavedAt={lastSavedAt}
+      activeId={activeSnippetId}
+      isFocusMode={isFocusMode}
+      showConfigureHeader={true}
+      hideRightColumnBorder={category !== 'snippet'}
+      headerActions={
+        <SharedPropertiesToolbar
+          key={activeSnippetId || 'new-snippet'}
+          initialSnippet={initialProperties}
+          compoundId={snippetCompoundId}
+          defaultName={snippetTitle || 'Untitled'}
+          showShortcut={false}
+          showTodo={false}
+          layout="horizontal"
+          onChange={handlePropertiesChange}
+          openPopupsToBottom={true}
+        />
+      }
+      onSave={async () => {
+        const saved = await handleSave(false);
+        return saved;
+      }}
+      onDiscard={() => {
+        // Discard draft or reset local states if required
+      }}
+      onCloseCallback={onBack}
+      deleteModalProps={{
+        isOpen: isDeleteDialogOpen,
+        onClose: () => {
+          setIsDeleteDialogOpen(false);
+          setSnippetToDeleteId(null);
+        },
+        onConfirm: async () => {
+          if (snippetToDeleteId) {
+            try {
+              const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
+              const fldObj = folderId ? { folder_id: folderId } : null;
+              const compoundId = getItemCompoundId({ snippet: { id: snippetToDeleteId }, workspace: wsObj, folder: fldObj });
+              await clearShortcut(snippetToDeleteId, compoundId, 'snippet');
+              const { deleteSnippet } = await import('./snippetData');
+              await deleteSnippet(snippetToDeleteId);
+              if (snippetToDeleteId === activeSnippetId) {
+                loadSnippet(null);
+              }
+            } catch (err) {
+              console.error('Delete failed:', err);
+            }
+          }
+          setIsDeleteDialogOpen(false);
+          setSnippetToDeleteId(null);
+        },
+        title: snippetToDeleteId && filteredSnippets.find(s => s.id === snippetToDeleteId)?.title ? `Delete "${filteredSnippets.find(s => s.id === snippetToDeleteId)?.title}"?` : 'Delete this snippet?',
+        description: "Are you sure you want to delete this snippet? This action cannot be undone."
+      }}
+      rightColumnContent={
+        category === 'snippet' ? (
+          <SnippetBuilderMainViewSnippetFormattingToolbar
+            activeSnippetId={activeSnippetId}
+            snippet={selectedSnippet}
+            workspaceId={workspaceId}
+            folderId={folderId}
+            tagIds={tagIds}
+            snippetTitle={snippetTitle}
+            onChange={handlePropertiesChange}
+          />
+        ) : null
+      }
+      searchQuery={searchQuery}
+      setSearchQuery={setSearchQuery}
+      searchPlaceholder="Search snippets..."
+      bottomListContent={
+        <ExistingItemsTable
+          items={filteredSnippets}
+          activeItemId={activeSnippetId}
+          onLoadItem={loadSnippet}
+          getItemTitle={(snip) => snip.title || ''}
+          getItemPreview={(snip) => astToPlainText(typeof snip.config === 'string' ? snip.config : JSON.stringify(snip.config))}
+          getItemCompoundId={(snip) => getItemCompoundId({
+            snippet: snip,
+            workspace: snip.workspaceId ? { workspace_id: snip.workspaceId } : null,
+            folder: snip.folderId ? { folder_id: snip.folderId } : null
+          })}
+          getItemType={() => 'snippet'}
+          shortcutsMap={shortcutsMap}
+          hotkeysMap={hotkeysMap}
+          isFavorite={isFavorite}
+          toggleFavorite={toggleFavorite}
+          onDeleteClick={(id) => {
+            setSnippetToDeleteId(id);
+            setIsDeleteDialogOpen(true);
+          }}
+          onFavoriteToggled={fetchAllShortcuts}
+          onUpdateItemField={handleUpdateItemField}
+          folderNamesMap={folderNamesMap}
+          workspaceNamesMap={workspaceNamesMap}
+          tagNamesMap={tagNamesMap}
+          emptyStateMessage="No snippets found. Type above to create your first snippet!"
+          isFullScreenMode={isFullScreenMode}
+          title=""
+        />
+      }
+    >
+      {/* Center Column: Snippet content */}
+      <div className="flex-1 flex flex-col min-h-0 relative">
+        <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2">
+          <EditorTitleShortcutInput
+            title={snippetTitle}
+            setTitle={(val) => {
+              setSnippetTitle(val);
+              if (val.trim()) setTitleError(null);
+            }}
+            titleError={titleError}
+            shortcutError={shortcutError}
+            isOverrideable={isShortcutOverrideable}
+            onOverrideShortcut={handleOverrideShortcut}
+            shortcut={snippetShortcut}
+            setShortcut={setSnippetShortcut}
+            titleRef={titleInputRef}
+            shortcutRef={shortcutInputRef}
+            onTitleBlur={async () => {
+              if (!snippetTitle.trim()) {
+                setTitleError('Enter the title');
+              } else if (isDirty) {
+                const saved = await handleSave();
+                if (saved) fetchAllShortcuts();
+              }
+            }}
+            onShortcutBlur={async () => {
+              if (isDirty) {
+                const saved = await handleSave();
+                if (saved) fetchAllShortcuts();
+              }
+            }}
+            onTitleEnter={async (shiftKey) => {
+              if (shiftKey) {
+                handleCopyTitleToShortcut();
+              } else {
+                if (!snippetTitle.trim()) {
+                  setTitleError('Enter the title');
+                } else if (isDirty) {
+                  const saved = await handleSave();
+                  if (saved) fetchAllShortcuts();
+                }
+              }
+            }}
+            onShortcutEnter={async () => {
+              if (isDirty) {
+                const saved = await handleSave();
+                if (saved) fetchAllShortcuts();
+              }
+            }}
+            onArrowDownPress={() => {
+              const editorDom = containerRef.current?.querySelector('.ProseMirror') as HTMLElement | null;
+              editorDom?.focus();
+            }}
+            onCopyTitleToShortcut={(isInitialized && isShortcutInitialized) ? handleCopyTitleToShortcut : undefined}
+          />
 
-          {/* Main Area */}
-          <div className="flex-1 flex min-h-0 relative">
-
-            {/* Wrapper for Title + Content */}
-            <div
-              className={`flex-1 flex flex-col min-h-0 relative`}>
-
-              {/* Absolute Close Button */}
-              <div className="absolute top-4 right-4 md:top-5 md:right-5 z-50 flex items-center gap-3">
-                {isDuplicateTitle && (
-                  <span className="text-xs text-red-500 font-medium whitespace-nowrap">
-                    Duplicate title exists
-                  </span>
-                )}
-                {/* Auto-save indicator */}
-                <div className="transition-opacity duration-300">
-                  <AutoSaveIndicator
-                    saveStatus={saveStatus}
-                    lastSavedAt={lastSavedAt}
-                    isDirty={isDirty}
-                    activeId={activeSnippetId}
-                  />
-                </div>
-                <button
-                  onClick={() => isDirty ? setIsUnsavedChangesDialogOpen(true) : closeEditor()}
-                  className="p-2 opacity-50 hover:opacity-100 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-all focus:outline-none focus:ring-1 focus:ring-red-400"
-                  title="Close">
-                  <FaTimes size={16} />
-                </button>
-              </div>
-
-              <div className="w-full flex-1 flex flex-col min-h-0 px-6 md:px-12 py-6">
-                {/* Title Input Row */}
-                <div
-                  className={`flex items-center gap-2 flex-shrink-0 relative z-10 ${isFullScreenMode ? 'py-8 pr-6' : 'py-4'}`}>
-                  <div className="flex-1 min-w-0 flex items-center gap-3">
-                    <input
-                      ref={titleInputRef}
-                      value={snippetTitle}
-                      onChange={e => {
-                        setSnippetTitle(e.target.value);
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === 'ArrowDown') {
-                          e.preventDefault();
-                          editorRef.current?.focus();
-                        }
-                      }}
-                      type="text"
-                      placeholder="Title"
-                      className={`w-full text-[28px] font-semibold text-black dark:text-white placeholder-[var(--color-textPlaceholder)]/70 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 ${isFullScreenMode ? 'pl-8' : ''}`}
-                    />
-                  </div>
-
-                  <div className="flex-1" />
-                </div>
-
-                {/* Editor Area */}
-                <div
-                  className={`flex-1 min-h-0 font-sans overflow-hidden flex flex-col text-neutral-900 dark:text-white ${isFullScreenMode ? 'pl-8 pr-6 pt-1' : 'pb-3'}`}>
-                  <div
-                    className="flex-1 min-h-0 overflow-hidden relative"
-                    ref={containerRef}
-                    onBlurCapture={() => {
-                      if (isDirty) {
-                        void handleSave();
-                      }
-                    }}
-                  >
-                    <SnippetBuilderMainViewEditor />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Sidebar Divider Line with Floating Collapse Toggle Button Centered */}
-            <div className="relative flex-shrink-0 w-px bg-black/10 dark:bg-white/10">
-              <button
-                type="button"
-                onClick={() => setIsSidebarCollapsed(prev => !prev)}
-                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-40 w-8 h-8 rounded-full bg-[var(--color-containerBg)] border border-black/10 dark:border-white/15 flex items-center justify-center text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-all shadow-sm focus:outline-none"
-                style={{ left: '50%' }}
-                title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              >
-                {isSidebarCollapsed ? <FiChevronRight size={18} /> : <FiChevronLeft size={18} />}
-              </button>
-            </div>
-
-            {/* RIGHT COLUMN - Snippet Options */}
-            <div
-              className={`flex-shrink-0 flex flex-col bg-[var(--color-editorBg)] overflow-y-auto custom-scrollbar ${isSidebarCollapsed ? 'w-0 opacity-0 overflow-hidden' : 'w-[340px] border-l border-black/10 dark:border-white/20'}`}
-              style={{
-                width: isSidebarCollapsed ? '0px' : '340px',
-                minWidth: isSidebarCollapsed ? '0px' : '340px',
-              }}
-            >
-              {/* Sidebar Content - hidden when collapsed */}
-              {!isSidebarCollapsed && (
-                <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 flex flex-col gap-3">
-                  {category === 'snippet' ? (
-                    <SnippetBuilderMainViewSnippetFormattingToolbar 
-                      activeSnippetId={activeSnippetId}
-                      snippet={selectedSnippet}
-                      workspaceId={workspaceId}
-                      folderId={folderId}
-                      snippetTitle={snippetTitle}
-                    />
-                  ) : null}
-                 
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="relative z-50 mt-auto flex-shrink-0 border-t border-black/10 dark:border-white/10 bg-[var(--color-editorBg)] rounded-b-xl">
-          <div className="relative flex items-center justify-between gap-3 px-6 py-3 text-[10px] font-medium text-neutral-500 dark:text-neutral-400 flex-shrink-0">
-            {/* Left: Back Button */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (onBack) onBack();
-                }}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800">
-                <span className="text-neutral-600 dark:text-neutral-300">Back</span>
-                <span className="flex items-center rounded border border-white/80 dark:border-white/20 bg-[var(--color-containerBg)] px-1 py-0 text-[9px] font-semibold text-neutral-500 dark:text-neutral-300">
-                  Esc
-                </span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3">
-            </div>
-          </div>
+          <EditorContentWorkspace
+            category="snippet"
+            containerRef={containerRef}
+            onBlurCapture={() => {
+              if (isDirty) {
+                void handleSave();
+              }
+            }}
+            onCreateAnother={handleCreateNew}
+            activeId={activeSnippetId}
+          />
         </div>
       </div>
-
-      {/* Delete Confirmation Dialog */}
-      <DeleteConfirmation
-        isOpen={isDeleteDialogOpen}
-        onClose={() => setIsDeleteDialogOpen(false)}
-        onConfirm={() => {
-          void handleDelete();
-          setIsDeleteDialogOpen(false);
-        }}
-        title={snippetTitle ? `Delete "${snippetTitle}"?` : 'Delete this snippet?'}
-        description="Are you sure you want to delete this snippet? This action cannot be undone."
-        zIndex={isFullScreenMode ? 200000 : 50}
-      />
-
-      {/* Unsaved Changes Dialog */}
-      <UnsavedChangesDialog
-        isOpen={isUnsavedChangesDialogOpen}
-        onClose={() => setIsUnsavedChangesDialogOpen(false)}
-        onSave={async () => {
-          const saved = await handleSave(false);
-          if (saved) {
-            setIsUnsavedChangesDialogOpen(false);
-            closeEditor();
-          }
-          return saved;
-        }}
-        onDiscard={() => {
-          setIsUnsavedChangesDialogOpen(false);
-          closeEditor();
-        }}
-        zIndex={isFullScreenMode ? 200000 : 9999}
-      />
-    </div>
+    </WorkspaceEditorLayout>
   );
 
+  const activeSnippet = useMemo(() => {
+    if (!activeSnippetId) return null;
+    return snippets.find(s => s.id === activeSnippetId) || null;
+  }, [activeSnippetId, snippets]);
+
+  const initialSnippetContent = useMemo(() => {
+    if (!activeSnippet) return '';
+    return activeSnippet.config || '';
+  }, [activeSnippet?.id]);
+
+  const loadedSnippetIdRef = useRef<string | null>(activeSnippetId);
+  const [editorKey, setEditorKey] = useState<string>(() => activeSnippetId || `new_${Date.now()}`);
+
+  useEffect(() => {
+    if (activeSnippetId !== loadedSnippetIdRef.current) {
+      const wasDraft = loadedSnippetIdRef.current === null;
+      loadedSnippetIdRef.current = activeSnippetId;
+      if (!wasDraft || !activeSnippetId) {
+        setEditorKey(activeSnippetId || `new_${Date.now()}`);
+      }
+      
+      // Clear any validation errors from the previous snippet/draft
+      setTitleError(null);
+      setShortcutError(null);
+    }
+  }, [activeSnippetId]);
+
   return (
-    <SnippetBuilderMainViewProvider key={selectedSnippet?.id || 'new'} initialContent={snippetConfig as any} onChange={(content: any) => {
-      setSnippetConfig(content);
+    <SnippetBuilderMainViewProvider key={editorKey} initialContent={initialSnippetContent as any} onChange={(content: any) => {
+      let parsed = content;
+      if (typeof content === 'string') {
+        try {
+          parsed = JSON.parse(content);
+        } catch (e) {
+          // ignore
+        }
+      }
+      setSnippetConfig(parsed);
     }}>
       {editorContentNode}
     </SnippetBuilderMainViewProvider>

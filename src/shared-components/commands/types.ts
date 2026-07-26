@@ -100,6 +100,7 @@ export interface CommandModule {
 
   // === Behavior Configuration ===
   behavior: CommandBehavior;
+  surface?: 'newtab' | 'website' | 'both';
   scope?: CommandScope; // For entity commands
   action?: CommandAction; // For entity commands
 

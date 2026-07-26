@@ -1,0 +1,20 @@
+{
+  "name": "@extension/browser",
+  "version": "0.0.1",
+  "description": "Cross-browser runtime capability detection and API adapters for NotesExtension",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "scripts": {
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "wxt": "^0.19.29"
+  },
+  "devDependencies": {
+    "@extension/tsconfig": "workspace:*",
+    "@types/chrome": "0.0.304",
+    "typescript": "5.8.1-rc"
+  }
+}

@@ -8,6 +8,7 @@ import { HotkeyCaptureForm } from '../hotkeys/ui/HotkeyCaptureForm';
 import { checkReservedHotkey } from '../hotkeys/core/reservedHotkeys';
 import { readAllHotkeys, readAllShortcuts, extractSnippetIdFromCompoundId } from '../hotkeys/utils/hotkeyUtils';
 import { findCommandByAnyId } from '../commands';
+import { getShortcutTriggerFormatError, normalizeShortcutTrigger } from '../shortcuts/core/shortcutDbData';
 
 // Interface for Menu Actions
 export type MenuAction =
@@ -78,6 +79,7 @@ export interface UnifiedContextMenuProps {
   portalContainer?: HTMLElement | null;
   showAllHotkeysOption?: boolean;
   quickActions?: MenuAction[];
+  preferDown?: boolean;
 }
 
 const shakeKeyframes = `
@@ -106,6 +108,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
   portalContainer = document.body,
   showAllHotkeysOption = true,
   quickActions = [],
+  preferDown = false,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -213,13 +216,18 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
       }
 
       if (shortcutInput?.value) {
-        let normalized = shortcutInput.value.trim().toLowerCase();
-        if (normalized && !normalized.startsWith('/')) normalized = `/${normalized}`;
+        const normalized = normalizeShortcutTrigger(shortcutInput.value);
+        const formatError = getShortcutTriggerFormatError(shortcutInput.value);
+        if (formatError) {
+          setInternalError(formatError);
+          setInternalConflictId(null);
+          return;
+        }
 
         if (normalized && itemId) {
           const allShortcuts = await readAllShortcuts();
           const currentSnippetId = extractSnippetIdFromCompoundId(itemId || '');
-          const existingEntry = Object.entries(allShortcuts).find(([id, sc]) => sc === normalized && extractSnippetIdFromCompoundId(id) !== currentSnippetId);
+          const existingEntry = Object.entries(allShortcuts).find(([id, sc]) => normalizeShortcutTrigger(sc) === normalized && extractSnippetIdFromCompoundId(id) !== currentSnippetId);
           if (existingEntry) {
             const conflictId = existingEntry[0];
             const conflict = findConflictingItemName(conflictId);
@@ -297,7 +305,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
   // Flip if:
   // 1. Doesn't fit below AND (space above > space below)
   const wouldOverflowBottom = y + preferredHeight + padding > window.innerHeight;
-  const shouldFlip = wouldOverflowBottom && spaceAbove > spaceBelow;
+  const shouldFlip = !preferDown && wouldOverflowBottom && spaceAbove > spaceBelow;
 
   // Calculate dynamic constraints
   const availableSpace = shouldFlip ? spaceAbove : spaceBelow;
@@ -334,7 +342,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
     <div
       ref={menuRef}
       data-unified-menu="true"
-      className={`bg-[var(--color-contextMenuBg)] border border-[var(--color-borderDefault)] rounded-lg shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-row transition-[width,left] ease-out`}
+      className={`bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-row transition-[width,left] ease-out`}
       style={{
         ...style,
         width: 'max-content',
@@ -393,8 +401,8 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
         {/* MENU ACTIONS PANEL */}
         {hasActions && (
-          <div className="flex flex-col py-1 transition-colors duration-200">
-            <div className="flex-1 overflow-y-auto min-h-0 py-1">
+          <div className="flex flex-col py-0 transition-colors duration-200">
+            <div className="flex-1 overflow-y-auto min-h-0 py-0">
               {filteredActions.length > 0 ? (
                 filteredActions.map((action, idx) => {
                   if (action.divider) {
@@ -428,7 +436,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                           }
                         }
                       }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between gap-2 transition-colors ${isSelected
+                      className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 transition-colors ${isSelected
                         ? 'bg-slate-100 bg-[var(--color-accentBg)] text-blue-600 text-[var(--color-accent)] font-medium'
                         : isFocused
                           ? 'bg-slate-100 dark:bg-neutral-800 text-slate-900 dark:text-white'
@@ -555,7 +563,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                 {/* True Unified Card (Big & Clean - Transparent) */}
                 <div
                   className={`flex flex-col rounded-lg overflow-hidden transition-all duration-200 ${error
-                    ? 'border border-[var(--color-danger)] shadow-[0_0_0_1px_var(--color-dangerBg)] animate-shake'
+                    ? 'border border-red-500/50 dark:border-red-500/80 shadow-[0_0_0_1px_rgba(239,68,68,0.2)] animate-shake'
                     : ''
                     }`}>
                   {/* Header with Clear Button */}
@@ -568,14 +576,11 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                           : 'Assign a Keyboard Shortcut (Alt / Ctrl + Key)'}
                     </div>
                     {hotkeyInput.value && hotkeyInput.onClear && (
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          hotkeyInput.onClear?.();
-                        }}
-                        disabled={hotkeyInput.isSaving}
-                        className="text-[var(--color-danger)] hover:text-[var(--color-dangerHover)] transition-colors p-1 rounded-md hover:bg-[var(--color-dangerBg)] flex items-center gap-1.5 text-[10px] font-medium"
-                        title="Clear Keyboard Shortcut">
+                      <div className="flex items-center">
+                        <button
+                          onClick={hotkeyInput.onClear}
+                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors p-1 rounded-md hover:bg-red-500/10 flex items-center gap-1.5 text-[10px] font-medium"
+                          title="Clear hotkey">
                         {hotkeyInput.isSaving && !hotkeyInput.value ? (
                           <>
                             <span>Clearing...</span>
@@ -587,7 +592,8 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                             <FiZapOff size={12} />
                           </>
                         )}
-                      </button>
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -617,8 +623,8 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
                   {/* Footer (Error & Link - Minimalist) */}
                   {error && (
-                    <div className="px-3 py-2 border-t border-[var(--color-dangerBg)] flex flex-col gap-1">
-                      <div className="flex items-start gap-2 text-[var(--color-danger)]">
+                    <div className="px-3 py-2 border-t border-red-500/20 flex flex-col gap-1">
+                      <div className="flex items-start gap-2 text-red-600 dark:text-red-400">
                         <FiZap size={12} className="shrink-0 mt-0.5" />
                         <div className="text-[11px] font-medium leading-tight flex flex-wrap gap-x-1">
                           <span className="text-slate-500 dark:text-neutral-100/90">Conflict:</span>
@@ -642,9 +648,9 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
                               return (
                                 <>
-                                  <span className="text-[var(--color-danger)] font-bold">"{hotkeyValue}"</span>
+                                  <span className="text-red-600 dark:text-red-400 font-bold">"{hotkeyValue}"</span>
                                   <span className="text-slate-500 dark:text-neutral-100/90">{isAlreadyAssigned}</span>
-                                  <span className="text-[var(--color-danger)] font-bold">"{itemName}"</span>
+                                  <span className="text-red-600 dark:text-red-400 font-bold">"{itemName}"</span>
                                   {/* <span className="text-[#93a1a1] dark:text-neutral-200/80 text-[10px]"> ({typeDisplay})</span> */}
                                 </>
                               );
@@ -723,34 +729,42 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                 {/* True Unified Card (Standard Text - Transparent) */}
                 <div
                   className={`flex flex-col rounded-lg overflow-hidden transition-all duration-200 ${error
-                    ? 'border border-[var(--color-danger)] shadow-[0_0_0_1px_var(--color-dangerBg)] animate-shake'
+                    ? 'border border-red-500/50 dark:border-red-500/80 shadow-[0_0_0_1px_rgba(239,68,68,0.2)] animate-shake'
                     : ''
                     }`}>
                   {/* Header */}
                   <div className="px-2 py-1 border-b border-slate-100 dark:border-white/5 flex items-center justify-between">
                     <div className="text-[9px] font-semibold tracking-wider text-slate-500 dark:text-neutral-200">
-                      Assign a Text Command
+                      Assign a Text Shortcut
                     </div>
                     {shortcutInput.value && shortcutInput.onClear && (
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          shortcutInput.onClear?.();
-                        }}
-                        className="text-[var(--color-iconDefault)] hover:text-[var(--color-danger)] transition-colors p-1 flex items-center justify-center rounded-md hover:bg-slate-100 dark:hover:bg-white/10"
-                        title="Clear Text Command">
-                        <FiTrash size={12} className="shrink-0" />
+                      <div className="flex items-center">
+                        <button
+                          onClick={shortcutInput.onClear}
+                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors p-1 rounded-md hover:bg-red-500/10 flex items-center gap-1.5 text-[10px] font-medium"
+                          title="Clear shortcut">
+                        {shortcutInput.isSaving && !shortcutInput.value ? (
+                          <>
+                            <span>Clearing...</span>
+                            <FiLoader size={10} className="animate-spin" />
+                          </>
+                        ) : (
+                          <>
+                            <span>Clear</span>
+                            <FiZapOff size={12} />
+                          </>
+                        )}
                       </button>
+                      </div>
                     )}
                   </div>
 
                   {/* Body (Input - Standard Small) */}
                   <div className="p-2 flex items-center justify-center min-h-[85px] transition-all duration-200">
-                    <span className="text-slate-400 dark:text-neutral-400 text-xs font-medium mr-0.5 ml-1">/</span>
                     <input
                       ref={shortcutInputRef}
                       type="text"
-                      value={shortcutInput.value}
+                      value={normalizeShortcutTrigger(shortcutInput.value)}
                       onChange={e => shortcutInput.onChange(e.target.value)}
                       onKeyDown={e => {
                         if (e.key === 'Enter') shortcutInput.onSave();
@@ -764,8 +778,8 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
                   {/* Footer (Error & Link - Minimalist) */}
                   {error && (
-                    <div className="px-2 py-1.5 border-t border-[var(--color-dangerBg)] flex flex-col gap-1">
-                      <div className="flex items-start gap-1.5 text-[var(--color-danger)]">
+                    <div className="px-2 py-1.5 border-t border-red-500/20 flex flex-col gap-1">
+                      <div className="flex items-start gap-1.5 text-red-600 dark:text-red-400">
                         <FiZap size={11} className="shrink-0 mt-0.5" />
                         <div className="text-[10px] font-medium leading-tight flex flex-wrap gap-x-1">
                           <span className="text-slate-500 dark:text-neutral-100/90">Conflict:</span>
@@ -789,9 +803,9 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
                               return (
                                 <>
-                                  <span className="text-[var(--color-danger)] font-bold">"{shortcutValue}"</span>
+                                  <span className="text-red-600 dark:text-red-400 font-bold">"{shortcutValue}"</span>
                                   <span className="text-slate-500 dark:text-neutral-100/90">{isAlreadyAssigned}</span>
-                                  <span className="text-[var(--color-danger)] font-bold">"{itemName}"</span>
+                                  <span className="text-red-600 dark:text-red-400 font-bold">"{itemName}"</span>
                                   <span className="text-slate-400 dark:text-neutral-200/80 text-[10px]">
                                     {' '}
                                     - {typeDisplay}
