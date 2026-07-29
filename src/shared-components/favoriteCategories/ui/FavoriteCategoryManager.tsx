@@ -1,4 +1,5 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAppearance } from '@extension/ui';
 import { FiFolder, FiTrash2, FiEdit2, FiCheck, FiX } from 'react-icons/fi';
 import { FaStar } from 'react-icons/fa';
@@ -19,7 +20,7 @@ type FavoriteCategoryManagerProps = {
   showTrigger?: boolean;
   isFavorite?: boolean;
   onRemoveFavorite?: () => void;
-  onSelectCategory?: (categoryId: string) => void;
+  onSelectCategory?: (categoryId: string | null) => void;
   selectedCategoryId?: string | null;
 };
 
@@ -40,9 +41,11 @@ const FavoriteCategoryManager = ({
   const categories = useFavoriteCategories(userId);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
+  const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const [query, setQuery] = useState('');
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -58,6 +61,15 @@ const FavoriteCategoryManager = ({
       setInternalOpen(next);
     }
   };
+
+  useEffect(() => {
+    if (open && rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect();
+      const x = Math.max(12, rect.right - 240);
+      const y = rect.bottom + 4;
+      setPopoverPos({ x, y });
+    }
+  }, [open]);
 
   const normalizedQuery = query.trim();
 
@@ -174,7 +186,11 @@ const FavoriteCategoryManager = ({
     if (!open) return;
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+      const path = event.composedPath();
+      if (
+        rootRef.current && !path.includes(rootRef.current) &&
+        popoverRef.current && !path.includes(popoverRef.current)
+      ) {
         closePopover();
       }
     };
@@ -213,9 +229,16 @@ const FavoriteCategoryManager = ({
         </button>
       )}
 
-      {open && (
+      {open && popoverPos && createPortal(
         <div
-          className={`${popoverClassName} pointer-events-auto w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] rounded-lg shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200 z-[9999] flex flex-col`}>
+          ref={popoverRef}
+          style={{
+            position: 'fixed',
+            left: `${popoverPos.x}px`,
+            top: `${popoverPos.y}px`,
+            zIndex: 2147483647,
+          }}
+          className="pointer-events-auto w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col">
           {isFavorite && onRemoveFavorite && (
             <button
               type="button"
@@ -354,7 +377,8 @@ const FavoriteCategoryManager = ({
                   onMouseEnter={() => setHoveredIndex(index)}
                   onClick={() => {
                     if (onSelectCategory) {
-                      onSelectCategory(category.id);
+                      const nextCategory = selectedCategoryId === category.id ? null : category.id;
+                      onSelectCategory(nextCategory);
                       closePopover();
                       return;
                     }
@@ -364,7 +388,8 @@ const FavoriteCategoryManager = ({
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       if (onSelectCategory) {
-                        onSelectCategory(category.id);
+                        const nextCategory = selectedCategoryId === category.id ? null : category.id;
+                        onSelectCategory(nextCategory);
                         closePopover();
                       } else {
                         startEdit(category.id, category.name);
@@ -416,7 +441,8 @@ const FavoriteCategoryManager = ({
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

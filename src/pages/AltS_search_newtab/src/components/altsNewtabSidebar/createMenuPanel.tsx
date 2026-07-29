@@ -2,7 +2,7 @@ import type React from 'react';
 import { useState, useEffect, useMemo } from 'react';
 import { useAppearance } from '@extension/ui';
 import { FiChevronUp, FiChevronDown, FiZap, FiFolder, FiBriefcase } from 'react-icons/fi';
-import { FaCode, FaLink, FaRobot, FaLayerGroup } from 'react-icons/fa';
+import { FaCode, FaLink, FaRobot } from 'react-icons/fa';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { getSidebarStorageData, setSidebarStorageData } from '../../../../../storage/localStorage/sidebarCustomizationStorage';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
@@ -23,6 +23,8 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 const SortableCreateItem = ({
   id,
@@ -380,7 +382,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
               onCommandSelect('createsession');
             }}>
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
-              <FaLayerGroup size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+              <SessionGridIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
             <span
               className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
@@ -554,19 +556,13 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
   return (
     <div className="flex flex-col select-none">
       <div className="px-3 pt-2.5 pb-1">
-        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+        <div className="flex items-center gap-1.5 px-1 py-1 rounded-lg">
           <span className="text-[11px] font-bold tracking-wider capitalize text-neutral-500 dark:text-neutral-400">
             Create
           </span>
-          <button
-            onClick={e => {
-              e.stopPropagation();
-              onCommandSelect('createlinks');
-            }}
-            title="Customize Create Items"
-            className="text-neutral-400 dark:text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 text-[18px] font-bold select-none leading-none flex items-center justify-center p-0.5 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer outline-none border-none pb-0.5">
+          <span className="text-neutral-500 dark:text-neutral-400 text-[14px] font-semibold select-none leading-none flex items-center justify-center">
             +
-          </button>
+          </span>
         </div>
       </div>
 

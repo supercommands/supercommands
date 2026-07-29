@@ -12,7 +12,6 @@ import {
   FaRobot,
   FaSearch,
   FaGlobe,
-  FaLayerGroup,
   FaFolder,
   FaFolderOpen,
   FaClock,
@@ -23,7 +22,7 @@ import {
   FaCamera,
   FaExpand,
   FaImages,
-  FaTable,
+  FaTable
 } from 'react-icons/fa';
 import { LuSparkles } from 'react-icons/lu';
 import { FiX } from 'react-icons/fi';
@@ -40,7 +39,10 @@ import { PAGE_ACTION_ITEMS } from '../../pages/AltS_search_websites/src/commands
 
 import { useDbStore } from '../../storage/store/useDbStore';
 import { StorageManager } from '../../storage/localStorage/storageManager';
-import { CustomSearchPrefixesForOmniboxStorage } from '../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
+import {
+  CustomSearchPrefixesForOmniboxStorage,
+  DEFAULT_OMNIBOX_PREFIXES,
+} from '../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
 import { VisualKeyDisplay } from '../hotkeys/ui/VisualKeyDisplay';
 import { EditablePrefixKey } from '../shortcuts/ui/EditablePrefixKey';
 
@@ -67,6 +69,8 @@ import { FaStar } from 'react-icons/fa';
 import { BsKeyboard, BsCalendarCheck } from 'react-icons/bs';
 import { MdOutlineShortcut } from 'react-icons/md';
 import { saveShortcut as apiSaveShortcut } from '../shortcuts';
+import { SessionGridIcon } from '../icons/sessionGridIcon';
+
 
 // Helper for query highlighting
 const highlightMatch = (text: string, query: string) => {
@@ -90,27 +94,20 @@ const highlightMatch = (text: string, query: string) => {
 const buildSlashSectionAliases = (
   prefixes?: Partial<Awaited<ReturnType<typeof CustomSearchPrefixesForOmniboxStorage.getPrefixes>>> | null,
 ): Record<string, string> => {
+  const resolved = { ...DEFAULT_OMNIBOX_PREFIXES, ...(prefixes || {}) };
   const aliases: Record<string, string> = {
     A: 'all',
     TS: 'thissite',
-    [String(prefixes?.todo || 't').trim().toUpperCase()]: 'todos',
-    [String(prefixes?.note || 'n').trim().toUpperCase()]: 'notes',
-    NM: 'notes',
-    [String(prefixes?.session || 's').trim().toUpperCase()]: 'sessions',
-    SE: 'sessions',
-    S: 'sessions',
-    [String(prefixes?.snippet || 'sn').trim().toUpperCase()]: 'snippets',
-    SN: 'snippets',
-    [String(prefixes?.link || 'l').trim().toUpperCase()]: 'links',
-    [String(prefixes?.bookmark || 'bm').trim().toUpperCase()]: 'bookmarks',
-    BM: 'bookmarks',
-    B: 'bookmarks',
-    [String(prefixes?.command || 'c').trim().toUpperCase()]: 'commands',
-    [String(prefixes?.system_command || 'sc').trim().toUpperCase()]: 'system_commands',
-    [String(prefixes?.automation || 'au').trim().toUpperCase()]: 'automations',
-    [String(prefixes?.agent || 'ca').trim().toUpperCase()]: 'chat_agents',
-    CA: 'chat_agents',
-    G: 'chat_agents',
+    [String(resolved.todo).trim().toUpperCase()]: 'todos',
+    [String(resolved.note).trim().toUpperCase()]: 'notes',
+    [String(resolved.session).trim().toUpperCase()]: 'sessions',
+    [String(resolved.snippet).trim().toUpperCase()]: 'snippets',
+    [String(resolved.link).trim().toUpperCase()]: 'links',
+    [String(resolved.bookmark).trim().toUpperCase()]: 'bookmarks',
+    [String(resolved.command).trim().toUpperCase()]: 'commands',
+    [String(resolved.system_command).trim().toUpperCase()]: 'system_commands',
+    [String(resolved.automation).trim().toUpperCase()]: 'automations',
+    [String(resolved.agent).trim().toUpperCase()]: 'chat_agents',
   };
 
   return Object.fromEntries(Object.entries(aliases).filter(([alias]) => alias.trim().length > 0));
@@ -221,11 +218,7 @@ function parseSlashMode(value: string, slashSectionAliases: Record<string, strin
     const upperText = textAfterPrefix.toUpperCase();
     const upperAlias = alias.toUpperCase();
 
-    // If starting with slash, allow exact match or space (e.g. /bm, /n, /s)
-    // If starting with 'c ', require space after alias (e.g. c bm , c n , c s )
-    const matchExactOrSpace = isSlash
-      ? (upperText === upperAlias || upperText.startsWith(upperAlias + ' '))
-      : upperText.startsWith(upperAlias + ' ');
+    const matchExactOrSpace = upperText === upperAlias || upperText.startsWith(upperAlias + ' ');
 
     if (matchExactOrSpace) {
       if (alias.length > bestAlias.length) {
@@ -238,7 +231,6 @@ function parseSlashMode(value: string, slashSectionAliases: Record<string, strin
   if (activeSection) {
     let query = textAfterPrefix.slice(bestAlias.length);
     if (query.startsWith(' ')) query = query.slice(1);
-    console.log('[SlashFilter Debug][BoardView] Matched activeSection:', activeSection, 'bestAlias:', bestAlias, 'query:', query);
     return { slashDropdown: false, activeSection, searchQuery: query };
   }
 
@@ -246,7 +238,6 @@ function parseSlashMode(value: string, slashSectionAliases: Record<string, strin
     return { slashDropdown: false, activeSection: null, searchQuery: textAfterPrefix };
   }
 
-  console.log('[SlashFilter Debug][BoardView] No activeSection matched for:', value, 'showing dropdown picker');
   // No match → show the dropdown picker
   return { slashDropdown: true, activeSection: null, searchQuery: '' };
 }
@@ -270,7 +261,7 @@ const SLASH_SECTION_META: Record<string, { title: string; icon: React.ReactNode 
   links: { title: 'Links', icon: <FaLink size={16} className="text-blue-400" /> },
   bookmarks: { title: 'Bookmarks', icon: <FaBookmark size={16} className="text-pink-400" /> },
   chat_agents: { title: 'Chat Agents', icon: <FaRobot size={16} className="text-[var(--color-iconDefault)]" /> },
-  sessions: { title: 'Tab Sessions', icon: <FaLayerGroup size={16} className="text-purple-400" /> },
+  sessions: { title: 'Tab Sessions', icon: <SessionGridIcon size={16} className="text-purple-400" /> },
   commands: { title: 'Commands', icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
   system_commands: { title: 'System Commands', icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
   automations: { title: 'Automations', icon: <FiZap size={16} className="text-[var(--color-iconDefault)]" /> },
@@ -326,14 +317,51 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       if (type === 'automation') kind = 'automation';
       if (type === 'agent' || type === 'aiprompt' || type === 'chat_agent') kind = 'chat_agent';
 
+      const realItemId = fav.item_id || fav.reference_id || fav.snippet_id || fav.note_id || fav.link_id || fav.commandId || fav.automation_id || fav.session_id || fav.id;
+
+      const innerObj = {
+        ...fav,
+        id: realItemId,
+        item_id: realItemId,
+        folder_id: fav.folder_id || fav.folderId,
+        workspace_id: fav.workspace_id || fav.workspaceId,
+      };
+
       const item = {
+        ...fav,
+        _kind: kind,
+        snippet: kind === 'snippet' ? innerObj : undefined,
+        session: kind === 'session' ? innerObj : undefined,
+        data: fav,
+        id: realItemId,
+        item_id: realItemId,
+        folder_id: fav.folder_id || fav.folderId,
+        workspace_id: fav.workspace_id || fav.workspaceId,
+      };
+      setContextMenuState({ x, y, item, preferDown: true });
+    },
+    executeFavorite: (fav: any, e?: any) => {
+      const type = (fav.type || fav.category || '').toLowerCase();
+      let kind = type === 'note' || type === 'link' || type === 'snippet' ? 'snippet' : type;
+      if (type === 'session') kind = 'session';
+      if (type === 'command') kind = 'command';
+      if (type === 'todo') kind = 'todo';
+      if (type === 'automation' || type === 'automations') kind = 'automation';
+      if (type === 'agent' || type === 'aiprompt' || type === 'chat_agent' || type === 'prompt') kind = 'chat_agent';
+
+      const item = {
+        ...fav,
         _kind: kind,
         snippet: kind === 'snippet' ? fav : undefined,
         session: kind === 'session' ? fav : undefined,
+        automation: kind === 'automation' ? fav : undefined,
+        command: kind === 'command' ? fav : undefined,
         data: fav,
         id: fav.id || fav.snippet_id || fav.commandId,
       };
-      setContextMenuState({ x, y, item, preferDown: true });
+
+      // Call the internal executeItem method
+      executeItem(item, e);
     }
   }));
   const [focus, setFocus] = useState<[number, number]>([0, 0]);
@@ -424,12 +452,14 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     !slashMode.slashDropdown &&
     !slashMode.activeSection &&
     normalizedSearchValue.startsWith(`${commandPrefix} `);
+  const isCommandSectionMode =
+    isBroadCommandMode || slashMode.activeSection === 'commands' || (!slashMode.activeSection && selectedSidebarSection === 'commands');
 
   const effectiveSidebarSection = slashMode.slashDropdown
     ? 'all'
     : slashMode.activeSection && slashMode.activeSection !== 'all'
       ? slashMode.activeSection
-      : isBroadCommandMode
+      : isCommandSectionMode
         ? 'commands'
         : selectedSidebarSection;
 
@@ -683,6 +713,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       is_done: t.isDone,
       is_todo_type: true,
       is_recurring: !!t.recurringType,
+      config: { id: t.references?.map((r: any) => r.id) || [], title: t.name },
       event_deadline: t.scheduleTime ? new Date(t.scheduleTime).toISOString() : null,
     }));
   }, [rawTodos]);
@@ -720,12 +751,12 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           : kind === 'chat_agent'
             ? 'chat_agent'
             : category === 'automation'
-          ? 'automation'
-          : category === 'link' || kind === 'bookmark'
-            ? 'link'
-            : kind === 'session' || category === 'session'
-              ? 'session'
-              : 'note';
+              ? 'automation'
+              : category === 'link' || kind === 'bookmark'
+                ? 'link'
+                : kind === 'session' || category === 'session'
+                  ? 'session'
+                  : 'note';
 
     const compoundId = getItemCompoundId(item);
     const rawId =
@@ -1219,7 +1250,12 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
               useUIStore.getState().openEditor({
                 type: 'note',
                 id: String(item.id || item.data?.id),
-                props: { item: mergedNote, snippet: mergedNote },
+                props: {
+                  item: mergedNote,
+                  snippet: mergedNote,
+                  initialDraftKey: mergedNote.title || mergedNote.name || mergedNote.key,
+                  initialDraftContent: mergedNote.body || mergedNote.content || mergedNote.value,
+                },
               });
             }
           } else {
@@ -1361,8 +1397,12 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       actions.push({ key: `div-assign-0`, divider: true });
 
       const compoundId = getItemCompoundId(item);
-      const sessionReferenceIds = isSession ? getSessionReferenceIds(item) : [compoundId];
-      const currentShortcut = sessionReferenceIds.map(id => shortcutsMap[id]).find(Boolean) || '';
+      const rawId = extractSnippetIdFromCompoundId(compoundId);
+      const directId = item.id || item.item_id || item.reference_id || item.snippet?.id || '';
+
+      const candidateIds = Array.from(new Set([compoundId, rawId, directId, item.compoundId].filter(Boolean)));
+      const sessionReferenceIds = isSession ? getSessionReferenceIds(item) : candidateIds;
+      const currentShortcut = sessionReferenceIds.map(id => shortcutsMap[id]).find(Boolean) || item.shortcut || item.data?.shortcut || '';
       const normalizedCurrentShortcut = currentShortcut ? normalizeShortcutTrigger(currentShortcut) : '';
 
       if (currentShortcut) {
@@ -1396,7 +1436,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         },
       });
 
-      const currentHotkey = sessionReferenceIds.map(id => hotkeysMap[id]).find(Boolean) || '';
+      const currentHotkey = sessionReferenceIds.map(id => hotkeysMap[id]).find(Boolean) || item.hotkey || item.data?.hotkey || '';
 
       if (currentHotkey) {
         actions.push({
@@ -1433,11 +1473,18 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   };
 
   const query = (rawSearchValue || '').trim();
+  const hasSelectedCategorySearch =
+    selectedSidebarSection !== 'all' &&
+    !!query &&
+    !query.startsWith('/') &&
+    !slashMode.activeSection &&
+    !isCommandSectionMode;
 
   // When query is empty OR slash mode is active, build items directly from Dexie/current team.
   // Slash mode must bypass state.suggestions because the Searchbar filters suggestions
   // using the raw text (e.g. '/L'), which matches nothing and returns 0 results.
-  const isSlashModeActive = query.startsWith('/') || isBroadCommandMode || !!slashMode.activeSection;
+  const isSlashModeActive =
+    query.startsWith('/') || isCommandSectionMode || !!slashMode.activeSection || hasSelectedCategorySearch;
   let sourceItems: SuggestionListItem[];
   if (query.length === 0 || isSlashModeActive) {
     // Build from Dexie/current team directly
@@ -1475,7 +1522,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         folder: s.folderId ? { folder_id: s.folderId } : null,
       } as any),
     );
+    dbChatAgents.forEach((agent: any) => boardItems.push({ _kind: 'chat_agent', ...agent } as any));
     dbAiPrompts.forEach((prompt: any) => boardItems.push({ _kind: 'aiPrompt', ...prompt } as any));
+    dbAutomations.forEach((automation: any) => boardItems.push({ _kind: 'automation', automation } as any));
 
     // Add all commands from the central store
     visibleCommands.forEach((cmd: any) => {
@@ -1513,6 +1562,113 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       });
     }
 
+    const cachedCategoryItems = filterVisibleCommandSuggestions([
+      ...(unfilteredSuggestions || []),
+      ...(state?.suggestions || []),
+    ]).filter((item: any) => {
+      const kind = item?._kind || item?.type;
+      if (kind !== 'workspace_item' && kind !== 'session' && kind !== 'chat_agent' && kind !== 'aiPrompt' && kind !== 'automation')
+        return false;
+      const category = String(item?.item?.category || item?.category || item?.snippet?.category || '').toLowerCase();
+      return [
+        'note',
+        'notes',
+        'link',
+        'links',
+        'snippet',
+        'snippets',
+        'session',
+        'sessions',
+        'tab session',
+        'tabgroup',
+        'todo',
+        'todos',
+        'bookmark',
+        'bookmarks',
+        'automation',
+        'automations',
+        'aiprompt',
+        'ai_prompt',
+        'prompt',
+        'chatagent',
+        'chat_agent',
+        'agent',
+      ].includes(category) || kind !== 'workspace_item';
+    });
+
+    const getCategoryMergeKeys = (item: any): string[] => {
+      const kind = String(item?._kind || item?.type || '').toLowerCase();
+      const category = String(
+        item?.item?.category ||
+        item?.snippet?.category ||
+        item?.category ||
+        (kind === 'aiprompt' || kind === 'chat_agent' || kind === 'chatagent' || kind === 'agent' ? 'agent' : kind),
+      ).toLowerCase();
+      const normalizedCategory = ['sessions', 'tab session', 'tabgroup'].includes(category)
+        ? 'session'
+        : ['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent'].includes(category)
+          ? 'agent'
+          : category;
+      const id = String(
+        item?.item?.id ||
+        item?.item?.item_id ||
+        item?.id ||
+        item?.session?.id ||
+        item?.session?.session_id ||
+        item?.automation?.id ||
+        item?.automation?.automation_id ||
+        item?.snippet?.id ||
+        item?.snippet?.snippet_id ||
+        item?.data?.id ||
+        '',
+      ).trim().toLowerCase();
+      const title = String(
+        item?.item?.title ||
+        item?.item?.key ||
+        item?.item?.name ||
+        item?.session?.title ||
+        item?.session?.key ||
+        item?.session?.name ||
+        item?.snippet?.title ||
+        item?.snippet?.key ||
+        item?.snippet?.name ||
+        item?.data?.title ||
+        item?.data?.key ||
+        item?.data?.name ||
+        item?.title ||
+        item?.key ||
+        item?.name ||
+        '',
+      ).trim().toLowerCase();
+
+      return [
+        id ? `${normalizedCategory}:id:${id}` : '',
+        title ? `${normalizedCategory}:title:${title}` : '',
+      ].filter(Boolean);
+    };
+
+    const getShortcutBadge = (item: any) =>
+      item?._displayShortcut || item?.item?._displayShortcut || item?.shortcut || item?.data?.shortcut || '';
+
+    const seenCategoryItems = new Map<string, any>();
+    boardItems.forEach((item: any) => {
+      getCategoryMergeKeys(item).forEach(key => seenCategoryItems.set(key, item));
+    });
+
+    cachedCategoryItems.forEach((item: any) => {
+      const keys = getCategoryMergeKeys(item);
+      const existing = keys.map(key => seenCategoryItems.get(key)).find(Boolean);
+      if (existing) {
+        const shortcutBadge = getShortcutBadge(item);
+        if (shortcutBadge && !getShortcutBadge(existing)) {
+          existing._displayShortcut = shortcutBadge;
+        }
+        return;
+      }
+      keys.forEach(key => seenCategoryItems.set(key, item));
+      boardItems.push(item);
+    });
+
     // Add todos — show ALL non-done todos in Board View so nothing is hidden
 
     const mappedTodos = todosList.map(t => ({
@@ -1524,14 +1680,52 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
 
     boardItems.push(...(mappedTodos as any));
 
+    const mergedBoardItems: SuggestionListItem[] = [];
+    const finalSeenCategoryItems = new Map<string, any>();
+
+    boardItems.forEach((item: any) => {
+      const kind = String(item?._kind || item?.type || '').toLowerCase();
+      const category = String(item?.item?.category || item?.snippet?.category || item?.category || kind).toLowerCase();
+      const isCategoryEntity =
+        kind === 'workspace_item' ||
+        kind === 'session' ||
+        kind === 'snippet' ||
+        kind === 'todo' ||
+        kind === 'bookmark' ||
+        kind === 'automation' ||
+        kind === 'aiprompt' ||
+        kind === 'chat_agent' ||
+        kind === 'chatagent' ||
+        kind === 'agent' ||
+        ['note', 'notes', 'link', 'links', 'session', 'sessions', 'tab session', 'tabgroup', 'todo', 'todos', 'bookmark', 'bookmarks', 'automation', 'automations', 'aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent', 'snippet', 'snippets'].includes(category);
+
+      if (!isCategoryEntity) {
+        mergedBoardItems.push(item);
+        return;
+      }
+
+      const keys = getCategoryMergeKeys(item);
+      const existing = keys.map(key => finalSeenCategoryItems.get(key)).find(Boolean);
+      if (existing) {
+        const shortcutBadge = getShortcutBadge(item);
+        if (shortcutBadge && !getShortcutBadge(existing)) {
+          existing._displayShortcut = shortcutBadge;
+        }
+        return;
+      }
+
+      keys.forEach(key => finalSeenCategoryItems.set(key, item));
+      mergedBoardItems.push(item);
+    });
+
     // If the board has data, use it; otherwise fall back to unfilteredSuggestions cache
-    // When in broad command mode (c space), use suggestions from searchbar which are already filtered to user commands
-    if (isBroadCommandMode) {
+    // When in command section mode (c space or /c), use suggestions from searchbar which are already filtered to user commands
+    if (isCommandSectionMode) {
       sourceItems = filterVisibleCommandSuggestions(state?.suggestions || unfilteredSuggestions || []);
     } else {
       sourceItems =
-        boardItems.length > 0
-          ? boardItems
+        mergedBoardItems.length > 0
+          ? mergedBoardItems
           : unfilteredSuggestions.length > 0
             ? filterVisibleCommandSuggestions(unfilteredSuggestions)
             : filterVisibleCommandSuggestions(state?.suggestions || []);
@@ -1639,7 +1833,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
 
   const filteredAllItems = sourceItems.filter(item => {
     const kind = (item as any)._kind || (item as any).type;
-    return !['history', 'ai_history', 'automation', 'open_url'].includes(kind);
+    return !['history', 'ai_history', 'open_url'].includes(kind);
   });
 
   const builtInCommandsById = useMemo(
@@ -1706,7 +1900,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     snippets: { title: 'Snippets', items: [] as SuggestionListItem[], icon: <FaCode size={16} /> },
     links: { title: 'Links', items: [] as SuggestionListItem[], icon: <FaLink size={16} /> },
     bookmarks: { title: 'Bookmarks', items: [] as SuggestionListItem[], icon: <FaBookmark size={16} /> },
-    sessions: { title: 'Tab Sessions', items: [] as SuggestionListItem[], icon: <FaLayerGroup size={16} /> },
+    sessions: { title: 'Tab Sessions', items: [] as SuggestionListItem[], icon: <SessionGridIcon size={16} /> },
     chat_agents: {
       title: 'Chat Agents',
       items: [] as SuggestionListItem[],
@@ -1748,8 +1942,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     const kind = (item as any)._kind || (item as any).type;
     if (kind === 'snippet' || kind === 'workspace_item') {
       const cat = String((item as any).item?.category || (item as any).snippet?.category || '').toLowerCase();
-      if (['link', 'links', 'tabgroup'].includes(cat)) groups.links.items.push(item);
-      else if (['session', 'sessions', 'tab session'].includes(cat)) groups.sessions.items.push(item);
+      if (['link', 'links'].includes(cat)) groups.links.items.push(item);
+      else if (['session', 'sessions', 'tab session', 'tabgroup'].includes(cat)) groups.sessions.items.push(item);
       else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat)) groups.chat_agents.items.push(item);
       else if (['automation', 'automations'].includes(cat)) groups.automations.items.push(item);
       else if (['todo', 'todos'].includes(cat)) groups.todos.items.push(item);
@@ -1796,26 +1990,26 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
 
   const sortCommandGroupItems = (items: any[]) => {
     items.sort((a: any, b: any) => {
-    const getCategoryPriority = (item: any) => {
-      const cat = String(item.command?.category || item.category || '').toLowerCase();
-      const cmdType = item.commandType;
-      const id = item.id || item.command?.id || '';
-      const label = String(item.label || item.command?.label || '').toLowerCase();
+      const getCategoryPriority = (item: any) => {
+        const cat = String(item.command?.category || item.category || '').toLowerCase();
+        const cmdType = item.commandType;
+        const id = item.id || item.command?.id || '';
+        const label = String(item.label || item.command?.label || '').toLowerCase();
 
-      if (cmdType === 'proxy' || item._kind === 'workspace_item') return 0; // User shortcuts have absolute highest priority
-      if (label.startsWith('create')) return 1; // Create related commands
-      if (cat === 'browser') return 2; // Browser commands
-      if (cmdType === 'page_action' || cat === 'page_action') return 3;
-      if (cat === 'ai' && id !== 'ai') return 4;
-      if (cat === 'thissite_action') return 6;
-      return 5; // Local app commands and other global commands
-    };
+        if (cmdType === 'proxy' || item._kind === 'workspace_item') return 0; // User shortcuts have absolute highest priority
+        if (label.startsWith('create')) return 1; // Create related commands
+        if (cat === 'browser') return 2; // Browser commands
+        if (cmdType === 'page_action' || cat === 'page_action') return 3;
+        if (cat === 'ai' && id !== 'ai') return 4;
+        if (cat === 'thissite_action') return 6;
+        return 5; // Local app commands and other global commands
+      };
 
-    const priorityDiff = getCategoryPriority(a) - getCategoryPriority(b);
-    if (priorityDiff !== 0) return priorityDiff;
+      const priorityDiff = getCategoryPriority(a) - getCategoryPriority(b);
+      if (priorityDiff !== 0) return priorityDiff;
 
-    // If priorities are exactly the same, rely on the original search ranking score as a tie-breaker
-    return (b.score || 0) - (a.score || 0);
+      // If priorities are exactly the same, rely on the original search ranking score as a tie-breaker
+      return (b.score || 0) - (a.score || 0);
     });
   };
   sortCommandGroupItems(groups.commands.items as any[]);
@@ -1905,7 +2099,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     if (kind === 'open_url') return item.displayUrl || item.url || 'Open URL';
     if (kind === 'workspace') return item.workspace?.workspace_name || 'Workspace';
     if (kind === 'folder') return item.folder?.folder_name || 'Folder';
-    if (kind === 'aiPrompt') return item.title || 'Chat Agent';
+    if (kind === 'aiPrompt' || kind === 'chat_agent' || kind === 'chatAgent' || kind === 'agent')
+      return item.title || item.name || item.key || item.label || 'Chat Agent';
     if (kind === 'automation') return item.automation?.name || item.title || 'Automation';
     if (kind === 'module') return item.module?.name || item.module?.module_key || 'Module';
     if (kind === 'agent_collection') return item.title || 'Agent Collection';
@@ -1965,7 +2160,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     if (kind === 'open_url') return 'Link';
     if (kind === 'session') return 'Session';
     if (kind === 'automation') return 'Automation';
-    if (kind === 'aiPrompt' || kind === 'prompt' || kind === 'chat_agent' || kind === 'agent') return 'Prompt';
+    if (kind === 'aiPrompt' || kind === 'prompt' || kind === 'chat_agent' || kind === 'agent') return 'Chat Agent';
     if (kind === 'todo') return 'Todo';
     if (kind === 'module') return 'Module';
 
@@ -1975,7 +2170,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       if (['snippet', 'snippets'].includes(normalizedCategory)) return 'Snippet';
       if (['session', 'sessions', 'tab session'].includes(normalizedCategory)) return 'Session';
       if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(normalizedCategory)) {
-        return 'Prompt';
+        return 'Chat Agent';
       }
       if (['automation', 'automations'].includes(normalizedCategory)) return 'Automation';
       if (['command', 'commands'].includes(normalizedCategory)) return 'Command';
@@ -1988,7 +2183,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   };
 
   const shouldShowCategoryLabel = (item: any) => {
-    if (!isBroadCommandMode) return false;
+    if (!isCommandSectionMode) return false;
     return Boolean(getCategoryLabel(item));
   };
 
@@ -2027,7 +2222,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         return '';
       }
       if (kind === 'bookmark') return item.url || '';
-      if (kind === 'aiPrompt') return String(item.prompt || item.body || '').replace(/<[^>]+>/g, '');
+      if (kind === 'aiPrompt' || kind === 'chat_agent' || kind === 'chatAgent' || kind === 'agent')
+        return String(item.description || item.prompt || item.body || item.value || '').replace(/<[^>]+>/g, '');
       if (kind === 'open_url') return item.url || '';
       if (kind === 'session') {
         const sessionUrls = item.session?.urls || item.data?.urls;
@@ -2051,6 +2247,24 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       return '';
     }
     return finalDesc;
+  };
+
+  const getDisplayedShortcutText = (item: any): string => {
+    const unwrapped = unwrapProxy(item);
+    const compoundId = getItemCompoundId(unwrapped);
+    return String(
+      unwrapped?._displayShortcut ||
+      unwrapped?.item?._displayShortcut ||
+      item?._displayShortcut ||
+      item?.item?._displayShortcut ||
+      unwrapped?.shortcut ||
+      unwrapped?.data?.shortcut ||
+      item?.shortcut ||
+      item?.data?.shortcut ||
+      (compoundId && shortcutsMap[compoundId] ? normalizeShortcutTrigger(shortcutsMap[compoundId]) : '') ||
+      (compoundId && hotkeysMap[compoundId] ? hotkeysMap[compoundId] : '') ||
+      '',
+    );
   };
 
   const getSnippetAllUrls = (item: any): string[] => {
@@ -2287,7 +2501,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       return <FaTerminal className="text-[var(--color-iconDefault)]" size={16} />;
     }
     if (entityKind === 'aggregate' || entityKind === 'agent_collection')
-      return <FaLayerGroup className="text-[var(--color-iconDefault)]" size={16} />;
+      return <SessionGridIcon className="text-[var(--color-iconDefault)]" size={16} />;
 
     if (entityKind === 'session') {
       const urls = getSnippetAllUrls(entity.session || entity);
@@ -2304,7 +2518,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           </div>
         );
       }
-      return <FaLayerGroup className="text-purple-400" size={16} />;
+      return <SessionGridIcon className="text-purple-400" size={16} />;
     }
 
     if (entityKind === 'snippet' || entityKind === 'note' || entityKind === 'link') {
@@ -2463,8 +2677,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   };
 
   const executeTodoItem = async (todo: any, e?: React.MouseEvent | KeyboardEvent) => {
-
-    if (todo.is_done) return;
+    
+    // We do not return if todo.is_done so the user can still open a completed task.
 
     const chromeAny = (window as any)?.chrome;
     const { category, value, snippet_id } = todo;
@@ -2502,44 +2716,15 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       return finalUrls.filter(u => u && u.startsWith('http'));
     };
 
-    let skipToggle = false;
+    let skipToggle = todo.is_done || false;
 
-    // A. Check if this is a config-based multi-item todo
-    const configIds = todo.config?.id;
-    if (Array.isArray(configIds) && configIds.length > 0) {
-      for (const cid of configIds) {
-        const cidStr = String(cid);
-        const matched = finalConvertibleItems.find(item => {
-          const itemIdStr = String(item.id);
-          if (itemIdStr === cidStr) return true;
-          const strippedItemId = itemIdStr.replace(/^(auto-|cmd-|mod-)/, '');
-          const strippedCid = cidStr.replace(/^(auto-|cmd-|mod-)/, '');
-          return strippedItemId === strippedCid;
-        });
-
-        if (matched) {
-          const itemCat = String(matched.category || '').toLowerCase();
-          const itemId = matched.id;
-          const itemVal = matched.data?.value || matched.data?.url || matched.data?.link || '';
-          if (['session', 'sessions', 'tab session', 'tabgroup'].includes(itemCat)) {
-            await startSessionFromTodoReference(matched);
-          } else if (['link', 'collection', 'agent_collection'].includes(itemCat)) {
-            extractUrls(itemVal).forEach(url => openTab({ url }));
-          } else if (['note', 'snippet', 'custom'].includes(itemCat)) {
-            openTab({
-              url: chromeAny.runtime.getURL(
-                `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(itemId)}`,
-              ),
-            });
-          } else if (['command', 'module', 'automation', 'install', 'agent', 'chat_agent'].includes(itemCat)) {
-            openTab({
-              url: chromeAny.runtime.getURL(
-                `AltS_search_newtab/index.html?trigger_hotkey=true&type=${itemCat}&id=${encodeURIComponent(itemId)}`,
-              ),
-            });
-          }
-        }
-      }
+    if (cat === 'custom' || cat === 'todo' || todo.todo_id || (todo.id && String(todo.id).startsWith('todo_'))) {
+      const triggerId = snippet_id || todo.id || todo.todo_id || (todo as any).todoId;
+      openTab({
+        url: chromeAny.runtime.getURL(
+          `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(triggerId)}`,
+        ),
+      });
     } else if (['session', 'sessions', 'tab session', 'tabgroup'].includes(cat)) {
       await startSessionFromTodoReference({
         _kind: 'session',
@@ -2596,6 +2781,44 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       }
     }
 
+    // A. Check if this is a config-based multi-item todo
+    const configIds = todo.config?.id || (Array.isArray(todo.references) ? todo.references.map((r: any) => r.id) : undefined);
+    if (Array.isArray(configIds) && configIds.length > 0) {
+      for (const cid of configIds) {
+        const cidStr = String(cid);
+        const matched = finalConvertibleItems.find(item => {
+          const itemIdStr = String(item.id);
+          if (itemIdStr === cidStr) return true;
+          const strippedItemId = itemIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
+          const strippedCid = cidStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
+          return strippedItemId === strippedCid;
+        });
+
+        if (matched) {
+          const itemCat = String(matched.category || '').toLowerCase();
+          const itemId = matched.id;
+          const itemVal = matched.data?.value || matched.data?.url || matched.data?.link || '';
+          if (['session', 'sessions', 'tab session', 'tabgroup'].includes(itemCat)) {
+            await startSessionFromTodoReference(matched);
+          } else if (['link', 'collection', 'agent_collection'].includes(itemCat)) {
+            extractUrls(itemVal).forEach(url => openTab({ url }));
+          } else if (['note', 'snippet', 'custom'].includes(itemCat)) {
+            openTab({
+              url: chromeAny.runtime.getURL(
+                `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(itemId)}`,
+              ),
+            });
+          } else if (['command', 'module', 'automation', 'install', 'agent', 'chat_agent'].includes(itemCat)) {
+            openTab({
+              url: chromeAny.runtime.getURL(
+                `AltS_search_newtab/index.html?trigger_hotkey=true&type=${itemCat}&id=${encodeURIComponent(itemId)}`,
+              ),
+            });
+          }
+        }
+      }
+    }
+
     if (!skipToggle) {
       const syntheticEvent = {
         stopPropagation: () => { },
@@ -2616,8 +2839,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     let kind = rawKind;
     if (rawKind === 'workspace_item') {
       const cat = String(entity.category || '').toLowerCase();
-      if (['link', 'links', 'tabgroup'].includes(cat)) kind = 'link';
-      else if (['session', 'sessions', 'tab session'].includes(cat)) kind = 'session';
+      if (['link', 'links'].includes(cat)) kind = 'link';
+      else if (['session', 'sessions', 'tab session', 'tabgroup'].includes(cat)) kind = 'session';
       else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat)) kind = 'aiPrompt';
       else if (['automation', 'automations'].includes(cat)) kind = 'automation';
       else if (['todo', 'todos'].includes(cat)) kind = 'todo';
@@ -2833,6 +3056,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
               category: inferredCategory === 'snippet' ? 'snippet' : undefined,
               snippet: inferredCategory === 'snippet' ? { ...actualSnippet, category: 'snippet' } : actualSnippet,
               item: actualSnippet,
+              initialDraftKey: actualSnippet.title || actualSnippet.name || actualSnippet.key,
+              initialDraftContent: actualSnippet.body || actualSnippet.content || actualSnippet.value,
             },
           });
         }
@@ -3225,6 +3450,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     } else if (slashMode.activeSection === 'all') {
       setSelectedSidebarSection('all');
       isSlashSelectedRef.current = true;
+    } else if (!rawSearchValue.trim()) {
+      setSelectedSidebarSection('all');
+      isSlashSelectedRef.current = false;
     }
     // When slash mode is exited, only reset to 'all' if it was selected by a slash command
     if (!slashMode.slashDropdown && !slashMode.activeSection) {
@@ -3290,6 +3518,13 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   // When slash mode is active, re-filter board items using the slash searchQuery
   // (e.g. /n google → filter notes by "google")
   const slashSearchQuery = slashMode.searchQuery;
+  const stripSelectedSectionLabel = (value: string) => {
+    const label = String(SLASH_SECTION_META[selectedSidebarSection]?.title || '').trim();
+    const normalized = String(value || '').trim();
+    if (!label || !normalized.toLowerCase().startsWith(label.toLowerCase())) return normalized;
+    return normalized.slice(label.length).trimStart();
+  };
+  const categorySearchQuery = slashSearchQuery.trim() || (hasSelectedCategorySearch ? stripSelectedSectionLabel(query) : '');
 
   // Override the activeGroups items with slash search query filtering
   const finalGroupsBase = (() => {
@@ -3305,16 +3540,35 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         (s: any) => s._kind === 'command' || s.commandType !== undefined || s._kind === 'workspace_item',
       );
 
-    if (isExplicitCommandMenu || !slashMode.activeSection || !slashSearchQuery.trim() || state?.mode === 'command')
+    const isCategoryFilterActive = Boolean(slashMode.activeSection || hasSelectedCategorySearch);
+    if (
+      isExplicitCommandMenu ||
+      !categorySearchQuery.trim() ||
+      (state?.mode === 'command' && !isCategoryFilterActive)
+    )
       return combinedGroups;
 
-    const lower = String(slashSearchQuery || '').toLowerCase();
+    if (!slashMode.activeSection && !hasSelectedCategorySearch)
+      return combinedGroups;
+
+    const lower = String(categorySearchQuery || '').toLowerCase();
     const filteredGroups = combinedGroups.map(g => ({
       ...g,
       items: g.items.filter((item: any) => {
-        const t = String(getTitle(item)).toLowerCase();
-        const d = String(getDesc(item)).toLowerCase();
-        return t.includes(lower) || d.includes(lower);
+        const unwrappedItem = unwrapProxy(item);
+        const t = String(getTitle(unwrappedItem)).toLowerCase();
+        const d = String(getDesc(unwrappedItem)).toLowerCase();
+        const c = String(getCategoryLabel(unwrappedItem) || '').toLowerCase();
+        const shortcut = getDisplayedShortcutText(unwrappedItem).toLowerCase();
+        const shortcutParts = shortcut.split(/\s+/);
+        const shortcutWithoutCategoryPrefix = shortcutParts.slice(2).join(' ');
+        return (
+          t.includes(lower) ||
+          d.includes(lower) ||
+          c.includes(lower) ||
+          shortcut.includes(lower) ||
+          shortcutWithoutCategoryPrefix.includes(lower)
+        );
       }),
     }));
     return filteredGroups;
@@ -3326,6 +3580,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       if (todoCreatePrefill) return false;
 
       if (rawSearchValue) {
+        setSelectedSidebarSection('all');
+        isSlashSelectedRef.current = false;
         state?.onQueryChange?.('');
         return true;
       } else if (onClose) {
@@ -3373,6 +3629,11 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   const groupItemCounts = useMemo(() => finalGroups.map(g => g.items?.length ?? 0).join(','), [finalGroups]);
 
   useEffect(() => {
+    if (!rawSearchValue || rawSearchValue.trim() === '') {
+      setFocus([-1, -1]);
+      return;
+    }
+
     let firstValidCol = -1;
     for (let c = 0; c < finalGroups.length; c++) {
       if ((finalGroups[c]?.items?.length ?? 0) > 0) {
@@ -3396,6 +3657,16 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       }
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key)) {
         let [col, row] = focus;
+        const isUnfocused = col < 0 || row < 0;
+
+        if (isUnfocused) {
+          if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            e.stopPropagation();
+            setFocus([0, 0]);
+          }
+          return;
+        }
 
         if (col < 0 || col >= finalGroups.length) col = 0;
         if (row < 0 || row >= finalGroups[col].items.length) row = 0;
@@ -3535,7 +3806,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       id: 'sessions',
       label: 'Tab Sessions',
       icon: (isSelected: boolean) => (
-        <FaLayerGroup
+        <SessionGridIcon
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
             isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
@@ -3650,25 +3921,10 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                   onMouseUp={e => e.stopPropagation()}
                   onClick={e => {
                     e.stopPropagation();
-                    console.log('[BoardView] sidebar tab clicked:', item.id, '— switching section, preserving query');
                     isSlashSelectedRef.current = false;
                     if (state?.onQueryChange) {
-                      let searchText = rawSearchValue;
-                      if (searchText.startsWith('/')) {
-                        const spaceIdx = searchText.indexOf(' ');
-                        if (spaceIdx !== -1) {
-                          searchText = searchText.slice(spaceIdx + 1);
-                        } else {
-                          searchText = '';
-                        }
-                      }
-
                       const alias = slashAliasDisplay[item.id];
-                      let newQuery = searchText;
-                      if (alias) {
-                        newQuery = `/${alias} ${searchText}`;
-                        if (!searchText) newQuery = `/${alias} `;
-                      }
+                      const newQuery = alias ? `/${alias} ` : '';
 
                       if (newQuery !== rawSearchValue) {
                         state.onQueryChange(newQuery);
@@ -3707,19 +3963,19 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                   ? 'command'
                                   : item.id === 'system_commands'
                                     ? 'system_command'
-                                  : item.id === 'links'
-                                    ? 'link'
-                                    : item.id === 'bookmarks'
-                                      ? 'bookmark'
-                                      : item.id === 'sessions'
-                                        ? 'session'
-                                        : item.id === 'automations'
-                                          ? 'automation'
-                                          : item.id === 'todos'
-                                            ? 'todo'
-                                            : item.id === 'chat_agents'
-                                              ? 'agent'
-                                              : 'note'
+                                    : item.id === 'links'
+                                      ? 'link'
+                                      : item.id === 'bookmarks'
+                                        ? 'bookmark'
+                                        : item.id === 'sessions'
+                                          ? 'session'
+                                          : item.id === 'automations'
+                                            ? 'automation'
+                                            : item.id === 'todos'
+                                              ? 'todo'
+                                              : item.id === 'chat_agents'
+                                                ? 'agent'
+                                                : 'note'
                           }
                           currentValue={
                             item.id === 'notes'
@@ -3734,15 +3990,15 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                       ? omniboxPrefixes.command
                                       : item.id === 'system_commands'
                                         ? omniboxPrefixes.system_command || ''
-                                      : item.id === 'sessions'
-                                        ? omniboxPrefixes.session || ''
-                                        : item.id === 'automations'
-                                          ? omniboxPrefixes.automation || ''
-                                          : item.id === 'todos'
-                                            ? omniboxPrefixes.todo || ''
-                                          : item.id === 'chat_agents'
-                                            ? omniboxPrefixes.agent || ''
-                                            : ''
+                                        : item.id === 'sessions'
+                                          ? omniboxPrefixes.session || ''
+                                          : item.id === 'automations'
+                                            ? omniboxPrefixes.automation || ''
+                                            : item.id === 'todos'
+                                              ? omniboxPrefixes.todo || ''
+                                              : item.id === 'chat_agents'
+                                                ? omniboxPrefixes.agent || ''
+                                                : ''
                           }
                         />
                       </span>
@@ -3911,11 +4167,11 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                           'text-[13px] tracking-tight truncate leading-tight flex-1 min-w-0 font-medium transition-colors duration-200',
                                           isFocused ? 'text-white' : 'text-white/90 group-hover:text-white',
                                         )}>
-                                      {highlightMatch(rawTitle, query)}
-                                    </span>
-                                    {shouldShowCategoryLabel(unwrappedItem) && categoryLabel && (
-                                      <span
-                                        className={clsx(
+                                        {highlightMatch(rawTitle, query)}
+                                      </span>
+                                      {shouldShowCategoryLabel(unwrappedItem) && categoryLabel && (
+                                        <span
+                                          className={clsx(
                                             'shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium tracking-tight border',
                                             isFocused
                                               ? 'text-white/80 border-white/15 bg-white/10'

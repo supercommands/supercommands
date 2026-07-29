@@ -458,15 +458,20 @@ const InjectedSnippetDropdownUI: React.FC<InjectedSnippetDropdownUIProps> = ({
                       return note.preview;
                     })()}
                   </div>
-                  {note.tags.length > 0 && (
-                    <div className="note-tags">
-                      {note.tags.slice(0, 3).map(tag => (
-                        <span key={tag} className="note-tag">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    const isRawTagId = (t: string) => !t || /^TAG_/i.test(t.trim()) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t.trim());
+                    const displayTags = note.tags.filter(t => !isRawTagId(t));
+                    if (displayTags.length === 0) return null;
+                    return (
+                      <div className="note-tags">
+                        {displayTags.slice(0, 3).map(tag => (
+                          <span key={tag} className="note-tag">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* <button

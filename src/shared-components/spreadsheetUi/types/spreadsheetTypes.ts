@@ -18,7 +18,7 @@ export type BaseRowData = {
   syncMessage?: string;
   favAction?: 'adding' | 'removing';
   editAction?: 'hotkey' | 'command' | 'name' | 'value' | 'location' | 'automation';
-  itemType?: 'link' | 'note' | 'snippet' | 'agent' | 'session';
+  itemType?: 'link' | 'note' | 'snippet' | 'agent' | 'session' | 'todo';
   category?: string;
   urls?: string[];
   value?: string;  updated_at?: string;

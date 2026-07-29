@@ -1,18 +1,15 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import {
-  FaUser,
+import { FaUser,
   FaRegCalendarAlt,
   FaRegClock,
   FaPlus,
   FaRobot,
   FaBolt,
-  FaLayerGroup,
   FaTimes,
   FaCheck,
   FaStar,
-  FaKeyboard,
-} from 'react-icons/fa';
+  FaKeyboard } from 'react-icons/fa';
 import { LuSparkles } from 'react-icons/lu';
 import {
   FiClock,
@@ -54,6 +51,8 @@ import { useTodoEditor } from '../useTodoEditor';
 import { AutoSaveIndicator } from '../../../../../shared-components/autoSaveEngine/autoSave';
 import DeleteConfirmation from '../../../../../shared-components/modals/deleteDialog';
 import { NewDueDateDropdown } from './newDueDateDropdown';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 interface InlineTimeInputProps {
   value: string; // 'HH:mm' in 24h
@@ -685,6 +684,16 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const isFocusMode = useUIStore((s: any) => s.isFocusMode);
 
   const triggerNotification = useNotification();
+  const initialScheduleTime = useMemo(() => {
+    if (typeof initialItem?.scheduleTime === 'number' && Number.isFinite(initialItem.scheduleTime)) {
+      return initialItem.scheduleTime;
+    }
+    if (initialItem?.event_deadline) {
+      const parsed = new Date(String(initialItem.event_deadline).replace(' ', 'T')).getTime();
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
+  }, [initialItem]);
 
   const {
     todoTitle: title,
@@ -719,7 +728,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     initialTitle: initialItem?.name || '',
     initialDescription: initialItem?.description || '',
     initialScheduleType: initialItem?.scheduleType || 'one-time',
-    initialScheduleTime: initialItem?.scheduleTime,
+    initialScheduleTime,
     initialRecurringCycle: initialItem?.recurringType,
     initialItems: initialItem?.references || [],
     initialTags: initialItem?.tagIds || [],
@@ -781,6 +790,31 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       })
       .catch(() => {});
   }, [existingTodos]);
+
+  useEffect(() => {
+    if (!isEditMode || !initialItem) return;
+    const todoId = initialItem.todo_id || initialItem.id;
+    if (!todoId) return;
+
+    const itemWsId = initialItem.workspaceId || initialItem.workspace_id || null;
+    const itemFId = initialItem.folderId || initialItem.folder_id || null;
+    const compoundId = getItemCompoundId({
+      id: todoId,
+      workspace_id: itemWsId,
+      folder_id: itemFId,
+      snippet: { id: todoId, category: 'todo' },
+      _kind: 'todo',
+    });
+
+    const foundShortcut =
+      (shortcutsMap && (shortcutsMap[compoundId] || shortcutsMap[todoId] || shortcutsMap[`todo_${todoId}`])) ||
+      initialItem.shortcut ||
+      '';
+
+    if (foundShortcut) {
+      setTodoShortcut(foundShortcut);
+    }
+  }, [initialItem, isEditMode, shortcutsMap]);
 
   useEffect(() => {
     let active = true;
@@ -975,29 +1009,29 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const [isPickerActive, setIsPickerActive] = useState(false);
 
   const [time, setTime] = useState(() => {
-    const initialTime = initialItem?.scheduleTime;
+    const initialTime = initialScheduleTime;
     return format(initialTime ? new Date(initialTime) : new Date(), 'HH:mm');
   });
   const [isTimeEditing, setIsTimeEditing] = useState(false);
   const [amPm, setAmPm] = useState<'AM' | 'PM'>(() => {
-    const initialTime = initialItem?.scheduleTime;
+    const initialTime = initialScheduleTime;
     const h = (initialTime ? new Date(initialTime) : new Date()).getHours();
     return h >= 12 ? 'PM' : 'AM';
   });
   const [rawTimeText, setRawTimeText] = useState('');
   const [hourText, setHourText] = useState(() => {
-    const initialTime = initialItem?.scheduleTime;
+    const initialTime = initialScheduleTime;
     let h = (initialTime ? new Date(initialTime) : new Date()).getHours();
     if (h > 12) h -= 12;
     if (h === 0) h = 12;
     return h.toString().padStart(2, '0');
   });
   const [minText, setMinText] = useState(() => {
-    const initialTime = initialItem?.scheduleTime;
+    const initialTime = initialScheduleTime;
     return (initialTime ? new Date(initialTime) : new Date()).getMinutes().toString().padStart(2, '0');
   });
   const [date, setDate] = useState(() => {
-    const initialTime = initialItem?.scheduleTime;
+    const initialTime = initialScheduleTime;
     return format(initialTime ? new Date(initialTime) : new Date(), 'yyyy-MM-dd');
   });
 
@@ -1053,6 +1087,23 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     }
   }, [scheduleTime]);
 
+  const scheduleSavedTodoAlarm = useCallback((todoId: string | false) => {
+    if (!todoId || !scheduleTime) return;
+    try {
+      const chromeAny = (window as any).chrome;
+      if (chromeAny?.runtime?.sendMessage) {
+        chromeAny.runtime.sendMessage({
+          action: 'schedule_todo_alarm',
+          todoId: String(todoId),
+          deadline: new Date(scheduleTime).toISOString(),
+          is_anytime: isAnytime,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to schedule autosaved todo alarm', err);
+    }
+  }, [isAnytime, scheduleTime]);
+
   // Auto-save logic (triggers for any task when both title & description are entered)
   useEffect(() => {
     if (!isDirty) return;
@@ -1062,11 +1113,24 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     if (!hasValidContent) return;
 
     const timer = setTimeout(() => {
-      handleSave(true);
+      void (async () => {
+        const savedId = await handleSave(true);
+        scheduleSavedTodoAlarm(savedId);
+      })();
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [isDirty, handleSave, title, description, selectedItems.length, todoShortcut, todoHotkey, isFavoriteState]);
+  }, [
+    isDirty,
+    handleSave,
+    title,
+    description,
+    selectedItems.length,
+    todoShortcut,
+    todoHotkey,
+    isFavoriteState,
+    scheduleSavedTodoAlarm,
+  ]);
 
   // Set global modal open state
   useEffect(() => {
@@ -1273,7 +1337,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     }
   }, [focusedIndex, activeSlot]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const currentActiveId = activeTodoId || liveTodoId || initialItem?.todo_id || initialItem?.id;
     const initialItemChanged = initialItem !== lastInitialItemRef.current;
     const itemsChanged = itemsSignature !== lastItemsSignatureRef.current;
@@ -1336,6 +1400,12 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         (Array.isArray(configIds) && configIds.length > 0) ||
         (Array.isArray(item.references) && item.references.length > 0);
       const isCustom = !hasAttachedFiles;
+      const itemScheduleTime =
+        typeof item.scheduleTime === 'number' && Number.isFinite(item.scheduleTime)
+          ? item.scheduleTime
+          : item.event_deadline
+            ? new Date(String(item.event_deadline).replace(' ', 'T')).getTime()
+            : NaN;
 
       let cat = (item.category || item.snippet_category || 'note').toLowerCase();
 
@@ -1376,11 +1446,25 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         } else {
           setSelectedTags([]);
         }
-        setTodoShortcut(isEditMode ? item.shortcut || '' : '');
         const todoId = item.todo_id || item.id;
+        const itemWsId = item.workspaceId || item.workspace_id || null;
+        const itemFId = item.folderId || item.folder_id || null;
+        const compoundId = getItemCompoundId({
+          id: todoId,
+          workspace_id: itemWsId,
+          folder_id: itemFId,
+          snippet: { id: todoId, category: 'todo' },
+          _kind: 'todo',
+        });
+        const resolvedShortcut =
+          (shortcutsMap && (shortcutsMap[compoundId] || shortcutsMap[todoId] || shortcutsMap[`todo_${todoId}`])) ||
+          item.shortcut ||
+          '';
+
+        setTodoShortcut(isEditMode ? resolvedShortcut : '');
         if (todoId && isEditMode) {
-          setIsFavoriteState(isFavorite(getItemCompoundId({ id: todoId, _kind: 'todo' })));
-          setTodoHotkey(hotkeysMap[todoId] || '');
+          setIsFavoriteState(isFavorite(compoundId) || isFavorite(getItemCompoundId({ id: todoId, _kind: 'todo' })));
+          setTodoHotkey(hotkeysMap[compoundId] || hotkeysMap[todoId] || '');
         } else {
           setIsFavoriteState(false);
           setTodoHotkey('');
@@ -1388,8 +1472,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
         if (item.is_anytime || (item.event_deadline && String(item.event_deadline).substring(0, 4) >= '2035')) {
           setIsAnytime(true);
-        } else if (item.event_deadline) {
-          const d = new Date(item.event_deadline);
+        } else if (Number.isFinite(itemScheduleTime)) {
+          const d = new Date(itemScheduleTime);
           setDate(format(d, 'yyyy-MM-dd'));
           setTime(format(d, 'HH:mm'));
           setIsAnytime(false);
@@ -1424,12 +1508,21 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         const referenceIds = Array.isArray(item.references) ? item.references.map((r: any) => r.id) : [];
         const allReferenceIds = [...configIds, ...referenceIds];
 
+        const stripTodoReferencePrefix = (id: unknown) =>
+          String(id).replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
+        const isSameTodoReference = (availableId: unknown, savedId: unknown) => {
+          const availableIdStr = String(availableId);
+          const savedIdStr = String(savedId);
+          return (
+            availableIdStr === savedIdStr ||
+            stripTodoReferencePrefix(availableIdStr) === stripTodoReferencePrefix(savedIdStr)
+          );
+        };
+
         if (allReferenceIds.length > 0) {
           matchedItems = (items || []).filter(availableItem =>
             allReferenceIds.some(cid => {
-              const availIdStr = String(availableItem.id);
-              const cidStr = String(cid);
-              return availIdStr === cidStr;
+              return isSameTodoReference(availableItem.id, cid);
             }),
           );
         }
@@ -1439,8 +1532,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           if (singleId) {
             const singleIdStr = String(singleId);
             const matched = (items || []).find(availableItem => {
-              const availIdStr = String(availableItem.id);
-              return availIdStr === singleIdStr;
+              return isSameTodoReference(availableItem.id, singleIdStr);
             });
             if (matched) {
               matchedItems = [matched];
@@ -1485,11 +1577,11 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
               ? 'recurring'
               : 'one-time',
           recurringCycle: (item as any).recurring_cycle ? String((item as any).recurring_cycle).toLowerCase() : 'daily',
-          time: (item as any).event_deadline
-            ? format(new Date(String((item as any).event_deadline)), 'HH:mm')
+          time: Number.isFinite(itemScheduleTime)
+            ? format(new Date(itemScheduleTime), 'HH:mm')
             : format(new Date(), 'HH:mm'),
-          date: (item as any).event_deadline
-            ? format(new Date(String((item as any).event_deadline)), 'yyyy-MM-dd')
+          date: Number.isFinite(itemScheduleTime)
+            ? format(new Date(itemScheduleTime), 'yyyy-MM-dd')
             : format(new Date(), 'yyyy-MM-dd'),
           isAnytime: !!(
             (item as any).is_anytime ||
@@ -1809,20 +1901,31 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           .catch(() => {});
 
         if (shouldCreateMore) {
-          resetEditor();
-          const now = new Date();
-          setTime(format(now, 'HH:mm'));
-          setDate(format(now, 'yyyy-MM-dd'));
-          setIsAnytime(false);
+          setTitle('');
+          setDescription('');
+          setTodoShortcut('');
           setTodoHotkey('');
           setSelectedItem(null);
           setSelectedItems([]);
           setSelectedTags([]);
           setEditorTagIds([]);
-          setTodoShortcut('');
           setShortcutError(null);
           setIsFavoriteState(false);
           setActiveSlot('title');
+          const now = new Date();
+          setTime(format(now, 'HH:mm'));
+          setDate(format(now, 'yyyy-MM-dd'));
+          setIsAnytime(false);
+          setIsTimeEditing(false);
+
+          lastInitialItemRef.current = null;
+          lastActiveTodoIdRef.current = null;
+          lastIsEditModeRef.current = false;
+
+          useUIStore.getState().setTodoCreatePrefill(null);
+          const currentProps = useUIStore.getState().activeEditor?.props || {};
+          const cleanProps = { ...currentProps, item: null, snippet: null, prefill: null };
+          useUIStore.getState().openEditor({ type: 'todo', id: 'new', props: cleanProps });
           titleInputRef.current?.focus();
           setExplicitSaveStatus('saved');
           isSavingRef.current = false;
@@ -2251,6 +2354,14 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     return unregister;
   }, [isTimeEditing, isEditing, activeSlot, onClose]);
 
+  const toolbarInitialSnippet = useMemo(
+    () => ({
+      tagIds: editorTagIds,
+      category: 'todo',
+    }),
+    [editorTagIds],
+  );
+
   return (
     <>
       <style>{hideNativeIconsStyle}</style>
@@ -2264,6 +2375,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         isFocusMode={isFocusMode}
         onSave={async () => {
           const result = await handleSave();
+          scheduleSavedTodoAlarm(result);
           return true;
         }}
         onDiscard={() => {}}
@@ -2272,7 +2384,33 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           onClose: () => setPendingDeleteId(null),
           onConfirm: async () => {
             if (pendingDeleteId) {
-              onDeleteTodo?.(pendingDeleteId);
+              const deletedId = pendingDeleteId;
+              const currentActiveId = liveTodoId || initialItem?.todo_id || initialItem?.id || activeTodoId;
+              const isDeletingCurrent =
+                String(deletedId) === String(currentActiveId) ||
+                String(deletedId) === String(initialItem?.id) ||
+                String(deletedId) === String(initialItem?.todo_id);
+
+              await onDeleteTodo?.(deletedId);
+
+              if (isDeletingCurrent) {
+                resetEditor();
+                const now = new Date();
+                setTime(format(now, 'HH:mm'));
+                setDate(format(now, 'yyyy-MM-dd'));
+                setIsAnytime(false);
+                setTodoHotkey('');
+                setSelectedItem(null);
+                setSelectedItems([]);
+                setSelectedTags([]);
+                setEditorTagIds([]);
+                setTodoShortcut('');
+                setShortcutError(null);
+                setIsFavoriteState(false);
+                setActiveSlot('title');
+                useUIStore.getState().setTodoCreatePrefill(null);
+                useUIStore.getState().openEditor({ type: 'todo', id: 'new' });
+              }
             }
             setPendingDeleteId(null);
           },
@@ -2285,7 +2423,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         headerActions={
           <SharedPropertiesToolbar
             key={liveTodoId || 'new-todo'}
-            initialSnippet={{ tags: selectedTags, tagIds: editorTagIds, category: 'todo' }}
+            initialSnippet={toolbarInitialSnippet}
             compoundId={
               liveTodoId
                 ? getItemCompoundId({
@@ -2304,12 +2442,16 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
               if (props.pendingHotkey !== undefined) setTodoHotkey(props.pendingHotkey);
               if (props.pendingShortcut !== undefined) setTodoShortcut(props.pendingShortcut);
               if (props.workspaceId !== undefined) setWorkspaceId(props.workspaceId);
-              if (props.folderId !== undefined) setFolderId(props.folderId);
+              if (props.folderId !== undefined) setFolderId(props.folderId ?? null);
               if (props.selectedTags !== undefined) {
-                setSelectedTags(props.selectedTags);
                 const newTIds = props.selectedTags.map(t => t.id);
-                setEditorTagIds(newTIds);
-                void handleSave(true, { tagIds: newTIds });
+                const currentTIds = [...(editorTagIds || [])].sort().join(',');
+                const nextTIds = [...newTIds].sort().join(',');
+                if (currentTIds !== nextTIds) {
+                  setSelectedTags(props.selectedTags);
+                  setEditorTagIds(newTIds);
+                  void handleSave(true, { tagIds: newTIds });
+                }
               }
             }}
             layout="horizontal"
@@ -2473,8 +2615,10 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                       setTitleError(true);
                     }
                   }}
-                  onTitleEnter={shiftKey => {
-                    if (shiftKey) {
+                  onTitleEnter={(shiftKey, e) => {
+                    if (e?.ctrlKey || e?.metaKey) {
+                      handleCreate({ overrideCreateMore: true });
+                    } else if (shiftKey) {
                       handleCopyTitleToShortcut();
                     } else {
                       if (!title.trim()) {
@@ -2814,7 +2958,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                       label: 'Tab Sessions',
                                       items: categoriesData.tabgroup,
                                       icon: (
-                                        <FaLayerGroup size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <SessionGridIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                       ),
                                     },
                                     {

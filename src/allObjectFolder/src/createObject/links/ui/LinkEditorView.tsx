@@ -11,8 +11,7 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reorder } from 'framer-motion';
-import {
-  FaPlus,
+import { FaPlus,
   FaTrash,
   FaChevronDown,
   FaChevronRight,
@@ -39,9 +38,7 @@ import {
   FaRobot,
   FaList,
   FaCopy,
-  FaDirections,
-  FaLayerGroup,
-} from 'react-icons/fa';
+  FaDirections } from 'react-icons/fa';
 import { FiStar, FiChevronLeft, FiChevronRight, FiTag, FiCopy } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { formatDistanceToNow } from 'date-fns';
@@ -66,6 +63,8 @@ import type { SnippetRecord } from '../../../../../allObjectFolder/src/createObj
 import { nowUtc } from '../../../../../shared-components/utils';
 import { deleteLink, updateLink } from '../linkData';
 import { createTag } from '../../tags/tagData';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 interface LinkEditorViewProps {
   isOpen: boolean;
@@ -131,14 +130,17 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       if (!initialLinkProp) {
 
       }
-      setTimeout(() => {
+      const focusInput = () => {
         const input = titleInputRef.current;
         if (input) {
           input.focus();
           const length = input.value.length;
           input.setSelectionRange(length, length);
         }
-      }, 150);
+      };
+      // Immediate and fallback timeouts to guarantee DOM focus inside modal on open/mount
+      setTimeout(focusInput, 50);
+      setTimeout(focusInput, 150);
     }
   }, [isOpen, initialLinkProp, localLinkOverride]);
 
@@ -403,7 +405,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   // Handle prefill data (e.g. from history/bookmarks/session)
   useEffect(() => {
-    if (isOpen && !isEditMode && prefill && !hasInitializedPrefill.current) {
+    if (isOpen && !isEditMode && prefill && !hasInitializedPrefill.current && !isForceCreateNew) {
       setTitle(prefill.key || '');
       const prefillId = prefill.id || (prefill as any).snippet_id;
       if (prefillId && !prefill.searchtags) {
@@ -435,7 +437,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     } else if (!isOpen) {
       hasInitializedPrefill.current = false;
     }
-  }, [isOpen, isEditMode, prefill]);
+  }, [isOpen, isEditMode, prefill, isForceCreateNew]);
 
   const [footerStatus, setFooterStatus] = useState<{ type: 'idle' | 'saving' | 'success' | 'error'; message: string }>({
     type: 'idle',
@@ -842,9 +844,17 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     try {
       await deleteLink(id);
       if (id === activeLinkId) {
+        useUIStore.getState().openEditor({ type: 'link', id: 'new' });
+        setIsForceCreateNew(true);
         resetEditor();
         setLocalLinkOverride(null);
-        setIsForceCreateNew(true);
+        hasInitializedPrefill.current = true;
+        hasSyncedInitialDataRef.current = false;
+        
+        setCustomLinkUrl('');
+        setCustomLinkName('');
+        setIsCustomLinkFormOpen(false);
+        setIsLeftCustomLinkFormOpen(false);
       }
     } catch (error) {
       console.error('[LinkEditorView] Failed to delete link item:', error);
@@ -1726,22 +1736,33 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   ]);
 
   const handleCreateNew = useCallback(async () => {
-    // Save current link list before creating new
-    await executeSave(false);
+    // 1. Save current link in background without blocking instant UI reset
+    void executeSave(false);
 
+    const currentProps = useUIStore.getState().activeEditor?.props || {};
+    const cleanProps = { ...currentProps, category: 'link', snippet: null, prefill: null, item: null, link: null };
+    useUIStore.getState().openEditor({ type: 'link', id: 'new', props: cleanProps });
+
+    // 3. Synchronously transition state to Create mode
     setIsForceCreateNew(true);
     resetEditor();
     setLocalLinkOverride(null);
-    hasInitializedPrefill.current = false;
+    hasInitializedPrefill.current = true;
     hasSyncedInitialDataRef.current = false;
 
     setCustomLinkUrl('');
     setCustomLinkName('');
     setIsCustomLinkFormOpen(false);
     setIsLeftCustomLinkFormOpen(false);
-    if (titleInputRef.current) {
-      titleInputRef.current.focus();
-    }
+
+    // 4. Immediately focus title input for single-press shortcut readiness
+    setTimeout(() => {
+      if (titleInputRef.current) {
+        titleInputRef.current.focus();
+        const length = titleInputRef.current.value.length;
+        titleInputRef.current.setSelectionRange(length, length);
+      }
+    }, 0);
   }, [executeSave, resetEditor]);
 
   const handleCloseAttempt = useCallback(async () => {
@@ -1758,22 +1779,45 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     const handler = () => {
-      if (isLeftCustomLinkFormOpen || isCustomLinkFormOpen || document.getElementById('hotkey-assignment-popup')) {
+      if (document.getElementById('hotkey-assignment-popup')) {
         return true; // we just let those handle it or block it
+      }
+      if (isCustomLinkFormOpen) {
+        setIsCustomLinkFormOpen(false);
+        setCustomLinkUrl('');
+        setCustomLinkName('');
+        if (titleInputRef.current) {
+          titleInputRef.current.focus();
+        }
+        return true;
+      }
+      if (isLeftCustomLinkFormOpen) {
+        const hasInputText = customLinkUrl.trim().length > 0;
+        setIsLeftCustomLinkFormOpen(false);
+        setCustomLinkUrl('');
+        setCustomLinkName('');
+        if (titleInputRef.current) {
+          titleInputRef.current.focus();
+        }
+        if (!hasInputText) {
+          handleCloseAttempt();
+        }
+        return true;
       }
       handleCloseAttempt();
       return true; // We intercepted the escape, don't let uiStateManager forcefully close
     };
     useUIStore.getState().setEditorEscapeHandler(handler);
     return () => useUIStore.getState().setEditorEscapeHandler(null);
-  }, [isOpen, isLeftCustomLinkFormOpen, isCustomLinkFormOpen, handleCloseAttempt]);
+  }, [isOpen, isLeftCustomLinkFormOpen, isCustomLinkFormOpen, customLinkUrl, handleCloseAttempt]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!isOpen) return;
-      // Create New Shortcut strictly on Ctrl+Shift+Enter
-      else if (event.ctrlKey && event.shiftKey && event.key === 'Enter') {
+      const isCtrlShiftEnter = (event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'Enter';
+      if (isCtrlShiftEnter) {
         event.preventDefault();
+        event.stopPropagation();
         handleCreateNew();
       }
       // Location Picker Shortcut: Alt+Enter (Win) -> Option+Enter (Mac)
@@ -1795,8 +1839,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       }
     };
 
-    window.addEventListener('keydown', handleShortcut);
-    return () => window.removeEventListener('keydown', handleShortcut);
+    window.addEventListener('keydown', handleShortcut, true);
+    return () => window.removeEventListener('keydown', handleShortcut, true);
   }, [
     handleSave,
     saveStatus,
@@ -1936,6 +1980,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         lastSavedAt={lastSavedAt}
         activeId={activeLinkId}
         hideRightColumnBorder={true}
+        allowMainContentOverflow={isLeftCustomLinkFormOpen && linkSuggestions.length > 0}
         onSave={async () => {
           const saved = await handleSave(false);
           return typeof saved === 'boolean' ? saved : !!saved;
@@ -2054,7 +2099,10 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         containerMaxWidthClass="max-w-[940px]"
       >
         <div className="flex-1 flex flex-col min-h-0 relative">
-          <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2 overflow-hidden">
+          <div className={clsx(
+            "w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2",
+            (isLeftCustomLinkFormOpen && linkSuggestions.length > 0) ? "overflow-visible" : "overflow-hidden"
+          )}>
 
             {/* Title & Shortcut Fields */}
             <EditorTitleShortcutInput
@@ -2095,8 +2143,10 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 isShortcutManuallyEditedRef.current = true;
                 hasUserModifiedRef.current = true;
               } : undefined}
-              onTitleEnter={async (shiftKey) => {
-                if (shiftKey) {
+              onTitleEnter={async (shiftKey, e) => {
+                if (e?.ctrlKey || e?.metaKey) {
+                  handleCreateNew();
+                } else if (shiftKey) {
                   const val = title.toLowerCase().replace(/[^a-z0-9]/g, '');
                   setLinkShortcut(val);
                   isShortcutManuallyEditedRef.current = true;
@@ -2194,7 +2244,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 ref={listContainerRef}
                 className={clsx(
                   "flex-1 min-h-0 w-full relative",
-                  "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden",
+                  "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]",
                   (isLeftCustomLinkFormOpen && linkSuggestions.length > 0)
                     ? "overflow-visible"
                     : "overflow-y-auto custom-scrollbar"
@@ -2529,9 +2579,16 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                                   } else if (event.key === 'Escape') {
                                     event.preventDefault();
                                     event.stopPropagation();
+                                    const hasInputText = customLinkUrl.trim().length > 0;
                                     setIsLeftCustomLinkFormOpen(false);
                                     setCustomLinkUrl('');
                                     setCustomLinkName('');
+                                    if (titleInputRef.current) {
+                                      titleInputRef.current.focus();
+                                    }
+                                    if (!hasInputText) {
+                                      handleCloseAttempt();
+                                    }
                                   }
                                 }}
                                 placeholder="Add a link URL..."

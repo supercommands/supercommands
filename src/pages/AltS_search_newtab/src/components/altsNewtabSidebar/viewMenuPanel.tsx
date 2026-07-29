@@ -4,9 +4,11 @@ import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { FiZap, FiCommand, FiFolder, FiBriefcase, FiArrowLeft, FiChevronUp, FiChevronDown } from 'react-icons/fi';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import { useSpreadsheetStore } from '../../../../../shared-components/spreadsheetUi/logic/spreadsheetStateStore';
-import { FaCode, FaLink, FaRobot, FaLayerGroup } from 'react-icons/fa';
+import { FaCode, FaLink, FaRobot } from 'react-icons/fa';
 import { BsCalendarCheck } from 'react-icons/bs';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 import {
   getSidebarStorageData,
   setSidebarStorageData,
@@ -172,7 +174,7 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
         id: 'sessions',
         label: 'Tab Sessions',
         slash: '/se ',
-        icon: <FaLayerGroup size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+        icon: <SessionGridIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
       },
       {
         id: 'notes',

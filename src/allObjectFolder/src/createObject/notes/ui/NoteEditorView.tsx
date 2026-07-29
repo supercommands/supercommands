@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { EditorContainer } from '../../../../../shared-components/editorContainer/EditorContainer';
@@ -8,14 +8,20 @@ import TextEditor from '../../../../../shared-components/TextEditor';
 import { SharedPropertiesToolbar } from '../../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
 import DeleteConfirmation from '../../../../../shared-components/modals/deleteDialog';
 import UnsavedChangesDialog from '../../../../../shared-components/modals/unsavedChangesDialog';
-import { FaTimes, FaPen, FaTrash } from 'react-icons/fa';
-import { FiSearch, FiBookmark, FiChevronRight, FiChevronDown } from 'react-icons/fi';
+import { FaTimes, FaPen, FaTrash, FaStar, FaFolder, FaKeyboard, FaTag } from 'react-icons/fa';
+import { FiSearch, FiBookmark, FiChevronRight, FiChevronLeft, FiChevronDown, FiTrash2, FiStar, FiExternalLink } from 'react-icons/fi';
 import { AutoSaveIndicator } from '../../../../../shared-components/autoSaveEngine/autoSave';
 import type { SharedProperties } from '../../../../../shared-components/editorToolbar/types';
 import { createTodo } from '../../todos/todoData';
-import { deleteNote } from '../noteData';
+import { updateNote, deleteNote } from '../noteData';
+import { createTag } from '../../tags/tagData';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import { getItemCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { useFavorites } from '../../../../../shared-components/favorites/favoriteHooks';
+import { saveUserHotkey, deleteUserHotkeyByReference } from '../../../../../shared-components/hotkeys/core/hotkeyDbData';
+import { buildHotkeyString } from '../../../../../shared-components/hotkeys/core/eventParser';
+import { saveShortcut, clearShortcut, useShortcutValidation } from '../../../../../shared-components/shortcuts';
+
 export interface NoteEditorViewProps {
   noteId?: string | null;
   onBack?: () => void;
@@ -26,6 +32,8 @@ export interface NoteEditorViewProps {
 
 export function NoteEditorView(props: NoteEditorViewProps) {
   const { isFullScreenMode = false } = props;
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
   const [isForceCreateNew, setIsForceCreateNew] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
@@ -34,13 +42,47 @@ export function NoteEditorView(props: NoteEditorViewProps) {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(props.noteId || null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSavedNotesExpanded, setIsSavedNotesExpanded] = useState(true);
-  const [isRightPanelHovered, setIsRightPanelHovered] = useState(false);
+  const [isRightPanelExpanded, setIsRightPanelExpanded] = useState(false);
   const [noteToDeleteId, setNoteToDeleteId] = useState<string | null>(null);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [pendingLoadNoteId, setPendingLoadNoteId] = useState<string | null>(null);
   const [isUnsavedLoadDialogOpen, setIsUnsavedLoadDialogOpen] = useState(false);
 
+  // Inline edit & hotkey states
+  const [editingCell, setEditingCell] = useState<{ itemId: string; field: 'title' | 'shortcut' } | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+  const [recordingHotkeyId, setRecordingHotkeyId] = useState<string | null>(null);
+  const [recordingCombo, setRecordingCombo] = useState<string>('');
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [tagEditValue, setTagEditValue] = useState<string>('');
+
   const notes = useDbStore(state => state.notes);
+  const tags = useDbStore(state => state.tags);
+  const folders = useDbStore(state => state.folders);
+  const workspaces = useDbStore(state => state.workspaces);
+  const shortcutsMap = useDbStore(state => state.shortcutsMap);
+  const hotkeysMap = useDbStore(state => state.hotkeysMap);
+
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const { validateShortcut } = useShortcutValidation();
+
+  const tagNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    tags.forEach(t => { map[t.id] = t.name; });
+    return map;
+  }, [tags]);
+
+  const folderNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    folders.forEach(f => { map[f.id] = f.folderName; });
+    return map;
+  }, [folders]);
+
+  const workspaceNamesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    workspaces.forEach(w => { map[w.id] = w.workspaceName; });
+    return map;
+  }, [workspaces]);
 
   const filteredNotes = React.useMemo(() => {
     let list = [...notes];
@@ -100,9 +142,8 @@ export function NoteEditorView(props: NoteEditorViewProps) {
     if (!noteToDeleteId) return;
     try {
       await deleteNote(noteToDeleteId);
-      if (noteToDeleteId === selectedNoteId) {
-        setIsForceCreateNew(true);
-        state.resetEditor();
+      if (noteToDeleteId === selectedNoteId || noteToDeleteId === state.activeNoteId) {
+        state.setIsNoteDeleted(true);
       }
     } catch (err) {
       console.error('Failed to delete note from list', err);
@@ -111,6 +152,73 @@ export function NoteEditorView(props: NoteEditorViewProps) {
       setNoteToDeleteId(null);
     }
   }, [noteToDeleteId, selectedNoteId, state]);
+
+  const getNoteCompoundId = useCallback((note: any) => {
+    return getItemCompoundId({
+      id: note.id,
+      workspace_id: note.workspaceId || undefined,
+      folder_id: note.folderId || undefined,
+      snippet: {
+        id: note.id,
+        category: 'note',
+      },
+    });
+  }, []);
+
+  const handleSaveEdit = useCallback(async (noteId: string, field: 'title' | 'shortcut') => {
+    if (field === 'title') {
+      await updateNote(noteId, { title: editValue });
+    } else if (field === 'shortcut') {
+      const noteItem = notes.find(n => n.id === noteId);
+      const compound = noteItem ? getNoteCompoundId(noteItem) : noteId;
+      if (editValue.trim()) {
+        const res = await validateShortcut(editValue.trim(), noteId);
+        if (!res.isValid) {
+          alert(res.errorMessage || 'Invalid shortcut');
+          setEditingCell(null);
+          return;
+        }
+        await saveShortcut(noteId, compound, editValue.trim(), noteItem?.title || 'Untitled Note', 'note');
+      } else {
+        await clearShortcut(noteId, compound, 'note');
+      }
+    }
+    setEditingCell(null);
+  }, [editValue, notes, getNoteCompoundId, validateShortcut]);
+
+  const handleSaveTagsEdit = useCallback(async (noteId: string) => {
+    const tagNamesArr = tagEditValue.split(',').map(s => s.trim()).filter(Boolean);
+    const targetNote = notes.find(n => n.id === noteId);
+    const wsId = targetNote?.workspaceId || state.workspaceId || 'default';
+    const tagIdsToSave: string[] = [];
+    for (const name of tagNamesArr) {
+      const existing = tags.find(t => t.name.toLowerCase() === name.toLowerCase());
+      if (existing) {
+        tagIdsToSave.push(existing.id);
+      } else {
+        try {
+          const newTag = await createTag(name, wsId);
+          tagIdsToSave.push(newTag.id);
+        } catch (e) {
+          console.error('Failed creating tag inline', e);
+        }
+      }
+    }
+    await updateNote(noteId, { tagIds: tagIdsToSave });
+    setEditingTagId(null);
+  }, [tagEditValue, tags, notes, state.workspaceId]);
+
+  const handleOpenerClick = useCallback((noteId: string) => {
+    const chromeAny = (window as any)?.chrome;
+    const baseUrl = chromeAny?.runtime?.getURL ? chromeAny.runtime.getURL('AltS_search_newtab/index.html') : '/AltS_search_newtab/index.html';
+    const url = `${baseUrl}?open_note=true&noteid=${encodeURIComponent(noteId)}`;
+    if (chromeAny?.tabs?.create) {
+      chromeAny.tabs.create({ url, active: true });
+    } else {
+      window.open(url, '_blank', 'noopener');
+    }
+  }, []);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const toolbarIdRef = React.useRef(`note-toolbar-${Math.random().toString(36).slice(2, 10)}`);
   const defaultToolbarNameRef = React.useRef(state.noteTitle);
@@ -167,6 +275,10 @@ export function NoteEditorView(props: NoteEditorViewProps) {
       await state.handleSave();
     }
 
+    const currentProps = useUIStore.getState().activeEditor?.props || {};
+    const cleanProps = { ...currentProps, snippet: null, prefill: null, item: null, initialDraftKey: null, initialDraftContent: null };
+    useUIStore.getState().openEditor({ type: 'note', id: 'new', props: cleanProps });
+
     setIsForceCreateNew(true);
     setShowTooltip(false);
     state.resetEditor();
@@ -194,7 +306,7 @@ export function NoteEditorView(props: NoteEditorViewProps) {
 
   const onDeleteProp = state.activeNoteId ? handleDeleteClick : undefined;
 
-  if (state.activeNoteId && state.liveNote === undefined && !state.isNoteDeleted) {
+  if (state.activeNoteId && state.liveNote === undefined && !state.isNoteDeleted && !props.initialDraftKey && !props.initialDraftContent) {
     return (
       <div className="flex items-center justify-center h-full min-h-screen bg-[var(--color-editorBg)] text-neutral-900 dark:text-white">
         <div className="flex flex-col items-center gap-4">
@@ -209,25 +321,28 @@ export function NoteEditorView(props: NoteEditorViewProps) {
     <>
       <EditorContainer
         ref={containerRef}
-        className={`w-full h-full flex flex-col gap-1 text-left text-neutral-900 dark:text-white bg-transparent ${isFullScreenMode || isEmbedded ? '' : 'px-6 md:px-12 lg:px-24 py-4'
+        className={`w-full h-full flex flex-col gap-1 text-left text-neutral-900 dark:text-white bg-transparent ${isFullScreenMode || isEmbedded ? '' : 'px-6 md:px-10 lg:px-14 py-4'
           }`}
         innerClassName={`flex flex-col relative bg-[var(--color-editorBg)] ${isFullScreenMode
           ? 'w-full rounded-none h-full max-h-none'
-          : 'w-[calc(100%-100px)] max-w-[1200px] mx-auto rounded-xl h-[860px] max-h-[90vh] overflow-hidden'
+          : 'w-[calc(100%-60px)] max-w-[1440px] mx-auto rounded-xl h-[860px] max-h-[90vh] overflow-hidden transition-all duration-300'
           } ${isFocusMode || isFullScreenMode ? 'border-none' : 'border border-black/5 dark:border-white/10'
           }`}
       >
         {state.isNoteDeleted ? (
           <div className="flex-1 min-h-0 flex items-center justify-center px-6 py-10">
-            <div className="max-w-md w-full rounded-2xl border border-red-200/70 dark:border-red-900/60 bg-red-50/70 dark:bg-red-950/30 p-6 text-center shadow-sm">
-              <div className="text-lg font-semibold text-red-700 dark:text-red-300">This note was deleted in another tab.</div>
-              <div className="mt-2 text-sm text-red-600/90 dark:text-red-200/80">
+            <div className="max-w-md w-full rounded-2xl border border-neutral-200 dark:border-white/10 bg-white/90 dark:bg-[#18181b]/90 p-7 text-center shadow-2xl backdrop-blur-xl flex flex-col items-center">
+              <div className="w-12 h-12 rounded-full bg-red-500/10 dark:bg-red-500/15 text-red-500 dark:text-red-400 flex items-center justify-center mb-4 border border-red-500/20">
+                <FiTrash2 size={20} />
+              </div>
+              <div className="text-lg font-semibold text-neutral-900 dark:text-white">This note was deleted in another tab.</div>
+              <div className="mt-1.5 text-sm text-neutral-600 dark:text-neutral-400 max-w-xs">
                 The editor is disabled to avoid saving stale content.
               </div>
               <button
                 type="button"
                 onClick={state.handleClose}
-                className="mt-5 inline-flex items-center justify-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+                className="mt-6 inline-flex items-center justify-center rounded-xl bg-neutral-900 dark:bg-neutral-800 hover:bg-neutral-800 dark:hover:bg-neutral-700 border border-transparent dark:border-white/10 px-6 py-2.5 text-sm font-medium text-white transition-all cursor-pointer shadow-md active:scale-95"
               >
                 Back
               </button>
@@ -239,7 +354,7 @@ export function NoteEditorView(props: NoteEditorViewProps) {
               {isFullScreenMode && <div className="h-20 flex-shrink-0" />}
 
               {/* Main Workspace Left Side */}
-              <div className="flex-grow flex flex-col min-h-0 relative">
+              <div className="flex-grow flex flex-col min-h-0 min-w-0 relative transition-all duration-300">
                 <div className="absolute top-2.5 right-2 md:top-2.5 md:right-2 z-50 flex items-center gap-3">
                   <div className="transition-opacity duration-300">
                     <AutoSaveIndicator
@@ -360,101 +475,378 @@ export function NoteEditorView(props: NoteEditorViewProps) {
                 </div>
               </div>
 
-              {/* Right Sidebar Column */}
+              {/* Right Sidebar Column with Collapsible / Expandable Panel (Hover to expand, leave to collapse) */}
               {!isFullScreenMode && (
                 <div
-                  onMouseEnter={() => setIsRightPanelHovered(true)}
-                  onMouseLeave={() => setIsRightPanelHovered(false)}
-                  className="w-[260px] h-full flex flex-col border-l border-black/10 dark:border-white/10 pl-6 py-6 pr-4 overflow-hidden shrink-0 transition-all duration-300"
+                  onMouseEnter={() => setIsRightPanelExpanded(true)}
+                  onMouseLeave={() => setIsRightPanelExpanded(false)}
+                  className={`relative h-full flex flex-col border-l border-black/10 dark:border-white/10 overflow-visible shrink-0 transition-all duration-300 ${isRightPanelExpanded ? 'w-[680px]' : 'w-[260px]'
+                    }`}
                 >
-                  {!isRightPanelHovered ? (
-                    // Default State (Not Hovered): Only show Saved notes button box
-                    <div className="flex flex-col gap-4">
-                      {/* Saved notes card */}
-                      <div className="flex items-center justify-between px-4 py-2.5 rounded-2xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 flex-shrink-0 cursor-pointer">
-                        <div className="flex items-center gap-3">
-                          <FiSearch className="text-neutral-500" size={16} />
-                          <span className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
-                            Saved notes
-                          </span>
-                          <span className="text-[10px] font-bold text-neutral-500 bg-black/10 dark:bg-white/10 px-2 py-0.5 rounded-full">
-                            {filteredNotes.length}
-                          </span>
-                        </div>
-                        <FiChevronRight className="text-neutral-500" size={16} />
-                      </div>
-                    </div>
-                  ) : (
-                    // Hovered State
-                    <div className="flex flex-col flex-grow min-h-0 animate-in fade-in duration-200">
-                      {/* Search notes input at the top */}
-                      <div className="relative mb-4 flex-shrink-0">
-                        <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" size={14} />
+                  <div className="w-full h-full flex flex-col pl-4 py-4 pr-3 overflow-hidden">
+                    {/* Header: Always show Search bar + item count badge pill at the far right corner */}
+                    <div className="relative mb-3 flex-shrink-0 flex items-center justify-between gap-2">
+                      <div className={`relative transition-all duration-300 ${isRightPanelExpanded ? 'w-[240px]' : 'flex-1 min-w-0'}`}>
+                        <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" size={13} />
                         <input
                           type="text"
                           placeholder="Search notes..."
                           value={searchQuery}
                           onChange={e => setSearchQuery(e.target.value)}
-                          autoFocus
-                          className="w-full pl-9 pr-4 py-1.5 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-neutral-800 dark:text-neutral-200 text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors placeholder-neutral-400 dark:placeholder-neutral-500"
+                          className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-neutral-800 dark:text-neutral-200 text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors placeholder-neutral-400 dark:placeholder-neutral-500"
                         />
                       </div>
 
-                      {/* Notes List Content (Compact spacing) */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-1 pr-1">
+                      {/* Item Count Badge Pill on the far right corner */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 bg-black/10 dark:bg-white/10 px-2.5 py-0.5 rounded-full border border-black/5 dark:border-white/10">
+                          {filteredNotes.length}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Notes List Content - rendered in both collapsed mode (Title + Content) and expanded mode (Full Table) */}
+                    {isRightPanelExpanded ? (
+                      <div className="flex-1 min-h-0 relative flex flex-col rounded-xl overflow-hidden">
+                        {/* Sticky Table Header */}
+                        <div className="flex items-center justify-between px-4 py-2.5 border-b border-black/5 dark:border-white/10 text-xs font-semibold text-neutral-700 dark:text-neutral-300 bg-black/5 dark:bg-white/5 backdrop-blur-md shrink-0">
+                          <div className="w-[110px] shrink-0 font-semibold text-neutral-700 dark:text-neutral-300 tracking-tight">Command short</div>
+                          <div className="w-[110px] shrink-0 font-semibold text-neutral-700 dark:text-neutral-300 tracking-tight">Title</div>
+                          <div className="w-[130px] shrink-0 px-2 font-semibold text-neutral-700 dark:text-neutral-300 tracking-tight">Content</div>
+                          <div className="w-[70px] shrink-0 font-semibold text-neutral-700 dark:text-neutral-300 tracking-tight text-left">Hotkey</div>
+                          <div className="w-[60px] shrink-0 font-semibold text-neutral-700 dark:text-neutral-300 tracking-tight text-left">Tag</div>
+                          <div className="w-[60px] shrink-0 font-semibold text-neutral-700 dark:text-neutral-300 tracking-tight text-left">Folder</div>
+                          <div className="w-[50px] shrink-0 font-semibold text-neutral-700 dark:text-neutral-300 tracking-tight text-right pr-2">Actions</div>
+                        </div>
+
+                        {/* Table Body / Rows */}
+                        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar divide-y divide-black/5 dark:divide-white/10">
+                          {filteredNotes.length === 0 ? (
+                            <div className="text-xs text-neutral-500 dark:text-neutral-400 text-center py-8">
+                              No notes found
+                            </div>
+                          ) : (
+                            filteredNotes.map(note => {
+                              const isCurrent = note.id === state.activeNoteId;
+                              const plainText = note.body ? extractTextFromHTML(note.body).substring(0, 80) : '';
+                              const compoundId = getNoteCompoundId(note);
+                              const sc = shortcutsMap[compoundId] || shortcutsMap[note.id] || ((note as any).shortcut || '');
+                              const hotkeyCombo = hotkeysMap[compoundId] || '';
+
+                              const wsName = note.workspaceId ? (workspaceNamesMap[note.workspaceId] || '') : '';
+                              const folderName = note.folderId ? (folderNamesMap[note.folderId] || '') : '';
+                              const folderDisplayName = folderName || wsName;
+
+                              const noteTags = note.tagIds
+                                ? note.tagIds.map((tid: string) => tagNamesMap[tid] || '').filter(Boolean)
+                                : [];
+                              const tagText = noteTags.join(', ');
+
+                              return (
+                                <div
+                                  key={note.id}
+                                  onClick={() => handleLoadNote(note.id)}
+                                  className={`py-2 px-4 transition-colors cursor-pointer flex items-center justify-between gap-2 text-xs ${isCurrent
+                                      ? 'bg-black/15 dark:bg-white/15 font-medium text-neutral-800 dark:text-neutral-200'
+                                      : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-neutral-600 dark:text-neutral-400'
+                                    }`}
+                                >
+                                  {/* Column 1: Command short badge with arrow indicator */}
+                                  <div className="w-[110px] shrink-0 flex items-center justify-between pr-2" onClick={(e) => e.stopPropagation()}>
+                                    {editingCell?.itemId === note.id && editingCell?.field === 'shortcut' ? (
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        value={editValue}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => {
+                                          const val = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                                          setEditValue(val);
+                                        }}
+                                        onBlur={() => handleSaveEdit(note.id, 'shortcut')}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') handleSaveEdit(note.id, 'shortcut');
+                                          else if (e.key === 'Escape') setEditingCell(null);
+                                        }}
+                                        className="px-1.5 py-0.5 w-[70px] rounded border border-blue-500 bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-[10px] outline-none shrink-0"
+                                      />
+                                    ) : (
+                                      <div className="flex items-center justify-between w-full">
+                                        {sc ? (
+                                          <>
+                                            <span
+                                              onDoubleClick={(e) => {
+                                                e.stopPropagation();
+                                                setEditingCell({ itemId: note.id, field: 'shortcut' });
+                                                setEditValue(sc);
+                                              }}
+                                              className="px-2 py-0.5 rounded-lg border border-black/10 dark:border-white/10 text-neutral-600 dark:text-neutral-400 bg-transparent text-xs font-medium block truncate max-w-[70px] text-center shrink-0 cursor-pointer"
+                                              title={`c ${sc} (Double click to edit)`}
+                                            >
+                                              c {sc}
+                                            </span>
+                                            <svg width="18" height="10" viewBox="0 0 24 10" fill="none" className="text-neutral-400 opacity-35 shrink-0">
+                                              <path d="M0 5H22M22 5L18 1M22 5L18 9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                          </>
+                                        ) : null}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Column 2: Title */}
+                                  <div
+                                    className="w-[110px] shrink-0 font-medium text-neutral-700 dark:text-neutral-300 truncate"
+                                    onDoubleClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingCell({ itemId: note.id, field: 'title' });
+                                      setEditValue(note.title || '');
+                                    }}
+                                  >
+                                    {editingCell?.itemId === note.id && editingCell?.field === 'title' ? (
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        value={editValue}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => setEditValue(e.target.value)}
+                                        onBlur={() => handleSaveEdit(note.id, 'title')}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') handleSaveEdit(note.id, 'title');
+                                          else if (e.key === 'Escape') setEditingCell(null);
+                                        }}
+                                        className="px-1.5 py-0.5 w-full rounded border border-blue-500 bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-semibold outline-none"
+                                      />
+                                    ) : (
+                                      <span title={note.title || 'Untitled Note'}>
+                                        {note.title || 'Untitled Note'}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Column 3: Content preview */}
+                                  <div className="w-[130px] shrink-0 px-2 truncate text-neutral-500 dark:text-neutral-400 text-xs">
+                                    {plainText.trim() || '—'}
+                                  </div>
+
+                                  {/* Column 4: Hotkey slot (fixed 70px width) */}
+                                  <div className="w-[70px] shrink-0 flex items-center justify-start text-[10px]" onClick={(e) => e.stopPropagation()}>
+                                    {recordingHotkeyId === note.id ? (
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        placeholder="Keys..."
+                                        value={recordingCombo}
+                                        readOnly
+                                        onClick={(e) => e.stopPropagation()}
+                                        onKeyDown={async (e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          if (e.key === 'Escape') {
+                                            setRecordingHotkeyId(null);
+                                            setRecordingCombo('');
+                                            return;
+                                          }
+                                          if (e.key === 'Backspace' || e.key === 'Delete') {
+                                            await deleteUserHotkeyByReference(compoundId);
+                                            setRecordingHotkeyId(null);
+                                            setRecordingCombo('');
+                                            return;
+                                          }
+                                          if (e.key === 'Enter') {
+                                            if (recordingCombo && recordingCombo !== 'Keys...') {
+                                              await saveUserHotkey(recordingCombo, compoundId, 'note');
+                                            } else {
+                                              await deleteUserHotkeyByReference(compoundId);
+                                            }
+                                            setRecordingHotkeyId(null);
+                                            setRecordingCombo('');
+                                            return;
+                                          }
+                                          const combo = buildHotkeyString(e.nativeEvent, isMac);
+                                          if (combo) setRecordingCombo(combo);
+                                        }}
+                                        onBlur={async () => {
+                                          if (recordingCombo && recordingCombo !== 'Keys...') {
+                                            await saveUserHotkey(recordingCombo, compoundId, 'note');
+                                          }
+                                          setRecordingHotkeyId(null);
+                                          setRecordingCombo('');
+                                        }}
+                                        className="px-1 py-0.5 w-[65px] rounded border border-blue-500 bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-[9px] outline-none"
+                                      />
+                                    ) : hotkeyCombo ? (
+                                      <div
+                                        onDoubleClick={(e) => {
+                                          e.stopPropagation();
+                                          setRecordingHotkeyId(note.id);
+                                          setRecordingCombo(hotkeyCombo);
+                                        }}
+                                        className="flex items-center gap-1 text-neutral-500 dark:text-neutral-400 shrink-0 cursor-pointer select-none max-w-[65px] truncate"
+                                        title="Double click to edit hotkey"
+                                      >
+                                        <FaKeyboard size={11} className="text-neutral-400 hover:text-blue-500 shrink-0" />
+                                        <span className="font-mono text-neutral-600 dark:text-neutral-300 truncate">{hotkeyCombo}</span>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setRecordingHotkeyId(note.id);
+                                          setRecordingCombo('Keys...');
+                                        }}
+                                        className="p-0.5 text-neutral-400 hover:text-blue-500 transition-colors shrink-0"
+                                        title="Assign Hotkey"
+                                      >
+                                        <FaKeyboard size={11} />
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Column 5: Tag slot (fixed 60px width) */}
+                                  <div className="w-[60px] shrink-0 flex items-center justify-start text-[10px]" onClick={(e) => e.stopPropagation()}>
+                                    {editingTagId === note.id ? (
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        placeholder="tag1, tag2"
+                                        value={tagEditValue}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => setTagEditValue(e.target.value)}
+                                        onBlur={() => handleSaveTagsEdit(note.id)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') handleSaveTagsEdit(note.id);
+                                          else if (e.key === 'Escape') setEditingTagId(null);
+                                        }}
+                                        className="px-1 py-0.5 w-[55px] rounded border border-blue-500 bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-[9px] outline-none"
+                                      />
+                                    ) : tagText ? (
+                                      <div
+                                        onDoubleClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingTagId(note.id);
+                                          setTagEditValue(tagText);
+                                        }}
+                                        className="flex items-center gap-1 text-neutral-500 dark:text-neutral-400 shrink-0 cursor-pointer select-none max-w-[55px] truncate"
+                                        title={`${tagText} (Double click to edit)`}
+                                      >
+                                        <FaTag size={10} className="text-neutral-400 hover:text-blue-500 shrink-0" />
+                                        <span className="truncate text-neutral-600 dark:text-neutral-300">{tagText}</span>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingTagId(note.id);
+                                          setTagEditValue('');
+                                        }}
+                                        className="p-0.5 text-neutral-400 hover:text-blue-500 transition-colors shrink-0"
+                                        title="Add Tags"
+                                      >
+                                        <FaTag size={10} />
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Column 6: Folder slot (fixed 60px width) */}
+                                  <div className="w-[60px] shrink-0 flex items-center justify-start text-[10px]" onClick={(e) => e.stopPropagation()}>
+                                    {folderDisplayName ? (
+                                      <div className="flex items-center gap-1 text-neutral-500 dark:text-neutral-400 shrink-0 max-w-[55px] truncate" title={folderDisplayName}>
+                                        <FaFolder size={10} className="text-neutral-400 shrink-0" />
+                                        <span className="truncate text-neutral-600 dark:text-neutral-300">{folderDisplayName}</span>
+                                      </div>
+                                    ) : null}
+                                  </div>
+
+                                  {/* Column 7: Actions slot (fixed 50px width: Star, Opener, Delete) */}
+                                  <div className="w-[50px] shrink-0 flex items-center justify-end gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
+                                    {/* Star */}
+                                    <button
+                                      type="button"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        await toggleFavorite(compoundId, 'note', note.title || 'Untitled Note');
+                                      }}
+                                      className="p-0.5 text-neutral-400 hover:text-yellow-500 transition-colors"
+                                      title="Favorite"
+                                    >
+                                      {isFavorite(compoundId) ? (
+                                        <FaStar className="text-yellow-500" size={11} />
+                                      ) : (
+                                        <FiStar size={11} />
+                                      )}
+                                    </button>
+
+                                    {/* Opener */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenerClick(note.id);
+                                      }}
+                                      className="text-neutral-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0"
+                                      title="Open note in new tab"
+                                    >
+                                      <FiExternalLink size={11} />
+                                    </button>
+
+                                    {/* Delete */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDeleteClickFromList(e, note.id)}
+                                      className="p-0.5 text-neutral-400 hover:text-red-500 transition-colors"
+                                      title="Delete note"
+                                    >
+                                      <FaTrash size={10} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      /* Default Collapsed Mode: Render clean list without card backgrounds */
+                      <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-1.5 pr-1 py-1">
                         {filteredNotes.length === 0 ? (
-                          <div className="text-xs text-neutral-500 dark:text-neutral-400 text-center py-8">
+                          <div className="text-xs text-neutral-500 dark:text-neutral-400 text-center py-6">
                             No notes found
                           </div>
                         ) : (
                           filteredNotes.map(note => {
                             const isCurrent = note.id === state.activeNoteId;
-                            const plainText = note.body ? extractTextFromHTML(note.body).substring(0, 80) : '';
+                            const plainText = note.body ? extractTextFromHTML(note.body).substring(0, 70) : '';
+
                             return (
                               <div
                                 key={note.id}
                                 onClick={() => handleLoadNote(note.id)}
-                                className={`group py-1.5 px-3 rounded-lg border transition-all cursor-pointer flex flex-col relative ${isCurrent
-                                    ? 'border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5'
-                                    : 'border-transparent bg-transparent hover:bg-black/5 dark:hover:bg-white/5'
+                                className={`py-1.5 px-2.5 rounded-lg transition-colors cursor-pointer flex flex-col gap-0.5 relative ${isCurrent
+                                    ? 'bg-black/10 dark:bg-white/10'
+                                    : 'hover:bg-black/5 dark:hover:bg-white/5'
                                   }`}
                               >
-                                <span className="text-xs font-medium text-neutral-800 dark:text-neutral-200 truncate pr-16">
+                                {/* Row 1: Title (Bold) */}
+                                <div className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 truncate">
                                   {note.title || 'Untitled Note'}
-                                </span>
-                                {plainText.trim() && (
-                                  <span className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate pr-16">
-                                    {plainText}
-                                  </span>
-                                )}
-
-                                {/* Hover actions */}
-                                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleLoadNote(note.id);
-                                    }}
-                                    className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-white transition-colors"
-                                    title="Edit Note"
-                                  >
-                                    <FaPen size={9} />
-                                  </button>
-                                  <button
-                                    onClick={(e) => handleDeleteClickFromList(e, note.id)}
-                                    className="p-1 rounded hover:bg-red-500/10 text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400 transition-colors"
-                                    title="Delete Note"
-                                  >
-                                    <FaTrash size={9} />
-                                  </button>
                                 </div>
+
+                                {/* Row 2: Description snippet */}
+                                {plainText.trim() && (
+                                  <div className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate">
+                                    {plainText}
+                                  </div>
+                                )}
                               </div>
                             );
                           })
                         )}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
             </div>

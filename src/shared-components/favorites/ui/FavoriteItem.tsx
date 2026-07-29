@@ -873,7 +873,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
               ? 'Automation'
               : 'Note';
   const isTabGroupCategory = categoryStr === 'session';
-  const isLinkCategory = categoryStr === 'link' || categoryStr === 'bulk_link';
+  const isLinkCategory = categoryStr === 'link';
   const normalizedCategory = String(categoryStr).toLowerCase();
   const displayName = snippet.key || snippet.label || snippet.title || snippet.name || 'Untitled Item';
 

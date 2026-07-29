@@ -22,6 +22,7 @@ import { getItemCompoundId, readAllShortcuts } from '../../../../shared-componen
 import { saveShortcut, clearShortcut } from '../../../../shared-components/shortcuts';
 import { useShortcutValidation } from '../../../../shared-components/shortcuts/hooks/useShortcutValidation';
 import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
+import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
 
 export interface UseLinkEditorParams {
   linkId?: string; // If provided, load this link
@@ -523,6 +524,15 @@ export function useLinkEditor(props: LinkEditorProps) {
       try {
         let savedLink: LinkRecord;
         const isCreating = !currentLinkId || isImportedCloudSnippetRef.current;
+        const previousCompoundId =
+          !isCreating && currentLinkId
+            ? getItemCompoundId({
+                id: currentLinkId,
+                workspace_id: lastSavedWorkspaceIdRef.current || null,
+                folder_id: lastSavedFolderIdRef.current || null,
+                snippet: { id: currentLinkId, category: 'link' },
+              })
+            : '';
 
         if (isCreating) {
           const input: CreateLinkInput = {
@@ -608,6 +618,23 @@ export function useLinkEditor(props: LinkEditorProps) {
           folder_id: fldObj?.folder_id || null,
           snippet: { id: savedLink.id, category: 'link' }
         });
+
+        if (previousCompoundId && targetCompoundId && previousCompoundId !== targetCompoundId) {
+          await migrateItemCompoundId(previousCompoundId, targetCompoundId, 'link');
+        }
+
+        if (currentLinkId && currentLinkId !== savedLink.id) {
+          const previousRawIdCompound = getItemCompoundId({
+            id: currentLinkId,
+            workspace_id: savedLink.workspaceId || null,
+            folder_id: savedLink.folderId || null,
+            snippet: { id: currentLinkId, category: 'link' },
+          });
+
+          if (previousRawIdCompound && previousRawIdCompound !== targetCompoundId) {
+            await migrateItemCompoundId(previousRawIdCompound, targetCompoundId, 'link');
+          }
+        }
 
         const finalShortcut = normalizeEditorShortcut(loopShortcut);
         if (finalShortcut) {

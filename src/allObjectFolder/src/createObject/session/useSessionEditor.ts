@@ -22,6 +22,7 @@ import { SessionOpenSettings, DEFAULT_SESSION_SETTINGS } from './sessionSettings
 import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { saveShortcut, clearShortcut, useShortcutValidation } from '../../../../shared-components/shortcuts';
 import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
+import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
 
 export interface UseSessionEditorParams {
   sessionId?: string;
@@ -358,7 +359,18 @@ export function useSessionEditor(props: UseSessionEditorParams) {
     const execute = async (): Promise<string | false> => {
       try {
         let savedRecord: SessionRecord;
-        if (!activeSessionIdRef.current) {
+        const previousSessionId = activeSessionIdRef.current;
+        const previousCompoundId =
+          previousSessionId
+            ? getItemCompoundId({
+                id: previousSessionId,
+                workspace_id: lastSavedWorkspaceIdRef.current || null,
+                folder_id: lastSavedFolderIdRef.current || null,
+                snippet: { id: previousSessionId, category: 'session' },
+              })
+            : '';
+
+        if (!previousSessionId) {
           // Create new
           const input: CreateSessionInput = {
             title: finalTitle,
@@ -400,7 +412,7 @@ export function useSessionEditor(props: UseSessionEditorParams) {
             expectedUpdatedAt: lastSavedUpdatedAtRef.current || undefined,
           };
 
-          const updated = await updateSession(activeSessionIdRef.current, input);
+          const updated = await updateSession(activeSessionIdRef.current!, input);
           savedRecord = updated;
           if (isMounted.current) {
             setWorkspaceId(updated.workspaceId);
@@ -440,6 +452,14 @@ export function useSessionEditor(props: UseSessionEditorParams) {
             folder_id: fldObj?.folder_id || null,
             snippet: { id: targetId, category: 'session' }
           });
+          
+          if (previousCompoundId && targetCompoundId && previousCompoundId !== targetCompoundId) {
+            await migrateItemCompoundId(previousCompoundId, targetCompoundId, 'session');
+          }
+
+          if (targetId && targetCompoundId && targetId !== targetCompoundId) {
+            await migrateItemCompoundId(targetId, targetCompoundId, 'session');
+          }
           
           const finalShortcut = loopShortcut.toLowerCase().replace(/[^a-z0-9]/g, '');
           if (finalShortcut) {

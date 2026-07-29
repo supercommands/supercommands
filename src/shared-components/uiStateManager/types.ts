@@ -27,6 +27,7 @@ export type EditorType = 'note' | 'automation' | 'agent' | 'snippet' | 'link' | 
 export interface ActiveEditorState {
   type: EditorType;
   id: string;
+  openInstanceId?: number;
   isNew?: boolean;
   readOnly?: boolean;
   props?: any;

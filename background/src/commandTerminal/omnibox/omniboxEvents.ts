@@ -29,7 +29,20 @@ import { handleSessionMessage } from '../../browserWindows/sessions';
 const SESSION_SUGGESTION_ID_PREFIX = 'id:';
 
 export function formatSuggestionDescription(title: string, category: string, prefix: string): string {
-  return `Open : <match>${title}</match> <dim>- ${category} - (c ${prefix})</dim>`;
+  let emoji = '🔍'; // fallback
+  switch (category) {
+    case 'Notes': emoji = '📄'; break;
+    case 'Links': emoji = '🔗'; break;
+    case 'System': emoji = '⚙\uFE0E'; break;
+    case 'Sessions': emoji = '⊞'; break; // Looks like the 2x2 grid
+    case 'Prompts': emoji = '💬'; break;
+    case 'Automations': emoji = '⚡'; break;
+    case 'Agents': emoji = '🤖'; break;
+    case 'Todos': emoji = '☑️'; break; // Checkbox
+    case 'Snippets': emoji = '</>'; break; // Text Expander icon
+    case 'Shortcuts': emoji = '⌘'; break; // Command icon
+  }
+  return `${emoji}  <match>${title}</match>  <dim>  ${category} - (c ${prefix})</dim>`;
 }
 
 const AI_COMMANDS: Record<string, string> = {

@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { format } from 'date-fns';
 import { useAppearance } from '@extension/ui';
 import { FaStar, FaFolder } from 'react-icons/fa';
@@ -687,7 +688,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/30 backdrop-blur-[2px] pointer-events-auto"
       onClick={e => {
@@ -1007,7 +1008,8 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

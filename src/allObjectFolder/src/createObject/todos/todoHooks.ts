@@ -24,6 +24,7 @@ export const useConvertibleItems = () => {
   const chatAgents = useDbStore(state => state.chatAgents);
   const aiPrompts = useDbStore(state => state.aiPrompts);
   const sessions = useDbStore(state => state.sessions);
+  const commands = useDbStore(state => state.commands);
 
   return useMemo(() => {
     try {
@@ -39,6 +40,14 @@ export const useConvertibleItems = () => {
       });
       links.forEach(l => {
         items.push({ id: l.id, name: (l as any).title || (l as any).name || 'Untitled Link', category: 'link', data: l });
+      });
+      commands.forEach(c => {
+        items.push({
+          id: `cmd-${c.id}`,
+          name: (c as any).label || (c as any).prefix || 'Untitled Command',
+          category: 'command',
+          data: { ...c, key: (c as any).label || (c as any).prefix, value: c.id },
+        });
       });
       automations.forEach(a => {
         const steps = (a as any).automation_steps || (a as any).steps || [];
@@ -63,7 +72,7 @@ export const useConvertibleItems = () => {
       console.warn('Failed to compute convertible items from useDbStore', e);
       return [];
     }
-  }, [notes, snippets, links, automations, chatAgents, aiPrompts, sessions]);
+  }, [notes, snippets, links, commands, automations, chatAgents, aiPrompts, sessions]);
 };
 
 export const parseTaskDate = (d: string | number | undefined) => {

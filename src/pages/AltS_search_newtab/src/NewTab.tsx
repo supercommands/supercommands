@@ -60,6 +60,12 @@ const AltS_search_newtab = () => {
       if (event.key === 'Escape') {
         const state = useUIStore.getState();
         console.log('[ESCAPE][NewTab] Escape pressed. activeView:', state.activeView, '| activeEditor:', state.activeEditor, '| isSheetOpen:', state.isSheetOpen, '| interceptors count:', state.escapeInterceptors.length);
+        if (state.activeEditor) {
+          event.preventDefault();
+          event.stopPropagation();
+          state.handleEscape();
+          return;
+        }
         state.handleEscape();
       }
     };

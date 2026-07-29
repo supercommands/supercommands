@@ -2375,7 +2375,7 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
       const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
       return {
         id: filename,
-        label: toTitleCase(nameWithoutExt),
+        label: filename === 'car-race.png' ? 'Car Race' : toTitleCase(nameWithoutExt),
         src: `AltS_search_newtab/images/wallappear/${filename}`,
       };
     }).sort((a, b) => {

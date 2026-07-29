@@ -24,6 +24,8 @@ import { getNote } from './noteData';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
+import { getItemCompoundId, extractSnippetIdFromCompoundId } from '../../../../shared-components/utils/idGenerator';
+import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
 
 const ENABLE_DEBUG_LOGS = false;
 const AUTOSAVE_DELAY_MS = 400;
@@ -102,6 +104,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   const [isUnsavedChangesDialogOpen, setIsUnsavedChangesDialogOpen] = useState<boolean>(false);
 
   // Save Lock to prevent overlapping autosaves
+  const isSelfDeletingRef = useRef(false);
   const saveInProgressRef = useRef(false);
   const saveAgainRef = useRef(false);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
@@ -133,6 +136,8 @@ export function useNoteEditor(props: NoteEditorViewProps) {
 
     if (resolvedNoteId) {
       noteEditorLog('init existing note', { resolvedNoteId });
+      const existingNoteTitle = '';
+      const existingNoteBody = '';
       activeNoteIdRef.current = resolvedNoteId;
       setActiveNoteId(resolvedNoteId);
       setIsInitialized(false);
@@ -151,16 +156,16 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       lastSavedTagIdsRef.current = [];
       lastSavedUpdatedAtRef.current = null;
 
-      setNoteTitle('');
-      setNoteBody('');
-      noteBodyRef.current = '';
+      setNoteTitle(existingNoteTitle);
+      setNoteBody(existingNoteBody);
+      noteBodyRef.current = existingNoteBody;
       setWorkspaceId(null);
       setFolderId(null);
       setTagIds([]);
 
       currentInputsRef.current = {
-        noteTitle: '',
-        noteBody: '',
+        noteTitle: existingNoteTitle,
+        noteBody: existingNoteBody,
         workspaceId: null,
         folderId: null,
         tagIds: [],
@@ -225,41 +230,59 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   // Removed properties effect
 
   // Natively sync across tabs using centralized useDbStore
-  const rawLiveNote = useDbStore(state =>
-    state.notes.find(n => n.id === activeNoteId) ||
-    state.snippets.find(s => s.id === activeNoteId) ||
-    state.todos.find(t => t.id === activeNoteId)
-  );
+  const rawLiveNote = useDbStore(state => {
+    if (!activeNoteId) return undefined;
+    const cleanId = extractSnippetIdFromCompoundId(activeNoteId);
+    return (
+      state.notes.find(n => n.id === activeNoteId || n.id === cleanId) ||
+      state.snippets.find(s => s.id === activeNoteId || s.id === cleanId) ||
+      state.todos.find(t => t.id === activeNoteId || t.id === cleanId)
+    );
+  });
 
   const liveNote = useMemo(() => {
     if (!rawLiveNote) return undefined;
+    const note = rawLiveNote as any;
 
-    // Check if it's a Todo record — 'isDone' is a reliable discriminator (always present, not in Note/Snippet)
-    if ('isDone' in rawLiveNote) {
-      const todo = rawLiveNote as any;
+    // Check if it's a Todo record — 'isDone' is a reliable discriminator
+    if ('isDone' in note) {
       return {
-        id: todo.id,
-        title: todo.name || '',
-        body: todo.description ?? '',
-        workspaceId: null,
-        folderId: null,
-        tagIds: [],
-        updatedAt: todo.updatedAt,
-        createdAt: todo.createdAt,
+        id: note.id,
+        title: note.title || note.name || note.key || '',
+        body: note.body || note.description || note.content || note.value || '',
+        workspaceId: note.workspaceId || note.workspace_id || null,
+        folderId: note.folderId || note.folder_id || null,
+        tagIds: note.tagIds || (Array.isArray(note.tags) ? note.tags.map((t: any) => typeof t === 'string' ? t : t.id) : []),
+        updatedAt: note.updatedAt || Date.now(),
+        createdAt: note.createdAt || Date.now(),
       } as any;
     }
 
     // Check if it's a Snippet record
-    if ('config' in rawLiveNote) {
-      const snippet = rawLiveNote as any;
-      const configStr = typeof snippet.config === 'string' ? snippet.config : JSON.stringify(snippet.config || '');
+    if ('config' in note) {
+      const configStr = typeof note.config === 'string' ? note.config : JSON.stringify(note.config || '');
       return {
-        ...snippet,
-        body: configStr ?? '',
+        ...note,
+        title: note.title || note.name || note.key || '',
+        body: note.body || configStr || note.content || note.value || '',
+        workspaceId: note.workspaceId || note.workspace_id || null,
+        folderId: note.folderId || note.folder_id || null,
+        tagIds: note.tagIds || (Array.isArray(note.tags) ? note.tags.map((t: any) => typeof t === 'string' ? t : t.id) : []),
+        updatedAt: note.updatedAt || Date.now(),
+        createdAt: note.createdAt || Date.now(),
       } as any;
     }
 
-    return rawLiveNote as NoteRecord;
+    return {
+      ...note,
+      title: note.title || note.name || note.key || '',
+      body: note.body || note.content || note.value || '',
+      workspaceId: note.workspaceId || note.workspace_id || null,
+      folderId: note.folderId || note.folder_id || null,
+      tagIds: note.tagIds || (Array.isArray(note.tags) ? note.tags.map((t: any) => typeof t === 'string' ? t : t.id) : []),
+      updatedAt: note.updatedAt || Date.now(),
+      createdAt: note.createdAt || Date.now(),
+    } as NoteRecord;
   }, [rawLiveNote]);
 
   const handleSave = useCallback(async (silent: boolean = false, overrideProps?: SharedProperties | null): Promise<boolean> => {
@@ -457,7 +480,26 @@ export function useNoteEditor(props: NoteEditorViewProps) {
               body: input.body ? summarizeHtml(input.body) : undefined,
             },
           });
+          const oldCompoundId = getItemCompoundId({
+            id: currentNoteId,
+            workspace_id: lastSavedWorkspaceIdRef.current,
+            folder_id: lastSavedFolderIdRef.current,
+            category: 'note',
+          });
+          
           savedNote = await updateNote(currentNoteId, input);
+          
+          const newCompoundId = getItemCompoundId({
+            id: savedNote.id,
+            workspace_id: savedNote.workspaceId,
+            folder_id: savedNote.folderId,
+            category: 'note',
+          });
+
+          if (oldCompoundId && newCompoundId && oldCompoundId !== newCompoundId) {
+            await migrateItemCompoundId(oldCompoundId, newCompoundId, 'note');
+          }
+
           noteEditorLog('updateNote success', {
             savedId: savedNote.id,
             updatedAt: savedNote.updatedAt,
@@ -691,7 +733,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     try {
       await deleteNote(currentNoteId);
       noteEditorLog('delete success', { currentNoteId });
-      if (onBack) onBack();
+      setIsNoteDeleted(true);
     } catch (msg) {
       console.error('Delete failed:', msg);
       noteEditorLog('delete failed', { currentNoteId, msg });
@@ -742,7 +784,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       initialized: isInitialized,
     });
 
-    if (lastSavedUpdatedAtRef.current !== null && liveNote.updatedAt <= lastSavedUpdatedAtRef.current) {
+    if (isInitialized && lastSavedUpdatedAtRef.current !== null && liveNote.updatedAt <= lastSavedUpdatedAtRef.current) {
       noteEditorLog('live note ignored because it is not newer than last saved', {
         liveUpdatedAt: liveNote.updatedAt,
         lastSavedUpdatedAt: lastSavedUpdatedAtRef.current,
@@ -1055,6 +1097,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     noteBodyRef.current = '';
     isDirtyRef.current = false;
     setIsDirty(false);
+    setIsUnsavedChangesDialogOpen(false);
     setSaveStatus('idle');
     setLastSavedAt(null);
     hasLoadedLiveNoteRef.current = true;
@@ -1135,6 +1178,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     flushSave,
     handleDelete,
     handleClose,
+    setIsNoteDeleted,
     setIsDeleteDialogOpen,
     setIsUnsavedChangesDialogOpen,
     handlePropertiesChange,

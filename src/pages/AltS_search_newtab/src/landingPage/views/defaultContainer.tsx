@@ -45,17 +45,14 @@ import {
   FiCheckSquare,
   FiSquare,
 } from 'react-icons/fi';
-import {
-  FaLayerGroup,
-  FaLink,
+import { FaLink,
   FaStar,
   FaTerminal,
   FaCheck,
   FaTimes,
   FaFolder,
   FaFolderOpen,
-  FaCode,
-} from 'react-icons/fa';
+  FaCode } from 'react-icons/fa';
 import { AiOutlineEnter } from 'react-icons/ai';
 import { LuSparkles } from 'react-icons/lu';
 import { BsKeyboard, BsCalendarCheck } from 'react-icons/bs';
@@ -89,6 +86,8 @@ import { UnifiedContextMenu, type MenuAction } from '../../../../../shared-compo
 
 import { useKeystrokeRecording } from '../../../../../shared-components/hotkeys';
 import { isCommandId, findCommandByAnyId } from '../../../../../shared-components/commands';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 // HotkeyBadge moved below to consolidate with other UI helpers
 
@@ -574,7 +573,7 @@ const getItemTagMeta = (item: InteractiveItem, todoCounts?: { overdue: number; d
   if (category === 'session') {
     return { label: 'Groups', isBadge: false };
   }
-  if (category === 'link' || category === 'bulk_link') {
+  if (category === 'link') {
     return { label: 'Links', isBadge: false };
   }
 
@@ -1139,7 +1138,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
               (snippetItem.suggestion.snippet as any).kind ||
               ''
             ).toLowerCase();
-            const type = cat === 'session' ? 'session' : cat === 'link' || cat === 'bulk_link' ? 'link' : 'note';
+            const type = cat === 'session' ? 'session' : cat === 'link' ? 'link' : 'note';
             if (normalizedShortcut) {
               await saveUserShortcut(normalizedShortcut, itemId, type as any);
             } else {
@@ -1244,7 +1243,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
               (snippetItem.suggestion.snippet as any).kind ||
               ''
             ).toLowerCase();
-            const type = cat === 'session' ? 'session' : cat === 'link' || cat === 'bulk_link' ? 'link' : 'note';
+            const type = cat === 'session' ? 'session' : cat === 'link' ? 'link' : 'note';
             if (hotkeyValue) {
               await saveUserHotkey(hotkeyValue, itemId, type);
             } else {
@@ -2212,7 +2211,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
           target?.getAttribute('data-searchbar-input') === 'true' ||
             target?.id === 'searchbar-input' ||
             target?.id === 'searchbar-inline-input' ||
-            target?.closest('.searchbar-glow-container'),
+            (target?.closest('.searchbar-glow-container') && !target?.closest('[data-prevent-searchbar-capture="true"]')),
         );
 
         // If focus is in an input-like element that is NOT the searchbar input, do not capture/intercept keys

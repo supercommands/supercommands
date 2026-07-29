@@ -15,8 +15,7 @@ import {
   FiCommand,
   FiCheckSquare,
 } from 'react-icons/fi';
-import {
-  FaCode,
+import { FaCode,
   FaLink,
   FaCheckCircle,
   FaCheck,
@@ -38,13 +37,11 @@ import {
   FaKey,
   FaQuestionCircle,
   FaRobot,
-  FaLayerGroup,
   FaGithub,
   FaCamera,
   FaExpand,
   FaImages,
-  FaTable,
-} from 'react-icons/fa';
+  FaTable } from 'react-icons/fa';
 import NotesIcon from '../components/NotesIcon';
 import { getFaviconUrl } from '../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { extractUrlsFromSnippet } from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
@@ -97,6 +94,8 @@ import { CustomSearchPrefixesForOmniboxStorage } from '../../../../storage/local
 import BoardView from '../../../../shared-components/BoardView/BoardView';
 import SpreadsheetMainContainer from '../../../../shared-components/spreadsheetUi/ui/spreadsheetMainContainer';
 import { EditablePrefixKey } from '../../../../shared-components/shortcuts/ui/EditablePrefixKey';
+import { SessionGridIcon } from '../../../../shared-components/icons/sessionGridIcon';
+
 
 // Map command IDs to specific React Icons
 const BROWSER_ICONS: Record<string, React.ReactNode> = {
@@ -411,7 +410,7 @@ const SECTION_META: Record<string, { title: string; icon: React.ReactNode }> = {
   automations: { title: 'Automations', icon: <FiZap className="w-4 h-4 shrink-0" /> },
   notes: { title: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0" /> },
   links: { title: 'Links', icon: <FaLink className="w-4 h-4 shrink-0" /> },
-  sessions: { title: 'Tab Sessions', icon: <FaLayerGroup className="w-4 h-4 shrink-0" /> },
+  sessions: { title: 'Tab Sessions', icon: <SessionGridIcon className="w-4 h-4 shrink-0" /> },
   snippets: { title: 'Snippets', icon: <FaCode className="w-4 h-4 shrink-0" /> },
   commands: { title: 'Commands', icon: <FaTerminal className="w-4 h-4 shrink-0" /> },
   system_commands: { title: 'System Commands', icon: <FaTerminal className="w-4 h-4 shrink-0" /> },
@@ -821,8 +820,11 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     }
 
     try {
-      const topUrl = (window.top as any)?.location?.href || window.location.href || '';
-      const topTitle = (window.top as any)?.document?.title || document.title || 'Untitled Page';
+      const topUrl =
+        window.location?.href && !window.location.href.startsWith('chrome-extension://')
+          ? window.location.href
+          : (window.top as any)?.location?.href || '';
+      const topTitle = document.title || (window.top as any)?.document?.title || 'Untitled Page';
       if (topUrl && !topUrl.startsWith('chrome-extension://')) {
         setActiveTabUrl(topUrl);
         setActiveTabTitle(topTitle);
@@ -833,11 +835,11 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
       const chromeAny = (window as any)?.chrome;
       if (chromeAny?.runtime?.sendMessage) {
         chromeAny.runtime.sendMessage(
-          { action: 'tabs_query', queryOptions: { active: true, currentWindow: true } },
+          { action: 'tabs_query', queryOptions: { active: true, lastFocusedWindow: true } },
           (response: any) => {
             const activeTab = response?.results?.[0];
-            if (activeTab) {
-              setActiveTabUrl(activeTab.url || '');
+            if (activeTab && activeTab.url && !activeTab.url.startsWith('chrome-extension://')) {
+              setActiveTabUrl(activeTab.url);
               setActiveTabTitle(activeTab.title || 'Untitled Page');
             }
           },
@@ -1097,7 +1099,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         id: 'save_session',
         name: 'Tab Session',
         category: 'thissite_action',
-        icon: <FaLayerGroup className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />,
+        icon: <SessionGridIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />,
       });
       thisSiteItems.push({
         id: 'add_to_existing',
@@ -1109,7 +1111,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         id: 'add_to_existing_session',
         name: 'Existing Session',
         category: 'thissite_action',
-        icon: <FaLayerGroup className="w-4 h-4 shrink-0 text-gray-400" />,
+        icon: <SessionGridIcon className="w-4 h-4 shrink-0 text-gray-400" />,
       });
       // Directly include page action extraction commands under "This Site"
       PAGE_ACTION_ITEMS.forEach((item: any) => {
@@ -1607,10 +1609,13 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
       let tabUrl = activeTabUrl;
       let tabTitle = activeTabTitle;
 
-      if (!tabUrl) {
+      if (!tabUrl || tabUrl.startsWith('chrome-extension://')) {
         try {
-          tabUrl = (window.top as any)?.location?.href || window.location.href || '';
-          tabTitle = (window.top as any)?.document?.title || document.title || 'Untitled Page';
+          const pageUrl = window.location.href;
+          if (pageUrl && !pageUrl.startsWith('chrome-extension://')) {
+            tabUrl = pageUrl;
+            tabTitle = document.title || 'Untitled Page';
+          }
         } catch (_) {}
       }
 
@@ -1687,12 +1692,22 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
           onClose();
           return;
         } else if (item.id === 'add_to_existing') {
-          setAddExistingUrl(url);
-          setAddExistingTitle(title);
+          const finalUrl =
+            url ||
+            activeTabUrl ||
+            (window.location.href.startsWith('chrome-extension://') ? '' : window.location.href);
+          const finalTitle = title || activeTabTitle || document.title || 'Untitled Page';
+          setAddExistingUrl(finalUrl);
+          setAddExistingTitle(finalTitle);
           setShowAddExistingModal(true);
         } else if (item.id === 'add_to_existing_session') {
-          setAddExistingUrl(url);
-          setAddExistingTitle(title);
+          const finalUrl =
+            url ||
+            activeTabUrl ||
+            (window.location.href.startsWith('chrome-extension://') ? '' : window.location.href);
+          const finalTitle = title || activeTabTitle || document.title || 'Untitled Page';
+          setAddExistingUrl(finalUrl);
+          setAddExistingTitle(finalTitle);
           setShowAddExistingSessionModal(true);
         } else if (item.id === 'summarize_page') {
           // Perform full context scraping and AI dispatching
@@ -2365,13 +2380,13 @@ ${pageContent}
                                         (opt.id === 'save_link' ? (
                                           <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'save_session' ? (
-                                          <FaLayerGroup className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <SessionGridIcon className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'saved_indicator' ? (
                                           <FaCheck className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'add_to_existing' ? (
                                           <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'add_to_existing_session' ? (
-                                          <FaLayerGroup className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <SessionGridIcon className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'summarize_page' ? (
                                           <LuSparkles className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : (
@@ -2446,13 +2461,13 @@ ${pageContent}
                                         (opt.id === 'save_link' ? (
                                           <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'save_session' ? (
-                                          <FaLayerGroup className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <SessionGridIcon className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'saved_indicator' ? (
                                           <FaCheck className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'add_to_existing' ? (
                                           <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'add_to_existing_session' ? (
-                                          <FaLayerGroup className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <SessionGridIcon className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : opt.id === 'summarize_page' ? (
                                           <LuSparkles className="w-4 h-4 shrink-0 text-current opacity-80" />
                                         ) : (
@@ -2837,29 +2852,41 @@ ${pageContent}
                 links.map(linkItem => (
                   <button
                     key={linkItem.id}
-                    onClick={async () => {
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       try {
-                        const currentUrls = linkItem.urls || [];
+                        const targetUrl =
+                          addExistingUrl ||
+                          activeTabUrl ||
+                          (window.location.href.startsWith('chrome-extension://') ? '' : window.location.href);
+                        const targetTitle = addExistingTitle || activeTabTitle || document.title || 'Untitled Page';
+
+                        if (!targetUrl) {
+                          showWebsiteToast('Unable to detect page URL to add', '#ef4444');
+                          return;
+                        }
+
+                        const currentUrls = Array.isArray(linkItem.urls) ? linkItem.urls : [];
+                        const newItem = {
+                          id: 'link_item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                          title: targetTitle,
+                          url: targetUrl,
+                        };
+
                         const response: any = await new Promise(resolve => {
                           chrome.runtime.sendMessage(
                             {
                               action: 'db_update_link',
                               linkId: linkItem.id,
                               input: {
-                                urls: [
-                                  ...currentUrls,
-                                  {
-                                    id: 'link_item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-                                    title: addExistingTitle,
-                                    url: addExistingUrl,
-                                  },
-                                ],
+                                urls: [...currentUrls, newItem],
                               },
                             },
-                            resolve,
+                            res => resolve(res),
                           );
                         });
-                        if (response && !response.success) {
+                        if (response && response.success === false) {
                           throw new Error(response.error || 'Failed to update link via background');
                         }
                         syncDbFromBackground();
@@ -2873,6 +2900,7 @@ ${pageContent}
                         });
                       } catch (err) {
                         console.error('Failed to add url to existing link:', err);
+                        showWebsiteToast('Failed to add URL to link collection', '#ef4444');
                       }
                     }}
                     className="w-full text-left px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-neutral-300 hover:text-white transition-all text-sm font-medium flex items-center justify-between cursor-pointer">
@@ -2912,29 +2940,41 @@ ${pageContent}
                 dbSessions.map(sessionItem => (
                   <button
                     key={sessionItem.id}
-                    onClick={async () => {
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       try {
-                        const currentUrls = sessionItem.urls || [];
+                        const targetUrl =
+                          addExistingUrl ||
+                          activeTabUrl ||
+                          (window.location.href.startsWith('chrome-extension://') ? '' : window.location.href);
+                        const targetTitle = addExistingTitle || activeTabTitle || document.title || 'Untitled Page';
+
+                        if (!targetUrl) {
+                          showWebsiteToast('Unable to detect page URL to add', '#ef4444');
+                          return;
+                        }
+
+                        const currentUrls = Array.isArray(sessionItem.urls) ? sessionItem.urls : [];
+                        const newItem = {
+                          id: 'link_item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                          title: targetTitle,
+                          url: targetUrl,
+                        };
+
                         const response: any = await new Promise(resolve => {
                           chrome.runtime.sendMessage(
                             {
                               action: 'db_update_session',
                               sessionId: sessionItem.id,
                               input: {
-                                urls: [
-                                  ...currentUrls,
-                                  {
-                                    id: 'link_item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-                                    title: addExistingTitle,
-                                    url: addExistingUrl,
-                                  },
-                                ],
+                                urls: [...currentUrls, newItem],
                               },
                             },
-                            resolve,
+                            res => resolve(res),
                           );
                         });
-                        if (response && !response.success) {
+                        if (response && response.success === false) {
                           throw new Error(response.error || 'Failed to update session via background');
                         }
                         syncDbFromBackground();
@@ -2948,6 +2988,7 @@ ${pageContent}
                         });
                       } catch (err) {
                         console.error('Failed to add url to existing session:', err);
+                        showWebsiteToast('Failed to add URL to session', '#ef4444');
                       }
                     }}
                     className="w-full text-left px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-neutral-300 hover:text-white transition-all text-sm font-medium flex items-center justify-between cursor-pointer">

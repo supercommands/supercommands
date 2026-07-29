@@ -7,8 +7,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { nowUtc } from '../../../../../shared-components/utils';
-import {
-  FaTimes,
+import { FaTimes,
   FaSun,
   FaRegCalendarAlt,
   FaRegCheckCircle,
@@ -21,7 +20,6 @@ import {
   FaTrash,
   FaLink,
   FaBox,
-  FaLayerGroup,
   FaRobot,
   FaCloudDownloadAlt,
   FaStore,
@@ -39,8 +37,7 @@ import {
   FaGamepad,
   FaKey,
   FaQuestionCircle,
-  FaSearch,
-} from 'react-icons/fa';
+  FaSearch } from 'react-icons/fa';
 import {
   FiMoreHorizontal,
   FiEdit2,
@@ -91,6 +88,8 @@ import TodoCalendar from './TodoCalendar';
 import pinTodoGif from '../assests/pin-todo.gif';
 import todoDataBlurGif from '../assests/todo-data-blur.gif';
 import unpinTodoGif from '../assests/unpin-todo.gif';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 type TodoItem = any; // TODO: Full migration to TodoRecord (camelCase) pending plan approval
 
@@ -345,6 +344,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       value: dt.description || '',
       category: 'custom',
       is_done: dt.isDone,
+      scheduleTime: dt.scheduleTime,
       event_deadline: new Date(dt.scheduleTime).toISOString(),
       is_recurring: dt.scheduleType === 'recurring',
       recurring_cycle: dt.recurringType || null,
@@ -822,14 +822,15 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
         const matched = finalConvertibleItems.find(item => {
           const itemIdStr = String(item.id);
           if (itemIdStr === cidStr) return true;
-          const strippedItemId = itemIdStr.replace(/^(auto-|cmd-|mod-)/, '');
-          const strippedCid = cidStr.replace(/^(auto-|cmd-|mod-)/, '');
+          const strippedItemId = itemIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
+          const strippedCid = cidStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
           return strippedItemId === strippedCid;
         });
 
         if (matched) {
           const itemCat = (matched.category || '').toLowerCase();
           const itemId = matched.id;
+          const triggerItemId = String(itemId).replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
           const itemVal = matched.data?.value || matched.data?.url || matched.data?.link || '';
 
           if (['tabgroup', 'tab session', 'session', 'sessions'].includes(itemCat)) {
@@ -851,7 +852,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
           } else if (['command', 'automation', 'agent', 'chat_agent'].includes(itemCat)) {
             chrome.tabs.create({
               url: chrome.runtime.getURL(
-                `AltS_search_newtab/index.html?trigger_hotkey=true&type=${itemCat}&id=${encodeURIComponent(itemId)}`,
+                `AltS_search_newtab/index.html?trigger_hotkey=true&type=${itemCat}&id=${encodeURIComponent(triggerItemId)}`,
               ),
             });
           }
@@ -943,6 +944,16 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
       console.log('[TodoList] handleCreateFromSelection called with:', { title: data.title, scheduleType: data.scheduleType, date: data.date, time: data.time });
       let newTodo;
       if (todoCreatePrefill?.todo_id) {
+        const previousScheduleTime =
+          typeof todoCreatePrefill?.scheduleTime === 'number'
+            ? todoCreatePrefill.scheduleTime
+            : todoCreatePrefill?.event_deadline
+              ? new Date(String(todoCreatePrefill.event_deadline).replace(' ', 'T')).getTime()
+              : NaN;
+        const shouldReactivateTodo =
+          Number.isFinite(scheduleTime) &&
+          scheduleTime > Date.now() &&
+          (!Number.isFinite(previousScheduleTime) || Math.abs(scheduleTime - previousScheduleTime) >= 60000);
         await db.todos.update(String(todoCreatePrefill.todo_id), {
           name: data.title,
           description: data.description ?? '',
@@ -950,6 +961,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
           scheduleType: data.scheduleType === 'recurring' ? 'recurring' : 'one-time',
           recurringType: data.scheduleType === 'recurring' ? data.recurringCycle : undefined,
           scheduleTime,
+          ...(shouldReactivateTodo ? { isDone: false } : {}),
           updatedAt: Date.now()
         });
         newTodo = { id: String(todoCreatePrefill.todo_id) };
@@ -1147,7 +1159,7 @@ const TodoList: React.FC<TodoListProps> = React.memo(({ isOpen, onClose, searchb
 
       const configIds = task.config?.id;
       if (Array.isArray(configIds) && configIds.length > 1) {
-        return wrapIcon(<FaLayerGroup size={iconSize - 2} className={wrap ? "text-[#38bdf8]" : ""} />);
+        return wrapIcon(<SessionGridIcon size={iconSize - 2} className={wrap ? "text-[#38bdf8]" : ""} />);
       }
       if ((!configIds || configIds.length === 0) && (category === 'note' || category === 'snippet' || category === 'custom')) {
         return null;

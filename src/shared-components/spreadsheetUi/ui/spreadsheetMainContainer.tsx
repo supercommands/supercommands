@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { useAppearance } from '@extension/ui';
 import { useState } from 'react';
-import {
-  FaSearch,
+import { FaSearch,
   FaTimes,
   FaFilter,
   FaCode,
@@ -15,11 +14,9 @@ import {
   FaUsers,
   FaCheck,
   FaRegStar,
-  FaPuzzlePiece,
-  FaLayerGroup
-} from 'react-icons/fa';
+  FaPuzzlePiece } from 'react-icons/fa';
 import { FiFilter, FiSettings, FiZap, FiChevronLeft, FiChevronRight, FiCommand, FiX } from 'react-icons/fi';
-import { BsStarFill, BsKeyboard } from 'react-icons/bs';
+import { BsStarFill, BsKeyboard, BsCalendarCheck } from 'react-icons/bs';
 import { MdOutlineShortcut } from 'react-icons/md';
 import { LuArrowRightLeft } from 'react-icons/lu';
 import { CustomSearchPrefixesForOmniboxStorage, CustomOmniboxPrefixes } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
@@ -37,6 +34,8 @@ import { useUIStore } from '../../../shared-components/uiStateManager';
 import SpreadsheetToolbar from './spreadsheetToolbar';
 import SpreadsheetQuickAddModal from './spreadsheetQuickAddModal';
 import Branding from '../../../shared-components/Branding';
+import { SessionGridIcon } from '../../icons/sessionGridIcon';
+
 
 interface SheetUIProps {
   onClose?: () => void;
@@ -218,6 +217,11 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
 
     // 🚀 Handle click outside to clear all focus/selection
     const handleOutsideClick = (e: MouseEvent) => {
+      // If an overlay editor is currently open, do not intercept clicks or blur elements
+      if (useUIStore.getState().activeEditor) {
+        return;
+      }
+
       const container = document.getElementById('sheet-ui-container');
       if (container && !container.contains(e.target as Node)) {
         const store = useSpreadsheetStore.getState();
@@ -327,8 +331,9 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       )},
       { type: 'category' as const, id: 'note', label: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
       { type: 'category' as const, id: 'snippet', label: 'Snippets', icon: <FaCode className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
+      { type: 'category' as const, id: 'todo', label: 'Todos', icon: <BsCalendarCheck className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
       { type: 'category' as const, id: 'link', label: 'Links', icon: <FaLink className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
-      { type: 'category' as const, id: 'session', label: 'Tab Sessions', icon: <FaLayerGroup className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
+      { type: 'category' as const, id: 'session', label: 'Tab Sessions', icon: <SessionGridIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
       { type: 'category' as const, id: 'general_commands', label: 'System Commands', icon: <FaTerminal className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
       { type: 'category' as const, id: 'commands', label: 'Browser Commands', icon: <FaTerminal className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
       {
@@ -554,9 +559,9 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
 
         
         {/* LEFT SIDEBAR (Inside Card) */}
-        <div className="w-[175px] shrink-0 flex flex-col border-r border-white/10 relative overflow-visible bg-transparent group/sidebar">
+        <div className="w-[175px] shrink-0 flex flex-col relative overflow-visible bg-transparent group/sidebar">
           {/* Categories List Scrollable */}
-          <div className="flex-1 overflow-y-auto hover-scrollbar px-3 pb-4 pt-3 flex flex-col gap-0.5">
+          <div className="flex-1 overflow-y-auto hover-scrollbar px-3 py-4 flex flex-col justify-center gap-0.5">
             {sidebarCategories.map(opt => {
               const active = isSelected(opt);
               return (
@@ -567,22 +572,25 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
                     setCategoryFilter([opt.id!]);
                   }}
                   className={clsx(
-                    "flex items-center gap-2.5 px-2 py-1.5 text-[12px] font-normal rounded-lg transition-all cursor-pointer text-left w-full group",
+                    "flex items-center gap-2.5 px-2.5 py-2 text-[11px] font-medium rounded-lg transition-all cursor-pointer text-left w-full group border",
                     active
-                      ? "bg-white/10 text-white font-medium"
-                      : "text-neutral-400 hover:bg-white/5 hover:text-white"
+                      ? "bg-white/[0.12] text-white border-white/10 shadow-sm"
+                      : "text-neutral-300/80 border-transparent hover:bg-white/[0.06] hover:border-white/5 hover:text-white"
                   )}
                 >
-                  <span className={clsx("w-4 flex justify-center shrink-0 text-[14px]", active ? "text-white" : "text-neutral-500 group-hover:text-neutral-300")}>
+                  <span className={clsx("w-4 flex justify-center shrink-0 text-[14px] transition-colors", active ? "text-white" : "text-neutral-400 group-hover:text-neutral-200")}>
                     {opt.icon}
                   </span>
-                  <span className="flex-1 truncate leading-tight">{opt.label}</span>
-                  {omniboxPrefixes && (opt.id === 'note' || opt.id === 'snippet' || opt.id === 'link' || opt.id === 'session' || opt.id === 'general_commands' || opt.id === 'commands' || opt.id === 'automation' || opt.id === 'agent') && (
+                  <span className={clsx("flex-1 truncate leading-tight tracking-[0.01em]", active ? "text-white" : "text-neutral-300 group-hover:text-white")}>
+                    {opt.label}
+                  </span>
+                  {omniboxPrefixes && (opt.id === 'note' || opt.id === 'snippet' || opt.id === 'todo' || opt.id === 'link' || opt.id === 'session' || opt.id === 'general_commands' || opt.id === 'commands' || opt.id === 'automation' || opt.id === 'agent') && (
                     <span className="ml-2 hidden items-center gap-1 group-hover/sidebar:flex focus-within:flex">
                       <EditablePrefixKey 
                         category={
                           opt.id === 'note' ? 'note' :
                           opt.id === 'snippet' ? 'snippet' :
+                          opt.id === 'todo' ? 'todo' :
                           opt.id === 'link' ? 'link' :
                           opt.id === 'session' ? 'session' :
                           opt.id === 'automation' ? 'automation' :
@@ -593,6 +601,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
                         currentValue={
                           opt.id === 'note' ? (omniboxPrefixes.note || '') :
                           opt.id === 'snippet' ? (omniboxPrefixes.snippet || '') :
+                          opt.id === 'todo' ? (omniboxPrefixes.todo || 't') :
                           opt.id === 'link' ? (omniboxPrefixes.link || '') :
                           opt.id === 'session' ? (omniboxPrefixes.session || '') :
                           opt.id === 'automation' ? (omniboxPrefixes.automation || '') :

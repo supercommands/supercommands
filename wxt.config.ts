@@ -35,7 +35,7 @@ export default defineConfig({
     name: '__MSG_extensionName__',
     description: '__MSG_extensionDescription__',
     default_locale: 'en',
-    version: '0.3.58',
+    version: '0.3.59',
     icons: {
       '128': 'icon.png'
     },
@@ -144,7 +144,8 @@ export default defineConfig({
           'AltS_search_newtab/index.html',
           'assets/alt-s-website.css',
           'assets/content-ui.css',
-          'AltS_search_newtab/images/wallappear/*'
+          'AltS_search_newtab/images/wallappear/*',
+          'AltS_search_newtab/images/Gif/*'
         ],
         matches: ['*://*/*']
       }

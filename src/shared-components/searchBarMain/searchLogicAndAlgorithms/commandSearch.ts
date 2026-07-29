@@ -1,4 +1,4 @@
-import { type CommandDefinition, type CommandId } from '../commandConfigurations/commands';
+import { type CommandDefinition } from '../commandConfigurations/commands';
 import { LOCAL_COMMANDS, type LocalCommandDefinition, type LocalCommandId } from '../commandConfigurations/localCommands';
 import { LOCAL_COMMAND_KEYWORDS } from '../commandConfigurations/commandKeywords';
 

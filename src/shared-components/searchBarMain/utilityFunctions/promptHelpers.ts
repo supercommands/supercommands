@@ -293,7 +293,7 @@ export const commandSupportsInlineQuery = (info: CommandSelectionInfo | null): i
   return Boolean(info && info.requiresInlineQuery);
 };
 
-export const mapFullNameToShortcut = (text: string): string => {
+export const mapFullNameToShortcut = (text: string, slashFilterMeta?: Record<string, { label: string }>): string => {
   const mapping: Record<string, string> = {
     '/all': '/a',
     '/todos': '/t',
@@ -305,7 +305,18 @@ export const mapFullNameToShortcut = (text: string): string => {
     '/links': '/l',
     '/commands': '/c',
     '/bookmarks': '/bm',
+    '/chat agents': '/g',
+    '/agents': '/g',
   };
+
+  if (slashFilterMeta) {
+    for (const [alias, meta] of Object.entries(slashFilterMeta)) {
+      const fullName = `/${String(meta.label || '').trim().toLowerCase()}`;
+      if (fullName.length <= 1) continue;
+      mapping[fullName] = `/${alias}`;
+    }
+  }
+
   const lower = text.toLowerCase();
   for (const [fullName, shortcut] of Object.entries(mapping)) {
     if (lower.startsWith(fullName)) {
@@ -315,14 +326,34 @@ export const mapFullNameToShortcut = (text: string): string => {
   return text;
 };
 
-export const getHighlightedHtml = (val: string): string => {
-  const match = val.match(/^\/[a-zA-Z]*/);
+export const getHighlightedHtml = (val: string, slashFilterMeta?: Record<string, { label: string }>): string => {
+  const match = val.match(/^\/[^\s\u00A0]*/);
   if (match && match[0]) {
     const prefix = match[0];
     const rest = val.slice(prefix.length);
 
     const lowerPrefix = prefix.toLowerCase();
-    const isFilterShortcut = ['/a', '/n', '/sn', '/s', '/p', '/l', '/c', '/b', '/bm', '/t', '/se', '/au', '/ca', '/sc', '/nm'].includes(lowerPrefix);
+    const staticLabels: Record<string, string> = {
+      '/a': 'All',
+      '/n': 'Notes',
+      '/nm': 'Notes',
+      '/sn': 'Snippets',
+      '/s': 'Tab Sessions',
+      '/se': 'Tab Sessions',
+      '/p': 'Prompts',
+      '/l': 'Links',
+      '/c': 'Commands',
+      '/b': 'Bookmarks',
+      '/bm': 'Bookmarks',
+      '/t': 'Todos',
+      '/au': 'Automations',
+      '/ca': 'Chat Agents',
+      '/g': 'Chat Agents',
+      '/sc': 'System Commands',
+    };
+    const dynamicLabel = slashFilterMeta?.[lowerPrefix.slice(1)]?.label;
+    const label = dynamicLabel || staticLabels[lowerPrefix] || prefix;
+    const isFilterShortcut = !!dynamicLabel || !!staticLabels[lowerPrefix];
 
     const escapedRest = rest
       .replace(/&/g, '&amp;')
@@ -337,25 +368,7 @@ export const getHighlightedHtml = (val: string): string => {
     const hasSpaceAfter = rest.startsWith(' ') || rest.startsWith('\u00A0');
 
     if (isFilterShortcut && hasSpaceAfter) {
-      const labels: Record<string, string> = {
-        '/a': 'All',
-        '/n': 'Notes',
-        '/nm': 'Notes',
-        '/sn': 'Snippets',
-        '/s': 'Tab Sessions',
-        '/se': 'Tab Sessions',
-        '/p': 'Prompts',
-        '/l': 'Links',
-        '/c': 'Commands',
-        '/b': 'Bookmarks',
-        '/bm': 'Bookmarks',
-        '/t': 'Todos',
-        '/au': 'Automations',
-        '/ca': 'Chat Agents',
-        '/sc': 'System Commands',
-      };
-      const label = labels[lowerPrefix] || prefix;
-      return `<span style="display: inline-flex; align-items: center; justify-content: center; background: rgba(156, 163, 175, 0.15); border: 1.5px solid #9ca3af; color: #9ca3af; border-radius: 6px; padding: 1px 6px; font-weight: 700; margin-right: 4px; font-family: monospace; font-size: 13px;">${label}</span>${escapedRest}`;
+      return `<span data-slash-filter-chip="true" contenteditable="false" style="display: inline-flex; align-items: center; justify-content: center; background: rgba(156, 163, 175, 0.15); border: 1.5px solid #9ca3af; color: #9ca3af; border-radius: 6px; padding: 1px 6px; font-weight: 700; margin-right: 4px; font-family: monospace; font-size: 13px;">${label}</span>${escapedRest}`;
     }
 
     return `${escapedPrefix}${escapedRest}`;

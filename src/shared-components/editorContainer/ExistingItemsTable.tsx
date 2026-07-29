@@ -558,7 +558,7 @@ export function ExistingItemsTable<T extends ExistingItem>({
                                       }
                                       if (e.key === 'Enter') {
                                         if (recordingCombo && recordingCombo !== 'Press keys...') {
-                                          await saveUserHotkey(recordingCombo, compoundId, 'snippet');
+                                          await saveUserHotkey(recordingCombo, compoundId, getItemType(item) as any);
                                         } else {
                                           await deleteUserHotkeyByReference(compoundId);
                                         }
@@ -573,7 +573,7 @@ export function ExistingItemsTable<T extends ExistingItem>({
                                     }}
                                     onBlur={async () => {
                                       if (recordingCombo && recordingCombo !== 'Press keys...') {
-                                        await saveUserHotkey(recordingCombo, compoundId, 'snippet');
+                                        await saveUserHotkey(recordingCombo, compoundId, getItemType(item) as any);
                                       }
                                       setRecordingHotkeyId(null);
                                       setRecordingCombo('');

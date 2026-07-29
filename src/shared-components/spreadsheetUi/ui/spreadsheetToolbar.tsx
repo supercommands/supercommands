@@ -25,7 +25,7 @@ import {
   FaHistory,
   FaWindowRestore,
 } from 'react-icons/fa';
-import { BsStarFill, BsChatDots, BsGrid } from 'react-icons/bs';
+import { BsStarFill, BsChatDots, BsGrid, BsCalendarCheck } from 'react-icons/bs';
 import NotesIcon from '../../../shared-components/icons/notesIcon';
 import StackedLinkIcon from '../../../shared-components/icons/stackedLinkIcon';
 import { useChromeStorage } from '@extension/shared/lib/hooks';
@@ -179,6 +179,7 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
     { type: 'category' as const, id: 'all', label: 'All', icon: <FaFilter className="text-[10px]" /> },
     { type: 'category' as const, id: 'note', label: 'All Notes', icon: <NotesIcon size={14} /> },
     { type: 'category' as const, id: 'snippet', label: 'Snippets', icon: <FaCode className="text-[var(--color-iconDefault)]" size={14} /> },
+    { type: 'category' as const, id: 'todo', label: 'Todos', icon: <BsCalendarCheck className="text-[var(--color-iconDefault)]" size={14} /> },
     { type: 'category' as const, id: 'link', label: 'Smart Links', icon: <FaLink className="text-[var(--color-iconDefault)]" size={14} /> },
     { type: 'category' as const, id: 'general_commands', label: 'System Commands', icon: <FaTerminal className="text-blue-400" size={14} /> },
     { type: 'category' as const, id: 'commands', label: 'Browser Commands', icon: <FaTerminal className="text-[var(--color-iconDefault)]" size={14} /> },

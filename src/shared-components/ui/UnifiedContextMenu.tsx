@@ -287,29 +287,38 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
   const padding = 12;
 
   // Calculate estimated height
-  const inputModeHeight = 220; // approximate height for input mode
-  // If no actions, we don't count their height
-  const menuHeight = hasActions ? actions.length * 36 + 24 : 0;
-  // Increase estimated height for better safety margin in tall menus
-  const estimatedHeight = isInputMode ? Math.max(inputModeHeight, menuHeight) : menuHeight;
-  const safetyBuffer = 450; // Use a more generous buffer for complex content
+  const quickActionsHeight = quickActions.length > 0 ? 44 : 0;
+  const headerHeight = menuTarget?.label ? 36 : 0;
+  const searchHeight = showSearch ? 44 : 0;
+  const actionsListHeight = hasActions ? actions.length * 36 : 0;
+  const actionsHeight = hasActions ? quickActionsHeight + headerHeight + searchHeight + actionsListHeight + 16 : 0;
+  const inputModeHeight = isInputMode ? 220 : 0;
+  const estimatedHeight = Math.max(actionsHeight, inputModeHeight, 100);
 
   // Calculate available space
   const spaceAbove = y - padding;
   const spaceBelow = window.innerHeight - y - padding;
 
   // Smart Flip & Constraint Logic
-  const preferredHeight = Math.max(estimatedHeight, hasActions && actions.length > 5 ? safetyBuffer : estimatedHeight);
+  const fitsBelow = spaceBelow >= estimatedHeight;
+  const fitsAbove = spaceAbove >= estimatedHeight;
 
-  // Decide whether to flip based on best fit
-  // Flip if:
-  // 1. Doesn't fit below AND (space above > space below)
-  const wouldOverflowBottom = y + preferredHeight + padding > window.innerHeight;
-  const shouldFlip = !preferDown && wouldOverflowBottom && spaceAbove > spaceBelow;
+  let shouldFlip = false;
+  if (!preferDown) {
+    if (!fitsBelow && fitsAbove) {
+      shouldFlip = true;
+    } else if (!fitsBelow && !fitsAbove) {
+      shouldFlip = spaceAbove > spaceBelow;
+    }
+  } else {
+    if (!fitsBelow && fitsAbove && spaceAbove > spaceBelow) {
+      shouldFlip = true;
+    }
+  }
 
   // Calculate dynamic constraints
   const availableSpace = shouldFlip ? spaceAbove : spaceBelow;
-  const maxHeight = Math.max(100, availableSpace); // Minimum height of 100px
+  const maxHeight = Math.max(120, availableSpace);
 
   // Calculate adjusted top/left
   let finalLeft = x;
@@ -318,15 +327,14 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
   if (wouldOverflowRight) {
     // SHIFT LEFT Strategy:
     finalLeft = window.innerWidth - totalWidth - padding;
-    // Double check left boundary
     if (finalLeft < padding) finalLeft = padding;
   }
 
-  // Final top position if NOT flipping
+  // Final top position if NOT flipping: shift upward if space allows to prevent unnecessary scrolling
   let finalTop = y;
-  if (!shouldFlip && y + maxHeight > window.innerHeight - padding) {
-    // If it still overflows after max-height (unlikely but safe), we don't want it anchored too high
-    // unless necessary. But position fixed + maxHeight handles most cutoffs.
+  if (!shouldFlip && y + estimatedHeight > window.innerHeight - padding) {
+    const idealTop = window.innerHeight - estimatedHeight - padding;
+    finalTop = Math.max(padding, idealTop);
   }
 
   const style: React.CSSProperties = {
@@ -342,14 +350,34 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
     <div
       ref={menuRef}
       data-unified-menu="true"
-      className={`bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-row transition-[width,left] ease-out`}
+      className={`bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-row transition-[width,left] ease-out custom-scrollbar`}
       style={{
         ...style,
         width: 'max-content',
         maxWidth: 'calc(100vw - 24px)',
         pointerEvents: 'auto',
       }}>
-      <style>{shakeKeyframes}</style>
+      <style>{`
+        ${shakeKeyframes}
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+          height: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 9999px;
+        }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.4);
+        }
+        .custom-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+        }
+      `}</style>
 
       {hasActions && (
       <div className="flex flex-col min-w-fit w-max">

@@ -315,8 +315,11 @@ export function useTodoEditor(props: UseTodoEditorParams) {
           // UPDATE
           const mappedReferences: TodoReference[] = finalItems.map((ref: any) => ({
             id: String(ref.id || ref.value || ref.snippet_id),
-            type: ref.type || ref.category || 'note'
+            type: ref.type || ref.category || 'note',
+            name: ref.name || ref.title || ref.key || 'Untitled'
           }));
+          const didReschedule =
+            Math.abs((finalScheduleTime || 0) - (lastSavedScheduleTimeRef.current || 0)) >= 60000;
 
           const updates: Partial<TodoRecord> = {
             name: computedTitle,
@@ -326,6 +329,7 @@ export function useTodoEditor(props: UseTodoEditorParams) {
             recurringType: finalRecurring,
             references: mappedReferences,
             tagIds: finalTagIds,
+            ...(didReschedule && finalScheduleTime > Date.now() ? { isDone: false } : {}),
           };
 
           const updated = await updateTodoContent(activeTodoIdRef.current, updates);

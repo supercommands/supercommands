@@ -1,4 +1,5 @@
-import React, { forwardRef, useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import * as React from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { useAppearance } from '@extension/ui';
 
@@ -12,10 +13,12 @@ import {
   useSensors,
   TouchSensor,
   MouseSensor,
+  closestCenter,
   type DragEndEvent,
   type DragStartEvent,
   type DragOverEvent,
 } from '@dnd-kit/core';
+import { runAutomation } from '../../../../../allObjectFolder/src/createObject/automationBeta/utilities/automation';
 import {
   SortableContext,
   rectSortingStrategy,
@@ -109,6 +112,7 @@ interface HomeViewProps {
   onNavigateToListView?: (category: 'commands', section?: string) => void;
   isLoggedIn: boolean;
   onOpenContextMenu?: (x: number, y: number, fav: any) => void;
+  onExecuteFavorite?: (fav: any, e?: React.MouseEvent) => void;
 }
 
 export type HomeViewHandle = DefaultContainerHandle;
@@ -132,7 +136,7 @@ const SortableFavItem = ({
 }: {
   id: string;
   children: React.ReactNode;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   title: string;
 }) => {
@@ -522,6 +526,7 @@ const HomeView = React.memo(
         onNavigateToListView,
         isLoggedIn,
         onOpenContextMenu,
+        onExecuteFavorite,
       },
       ref,
     ) => {
@@ -706,7 +711,19 @@ const HomeView = React.memo(
           .slice()
           .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
+        const validCategoryIds = new Set(favoriteCategories.map(c => c.id));
+
         const nextOrder: string[] = [];
+
+        // 1. Root items (without category or with orphan category) must come first before any group header
+        populatedFavorites.forEach(fav => {
+          const catId = (fav as any).favoriteCategoryId;
+          if (!catId || !validCategoryIds.has(catId)) {
+            nextOrder.push(fav.compoundId);
+          }
+        });
+
+        // 2. Group headers and their respective category items
         orderedCategories.forEach(category => {
           nextOrder.push(`header-${category.id}`);
           populatedFavorites.forEach(fav => {
@@ -714,12 +731,6 @@ const HomeView = React.memo(
               nextOrder.push(fav.compoundId);
             }
           });
-        });
-
-        populatedFavorites.forEach(fav => {
-          if (!(fav as any).favoriteCategoryId) {
-            nextOrder.push(fav.compoundId);
-          }
         });
 
         setFavGridOrder(nextOrder);
@@ -787,21 +798,10 @@ const HomeView = React.memo(
 
       const handleDeleteFavGroup = (headerId: string) => {
         const groupId = headerId.replace('header-', '');
-        const headerIndex = favGridOrder.indexOf(headerId);
-        if (headerIndex === -1) return;
-
-        // Identify all items belonging to this group
-        const itemsInGroup: string[] = [];
-        for (let i = headerIndex + 1; i < favGridOrder.length; i++) {
-          if (favGridOrder[i].startsWith('header-')) break;
-          itemsInGroup.push(favGridOrder[i]);
-        }
+        void deleteFavoriteCategory(groupId);
 
         const remainingOrder = favGridOrder.filter(id => id !== headerId);
-        const orderWithoutGroupItems = remainingOrder.filter(id => !itemsInGroup.includes(id));
-        const newOrder = [...itemsInGroup, ...orderWithoutGroupItems];
-
-        setFavGridOrder(newOrder);
+        setFavGridOrder(remainingOrder);
 
         const newVisible = { ...favGridVisible };
         delete newVisible[headerId];
@@ -816,7 +816,7 @@ const HomeView = React.memo(
         }
 
         setFavStorage({
-          favorites_items_order: newOrder,
+          favorites_items_order: remainingOrder,
           favorites_visible_items: newVisible,
           favorites_custom_group_names: newNames,
         });
@@ -983,7 +983,6 @@ const HomeView = React.memo(
           case 'snippet':
             return 'Snippet';
           case 'link':
-          case 'bulk_link':
           case 'tabgroup':
             return 'Link';
           case 'session':
@@ -1047,102 +1046,30 @@ const HomeView = React.memo(
       };
 
       const handleFavGridClick = useCallback(
-        (fav: any) => {
+        (fav: any, e?: React.MouseEvent) => {
+          if (onExecuteFavorite) {
+            onExecuteFavorite(fav, e);
+            return;
+          }
+
+          // Fallback if onExecuteFavorite is not provided
           const chromeAny = (window as any)?.chrome;
           const type = (fav.type || fav.category || '').toLowerCase();
-          if (type === 'link' || type === 'snippet' || type === 'session') {
-            const urls = getFavAllUrls(fav);
-            if (urls.length > 0) {
-              urls.forEach((url, idx) => {
-                const cleanUrl = url.startsWith('//') ? `https:${url}` : url;
-                if (chromeAny?.tabs?.create) {
-                  chromeAny.tabs.create({ url: cleanUrl, active: idx === 0 });
-                } else {
-                  window.open(cleanUrl, '_blank', 'noopener');
-                }
-              });
-              return;
-            }
-            // fallback: open editor
-            if (fav.id) {
-              if (type === 'snippet') {
-                const baseUrl = chromeAny?.runtime?.getURL ? chromeAny.runtime.getURL('AltS_search_newtab/index.html') : '/AltS_search_newtab/index.html';
-                const url = new URL(baseUrl);
-                url.searchParams.set('alts_action', 'true');
-                url.searchParams.set('type', 'snippet');
-                url.searchParams.set('entityId', fav.id);
-                url.searchParams.set('edit_mode', 'true');
-                const mergedSnippet = {
-                  ...fav,
-                  category: 'snippet',
-                };
-                const editorPropsObj = { props: { item: mergedSnippet, snippet: mergedSnippet, category: 'snippet' } };
-                url.searchParams.set('editorProps', JSON.stringify(editorPropsObj));
-
-                const finalUrl = url.toString();
-                if (chromeAny?.tabs?.create) {
-                  chromeAny.tabs.create({ url: finalUrl, active: true });
-                } else {
-                  window.open(finalUrl, '_blank', 'noopener');
-                }
-              } else if (type === 'session') {
-                useUIStore.getState().openEditor({ type: 'session', id: fav.id, props: { item: fav, session: fav } });
-              } else {
-                useUIStore.getState().openEditor({ type: 'link', id: fav.id, props: { item: fav } });
-              }
-            }
-          } else if (type === 'note') {
-            if (fav.id)
-              useUIStore
-                .getState()
-                .openEditor({ type: 'note', id: fav.id, props: { category: 'note', item: fav, snippet: fav } });
-          } else if (type === 'todo') {
-            if (fav.id) {
-              const baseUrl = chromeAny?.runtime?.getURL ? chromeAny.runtime.getURL('AltS_search_newtab/index.html') : '/AltS_search_newtab/index.html';
-              const url = new URL(baseUrl);
-              url.searchParams.set('alts_action', 'true');
-              url.searchParams.set('type', 'todo');
-              url.searchParams.set('entityId', fav.id);
-              url.searchParams.set('edit_mode', 'true');
-              const prefill = {
-                ...fav,
-                todo_id: fav.id,
-                is_todo_type: true,
-              };
-              const editorPropsObj = { props: { prefill, item: prefill, snippet: prefill } };
-              url.searchParams.set('editorProps', JSON.stringify(editorPropsObj));
-
-              const finalUrl = url.toString();
+          const urls = getFavAllUrls(fav);
+          if (urls.length > 0) {
+            urls.forEach((url, idx) => {
+              const cleanUrl = url.startsWith('//') ? `https:${url}` : url;
               if (chromeAny?.tabs?.create) {
-                chromeAny.tabs.create({ url: finalUrl, active: true });
+                chromeAny.tabs.create({ url: cleanUrl, active: idx === 0 });
               } else {
-                window.open(finalUrl, '_blank', 'noopener');
+                window.open(cleanUrl, '_blank', 'noopener');
               }
-            }
-          } else if (type === 'aiprompt' || type === 'prompt') {
-            if (fav.id) useUIStore.getState().openEditor({ type: 'aiPrompt', id: fav.id, props: { item: fav } });
-          } else if (type === 'agent' || type === 'chat_agent') {
-            if (fav.id) useUIStore.getState().openEditor({ type: 'agent', id: fav.id, props: { item: fav } });
-          } else if (type === 'command') {
-            // commands: bubble up as quick command
-            const cmdId = fav.id || fav.commandId;
-            if (cmdId && onQuickCommandSelect) onQuickCommandSelect(cmdId as any);
-          } else {
-            const urls = getFavAllUrls(fav);
-            if (urls.length > 0) {
-              const chromeAny = (window as any)?.chrome;
-              urls.forEach((url, idx) => {
-                const cleanUrl = url.startsWith('//') ? `https:${url}` : url;
-                if (chromeAny?.tabs?.create) {
-                  chromeAny.tabs.create({ url: cleanUrl, active: idx === 0 });
-                } else {
-                  window.open(cleanUrl, '_blank', 'noopener');
-                }
-              });
-            }
+            });
+          } else if (fav.id && (type === 'note' || type === 'snippet' || type === 'link')) {
+            useUIStore.getState().openEditor({ type: 'note', id: fav.id, props: { category: 'note', item: fav, snippet: fav } });
           }
         },
-        [onQuickCommandSelect],
+        [onExecuteFavorite],
       );
 
       // Helper: render the icon inside a favorite card
@@ -1168,7 +1095,7 @@ const HomeView = React.memo(
 
         // Only render favicon for single links/sessions (length === 1)
         if (
-          (type === 'link' || type === 'bulk_link' || type === 'tabgroup' || type === 'session') &&
+          (type === 'link' || type === 'tabgroup' || type === 'session') &&
           hostnames.length === 1 &&
           !imgFailed
         ) {
@@ -1185,7 +1112,7 @@ const HomeView = React.memo(
 
         // Render overlapping circular favicons for multiple links/sessions (length >= 2) horizontally
         if (
-          (type === 'link' || type === 'bulk_link' || type === 'tabgroup' || type === 'session') &&
+          (type === 'link' || type === 'tabgroup' || type === 'session') &&
           hostnames.length >= 2
         ) {
           return (
@@ -1222,7 +1149,7 @@ const HomeView = React.memo(
         if (type === 'command') {
           return <FiLayers className={`${iconClass} text-[var(--color-iconDefault)]`} />;
         }
-        if (type === 'link' || type === 'bulk_link' || type === 'tabgroup') {
+        if (type === 'link' || type === 'tabgroup') {
           return <FiLink className={`${iconClass} text-[var(--color-iconDefault)]`} />;
         }
         return <NotesIcon className="w-6 h-6 shrink-0 text-[var(--color-iconDefault)]" />;
@@ -1260,8 +1187,7 @@ const HomeView = React.memo(
           .filter(
             entry =>
               entry.snippet.category !== 'link' &&
-              entry.snippet.category !== 'session' &&
-              entry.snippet.category !== 'bulk_link',
+              entry.snippet.category !== 'session',
           )
           .slice(0, NOTE_LIMIT)
           .map((entry, index) => {
@@ -1273,7 +1199,7 @@ const HomeView = React.memo(
 
             const category = entry.snippet.category?.toLowerCase() || '';
             let kind: 'note' | 'link' = 'note';
-            if (category === 'link' || category === 'session' || category === 'bulk_link') kind = 'link';
+            if (category === 'link' || category === 'session') kind = 'link';
 
             return {
               context,
@@ -1293,8 +1219,7 @@ const HomeView = React.memo(
           .filter(
             entry =>
               entry.snippet.category === 'link' ||
-              entry.snippet.category === 'session' ||
-              entry.snippet.category === 'bulk_link',
+              entry.snippet.category === 'session',
           )
           .slice(0, LINK_LIMIT)
           .map((entry, index) => {
@@ -1445,7 +1370,7 @@ const HomeView = React.memo(
               : entry.workspace.workspace_name;
 
             const category = entry.snippet.category?.toLowerCase() || '';
-            const isLink = category === 'link' || category === 'session' || category === 'bulk_link';
+            const isLink = category === 'link' || category === 'session';
 
             let kind: 'note' | 'link' = 'note';
             if (isLink) kind = 'link';
@@ -1571,7 +1496,7 @@ const HomeView = React.memo(
           const category = (snippet?.category || '').toLowerCase();
           const snippetId = snippet?.snippet_id || snippet?.id || '';
 
-          if (category === 'link' || category === 'session' || category === 'bulk_link') {
+          if (category === 'link' || category === 'session') {
             const urls = extractUrlsFromSnippet(snippet);
           } else {
           }
@@ -1630,14 +1555,12 @@ const HomeView = React.memo(
                   notesCount: teamSnippets.filter(
                     s =>
                       s.snippet.category !== 'link' &&
-                      s.snippet.category !== 'session' &&
-                      s.snippet.category !== 'bulk_link',
+                      s.snippet.category !== 'session',
                   ).length,
                   linksCount: teamSnippets.filter(
                     s =>
                       s.snippet.category === 'link' ||
-                      s.snippet.category === 'session' ||
-                      s.snippet.category === 'bulk_link',
+                      s.snippet.category === 'session',
                   ).length,
                 }
                 : null
@@ -1711,7 +1634,7 @@ const HomeView = React.memo(
                           <SortableFavItem
                             key={fav.compoundId}
                             id={fav.compoundId}
-                            onClick={() => handleFavGridClick(fav)}
+                            onClick={(e) => handleFavGridClick(fav, e)}
                             onContextMenu={e => {
                               e.preventDefault();
                               if (onOpenContextMenu) {
@@ -1839,16 +1762,12 @@ const HomeView = React.memo(
                               }
                             }}
                             onDelete={() => {
-                              void deleteFavoriteCategory(groupId);
-                              if (newlyCreatedFavGroupId === option.id) {
-                                setNewlyCreatedFavGroupId(null);
-                              }
+                              handleDeleteFavGroup(option.id);
                             }}
                             autoFocusEdit={newlyCreatedFavGroupId === option.id}
                             onCancelEdit={() => {
                               if (newlyCreatedFavGroupId === option.id) {
-                                void deleteFavoriteCategory(groupId);
-                                setNewlyCreatedFavGroupId(null);
+                                handleDeleteFavGroup(option.id);
                               }
                             }}
                           />

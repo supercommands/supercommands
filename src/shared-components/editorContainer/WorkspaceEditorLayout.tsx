@@ -48,6 +48,7 @@ export interface WorkspaceEditorLayoutProps {
   headerRightPaddingClass?: string;
   rightColumnWidthClass?: string;
   containerMaxWidthClass?: string;
+  allowMainContentOverflow?: boolean;
 }
 
 export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
@@ -76,6 +77,7 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
   headerRightPaddingClass = '',
   rightColumnWidthClass = 'w-[260px]',
   containerMaxWidthClass = 'max-w-[1200px]',
+  allowMainContentOverflow = false,
 }) => {
   const [isUnsavedChangesOpen, setIsUnsavedChangesOpen] = useState(false);
   const [isTableCollapsed, setIsTableCollapsed] = useState(false);
@@ -117,8 +119,8 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
       innerClassName={`flex flex-col relative w-[calc(100%-100px)] bg-[var(--color-editorBg)] ${containerMaxWidthClass} mx-auto rounded-xl ${isTableCollapsed ? 'h-auto max-h-[520px]' : 'h-[860px] max-h-[90vh]'} overflow-hidden transition-all duration-300 ${isFocusMode ? 'border-none' : 'border border-black/5 dark:border-white/10'}`}
     >
       {/* Main Columns System */}
-      <div className="h-[440px] shrink-0 flex-none flex flex-col overflow-hidden">
-        <div className="flex-1 flex flex-col text-[#073642] dark:text-neutral-200 relative bg-transparent dark:bg-transparent border-none min-h-0 overflow-hidden">
+      <div className={`shrink-0 flex-none flex flex-col ${allowMainContentOverflow ? 'h-auto min-h-[440px] pb-[260px] overflow-visible' : 'h-[440px] overflow-hidden'}`}>
+        <div className={`flex-1 flex flex-col text-[#073642] dark:text-neutral-200 relative bg-transparent dark:bg-transparent border-none min-h-0 ${allowMainContentOverflow ? 'overflow-visible' : 'overflow-hidden'}`}>
           
           {/* Standard Header Row */}
           <EditorHeader

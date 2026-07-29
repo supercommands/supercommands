@@ -34,7 +34,8 @@ export const createTodo = async (
 
     const mappedReferences: TodoReference[] = references.map((ref: any) => ({
       id: String(ref.id || ref.value || ref.snippet_id),
-      type: ref.type || ref.category || 'note'
+      type: ref.type || ref.category || 'note',
+      name: ref.name || ref.title || ref.key || 'Untitled'
     }));
 
     const newTodo: TodoRecord = {

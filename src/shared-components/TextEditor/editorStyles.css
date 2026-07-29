@@ -346,3 +346,36 @@
 .ProseMirror {
   padding: 0 !important;
 }
+
+/* Toolbar Button States - Notes Editor */
+.ql-toolbar button {
+  border-radius: 6px !important;
+  color: #a3a3a3 !important;
+  transition: background-color 0.15s ease, color 0.15s ease !important;
+}
+
+.ql-toolbar button:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+
+/* Active Selected State - Displays background fill pill when tool is active */
+.ql-toolbar button.ql-active,
+.ql-snow.ql-toolbar button.ql-active,
+.ql-snow .ql-toolbar button.ql-active {
+  background-color: rgba(255, 255, 255, 0.18) !important;
+  background: rgba(255, 255, 255, 0.18) !important;
+  color: #ffffff !important;
+}
+
+.ql-toolbar button.ql-active .ql-stroke,
+.ql-toolbar button.ql-active .ql-stroke-miter,
+.ql-snow.ql-toolbar button.ql-active .ql-stroke,
+.ql-snow.ql-toolbar button.ql-active .ql-stroke-miter {
+  stroke: #ffffff !important;
+}
+
+.ql-toolbar button.ql-active .ql-fill,
+.ql-snow.ql-toolbar button.ql-active .ql-fill {
+  fill: #ffffff !important;
+}

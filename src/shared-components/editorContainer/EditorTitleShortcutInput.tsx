@@ -18,7 +18,7 @@ export interface EditorTitleShortcutInputProps {
   onTitleBlur?: () => void;
   onShortcutBlur?: () => void;
 
-  onTitleEnter?: (shiftKey: boolean) => void;
+  onTitleEnter?: (shiftKey: boolean, event?: React.KeyboardEvent<HTMLInputElement>) => void;
   onShortcutEnter?: () => void;
 
   onArrowDownPress?: () => void;
@@ -53,10 +53,19 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
 }) => {
   const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      if (onTitleEnter) {
-        onTitleEnter(e.shiftKey);
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+      if (isCmdOrCtrl && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onTitleEnter) {
+          onTitleEnter(true, e);
+        }
+      } else if (!isCmdOrCtrl) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onTitleEnter) {
+          onTitleEnter(e.shiftKey, e);
+        }
       }
     } else if (e.key === 'ArrowRight') {
       const el = titleRef?.current;
@@ -78,9 +87,11 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
   };
 
   const handleShortcutKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
-      if (onShortcutEnter) {
+      if (e.shiftKey && onCopyTitleToShortcut && !shortcut && title.trim().length > 0) {
+        onCopyTitleToShortcut();
+      } else if (onShortcutEnter) {
         onShortcutEnter();
       }
     } else if (e.key === 'ArrowLeft') {
@@ -173,20 +184,24 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
               onKeyDown={handleShortcutKeyDown}
               type="text"
               placeholder={shortcutPlaceholder}
-              className={`w-full text-sm font-medium text-neutral-700 dark:text-neutral-300 placeholder-black/35 dark:placeholder-white/35 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 p-0 pl-5 ${!shortcut && title.trim().length > 0 && onCopyTitleToShortcut ? 'pr-28' : ''}`}
+              className={`w-full text-sm font-medium text-neutral-700 dark:text-neutral-300 placeholder-black/35 dark:placeholder-white/35 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 p-0 pl-5 ${!shortcut ? 'pr-28' : ''}`}
             />
-            {!shortcut && title.trim().length > 0 && onCopyTitleToShortcut && (
+            {!shortcut && (
               <button
                 type="button"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  onCopyTitleToShortcut();
+                  if (onCopyTitleToShortcut) {
+                    onCopyTitleToShortcut();
+                  }
                 }}
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  onCopyTitleToShortcut();
+                  if (onCopyTitleToShortcut) {
+                    onCopyTitleToShortcut();
+                  }
                 }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-white bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 rounded border border-black/10 dark:border-white/10 transition-all cursor-pointer select-none"
                 title="Copy Title to Shortcut (Shift+Enter)"

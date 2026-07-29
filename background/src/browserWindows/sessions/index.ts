@@ -55,6 +55,14 @@ export async function saveSessionToDb(session: ActiveSessionEntry) {
     const sessionRecord = await db.sessions.get(session.sessionId);
     if (!sessionRecord) return;
 
+    const currentUrls = session.capturedUrls || [];
+    const dbUrls = (sessionRecord.urls || []).map(u => u.url);
+    const hasChanged = currentUrls.length !== dbUrls.length || currentUrls.some((url, i) => url !== dbUrls[i]);
+
+    if (!hasChanged) {
+      return; // Skip saving if nothing actually changed
+    }
+
     const urlsAsLinkItems = session.capturedUrls.map((url, i) => {
       const existing = sessionRecord.urls?.find(u => u.url === url);
       return {

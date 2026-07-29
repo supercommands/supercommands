@@ -67,12 +67,21 @@ export async function updateWorkspace(id: string, updates: Partial<WorkspaceData
 }
 
 /**
- * Deletes a Workspace from the local Dexie store.
- * NOTE: This should ideally also delete child folders/notes, which can be done in a higher-level hook later.
+ * Deletes a Workspace and all its associated items (cascade delete) from the local Dexie store.
  */
 export async function deleteWorkspace(id: string): Promise<void> {
   try {
-    await db.workspaces.delete(id);
+    await Promise.all([
+      db.folders.where({ workspaceId: id }).delete(),
+      db.notes.where({ workspaceId: id }).delete(),
+      db.links.where({ workspaceId: id }).delete(),
+      db.snippets.where({ workspaceId: id }).delete(),
+      db.automations.where({ workspaceId: id }).delete(),
+      db.chatAgents.where({ workspaceId: id }).delete(),
+      db.aiPrompts.where({ workspaceId: id }).delete(),
+      db.tags.where({ workspaceId: id }).delete(),
+      db.workspaces.delete(id),
+    ]);
   } catch (error: any) {
     console.error(`[workspaceData.deleteWorkspace] Error for id ${id}:`, error);
     throw new Error('An error occurred while deleting workspace.');

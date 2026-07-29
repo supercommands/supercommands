@@ -22,6 +22,7 @@ import type { SharedProperties } from '../../../../shared-components/editorToolb
 import { saveShortcut, clearShortcut, useShortcutValidation } from '../../../../shared-components/shortcuts';
 import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
 import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
 
 export interface SnippetEditorViewProps {
   snippetId?: string | null;
@@ -116,6 +117,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
     setActiveSnippetId(null);
     setSnippetTitle(initialDraftKey || '');
     setSnippetConfig(initialDraftConfig || '');
+    setIsUnsavedChangesDialogOpen(false);
 
     // Background Destination Logic: Snippets have no UI for this on initial render
     // Load default workspace (falling back to smart default) and folder from local storage
@@ -299,7 +301,19 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
         // Save shortcut!
         const wsObj = savedSnippet.workspaceId ? { workspace_id: savedSnippet.workspaceId } : null;
         const fldObj = savedSnippet.folderId ? { folder_id: savedSnippet.folderId } : null;
-        const compoundId = getItemCompoundId({ snippet: savedSnippet, workspace: wsObj, folder: fldObj });
+        const newCompoundId = getItemCompoundId({ snippet: savedSnippet, workspace: wsObj, folder: fldObj });
+
+        if (currentSnippetId) {
+          const oldWsObj = lastSavedWorkspaceIdRef.current ? { workspace_id: lastSavedWorkspaceIdRef.current } : null;
+          const oldFldObj = lastSavedFolderIdRef.current ? { folder_id: lastSavedFolderIdRef.current } : null;
+          const oldCompoundId = getItemCompoundId({ snippet: { id: currentSnippetId, category: 'snippet' }, workspace: oldWsObj, folder: oldFldObj });
+          
+          if (oldCompoundId && newCompoundId && oldCompoundId !== newCompoundId) {
+            await migrateItemCompoundId(oldCompoundId, newCompoundId, 'snippet');
+          }
+        }
+
+        const compoundId = newCompoundId;
 
         const finalShortcut = (currentShortcut || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         if (finalShortcut) {

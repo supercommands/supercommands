@@ -156,14 +156,17 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   autoFocusEdit,
   onCancelEdit,
 }) => {
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  const [isEditing, setIsEditing] = React.useState(autoFocusEdit || false);
-  const [editValue, setEditValue] = React.useState(label);
-  const [menuCoords, setMenuCoords] = React.useState({ top: 0, left: 0 });
-  const dotsRef = React.useRef<HTMLDivElement>(null);
-  const hasAppliedAutoFocusRef = React.useRef(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(autoFocusEdit || false);
+  const [editValue, setEditValue] = useState(label);
+  const [menuCoords, setMenuCoords] = useState({ top: 0, left: 0 });
+  const dotsRef = useRef<HTMLDivElement>(null);
+  const hasAppliedAutoFocusRef = useRef(false);
+  const isSubmittingRef = useRef(false);
 
   const handleRenameSubmit = () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     if (editValue.trim() && onRename) {
       onRename(editValue.trim());
     } else {
@@ -187,14 +190,14 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     setMenuOpen(!menuOpen);
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!menuOpen) return;
     const handleClose = () => setMenuOpen(false);
     window.addEventListener('click', handleClose);
     return () => window.removeEventListener('click', handleClose);
   }, [menuOpen]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (autoFocusEdit && !hasAppliedAutoFocusRef.current) {
       setIsEditing(true);
       setEditValue(label);
@@ -205,6 +208,20 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       hasAppliedAutoFocusRef.current = false;
     }
   }, [autoFocusEdit, label]);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditing) {
+      isSubmittingRef.current = false;
+      // Force focus to ensure search bar doesn't steal it
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 50);
+    }
+  }, [isEditing]);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 mb-1.5 relative group rounded border bg-white/[0.04] border-white/5">
@@ -219,13 +236,18 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         </div>
         {isEditing ? (
           <input
+            ref={inputRef}
             autoFocus
             value={editValue}
             onChange={e => setEditValue(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
                 handleRenameSubmit();
               } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
                 setIsEditing(false);
                 if (onCancelEdit) onCancelEdit();
               }
@@ -1014,6 +1036,7 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
         ReactDOM.createPortal(
           <div
             data-portal="true"
+            data-prevent-searchbar-capture="true"
             className="fixed z-[9999] w-52 p-2 rounded-lg border shadow-xl flex flex-col select-none overflow-y-auto max-h-[80vh] custom-scrollbar bg-[var(--color-sidebarBg)] backdrop-blur-md border-white/10 text-neutral-400 shadow-black/80"
             style={{ top: `${coords.top}px`, left: `${coords.left}px` }}>
             <Reorder.Group

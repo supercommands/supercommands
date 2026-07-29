@@ -18,21 +18,18 @@ import {
 } from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
 import { resolveEntityById } from '../../../../shared-components/utils/entityResolver';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  FaLink,
+import { FaLink,
   FaNetworkWired,
   FaBook,
   FaPlus,
   FaHashtag,
   FaChevronRight,
   FaChevronLeft,
-  FaLayerGroup,
   FaSun,
   FaMoon,
   FaFileAlt,
   FaHome,
-  FaChevronDown,
-} from 'react-icons/fa';
+  FaChevronDown } from 'react-icons/fa';
 import { FiCreditCard, FiTerminal, FiSettings, FiCheck, FiLayout } from 'react-icons/fi';
 import { LuSparkles } from 'react-icons/lu';
 import { AiOutlineEnter } from 'react-icons/ai';
@@ -105,6 +102,8 @@ import AutomationActionMenu from '../../../../allObjectFolder/src/createObject/a
 
 import { SettingsLayout, GeneralSettingsPanel, AllWorkspacesPanel } from '../../../../settings';
 import SpreadsheetMainContainer from '../../../../shared-components/spreadsheetUi/ui/spreadsheetMainContainer';
+import { SessionGridIcon } from '../../../../shared-components/icons/sessionGridIcon';
+
 
 type Snippet = SnippetRecord & {
   key?: string;
@@ -480,6 +479,7 @@ const Container: React.FC<ContainerProps> = ({
         value: todo.description ?? '',
         category: 'custom',
         is_done: todo.isDone,
+        scheduleTime: todo.scheduleTime,
         event_deadline: new Date(todo.scheduleTime).toISOString(),
         is_recurring: todo.scheduleType === 'recurring',
         recurring_cycle: todo.recurringType ?? null,
@@ -500,9 +500,11 @@ const Container: React.FC<ContainerProps> = ({
       try {
         await db.todos.delete(id);
         await deleteTodo(id);
-        if (activeTodoId === id) {
+        const currentActiveId = activeTodoId || (useUIStore.getState().activeEditor?.type === 'todo' ? (useUIStore.getState().activeEditor?.props?.prefill?.todo_id || useUIStore.getState().activeEditor?.props?.prefill?.id || useUIStore.getState().activeEditor?.id) : null);
+        if (String(currentActiveId) === String(id) || activeTodoId === id) {
           setActiveTodoId(null);
           useUIStore.getState().setTodoCreatePrefill(null);
+          useUIStore.getState().openEditor({ type: 'todo', id: 'new' });
         }
         const chromeAny = (window as any).chrome;
         if (chromeAny?.runtime?.sendMessage) {
@@ -1783,10 +1785,7 @@ const Container: React.FC<ContainerProps> = ({
 
       useUIStore.getState().setView({ type: 'home' });
       const invokeModule = (attempt: number) => {
-        if (searchbarRef.current?.executeModule) {
-          searchbarRef.current.executeModule(moduleId);
-          return;
-        }
+        /* removed executeModule */
         if (attempt >= 10) {
           triggerNotification('Search bar is not ready yet. Please try again.', 'warning');
           return;
@@ -2184,18 +2183,8 @@ const Container: React.FC<ContainerProps> = ({
   const dbConvertibleItems = useConvertibleItems();
 
   const convertibleItems = useMemo(() => {
-    const items: any[] = [...dbConvertibleItems];
-
-    commands.forEach(cmd => {
-      items.push({
-        id: `cmd-${cmd.id}`,
-        name: cmd.label,
-        category: 'command',
-        data: { ...cmd, key: cmd.label, value: cmd.id },
-      });
-    });
-    return items;
-  }, [commands, dbConvertibleItems]);
+    return [...dbConvertibleItems];
+  }, [dbConvertibleItems]);
 
   const [asyncItems, setAsyncItems] = useState<any[]>([]);
   useEffect(() => {
@@ -2295,6 +2284,17 @@ const Container: React.FC<ContainerProps> = ({
         todoCreatePrefill?.todo_id ||
         (todoCreatePrefill?.snippet_id && todoCreatePrefill?.is_todo_type ? todoCreatePrefill.snippet_id : undefined);
       if (existingTodoId) {
+        const nextScheduleTime = new Date(deadline).getTime();
+        const previousScheduleTime =
+          typeof todoCreatePrefill?.scheduleTime === 'number'
+            ? todoCreatePrefill.scheduleTime
+            : todoCreatePrefill?.event_deadline
+              ? new Date(String(todoCreatePrefill.event_deadline).replace(' ', 'T')).getTime()
+              : NaN;
+        const shouldReactivateTodo =
+          Number.isFinite(nextScheduleTime) &&
+          nextScheduleTime > Date.now() &&
+          (!Number.isFinite(previousScheduleTime) || Math.abs(nextScheduleTime - previousScheduleTime) >= 60000);
         const sid = todoCreatePrefill?.snippet_id ? String(todoCreatePrefill.snippet_id) : '';
         const hasConfigIds = Array.isArray(data.selectedItems) && data.selectedItems.length > 0;
         const configFromSelection = hasConfigIds
@@ -2332,6 +2332,7 @@ const Container: React.FC<ContainerProps> = ({
                     is_recurring: data.scheduleType === 'recurring',
                     recurring_cycle: data.scheduleType === 'recurring' ? data.recurringCycle : null,
                     is_anytime: isAnytime,
+                    is_done: shouldReactivateTodo ? false : t.is_done,
                     config: configFromSelection,
                     tags: data.tags || [],
                     shortcut: data.shortcut || '',
@@ -2355,7 +2356,7 @@ const Container: React.FC<ContainerProps> = ({
                     event_deadline: deadline,
                     is_recurring: data.scheduleType === 'recurring',
                     recurring_cycle: data.scheduleType === 'recurring' ? data.recurringCycle : null,
-                    is_done: todoCreatePrefill?.is_done || false,
+                    is_done: shouldReactivateTodo ? false : todoCreatePrefill?.is_done || false,
                     config: configFromSelection,
                     tags: data.tags || [],
                     shortcut: data.shortcut || '',
@@ -2399,12 +2400,13 @@ const Container: React.FC<ContainerProps> = ({
             await db.todos.update(todoId, {
               name: data.title,
               description: data.description,
-              scheduleTime: new Date(deadline).getTime(),
+              scheduleTime: nextScheduleTime,
               recurringType: (data.recurringCycle as any) || undefined,
               scheduleType: data.scheduleType === 'recurring' ? 'recurring' : 'one-time',
               references: updateReferences,
               tagIds: data.tagIds || [],
               shortcut: data.shortcut || '',
+              ...(shouldReactivateTodo ? { isDone: false } : {}),
               updatedAt: Date.now(),
             });
             if (data.shortcut !== undefined) {
@@ -2416,17 +2418,16 @@ const Container: React.FC<ContainerProps> = ({
             }
             if (data.hotkey !== undefined) {
               if (data.hotkey) {
-                await saveHotkey(todoId, todoId, data.hotkey, data.title, 'todo');
+                await saveHotkey(todoId, todoId, data.hotkey, 'todo');
               } else {
                 await clearHotkey(todoId, todoId, 'todo');
               }
             }
             if (data.isFavorite !== undefined) {
-              const compoundId = getItemCompoundId({ id: todoId, _kind: 'todo' });
               const currentFavs = useDbStore.getState().favorites || [];
-              const isFav = currentFavs.some((f: any) => f.itemId === compoundId);
+              const isFav = currentFavs.some((f: any) => f.reference_id === todoId);
               if (data.isFavorite !== isFav) {
-                await toggleFavoriteRecord(compoundId, 'todo', data.title);
+                await toggleFavoriteRecord(userId || 'local_user', todoId, 'todo', data.title);
               }
             }
           } catch (dbError) {
@@ -2479,11 +2480,10 @@ const Container: React.FC<ContainerProps> = ({
               await saveShortcut(todoIdVal, todoIdVal, data.shortcut, data.title, 'todo');
             }
             if (data.hotkey) {
-              await saveHotkey(todoIdVal, todoIdVal, data.hotkey, data.title, 'todo');
+              await saveHotkey(todoIdVal, todoIdVal, data.hotkey, 'todo');
             }
             if (data.isFavorite) {
-              const compoundId = getItemCompoundId({ id: todoIdVal, _kind: 'todo' });
-              await toggleFavoriteRecord(compoundId, 'todo', data.title);
+              await toggleFavoriteRecord(userId || 'local_user', todoIdVal, 'todo', data.title);
             }
           }
         } catch (dbError) {
@@ -2616,7 +2616,7 @@ const Container: React.FC<ContainerProps> = ({
               await saveHotkey(newTodo.id, compoundId, data.hotkey, 'todo');
             }
             if (data.isFavorite) {
-              await toggleFavoriteRecord(compoundId, 'todo', data.title);
+              await toggleFavoriteRecord(userId || 'local_user', newTodo.id, 'todo', data.title);
             }
           }
         } catch (dbError) {
@@ -2756,9 +2756,9 @@ const Container: React.FC<ContainerProps> = ({
 
       if (activeEditor?.props?.isOverlay && sheetBackground) {
         return (
-          <div className="relative w-full h-full">
+          <div className="relative w-full h-full flex flex-col overflow-hidden">
             {sheetBackground}
-            <div className="absolute inset-0 z-[1000] backdrop-blur-sm bg-black/20 flex flex-col">
+            <div className="fixed inset-0 z-[10000] backdrop-blur-md bg-black/50 flex flex-col overflow-y-auto">
               {editorComponent}
             </div>
           </div>
@@ -2769,7 +2769,7 @@ const Container: React.FC<ContainerProps> = ({
     }
 
     if (activeEditor?.type === 'todo') {
-      return (
+      const editorComponent = (
         <div className="flex-1 min-h-0 pt-6">
           <div className="h-full w-full flex flex-col overflow-visible">
             <CreateTodoView
@@ -2783,6 +2783,9 @@ const Container: React.FC<ContainerProps> = ({
                 } else {
                   useUIStore.getState().setTodoCreatePrefill(null);
                   setActiveTodoId(null);
+                  const currentProps = useUIStore.getState().activeEditor?.props || {};
+                  const cleanProps = { ...currentProps, item: null, snippet: null, prefill: null };
+                  useUIStore.getState().openEditor({ type: 'todo', id: 'new', props: cleanProps });
                 }
               }}
               initialItem={
@@ -2818,6 +2821,19 @@ const Container: React.FC<ContainerProps> = ({
           </div>
         </div>
       );
+
+      if (activeEditor?.props?.isOverlay && sheetBackground) {
+        return (
+          <div className="relative w-full h-full flex flex-col overflow-hidden">
+            {sheetBackground}
+            <div className="fixed inset-0 z-[10000] backdrop-blur-md bg-black/50 flex flex-col overflow-y-auto">
+              {editorComponent}
+            </div>
+          </div>
+        );
+      }
+
+      return editorComponent;
     }
 
     // Agent Panel
@@ -2845,20 +2861,39 @@ const Container: React.FC<ContainerProps> = ({
 
     // AI Prompt Generator
     if (activeEditor?.type === 'aiPrompt') {
-      return (
-        <div className="flex-1 min-h-0 pt-6 flex flex-col">
+      const editorComponent = (
+        <div className="flex-1 min-h-0 flex flex-col">
           <div className="flex-1 w-full flex flex-col overflow-visible">
             <AiPromptEditorView
               aiPromptId={activeEditor?.id === 'new' ? null : activeEditor?.id}
               onBack={() => {
                 useUIStore.getState().closeEditor();
-                useUIStore.getState().setView({ type: 'home' });
+                if (!activeEditor?.props?.isOverlay) {
+                  useUIStore.getState().setView({ type: 'home' });
+                }
               }}
               isFullScreenMode={false}
             />
           </div>
         </div>
       );
+
+      if (activeEditor?.props?.isOverlay && sheetBackground) {
+        return (
+          <div className="relative w-full h-full flex flex-col overflow-hidden">
+            {sheetBackground}
+            <div className="fixed inset-0 z-[10000] backdrop-blur-md bg-black/50 flex flex-col overflow-y-auto">
+              <div className="flex-1 min-h-0 pt-6">
+                <div className="h-full w-full flex flex-col overflow-visible">
+                  {editorComponent}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      return editorComponent;
     }
 
     if (showEditor) {
@@ -2916,6 +2951,7 @@ const Container: React.FC<ContainerProps> = ({
         } else if (isSnippetMode) {
           editorContent = (
             <EditSnippetScreen
+              key={`snippet-editor-${activeEditor?.id || 'new'}-${activeEditor?.openInstanceId || 0}`}
               selectedSnippet={activeEditor?.props?.snippet || hotkeySnippet || effectiveSnippet}
               isCreatingNew={activeEditor?.id === 'new'}
               snippetBreadCrum={snippetBreadCrum}
@@ -2937,9 +2973,24 @@ const Container: React.FC<ContainerProps> = ({
             />
           );
         } else {
+          const isNewNoteEditor = activeEditor?.id === 'new';
+          const noteInitialDraftKey = isNewNoteEditor
+            ? activeEditor?.props?.initialDraftKey ||
+              activeEditor?.props?.snippet?.title ||
+              activeEditor?.props?.snippet?.name ||
+              activeEditor?.props?.snippet?.key
+            : undefined;
+          const noteInitialDraftContent = isNewNoteEditor
+            ? activeEditor?.props?.initialDraftContent ||
+              activeEditor?.props?.snippet?.body ||
+              activeEditor?.props?.snippet?.content ||
+              activeEditor?.props?.snippet?.value
+            : undefined;
+
           editorContent = (
             <NoteEditorView
-              noteId={activeEditor?.id === 'new' ? null : activeEditor?.id}
+              key={`note-editor-${activeEditor?.id || 'new'}-${activeEditor?.openInstanceId || 0}`}
+              noteId={isNewNoteEditor ? null : activeEditor?.id}
               onBack={() => {
                 useUIStore.getState().closeEditor();
                 if (!activeEditor?.props?.isOverlay) {
@@ -2949,29 +3000,19 @@ const Container: React.FC<ContainerProps> = ({
                   useUIStore.getState().setView({ type: 'home' });
                 }
               }}
-              initialDraftKey={
-                activeEditor?.props?.initialDraftKey ||
-                activeEditor?.props?.snippet?.title ||
-                activeEditor?.props?.snippet?.name ||
-                activeEditor?.props?.snippet?.key
-              }
-              initialDraftContent={
-                activeEditor?.props?.initialDraftContent ||
-                activeEditor?.props?.snippet?.body ||
-                activeEditor?.props?.snippet?.content ||
-                activeEditor?.props?.snippet?.value
-              }
+              initialDraftKey={noteInitialDraftKey}
+              initialDraftContent={noteInitialDraftContent}
             />
           );
         }
 
         if (activeEditor?.props?.isOverlay && sheetBackground) {
           return (
-            <div className="relative w-full h-full">
+            <div className="relative w-full h-full flex flex-col overflow-hidden">
               {sheetBackground}
-              <div className="absolute inset-0 z-[1000] backdrop-blur-sm bg-black/20 flex flex-col">
+              <div className="fixed inset-0 z-[10000] backdrop-blur-md bg-black/50 flex flex-col overflow-y-auto">
                 <div className="flex-1 min-h-0 pt-6">
-                  <div className={`${isFocusMode || isCreatingEditorView ? 'h-full' : 'h-full'} w-full flex flex-col overflow-visible bg-[var(--color-appBg)]`}>
+                  <div className="h-full w-full flex flex-col overflow-visible">
                     {editorContent}
                   </div>
                 </div>
@@ -3204,6 +3245,7 @@ const Container: React.FC<ContainerProps> = ({
           <HomeView
             onRequestOpenUrls={handleRequestOpenUrls}
             ref={homeViewRef}
+            onExecuteFavorite={(fav: any, e?: any) => boardViewRef.current?.executeFavorite(fav, e)}
             onQuickCommandSelect={commandId => {
               const localDef = findCommandByAnyId(commands, commandId);
               if (localDef && localDef.surface !== 'website') {
@@ -3268,6 +3310,7 @@ const Container: React.FC<ContainerProps> = ({
       <div className="flex-1 min-h-0 h-[70%] w-full">
         <HomeView
           ref={homeViewRef}
+          onExecuteFavorite={(fav: any, e?: any) => boardViewRef.current?.executeFavorite(fav, e)}
           onQuickCommandSelect={commandId => {
             if (commandId === 'todo') {
               useUIStore.getState().setSidebar('todoSidebar', { open: true });

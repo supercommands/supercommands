@@ -341,17 +341,30 @@ const extractTabsValue = (value: any): string => {
     .join('\n');
 };
 
+const isRawTagId = (tag: string): boolean => {
+  if (!tag || typeof tag !== 'string') return true;
+  const trimmed = tag.trim();
+  if (/^TAG_/i.test(trimmed)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) return true;
+  return false;
+};
+
 const normalizeSnippetTags = (raw: unknown): string[] => {
   if (!Array.isArray(raw)) return [];
   return raw
     .map(tag => {
       if (!tag) return null;
-      if (typeof tag === 'string') return tag;
       if (typeof tag === 'object' && typeof (tag as { name?: unknown }).name === 'string') {
-        return ((tag as { name: string }).name || '').trim();
+        const name = ((tag as { name: string }).name || '').trim();
+        if (name && !isRawTagId(name)) return name;
       }
       if (typeof tag === 'object' && typeof (tag as { label?: unknown }).label === 'string') {
-        return ((tag as { label: string }).label || '').trim();
+        const label = ((tag as { label: string }).label || '').trim();
+        if (label && !isRawTagId(label)) return label;
+      }
+      if (typeof tag === 'string') {
+        const str = tag.trim();
+        if (str && !isRawTagId(str)) return str;
       }
       return null;
     })

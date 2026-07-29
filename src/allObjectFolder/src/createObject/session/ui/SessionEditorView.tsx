@@ -11,8 +11,7 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reorder } from 'framer-motion';
-import {
-  FaPlus,
+import { FaPlus,
   FaTrash,
   FaChevronDown,
   FaChevronRight,
@@ -38,9 +37,7 @@ import {
   FaRobot,
   FaList,
   FaCopy,
-  FaDirections,
-  FaLayerGroup,
-} from 'react-icons/fa';
+  FaDirections } from 'react-icons/fa';
 import { FiStar, FiChevronLeft, FiChevronRight, FiTag, FiSettings, FiCopy } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { formatDistanceToNow } from 'date-fns';
@@ -78,6 +75,8 @@ import {
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import { nowUtc } from '../../../../../shared-components/utils';
 import { AutoSaveIndicator } from '../../../../../shared-components/autoSaveEngine/autoSave';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 interface SessionEditorViewProps {
   isOpen: boolean;
@@ -396,6 +395,8 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
   const { validateShortcut } = useShortcutValidation();
   const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const [shortcutConflictId, setShortcutConflictId] = useState<string | null>(null);
+  const [isShortcutOverrideable, setIsShortcutOverrideable] = useState(false);
 
   // Clear validation errors when switching between active sessions/drafts
   useEffect(() => {
@@ -403,19 +404,33 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     setShortcutError(null);
   }, [liveSessionId, setSessionError]);
 
+  const effectiveSessionWorkspaceId =
+    workspaceId ||
+    persistedSessionRecord?.workspaceId ||
+    (initialSession as any)?.workspace_id ||
+    (initialSession as any)?.workspaceId ||
+    null;
+  const effectiveSessionFolderId =
+    workspaceId
+      ? folderId
+      : persistedSessionRecord?.folderId ??
+        (initialSession as any)?.folder_id ??
+        (initialSession as any)?.folderId ??
+        null;
+
   const sessionCompoundId = useMemo(() => {
     if (!currentSessionId) return '';
 
     return getItemCompoundId({
       id: currentSessionId,
-      workspace_id: workspaceId || undefined,
-      folder_id: folderId || undefined,
+      workspace_id: effectiveSessionWorkspaceId || undefined,
+      folder_id: effectiveSessionFolderId || undefined,
       snippet: {
         id: currentSessionId,
         category: 'session',
       },
     });
-  }, [currentSessionId, workspaceId, folderId]);
+  }, [currentSessionId, effectiveSessionWorkspaceId, effectiveSessionFolderId]);
 
   useEffect(() => {
     if (liveSessionId && liveSessionId !== activeSessionId) {
@@ -889,10 +904,9 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   useEffect(() => {
     if (isOpen && !isEditMode && !prefill && availableItems.length > 0) {
       const allTabsItems = availableItems.filter(item => item.source === 'tab');
-      let addedAny = false;
-      
       // Use functional state update to avoid dependency cycle
       setSelectedLinks(prevLinks => {
+        let addedAny = false;
         const newLinks = [...prevLinks];
         for (const tab of allTabsItems) {
           const tabId = tab.originalData?.id || tab.url;
@@ -906,10 +920,6 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
         }
         return addedAny ? newLinks : prevLinks;
       });
-
-      if (addedAny) {
-        seenAutoSelectedTabsRef.current.clear();
-      }
     }
   }, [isOpen, isEditMode, prefill, availableItems, isTitleManuallyModified]);
 
@@ -920,9 +930,18 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   useEffect(() => {
     const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
     const isLiveSyncingSession = currentSessionId && runningSessionId && String(currentSessionId) === String(runningSessionId);
+    const isCreateMode = !initialSession && !activeSessionId;
 
-    if (!isOpen || sessionOpenSettings.autoSaveMode === 'dont_save' || !hasFetchedTabs || !isLiveSyncingSession) {
+    if (!isOpen || !hasFetchedTabs) {
       previousOpenTabsRef.current = null;
+      if (liveTrackingTimeoutRef.current !== null) {
+        window.clearTimeout(liveTrackingTimeoutRef.current);
+        liveTrackingTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (sessionOpenSettings.autoSaveMode === 'dont_save') {
       if (liveTrackingTimeoutRef.current !== null) {
         window.clearTimeout(liveTrackingTimeoutRef.current);
         liveTrackingTimeoutRef.current = null;
@@ -1006,12 +1025,10 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
           }
 
           for (const tabKey of addedTabKeys) {
-            if (!newLinks.some(link => getTabInstanceKey(link) === tabKey)) {
-              const tabItem = currentOpenItemsByKey.get(tabKey);
-              if (tabItem) {
-                newLinks.push(tabItem);
-                changed = true;
-              }
+            const tabItem = currentOpenItemsByKey.get(tabKey);
+            if (tabItem && !newLinks.some(link => areSameSessionItems(link, tabItem))) {
+              newLinks.push(tabItem);
+              changed = true;
             }
           }
 
@@ -1020,11 +1037,12 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
           }
           return changed ? newLinks : prevLinks;
         });
+        previousOpenTabsRef.current = currentOpenTabState;
         liveTrackingTimeoutRef.current = null;
       }, 800);
+    } else {
+      previousOpenTabsRef.current = currentOpenTabState;
     }
-
-    previousOpenTabsRef.current = currentOpenTabState;
     return () => {
       if (liveTrackingTimeoutRef.current !== null) {
         window.clearTimeout(liveTrackingTimeoutRef.current);
@@ -1036,8 +1054,9 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   useEffect(() => {
     const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
     const isLiveSyncingSession = currentSessionId && runningSessionId && String(currentSessionId) === String(runningSessionId);
+    const isCreateMode = !initialSession && !activeSessionId;
 
-    if (!isOpen || sessionOpenSettings.autoSaveMode === 'dont_save' || !hasFetchedTabs || !isLiveSyncingSession) return;
+    if (!isOpen || sessionOpenSettings.autoSaveMode === 'dont_save' || !hasFetchedTabs) return;
 
     const currentTabItems = availableItems.filter(item => item.source === 'tab');
     if (currentTabItems.length === 0) return;
@@ -1214,12 +1233,13 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   };
 
   const handleHotkeyChange = async (newHotkey: string) => {
-    if (initialSession?.id && !String(initialSession.id).startsWith('temp-')) {
+    const sessionIdForHotkey = currentSessionId || initialSession?.id || liveSessionId;
+    if (sessionIdForHotkey && !String(sessionIdForHotkey).startsWith('temp-')) {
       try {
         if (!newHotkey) {
-          await apiClearHotkey(initialSession.id, sessionCompoundId, 'session');
+          await apiClearHotkey(sessionIdForHotkey, sessionCompoundId, 'session');
         } else {
-          await apiSaveHotkey(initialSession.id, sessionCompoundId, newHotkey, 'session');
+          await apiSaveHotkey(sessionIdForHotkey, sessionCompoundId, newHotkey, 'session');
         }
         showFooterStatus('success', newHotkey ? 'Hotkey updated' : 'Hotkey cleared');
       } catch (error) {
@@ -1234,8 +1254,8 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     if (sessionIdForShortcut && !String(sessionIdForShortcut).startsWith('temp-')) {
       const compoundIdForShortcut = getItemCompoundId({
         id: sessionIdForShortcut,
-        workspace_id: propertiesRef.current?.workspaceId || (initialSession as any)?.workspace_id || (initialSession as any)?.workspaceId || undefined,
-        folder_id: propertiesRef.current?.folderId || (initialSession as any)?.folder_id || (initialSession as any)?.folderId || undefined,
+        workspace_id: propertiesRef.current?.workspaceId ?? (initialSession as any)?.workspace_id ?? (initialSession as any)?.workspaceId ?? undefined,
+        folder_id: propertiesRef.current?.folderId ?? (initialSession as any)?.folder_id ?? (initialSession as any)?.folderId ?? undefined,
         snippet: {
           id: sessionIdForShortcut,
           category: 'session',
@@ -1682,14 +1702,6 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
           },
         ];
       });
-
-      if (activeSessionId) {
-        chrome.runtime.sendMessage({
-          action: 'open_tab_in_session',
-          sessionId: activeSessionId,
-          url: tab.url
-        }).catch(() => {});
-      }
     },
     [getHostname, isTitleManuallyModified, activeSessionId],
   );
@@ -1737,7 +1749,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
         ];
       });
 
-      if (activeSessionId && item.url) {
+      if (activeSessionId && item.url && item.source !== 'tab') {
         chrome.runtime.sendMessage({
           action: 'open_tab_in_session',
           sessionId: activeSessionId,
@@ -1788,21 +1800,25 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
     setSelectedLinks(nextSelectedLinks);
 
-    if (sessionOpenSettings.autoSaveMode === 'auto_save') {
-      void executeSave(true, {
-        openSettings: sessionOpenSettings,
-        workspaceId: propertiesRef.current?.workspaceId,
-        folderId: propertiesRef.current?.folderId,
-        tagIds: propertiesRef.current?.tagIds,
-        urls: nextSelectedLinks,
-      });
-    }
+    void executeSave(true, {
+      openSettings: sessionOpenSettings,
+      workspaceId: propertiesRef.current?.workspaceId,
+      folderId: propertiesRef.current?.folderId,
+      tagIds: propertiesRef.current?.tagIds,
+      urls: nextSelectedLinks,
+    });
 
     if (activeSessionId) {
       chrome.runtime.sendMessage({
         action: 'open_tab_in_session',
         sessionId: activeSessionId,
         url: normalizedUrl
+      }).catch(() => {});
+    } else {
+      chrome.runtime.sendMessage({
+        action: 'open_tab',
+        url: normalizedUrl,
+        active: false
       }).catch(() => {});
     }
 
@@ -1930,19 +1946,31 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
           },
         });
         if (shortcutsMap && shortcutsMap[sessionCompoundId] === sessionShortcut) {
-          if (active) setShortcutError(null);
+          if (active) {
+            setShortcutError(null);
+            setIsShortcutOverrideable(false);
+            setShortcutConflictId(null);
+          }
           return;
         }
         const res = await validateShortcut(sessionShortcut, currentSessionId || 'new');
         if (active) {
           if (!res.isValid) {
             setShortcutError(res.errorMessage || 'This shortcut is already taken.');
+            setIsShortcutOverrideable(!!res.isOverrideable);
+            setShortcutConflictId(res.conflictId || null);
           } else {
             setShortcutError(null);
+            setIsShortcutOverrideable(false);
+            setShortcutConflictId(null);
           }
         }
       } else {
-        if (active) setShortcutError(null);
+        if (active) {
+          setShortcutError(null);
+          setIsShortcutOverrideable(false);
+          setShortcutConflictId(null);
+        }
       }
     };
     void checkShortcut();
@@ -1950,6 +1978,44 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       active = false;
     };
   }, [sessionShortcut, currentSessionId, shortcutsMap, workspaceId, folderId, validateShortcut]);
+
+  const handleOverrideShortcut = useCallback(async () => {
+    if (!sessionShortcut) return;
+    
+    let targetId = currentSessionId;
+    if (!targetId) {
+      const saveSuccess = await executeSave(true, {
+        openSettings: sessionOpenSettings,
+        workspaceId: workspaceId || null,
+        folderId: folderId || null,
+        tagIds: tagIds,
+        title: title,
+        urls: selectedLinks,
+      });
+      if (!saveSuccess) return;
+      targetId = activeSessionId || null;
+    }
+    if (!targetId) return;
+
+    if (shortcutConflictId) {
+      await apiClearShortcut(shortcutConflictId, shortcutConflictId, 'session');
+    }
+
+    const currentCompound = getItemCompoundId({
+      id: targetId,
+      workspace_id: workspaceId || null,
+      folder_id: folderId || null,
+      snippet: { id: targetId, category: 'session' },
+    });
+
+    await apiSaveShortcut(targetId, currentCompound, sessionShortcut, title || 'Untitled Session', 'session');
+    
+    setShortcutError(null);
+    setIsShortcutOverrideable(false);
+    setShortcutConflictId(null);
+    
+    if (setSessionShortcut) setSessionShortcut(sessionShortcut);
+  }, [sessionShortcut, currentSessionId, executeSave, sessionOpenSettings, workspaceId, folderId, tagIds, title, selectedLinks, activeSessionId, shortcutConflictId, setSessionShortcut]);
 
   const handleSave = useCallback(
     async (
@@ -2002,28 +2068,42 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       setTagIds(newTagIds);
     }
 
+    const prevWorkspaceId = propertiesRef.current?.workspaceId;
+    const prevFolderId = propertiesRef.current?.folderId;
+    const prevTagIds = propertiesRef.current?.tagIds;
+    const nextWorkspaceId = properties.workspaceId !== undefined ? properties.workspaceId : prevWorkspaceId;
+    const nextFolderId = properties.folderId !== undefined ? properties.folderId : prevFolderId;
+    const nextTagIds = newTagIds !== undefined ? newTagIds : prevTagIds;
+
     propertiesRef.current = {
+      ...propertiesRef.current,
       ...properties,
-      tagIds: newTagIds !== undefined ? newTagIds : propertiesRef.current?.tagIds
+      workspaceId: nextWorkspaceId,
+      folderId: nextFolderId,
+      tagIds: nextTagIds
     };
 
     if (properties.workspaceId !== undefined) {
-      setWorkspaceId(properties.workspaceId);
+      setWorkspaceId(nextWorkspaceId);
     }
     if (properties.folderId !== undefined) {
-      setFolderId(properties.folderId);
+      setFolderId(nextFolderId);
     }
     
-    // Only trigger autosave if this was a user-initiated change
-    if (properties.workspaceId !== undefined || properties.folderId !== undefined || properties.selectedTags !== undefined) {
+    const didWorkspaceChange = nextWorkspaceId !== prevWorkspaceId;
+    const didFolderChange = nextFolderId !== prevFolderId;
+    const didTagsChange = JSON.stringify(nextTagIds || []) !== JSON.stringify(prevTagIds || []);
+
+    // Only trigger autosave if this was an actual change in values
+    if (didWorkspaceChange || didFolderChange || didTagsChange) {
       hasUserModifiedRef.current = true;
       void handleSave(true, undefined, undefined, undefined, {
-        workspaceId: properties.workspaceId,
-        folderId: properties.folderId,
-        tagIds: newTagIds !== undefined ? newTagIds : propertiesRef.current?.tagIds
+        workspaceId: nextWorkspaceId,
+        folderId: nextFolderId,
+        tagIds: nextTagIds
       });
     }
-  }, [setWorkspaceId, setFolderId, setTagIds, tagIds, handleSave]);
+  }, [setWorkspaceId, setFolderId, setTagIds, tagIds, workspaceId, folderId, handleSave]);
 
 
   const updateSessionSettings = useCallback(
@@ -2059,7 +2139,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   );
 
   useEffect(() => {
-    if (!isOpen || sessionOpenSettings.autoSaveMode !== 'auto_save') return;
+    if (!isOpen) return;
     const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
     const isLiveSyncingSession = currentSessionId && runningSessionId && String(currentSessionId) === String(runningSessionId);
 
@@ -2183,11 +2263,16 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     // NOT trigger onClose or open a new Chrome window
     await executeSave(true);
 
+    const currentProps = useUIStore.getState().activeEditor?.props || {};
+    const cleanProps = { ...currentProps, session: null, snippet: null, prefill: null, item: null };
+    useUIStore.getState().openEditor({ type: 'session', id: 'new', props: cleanProps });
+    setActiveSessionId(null);
     setIsForceCreateNew(true);
     resetEditor();
     setLocalSessionOverride(null);
     hasInitializedPrefill.current = false;
     hasSyncedInitialDataRef.current = false;
+    seenAutoSelectedTabsRef.current.clear();
 
     // Keep last workspace/folder for convenience, but clear session-specific tags
     propertiesRef.current = { 
@@ -2537,7 +2622,28 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                 await apiClearShortcut(sessionToDeleteId, compoundId, 'session');
                 await deleteSession(sessionToDeleteId);
                 if (sessionToDeleteId === activeSessionId) {
+                  setActiveSessionId(null);
+                  setIsForceCreateNew(true);
                   resetEditor();
+                  setLocalSessionOverride(null);
+                  hasInitializedPrefill.current = false;
+                  hasSyncedInitialDataRef.current = false;
+                  seenAutoSelectedTabsRef.current.clear();
+                  
+                  // Reset all UI state
+                  setCustomLinkUrl('');
+                  setCustomLinkName('');
+                  setIsCustomLinkFormOpen(false);
+                  setIsLeftCustomLinkFormOpen(false);
+                  setIsSettingsPopupOpen(false);
+                  setIsLocationPickerOpen(false);
+                  setIsTitleManuallyModified(false);
+                  setHasAutoPinned(false);
+                  setFooterStatus({ type: 'idle', message: '' });
+                  setEditingUrlId(null);
+                  setEditingUrlValue('');
+                  isSessionShortcutManuallyEditedRef.current = false;
+                  setSessionShortcut('');
                 }
                 void fetchTableMaps();
               } catch (err) {
@@ -2554,7 +2660,14 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
           <div className="flex items-center gap-3">
             <SharedPropertiesToolbar
               key={currentSessionId || 'new-session'}
-              initialSnippet={{ ...initialSession, ...initialSessionProp, workspaceId, folderId, tagIds: tagIds, category: 'session' }}
+              initialSnippet={{
+                ...initialSession,
+                ...initialSessionProp,
+                workspaceId: effectiveSessionWorkspaceId,
+                folderId: effectiveSessionFolderId,
+                tagIds: tagIds,
+                category: 'session',
+              }}
               compoundId={sessionCompoundId}
               defaultName={title || 'New Session'}
               onChange={handlePropertiesChange}
@@ -2700,11 +2813,19 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                 setSessionNotice('Saving current session...');
                 const saved = await executeSave(true);
                 if (!saved) {
-                  setSessionError('Please save your current session before switching.');
+                  if (!activeSessionId) {
+                    // It's a new session that failed validation (e.g. no tabs).
+                    // Allow the user to switch away and discard the invalid draft.
+                    setSessionNotice(null);
+                    setSessionError(null);
+                  } else {
+                    setSessionError('Please save your current session before switching.');
+                    setSessionNotice(null);
+                    return;
+                  }
+                } else {
                   setSessionNotice(null);
-                  return;
                 }
-                setSessionNotice(null);
               }
               
               const chromeAny = (window as any).chrome;
@@ -2728,11 +2849,13 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                   if (setSaveError) setSaveError(null);
                   if (setSessionError) setSessionError(null);
                   setActiveSessionId(id);
+                  setIsForceCreateNew(false);
                 });
               } else {
                 if (setSaveError) setSaveError(null);
                 if (setSessionError) setSessionError(null);
                 setActiveSessionId(id);
+                setIsForceCreateNew(false);
               }
             }}
             onUpdateItemField={handleUpdateItemField}
@@ -2772,9 +2895,13 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
           />
         }
         containerMaxWidthClass={(isEditMode || currentSessionId) ? "max-w-[1200px]" : "max-w-[940px]"}
+        allowMainContentOverflow={(isLeftCustomLinkFormOpen && linkSuggestions.length > 0) || isSettingsPopupOpen}
       >
         <div className="flex-1 flex flex-col min-h-0 relative">
-          <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2 overflow-hidden">
+          <div className={clsx(
+            "w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2",
+            ((isLeftCustomLinkFormOpen && linkSuggestions.length > 0) || isSettingsPopupOpen) ? "overflow-visible" : "overflow-hidden"
+          )}>
             {/* Error notifications */}
             <EditorTitleShortcutInput
               titleError={sessionError || saveError}
@@ -2782,11 +2909,14 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
               setTitle={(val) => {
                 hasUserModifiedRef.current = true;
                 if (val.trim()) {
-                  if (setSaveError) setSaveError(null);
                   if (setSessionError) setSessionError(null);
+                  if (setSaveError) setSaveError(null);
                 }
                 setTitle(val);
               }}
+              shortcutError={shortcutError}
+              onOverrideShortcut={handleOverrideShortcut}
+              isOverrideable={isShortcutOverrideable}
               shortcut={sessionShortcut}
               setShortcut={(val) => {
                 hasUserModifiedRef.current = true;
@@ -2795,16 +2925,18 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
               titlePlaceholder="Title"
               shortcutPlaceholder="Shortcut"
               onTitleBlur={() => {
-                if (sessionOpenSettings.autoSaveMode === 'auto_save') {
-                  void handleSave(true);
-                }
+                void handleSave(true);
               }}
               onShortcutBlur={async () => {
-                if (sessionOpenSettings.autoSaveMode === 'auto_save' && hasUnsavedChanges) {
+                if (hasUnsavedChanges) {
                   void handleSave(true);
                 }
               }}
-              onTitleEnter={(shiftKey) => {
+              onTitleEnter={(shiftKey, e) => {
+                if (e?.ctrlKey || e?.metaKey) {
+                  handleCreateNew();
+                  return;
+                }
                 if (shiftKey) {
                   handleCopyTitleToShortcut();
                   return;
@@ -2849,7 +2981,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                 ref={listContainerRef}
                 className={clsx(
                   "flex-1 min-h-0 w-full",
-                  "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden",
+                  "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]",
                   (isLeftCustomLinkFormOpen && linkSuggestions.length > 0)
                     ? "overflow-visible"
                     : "overflow-y-auto custom-scrollbar"
@@ -3109,6 +3241,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                                     event.stopPropagation();
 
                                     if (focusedSuggestionIndex >= 0 && linkSuggestions[focusedSuggestionIndex]) {
+                                      hasUserModifiedRef.current = true;
                                       const item = linkSuggestions[focusedSuggestionIndex];
                                       setSelectedLinks(prev => [
                                         ...prev,
@@ -3120,6 +3253,21 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                                           favIconUrl: getFaviconUrl(getHostname(item.url)),
                                         },
                                       ]);
+                                      
+                                      if (activeSessionId) {
+                                        chrome.runtime.sendMessage({
+                                          action: 'open_tab_in_session',
+                                          sessionId: activeSessionId,
+                                          url: item.url
+                                        }).catch(() => {});
+                                      } else {
+                                        chrome.runtime.sendMessage({
+                                          action: 'open_tab',
+                                          url: item.url,
+                                          active: false
+                                        }).catch(() => {});
+                                      }
+
                                       setCustomLinkUrl('');
                                       setCustomLinkName('');
                                       setIsLeftCustomLinkFormOpen(false);
@@ -3232,7 +3380,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
                   })()}
                 </div>
               </div>
-              {isEditMode && !hasPendingSessionChanges && (
+              {isEditMode && (
                 <button
                   id="create-another-btn"
                   type="button"
@@ -3569,7 +3717,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
               ))
             ) : (
               <div className="flex flex-col items-center justify-center h-full gap-2 opacity-50">
-                <FaLayerGroup size={24} className="text-neutral-400" />
+                <SessionGridIcon size={24} className="text-neutral-400" />
                 <span className="text-[11px] font-medium text-neutral-500">No links captured yet</span>
               </div>
             )}

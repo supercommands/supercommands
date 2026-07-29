@@ -9,12 +9,25 @@
  * ```
  */
 
-export type TodoReferenceType = 'note' | 'prompt' | 'link' | 'snippet' | 'chat_agent';
+export type TodoReferenceType =
+  | 'note'
+  | 'prompt'
+  | 'ai_prompt'
+  | 'link'
+  | 'snippet'
+  | 'command'
+  | 'automation'
+  | 'agent'
+  | 'chat_agent'
+  | 'module'
+  | 'session'
+  | 'tabgroup';
 
 
 export interface TodoReference {
   type: TodoReferenceType;
   id: string;
+  name?: string;
 }
 
 export type ScheduleType = 'one-time' | 'recurring';
@@ -40,5 +53,4 @@ export interface TodoRecord {
   createdAt: number;
   updatedAt: number;
 }
-
 

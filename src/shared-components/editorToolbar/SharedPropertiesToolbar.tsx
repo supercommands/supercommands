@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { FaStar, FaFolder } from 'react-icons/fa';
-import { FiStar, FiTag, FiZapOff } from 'react-icons/fi';
+import { FiStar, FiTag, FiZapOff, FiEdit2, FiTrash2 } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { useFavorites } from '../favorites';
 
@@ -23,7 +24,7 @@ import {
 import type { TagRecord } from '../../allObjectFolder/src/createObject/tags';
 import type { WorkspaceData } from '../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 import type { FolderData } from '../../settings/allWorkspaceManager/folders/folderTypes';
-import { useTags, createTag } from '../../allObjectFolder/src/createObject/tags';
+import { useTags, createTag, updateTag, deleteTag } from '../../allObjectFolder/src/createObject/tags';
 import { useDbStore } from '../../storage/store/useDbStore';
 
 import type { SharedPropertiesToolbarProps, SharedProperties } from './types';
@@ -83,6 +84,7 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
 
   const [selectedTags, setSelectedTags] = useState<TagRecord[]>([]);
   const [availableTags, setAvailableTags] = useState<TagRecord[]>([]);
+  const [tagPopupPos, setTagPopupPos] = useState<{ x: number; y: number } | null>(null);
 
   const lastToggleTimeRef = useRef(0);
 
@@ -94,7 +96,32 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
 
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingTagName, setEditingTagName] = useState<string>('');
+
   const dbTags = useTags(workspaceId || undefined) || [];
+
+  const handleSaveTagEdit = async (tagId: string) => {
+    const trimmed = editingTagName.trim();
+    setEditingTagId(null);
+    if (!trimmed) return;
+    try {
+      await updateTag(tagId, { name: trimmed });
+      setSelectedTags(prev => prev.map(t => t.id === tagId ? { ...t, name: trimmed } : t));
+    } catch (err) {
+      console.error('[SharedPropertiesToolbar] Failed to update tag:', err);
+    }
+  };
+
+  const handleDeleteTag = async (tagId: string) => {
+    try {
+      await deleteTag(tagId);
+      setSelectedTags(prev => prev.filter(t => t.id !== tagId));
+      if (editingTagId === tagId) setEditingTagId(null);
+    } catch (err) {
+      console.error('[SharedPropertiesToolbar] Failed to delete tag:', err);
+    }
+  };
 
   const hotkeysMap = useDbStore(state => state.hotkeysMap);
   const shortcutsMap = useDbStore(state => state.shortcutsMap);
@@ -154,15 +181,22 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
 
   // Reset tracking state when compoundId changes to force full re-sync
   useEffect(() => {
-    prevIncomingRef.current = {
-      workspaceId: undefined,
-      folderId: undefined,
-      tagIdsStr: undefined,
-      reminderDate: undefined,
-      reminderTime: undefined,
-      isRecurring: undefined,
-      recurringCycle: undefined,
-    };
+    const prevRawId = extractSnippetIdFromCompoundId(prevCompoundIdRef.current || '');
+    const newRawId = extractSnippetIdFromCompoundId(compoundId || '');
+    const wasFullyFormed = !!prevCompoundIdRef.current && prevCompoundIdRef.current !== prevRawId;
+    const isMove = prevCompoundIdRef.current !== compoundId && prevRawId === newRawId && prevRawId !== '' && wasFullyFormed;
+
+    if (!isMove) {
+      prevIncomingRef.current = {
+        workspaceId: undefined,
+        folderId: undefined,
+        tagIdsStr: undefined,
+        reminderDate: undefined,
+        reminderTime: undefined,
+        isRecurring: undefined,
+        recurringCycle: undefined,
+      };
+    }
     isFirstBubbleRef.current = true;
   }, [compoundId]);
 
@@ -198,6 +232,12 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
 
     const wasUnsaved =
       (!prevCompoundIdRef.current || prevCompoundIdRef.current === 'new') && !!compoundId && compoundId !== 'new';
+      
+    const prevRawId = extractSnippetIdFromCompoundId(prevCompoundIdRef.current || '');
+    const newRawId = extractSnippetIdFromCompoundId(compoundId || '');
+    const wasFullyFormed = !!prevCompoundIdRef.current && prevCompoundIdRef.current !== prevRawId;
+    const isMove = prevCompoundIdRef.current !== compoundId && prevRawId === newRawId && prevRawId !== '' && wasFullyFormed;
+
     prevCompoundIdRef.current = compoundId;
 
     let isMounted = true;
@@ -243,6 +283,10 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
         }
       };
       void savePendingKeys();
+    } else if (isMove) {
+      // It's the exact same item, just moved to a new folder/workspace!
+      // Do not fetch from DB because the background migration is in progress.
+      // We already have the correct values in state, so we just preserve them seamlessly.
     } else {
       // Use reactive hotkeys from useDbStore
       const snippetIdPart = extractSnippetIdFromCompoundId(compoundId);
@@ -343,7 +387,7 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
       isFirstBubbleRef.current = false;
       return;
     }
-    if (onChange) {
+    if (onChange && isUserChangeRef.current) {
       const initWs = initialSnippet?.workspaceId || initialSnippet?.workspace_id || null;
       const initFolder = initialSnippet?.folderId || initialSnippet?.folder_id || null;
 
@@ -383,13 +427,22 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const path = event.composedPath();
-      if (todoPopupRef.current && !path.includes(todoPopupRef.current)) {
+      if (
+        todoPopupRef.current && !path.includes(todoPopupRef.current) &&
+        (!todoPortalRef.current || !path.includes(todoPortalRef.current))
+      ) {
         setIsTodoPopupOpen(false);
       }
-      if (locationPopupRef.current && !path.includes(locationPopupRef.current)) {
+      if (
+        locationPopupRef.current && !path.includes(locationPopupRef.current) &&
+        (!locationPortalRef.current || !path.includes(locationPortalRef.current))
+      ) {
         setIsLocationPickerOpen(false);
       }
-      if (popupRef.current && !path.includes(popupRef.current)) {
+      if (
+        popupRef.current && !path.includes(popupRef.current) &&
+        (!tagPortalRef.current || !path.includes(tagPortalRef.current))
+      ) {
         setTagPopupOpen(false);
       }
     };
@@ -461,7 +514,7 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     setIsFavoriteCategoryOpen(false);
   };
 
-  const handleFavoriteCategorySelect = async (categoryId: string) => {
+  const handleFavoriteCategorySelect = async (categoryId: string | null) => {
     if (!compoundId || compoundId === 'new') return;
     setSelectedFavoriteCategoryId(categoryId);
     if (isFav) {
@@ -575,6 +628,70 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   const locationPopupRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null); // Tag popup ref
 
+  const todoPortalRef = useRef<HTMLDivElement>(null);
+  const locationPortalRef = useRef<HTMLDivElement>(null);
+  const tagPortalRef = useRef<HTMLDivElement>(null);
+
+  const [todoPopupPos, setTodoPopupPos] = useState<{ x: number; y: number } | null>(null);
+  const [locationPopupPos, setLocationPopupPos] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (tagPopupOpen && popupRef.current) {
+      const rect = popupRef.current.getBoundingClientRect();
+      let x = rect.left;
+      let y = rect.bottom + 4;
+      if (openPopupsToBottom) {
+        x = Math.max(12, rect.right - 240);
+        y = rect.bottom + 4;
+      } else if (openPopupsToLeft) {
+        x = rect.left - 244;
+        y = rect.top;
+      } else {
+        x = rect.right + 12;
+        y = rect.top;
+      }
+      setTagPopupPos({ x, y });
+    }
+  }, [tagPopupOpen, openPopupsToBottom, openPopupsToLeft]);
+
+  useEffect(() => {
+    if (isTodoPopupOpen && todoPopupRef.current) {
+      const rect = todoPopupRef.current.getBoundingClientRect();
+      let x = rect.left;
+      let y = rect.bottom + 4;
+      if (openPopupsToBottom) {
+        x = Math.max(12, rect.right - 240);
+        y = rect.bottom + 4;
+      } else if (openPopupsToLeft) {
+        x = rect.left - 244;
+        y = rect.top;
+      } else {
+        x = rect.right + 12;
+        y = rect.top;
+      }
+      setTodoPopupPos({ x, y });
+    }
+  }, [isTodoPopupOpen, openPopupsToBottom, openPopupsToLeft]);
+
+  useEffect(() => {
+    if (isLocationPickerOpen && locationPopupRef.current) {
+      const rect = locationPopupRef.current.getBoundingClientRect();
+      let x = rect.left;
+      let y = rect.bottom + 4;
+      if (openPopupsToBottom) {
+        x = Math.max(12, rect.right - 260);
+        y = rect.bottom + 4;
+      } else if (openPopupsToLeft) {
+        x = rect.left - 264;
+        y = rect.top;
+      } else {
+        x = rect.right + 12;
+        y = rect.top;
+      }
+      setLocationPopupPos({ x, y });
+    }
+  }, [isLocationPickerOpen, openPopupsToBottom, openPopupsToLeft]);
+
   // --- Todo State ---
   const [isAnytime, setIsAnytime] = useState(false);
   const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
@@ -674,7 +791,7 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
             }`}
             isFavorite={isFav}
             selectedCategoryId={selectedFavoriteCategoryId}
-            onSelectCategory={categoryId => {
+            onSelectCategory={(categoryId: string | null) => {
               void handleFavoriteCategorySelect(categoryId);
             }}
             onRemoveFavorite={() => {
@@ -733,20 +850,30 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
               title="Create Todo (Alt+/)">
               <BsCalendarCheck size={20} />
             </button>
-            {isTodoPopupOpen && (
-              <NewDueDateDropdown
-                isOpen={isTodoPopupOpen}
-                onClose={() => setIsTodoPopupOpen(false)}
-                positionClassName={`absolute ${openPopupsToBottom ? 'right-0 top-full mt-2' : openPopupsToLeft ? 'right-full top-0 mr-3' : 'left-full top-0 ml-3'}`}
-                onSelect={({ date, time }) => {
-                  isUserChangeRef.current = true;
-                  setReminderDate(date);
-                  setReminderTime(time || '');
-                  setIsTodoPopupOpen(false);
-                }}
-                currentDate={reminderDate}
-                currentTime={reminderTime}
-              />
+            {isTodoPopupOpen && todoPopupPos && createPortal(
+              <div
+                ref={todoPortalRef}
+                style={{
+                  position: 'fixed',
+                  left: `${todoPopupPos.x}px`,
+                  top: `${todoPopupPos.y}px`,
+                  zIndex: 2147483647,
+                }}>
+                <NewDueDateDropdown
+                  isOpen={isTodoPopupOpen}
+                  onClose={() => setIsTodoPopupOpen(false)}
+                  positionClassName=""
+                  onSelect={({ date, time }) => {
+                    isUserChangeRef.current = true;
+                    setReminderDate(date);
+                    setReminderTime(time || '');
+                    setIsTodoPopupOpen(false);
+                  }}
+                  currentDate={reminderDate}
+                  currentTime={reminderTime}
+                />
+              </div>,
+              document.body
             )}
           </div>
         )}
@@ -766,9 +893,16 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
               title={`${snippetBreadCrum?.folder_name || snippetBreadCrum?.workspace_name || 'Folders'} (Alt+/)`}>
               <FaFolder size={20} />
             </button>
-            {isLocationPickerOpen && (
+            {isLocationPickerOpen && locationPopupPos && createPortal(
               <div
-                className={`absolute ${openPopupsToBottom ? 'right-0 top-full mt-2' : openPopupsToLeft ? 'right-full top-0 pr-3' : 'left-full top-0 pl-3'} z-[9999] w-[260px]`}>
+                ref={locationPortalRef}
+                style={{
+                  position: 'fixed',
+                  left: `${locationPopupPos.x}px`,
+                  top: `${locationPopupPos.y}px`,
+                  zIndex: 2147483647,
+                }}
+                className="w-[260px]">
                 <DestinationPicker
                   selectedWorkspaceId={workspaceId}
                   selectedFolderId={folderId}
@@ -781,7 +915,8 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
                   }}
                   onClose={() => setIsLocationPickerOpen(false)}
                 />
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         )}
@@ -801,9 +936,16 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
               </span>
             )}
           </button>
-          {tagPopupOpen && (
+          {tagPopupOpen && tagPopupPos && createPortal(
             <div
-              className={`absolute ${openPopupsToBottom ? 'right-0 top-full mt-2' : openPopupsToLeft ? 'right-full top-0 mr-3' : 'left-full top-0 ml-3'} w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] rounded-lg shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200 z-[9999] flex flex-col`}>
+              ref={tagPortalRef}
+              style={{
+                position: 'fixed',
+                left: `${tagPopupPos.x}px`,
+                top: `${tagPopupPos.y}px`,
+                zIndex: 2147483647,
+              }}
+              className="w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col">
               
               {/* Integrated Inline Search Row */}
               <div className="border-b border-slate-100 dark:border-white/5 flex items-center">
@@ -925,37 +1067,101 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
                   </button>
                 )}
 
-                {dbTags
-                  .map((tag, idx) => {
-                    const isSelected = selectedTags.some(t => t.id === tag.id);
-                    const dotColor = getTagColor(tag.name);
+                {dbTags.map((tag, idx) => {
+                  const isSelected = selectedTags.some(t => t.id === tag.id);
+                  const dotColor = getTagColor(tag.name);
+                  const isEditingThisTag = editingTagId === tag.id;
+
+                  if (isEditingThisTag) {
                     return (
-                      <button
-                        key={tag.id || idx}
-                        type="button"
-                        onClick={() => {
-                          handleTagSelect({ id: tag.id, name: tag.name });
-                        }}
-                        className={`flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs transition-colors ${isSelected ? 'bg-black/5 dark:bg-white/10 text-neutral-900 dark:text-white font-medium' : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white'}`}>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: dotColor }}
-                          />
-                          <span>{tag.name}</span>
-                        </div>
+                      <div key={tag.id || idx} className="flex items-center gap-1.5 px-2 py-1 bg-black/10 dark:bg-white/10 rounded-lg">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: dotColor }}
+                        />
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editingTagName}
+                          onChange={e => setEditingTagName(e.target.value)}
+                          onKeyDown={async e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              await handleSaveTagEdit(tag.id);
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setEditingTagId(null);
+                            }
+                          }}
+                          onBlur={() => handleSaveTagEdit(tag.id)}
+                          className="flex-1 bg-transparent px-1 py-0.5 text-xs outline-none text-neutral-900 dark:text-white font-medium border-b border-blue-500 min-w-0"
+                        />
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={tag.id || idx}
+                      onClick={() => handleTagSelect({ id: tag.id, name: tag.name })}
+                      className={`group flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-black/5 dark:bg-white/10 text-neutral-900 dark:text-white font-medium'
+                          : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: dotColor }}
+                        />
+                        <span className="truncate">{tag.name}</span>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                        {/* Pencil / Edit Icon */}
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setEditingTagId(tag.id);
+                            setEditingTagName(tag.name);
+                          }}
+                          className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-neutral-200 transition-all cursor-pointer"
+                          title="Rename Tag"
+                        >
+                          <FiEdit2 size={11} />
+                        </button>
+
+                        {/* Trash / Delete Icon */}
+                        <button
+                          type="button"
+                          onClick={async e => {
+                            e.stopPropagation();
+                            await handleDeleteTag(tag.id);
+                          }}
+                          className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-neutral-400 hover:text-red-400 transition-all cursor-pointer"
+                          title="Delete Tag"
+                        >
+                          <FiTrash2 size={11} />
+                        </button>
+
                         {isSelected && (
                           <span
-                            className="text-[var(--color-danger)] hover:text-[var(--color-dangerHover)] transition-colors p-0.5 rounded flex items-center justify-center bg-[var(--color-dangerBg)]"
-                            title="Remove tag">
+                            className="text-[var(--color-danger)] p-0.5 rounded flex items-center justify-center bg-[var(--color-dangerBg)]"
+                            title="Added">
                             <FiZapOff size={10} />
                           </span>
                         )}
-                      </button>
-                    );
-                  })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       </div>

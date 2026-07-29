@@ -159,7 +159,7 @@ const App: React.FC = () => {
 
   // Auto-close Sheet UI when navigating to specific views to prevent UI overlaps
   useEffect(() => {
-    if (isSpreadsheetViewOpen && (showTodosView || (activeEditor?.type === 'note' && !activeEditor?.props?.isOverlay) || (activeEditor?.type === 'link' && !activeEditor?.props?.isOverlay))) {
+    if (isSpreadsheetViewOpen && (showTodosView || (activeEditor?.type === 'note' && !activeEditor?.props?.isOverlay) || (activeEditor?.type === 'link' && !activeEditor?.props?.isOverlay) || (activeEditor?.type === 'todo' && !activeEditor?.props?.isOverlay))) {
       setIsSpreadsheetViewOpen(false);
     }
   }, [activeView?.type, isSpreadsheetViewOpen]);
@@ -548,7 +548,7 @@ const App: React.FC = () => {
           searchbarRef.current.executeCommand((value || id) as any, { mode: 'execute' });
           searchbarRef.current.focus();
         } else if (category === 'module') {
-          searchbarRef.current.executeModule(value || id);
+          /* executeModule removed */
           searchbarRef.current.focus();
         } else if (category === 'automation') {
           if (automationObj) {
@@ -577,7 +577,7 @@ const App: React.FC = () => {
         const { cmdType, cmdId } = message;
         if (!searchbarRef.current) return;
         if (cmdType === 'command') searchbarRef.current.executeCommand(cmdId as any, { mode: 'execute' });
-        else if (cmdType === 'module') searchbarRef.current.executeModule(cmdId);
+        /* module removed */
       } else if (message.type === 'EXECUTE_AUTOMATION') {
         // Legacy/Direct support
         if (!searchbarRef.current) return;
@@ -1077,7 +1077,7 @@ const App: React.FC = () => {
     }
     if (isSpreadsheetViewOpen) {
       if (
-        activeEditor?.type === 'todo' ||
+        (activeEditor?.type === 'todo' && !activeEditor?.props?.isOverlay) ||
         activeEditor?.type === 'agent' ||
         activeEditor?.type === 'ai' ||
         (activeEditor?.type === 'link' && !activeEditor?.props?.isOverlay)
@@ -1253,7 +1253,7 @@ const App: React.FC = () => {
         )}
 
         {/* Tutorial Button - Top Right */}
-        {!isEmbedded && !showTutorial && showTutorialButton && !isSpreadsheetViewOpen && (
+        {!isEmbedded && !showTutorial && showTutorialButton && !isSpreadsheetViewOpen && !activeEditor && activeView?.type === 'home' && (
           <div className="absolute top-4 right-6 z-[10000] pointer-events-auto">
             <button
               onClick={() => setShowTutorial(true)}

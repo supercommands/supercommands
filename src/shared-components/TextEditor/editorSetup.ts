@@ -233,23 +233,9 @@ export const setupEditor = async (
         padding: 0 !important;
         border: none !important;
         cursor: pointer;
-        background: transparent !important;
-        color: #a3a3a3;
-        transition: background 0.12s ease, color 0.12s ease;
+        transition: background-color 0.15s ease, color 0.15s ease;
         flex-shrink: 0;
       `;
-      b.onmouseenter = () => {
-        b.style.setProperty('background', 'rgba(150,150,150,0.15)', 'important');
-        b.style.color = '#e5e5e5';
-      };
-      b.onmouseleave = () => {
-        b.style.setProperty('background', 'transparent', 'important');
-        if (!b.classList.contains('ql-active')) {
-          b.style.color = '#a3a3a3';
-        } else {
-          b.style.color = '#ffffff';
-        }
-      };
     });
 
     toolbar.querySelectorAll('button svg').forEach((svg: any) => {

@@ -325,7 +325,7 @@ export interface SearchbarHandle {
   isLocked: boolean;
   openUrls: (urls: string[], title?: string, forceNewTab?: boolean) => void;
   activateAutomation: (automation: SavedAutomation) => void;
-  executeModule: (moduleId: string) => void;
+
   submitAI: (prompt: string) => void;
   triggerFileUpload: () => void;
   selectSavedAgent: (agent: any) => void;

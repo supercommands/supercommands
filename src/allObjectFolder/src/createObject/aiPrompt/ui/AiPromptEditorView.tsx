@@ -134,6 +134,8 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
 
   useEffect(() => {
     void fetchAllShortcuts();
+    window.addEventListener('storage', fetchAllShortcuts);
+    return () => window.removeEventListener('storage', fetchAllShortcuts);
   }, [aiPrompts, fetchAllShortcuts]);
 
   useEffect(() => {
@@ -161,21 +163,24 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
 
       if (isCtrlShiftEnter) {
         event.preventDefault();
+        event.stopPropagation();
         if (state.saveStatus === 'saving') return;
         
         void (async () => {
-          await state.handleSave();
+          if (state.isDirty) {
+            await state.handleSave();
+          }
           state.loadPrompt(null);
           useUIStore.getState().openEditor({ type: 'aiPrompt', id: 'new', isNew: true });
         })();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [state.saveStatus, state.handleSave, state.loadPrompt]);
+  }, [state.saveStatus, state.isDirty, state.handleSave, state.loadPrompt]);
 
   // Register escape handler with uiStateManager
   useEffect(() => {
@@ -381,6 +386,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
   }, [state.promptTitle, aiPrompts, state.activeAiPromptId]);
 
   const tagIdsKey = useMemo(() => [...state.tagIds].sort().join('|'), [state.tagIds]);
+
   const initialProperties = useMemo(() => {
     return {
       id: state.activeAiPromptId,
@@ -616,7 +622,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
           />
         }
       >
-        <div className="flex-1 flex flex-col min-h-0 relative">
+        <div ref={containerRef} className="flex-1 flex flex-col min-h-0 relative">
           <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2 overflow-hidden">
             <EditorTitleShortcutInput
               title={state.promptTitle}
@@ -643,6 +649,8 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
               onTitleEnter={async (shiftKey) => {
                 if (shiftKey) {
                   handleCopyTitleToShortcut();
+                  const editorDom = containerRef.current?.querySelector('.ProseMirror, .ql-editor') as HTMLElement | null;
+                  editorDom?.focus();
                 } else {
                   if (!state.promptTitle.trim()) {
                     setTitleError('Enter the title');
@@ -654,7 +662,11 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
               onShortcutEnter={async () => {
                 if (state.isDirty) await state.handleSave();
               }}
-              onCopyTitleToShortcut={(state.isInitialized && state.isShortcutInitialized) ? handleCopyTitleToShortcut : undefined}
+              onArrowDownPress={() => {
+                const editorDom = containerRef.current?.querySelector('.ProseMirror, .ql-editor') as HTMLElement | null;
+                editorDom?.focus();
+              }}
+              onCopyTitleToShortcut={handleCopyTitleToShortcut}
               titleRef={state.titleInputRef}
               shortcutRef={shortcutInputRef}
             />

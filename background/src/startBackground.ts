@@ -188,7 +188,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.action === 'db_update_link') {
     (async () => {
       try {
-        const { updateLink } = await import('../../src/allObjectFolder/src/createObject/links/linkData');
         const link = await updateLink(message.linkId, message.input);
         sendResponse({ success: true, link });
         chrome.tabs.query({}, (tabs) => {

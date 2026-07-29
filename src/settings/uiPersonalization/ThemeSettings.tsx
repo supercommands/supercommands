@@ -51,7 +51,7 @@ const ThemeSettings: React.FC = () => {
   };
 
   const wallpapers = [
-    { id: 'none', label: '', src: '' },
+    { id: 'none', label: 'None', src: '' },
     ...(customWallpaperPreview ? [{ id: 'custom', label: 'Custom Image', src: customWallpaperPreview }] : []),
     ...['car-race.png', 'Evermist.png', 'sky.png'].map(filename => {
       const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
@@ -88,7 +88,7 @@ const ThemeSettings: React.FC = () => {
             whileHover={{ scale: 1.03, y: -2 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setThemeProfile('default-dark')}
-            className={`cursor-pointer border rounded-xl w-[160px] h-[95px] bg-black transition-all relative overflow-hidden shadow-md ${themeId === 'default-dark'
+            className={`cursor-pointer border rounded-xl w-[160px] h-[95px] bg-gradient-to-br from-[#121212] to-[#1e1e1e] transition-all relative overflow-hidden shadow-md ${themeId === 'default-dark'
               ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500'
               : 'border-[var(--color-borderDefault)] hover:border-[var(--color-borderActive)]'
               }`}
@@ -114,7 +114,7 @@ const ThemeSettings: React.FC = () => {
             whileHover={{ scale: 1.03, y: -2 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setThemeProfile('ocean-blue')}
-            className={`cursor-pointer border rounded-xl w-[160px] h-[95px] bg-[#090e1a] transition-all relative overflow-hidden shadow-md ${themeId === 'ocean-blue'
+            className={`cursor-pointer border rounded-xl w-[160px] h-[95px] bg-gradient-to-br from-[#090e1a] via-[#0f172a] to-[#1e293b] transition-all relative overflow-hidden shadow-md ${themeId === 'ocean-blue'
               ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500'
               : 'border-[var(--color-borderDefault)] hover:border-[var(--color-borderActive)]'
               }`}

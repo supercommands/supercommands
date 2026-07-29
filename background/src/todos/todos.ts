@@ -23,9 +23,15 @@ import { db } from '../../../src/storage/indexDB/dbConfig';
  */
 export function extractSnippetId(id: string): string {
   if (!id) return '';
+  let snippetId = id;
+  if (id.startsWith('workspace_') || id.startsWith('folder_') || id.startsWith('ws_') || id.startsWith('fld_')) {
+    const parts = id.split('-');
+    if (parts.length > 5) snippetId = parts.slice(5).join('-');
+  }
+  
   const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const match = id.match(uuidRegex);
-  return match ? match[0] : id;
+  const match = snippetId.match(uuidRegex);
+  return match ? match[0] : snippetId;
 }
 
 export async function backgroundSync() {
@@ -281,11 +287,11 @@ export async function executeTodoAction(todoId: string) {
 
       const findItemDetails = (itemId: string) => {
         const cidStr = String(itemId);
-        const strippedCid = cidStr.replace(/^(auto-|cmd-|mod-)/, '');
+        const strippedCid = cidStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
 
         let matched = altsCommands.find((c: any) => {
           const cIdStr = String(c.id || '');
-          const strippedCId = cIdStr.replace(/^(auto-|cmd-|mod-)/, '');
+          const strippedCId = cIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
           return cIdStr === cidStr || strippedCId === strippedCid;
         });
         if (matched) return matched;
@@ -295,7 +301,7 @@ export async function executeTodoAction(todoId: string) {
           if (Array.isArray(userFavs)) {
             matched = userFavs.find((item: any) => {
               const itemIdStr = String(item.id || item.snippet_id || '');
-              const strippedItemId = itemIdStr.replace(/^(auto-|cmd-|mod-)/, '');
+              const strippedItemId = itemIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
               return itemIdStr === cidStr || strippedItemId === strippedCid;
             });
             if (matched) return matched;
@@ -308,7 +314,7 @@ export async function executeTodoAction(todoId: string) {
               const wsSnippets = workspace.workspace_snippets || [];
               matched = wsSnippets.find((s: any) => {
                 const sIdStr = String(s.id || s.snippet_id || '');
-                const strippedSId = sIdStr.replace(/^(auto-|cmd-|mod-)/, '');
+                const strippedSId = sIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
                 return sIdStr === cidStr || strippedSId === strippedCid;
               });
               if (matched) return matched;
@@ -316,7 +322,7 @@ export async function executeTodoAction(todoId: string) {
               const wsAutos = workspace.workspace_automations || [];
               matched = wsAutos.find((a: any) => {
                 const aIdStr = String(a.id || a.automation_id || '');
-                const strippedAId = aIdStr.replace(/^(auto-|cmd-|mod-)/, '');
+                const strippedAId = aIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
                 return aIdStr === cidStr || strippedAId === strippedCid;
               });
               if (matched) return matched;
@@ -325,7 +331,7 @@ export async function executeTodoAction(todoId: string) {
                 const folderSnippets = folder.snippets || [];
                 matched = folderSnippets.find((s: any) => {
                   const sIdStr = String(s.id || s.snippet_id || '');
-                  const strippedSId = sIdStr.replace(/^(auto-|cmd-|mod-)/, '');
+                  const strippedSId = sIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
                   return sIdStr === cidStr || strippedSId === strippedCid;
                 });
                 if (matched) return matched;
@@ -340,9 +346,14 @@ export async function executeTodoAction(todoId: string) {
       for (const cid of configIds) {
         const matched = findItemDetails(cid);
         if (matched) {
-          const matchedCat = (matched.category || matched.snippet_category || '').toLowerCase();
+          const matchedCat = (
+            matched.category ||
+            matched.snippet_category ||
+            (matched.prefix || matched.label || matched.behavior ? 'command' : '')
+          ).toLowerCase();
           const itemVal = matched.value || matched.data?.value || matched.data?.url || matched.data?.link || '';
           const itemId = matched.id || matched.snippet_id;
+          const triggerItemId = String(itemId).replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
 
           if (
             ['link', 'tabgroup', 'Tab Session', 'links', 'quicklink', 'collection', 'agent_collection'].includes(
@@ -380,7 +391,7 @@ export async function executeTodoAction(todoId: string) {
           } else {
             chrome.tabs.create({
               url: chrome.runtime.getURL(
-                `AltS_search_newtab/index.html?trigger_hotkey=true&type=${matchedCat}&id=${encodeURIComponent(itemId)}`,
+                `AltS_search_newtab/index.html?trigger_hotkey=true&type=${matchedCat}&id=${encodeURIComponent(triggerItemId)}`,
               ),
             });
           }

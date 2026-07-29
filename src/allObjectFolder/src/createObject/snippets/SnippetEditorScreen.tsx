@@ -188,6 +188,9 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   });
 
 
+  const loadedSnippetIdRef = useRef<string | null>(activeSnippetId);
+  const [editorKey, setEditorKey] = useState<string>(() => activeSnippetId || `new_${Date.now()}`);
+
   const sortedSnippets = useMemo(() => {
     return [...snippets].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }, [snippets]);
@@ -557,7 +560,18 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
       await handleSave();
     }
     loadSnippet(null);
-    setShowTooltip(false);
+    setEditorKey(`new_${Date.now()}`);
+    const currentProps = useUIStore.getState().activeEditor?.props || {};
+    const cleanProps = {
+      ...currentProps,
+      category: 'snippet',
+      snippet: null,
+      prefill: null,
+      item: null,
+      initialDraftKey: null,
+      initialDraftConfig: null,
+    };
+    useUIStore.getState().openEditor({ type: 'note', id: 'new', props: cleanProps });
     if (titleInputRef.current) {
       titleInputRef.current.focus();
     }
@@ -814,12 +828,12 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   const titlePlaceholder = 'Title';
 
   const initialProperties = useMemo(() => {
-    const base: any = selectedSnippet || {};
+    const base: any = (activeSnippetId && activeSnippetId !== 'new') ? (selectedSnippet || {}) : {};
     return {
       ...base,
-      id: activeSnippetId || base.id,
-      workspaceId: workspaceId || base.workspaceId,
-      folderId: folderId || base.folderId,
+      id: activeSnippetId || 'new',
+      workspaceId: workspaceId || base.workspaceId || null,
+      folderId: folderId || base.folderId || null,
       tagIds: tagIds !== undefined ? tagIds : (base.tagIds || []),
       category: 'snippet',
     };
@@ -971,8 +985,10 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
                 if (saved) fetchAllShortcuts();
               }
             }}
-            onTitleEnter={async (shiftKey) => {
-              if (shiftKey) {
+            onTitleEnter={async (shiftKey, e) => {
+              if (e?.ctrlKey || e?.metaKey) {
+                void handleCreateNew();
+              } else if (shiftKey) {
                 handleCopyTitleToShortcut();
               } else {
                 if (!snippetTitle.trim()) {
@@ -997,6 +1013,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
           />
 
           <EditorContentWorkspace
+            key={editorKey}
             category="snippet"
             containerRef={containerRef}
             onBlurCapture={() => {
@@ -1021,9 +1038,6 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     if (!activeSnippet) return '';
     return activeSnippet.config || '';
   }, [activeSnippet?.id]);
-
-  const loadedSnippetIdRef = useRef<string | null>(activeSnippetId);
-  const [editorKey, setEditorKey] = useState<string>(() => activeSnippetId || `new_${Date.now()}`);
 
   useEffect(() => {
     if (activeSnippetId !== loadedSnippetIdRef.current) {
