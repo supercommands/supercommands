@@ -58,7 +58,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         {showCloseButton !== false && (
           <button
             onClick={onCloseClick}
-            className={`p-2 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] rounded-lg transition-all focus:outline-none cursor-pointer z-50 ${
+            className={`-mt-1 p-2 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] rounded-lg transition-all focus:outline-none cursor-pointer z-50 ${
               showCloseButton ? '' : 'md:hidden'
             }`}
             title="Close"

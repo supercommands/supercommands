@@ -3502,16 +3502,6 @@ if (items && Array.isArray(items)) {
       }
     }, [allSuggestions.length, highlightIndex]);
 
-    useEffect(() => {
-      onSuggestionStateChange?.({
-        value,
-        suggestions: allSuggestions,
-        isVisible: !isSuggestionsHidden,
-        highlightIndex,
-        mode: 'mixed',
-      } as any);
-    }, [value, allSuggestions, isSuggestionsHidden, highlightIndex, onSuggestionStateChange]);
-
     const handleRequestOpenUrls = useCallback(
       (urls: string[], title?: string) => {
         openUrls(urls, title);

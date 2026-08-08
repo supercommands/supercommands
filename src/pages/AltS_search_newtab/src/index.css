@@ -421,7 +421,7 @@ html.dark body {
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;
-  opacity: 0.65;
+  opacity: 0.15;
   transition: opacity 150ms ease, color 150ms ease;
 }
 
@@ -470,7 +470,7 @@ html.dark body {
 
 .react-grid-item:hover > .react-resizable-handle,
 .react-grid-item.react-resizable-resizing > .react-resizable-handle {
-  opacity: 1;
+  opacity: 0.65;
 }
 
 .react-grid-item > .react-resizable-handle:hover::before,

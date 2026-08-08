@@ -224,6 +224,12 @@ export default defineConfig({
     },
   },
   vite: () => ({
+    build: {
+      // Chrome warns when eagerly preloaded chunks are not evaluated shortly
+      // after the new-tab page loads. Let normal ESM imports fetch the chunks
+      // when they are needed instead of emitting <link rel="modulepreload">.
+      modulePreload: false,
+    },
     esbuild: {
       charset: 'ascii',
     },

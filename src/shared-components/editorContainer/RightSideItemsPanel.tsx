@@ -225,7 +225,7 @@ export function RightSideItemsPanel<T extends { id: string }>({
       <div className="w-full h-full flex flex-col pl-3.5 pt-2.5 pb-4 pr-2 overflow-hidden">
 
         {/* ── Header: Search + Close ── */}
-        <div className="relative mb-3 flex-shrink-0 flex items-center gap-1.5 w-full">
+        <div className="relative mb-3 flex-shrink-0 flex items-start gap-1.5 w-full">
           <div className="relative flex-1 min-w-0">
             <FiSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-iconDefault)]" size={13} />
             <input
@@ -249,7 +249,7 @@ export function RightSideItemsPanel<T extends { id: string }>({
               onClick={onCloseClick}
               aria-label="Close editor"
               title="Close"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-[var(--color-iconDefault)] transition-colors hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-borderActive)] cursor-pointer"
+              className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-[var(--color-iconDefault)] transition-colors hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-borderActive)] cursor-pointer"
             >
               <FaTimes size={16} />
             </button>

@@ -300,6 +300,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
   const hasUserModifiedRef = useRef(false);
+  const [hasUserEditedTitle, setHasUserEditedTitle] = useState(false);
   const autoSaveTimerRef = useRef<any>(null);
 
   useEffect(() => {
@@ -308,8 +309,10 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       setIsForceCreateNew(false);
       hasPrefilledEditModeRef.current = false;
       hasUserModifiedRef.current = false;
+      setHasUserEditedTitle(false);
     } else {
       hasUserModifiedRef.current = false;
+      setHasUserEditedTitle(false);
       if (!initialSessionProp) {
         
       }
@@ -501,6 +504,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
   useEffect(() => {
     hasUserModifiedRef.current = false;
+    setHasUserEditedTitle(false);
   }, [activeSessionId]);
 
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
@@ -2129,6 +2133,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
 
       if (saved) {
         setIsForceCreateNew(false);
+        setHasUserEditedTitle(false);
       }
 
       if (saved && !isAutoSave) {
@@ -2224,7 +2229,10 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
     const currentSessionId = initialSession?.id || (initialSession as any)?.snippet_id || activeSessionId || null;
     const isLiveSyncingSession = currentSessionId && runningSessionId && String(currentSessionId) === String(runningSessionId);
 
-    const shouldBlockAutoSave = !hasUserModifiedRef.current;
+    // Title edits need a reactive signal in addition to the synchronous ref.
+    // This guarantees that typing arms the debounce while programmatic title
+    // prefills remain blocked until the user actually changes something.
+    const shouldBlockAutoSave = !hasUserModifiedRef.current && !hasUserEditedTitle;
     if (shouldBlockAutoSave) {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
@@ -2257,7 +2265,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
         autoSaveTimerRef.current = null;
       }
     };
-  }, [autoSaveSignature, handleSave, hasPendingSessionChanges, isOpen, sessionOpenSettings.autoSaveMode, activeSessionId, runningSessionId, initialSession]);
+  }, [autoSaveSignature, handleSave, hasPendingSessionChanges, hasUserEditedTitle, isOpen, sessionOpenSettings.autoSaveMode, activeSessionId, runningSessionId, initialSession]);
 
   const parseSnippetValue = useCallback((value: string): SelectedLink[] => {
     if (!value) return [];
@@ -2360,6 +2368,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       autoSaveTimerRef.current = null;
     }
     hasUserModifiedRef.current = false;
+    setHasUserEditedTitle(false);
     try {
       // Save current session silently (autosave=true) — we just want to persist,
       // NOT trigger onClose or open a new Chrome window
@@ -2379,6 +2388,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
       hasInitializedPrefill.current = false;
       hasSyncedInitialDataRef.current = false;
       hasUserModifiedRef.current = false;
+      setHasUserEditedTitle(false);
       lastAutoSaveSignatureRef.current = '';
       seenAutoSelectedTabsRef.current.clear();
       if (autoSaveTimerRef.current) {
@@ -2874,6 +2884,7 @@ const SessionEditorView: React.FC<SessionEditorViewProps> = ({
               title={title}
               setTitle={(val) => {
                 hasUserModifiedRef.current = true;
+                setHasUserEditedTitle(true);
                 if (val.trim()) {
                   if (setSessionError) setSessionError(null);
                   if (setSaveError) setSaveError(null);

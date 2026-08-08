@@ -355,7 +355,17 @@ export function useLinkEditor(props: LinkEditorProps) {
           snippet: { id: activeLinkId, category: 'link' }
         });
         const shortcutsMap = await readAllShortcuts();
-        const sc = normalizeShortcutTrigger(shortcutsMap[targetCompoundId] || '');
+        let sc = normalizeShortcutTrigger(
+          shortcutsMap[targetCompoundId] || shortcutsMap[activeLinkId] || '',
+        );
+        if (!sc) {
+          const matchingKey = Object.keys(shortcutsMap).find(
+            key => key === activeLinkId || key.endsWith(`-${activeLinkId}`),
+          );
+          if (matchingKey) {
+            sc = normalizeShortcutTrigger(shortcutsMap[matchingKey] || '');
+          }
+        }
         if (isMounted.current) {
           if (!isShortcutManuallyEditedRef.current) {
             setLinkShortcut(sc);

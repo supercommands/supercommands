@@ -62,7 +62,7 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
                 <span className="w-px h-3 bg-[var(--color-borderDefault)] mx-0.5" />
                 <LuX
                   size={14}
-                  className="shrink-0 text-[var(--color-textMuted)] hover:text-[var(--color-danger)] transition-colors"
+                  className="shrink-0 text-red-500 hover:text-red-400 transition-colors"
                 />
               </span>
             </motion.button>

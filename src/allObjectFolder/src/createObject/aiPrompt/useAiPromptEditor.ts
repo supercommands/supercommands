@@ -73,6 +73,27 @@ const defaultModelUrls = {
   perplexity: 'https://www.perplexity.ai',
 };
 
+function resolveItemShortcut(
+  shortcutsMap: Record<string, string>,
+  compoundId: string,
+  rawId: string,
+): string {
+  let shortcut = normalizeShortcutTrigger(
+    shortcutsMap[compoundId] || shortcutsMap[rawId] || '',
+  );
+
+  if (!shortcut) {
+    const matchingKey = Object.keys(shortcutsMap).find(
+      key => key === rawId || key.endsWith(`-${rawId}`),
+    );
+    if (matchingKey) {
+      shortcut = normalizeShortcutTrigger(shortcutsMap[matchingKey] || '');
+    }
+  }
+
+  return shortcut;
+}
+
 export function useAiPromptEditor(props: AiPromptEditorProps) {
   const { aiPromptId, onBack, initialTitle, initialPrompt } = props;
 
@@ -109,6 +130,11 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   const lastSavedShortcutRef = useRef<string>('');
   const isShortcutManuallyEditedRef = useRef<boolean>(false);
   const hasLoadedShortcutRef = useRef<boolean>(false);
+
+  const updatePromptShortcut = useCallback((value: string) => {
+    isShortcutManuallyEditedRef.current = true;
+    setPromptShortcut(value);
+  }, []);
 
   const { validateShortcut } = useShortcutValidation();
   const [shortcutError, setShortcutError] = useState<string | null>(null);
@@ -279,6 +305,11 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   useEffect(() => {
     hasLoadedShortcutRef.current = false;
     isShortcutManuallyEditedRef.current = false;
+  }, [activeAiPromptId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     if (activeAiPromptId) {
       setIsShortcutInitialized(false);
       const loadSavedShortcut = async () => {
@@ -292,22 +323,18 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
             snippet: { id: activeAiPromptId, category: 'aiPrompt' }
           });
           const shortcutsMap = await readAllShortcuts();
-          let sc = normalizeShortcutTrigger(shortcutsMap[targetCompoundId] || '');
-          if (!sc) {
-            const matchingKey = Object.keys(shortcutsMap).find(key => key === activeAiPromptId || key.endsWith(`-${activeAiPromptId}`));
-            if (matchingKey) {
-              sc = normalizeShortcutTrigger(shortcutsMap[matchingKey] || '');
+          const sc = resolveItemShortcut(shortcutsMap, targetCompoundId, activeAiPromptId);
+          if (isMounted.current && !cancelled) {
+            if (!isShortcutManuallyEditedRef.current) {
+              setPromptShortcut(sc);
+              lastSavedShortcutRef.current = sc;
+              hasLoadedShortcutRef.current = true;
             }
-          }
-          if (isMounted.current) {
-            setPromptShortcut(sc);
-            lastSavedShortcutRef.current = sc;
-            hasLoadedShortcutRef.current = true;
             setIsShortcutInitialized(true);
           }
         } catch (err) {
           console.error('Failed to load shortcut:', err);
-          if (isMounted.current) {
+          if (isMounted.current && !cancelled) {
             setIsShortcutInitialized(true);
           }
         }
@@ -318,6 +345,10 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       lastSavedShortcutRef.current = '';
       setIsShortcutInitialized(true);
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeAiPromptId, workspaceId, folderId]);
 
   useEffect(() => {
@@ -712,18 +743,6 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       lastSavedTagIdsRef.current = promptRecord.tagIds;
       lastSavedCustomModelsRef.current = promptRecord.customModels || [];
 
-      const compoundId = getItemCompoundId({
-        id: promptRecord.id,
-        workspace_id: promptRecord.workspaceId || null,
-        folder_id: promptRecord.folderId || null,
-        snippet: { id: promptRecord.id, category: 'aiPrompt' }
-      });
-      readAllShortcuts().then(shortcutsMap => {
-        const sc = normalizeShortcutTrigger(shortcutsMap[compoundId] || '');
-        setPromptShortcut(sc);
-        lastSavedShortcutRef.current = sc;
-      }).catch(() => { });
-
       setIsInitialized(false);
     }
   }, []);
@@ -750,6 +769,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     if (!liveAiPrompt) return;
 
     const fetchShortcut = async () => {
+      const requestedPromptId = liveAiPrompt.id;
       try {
         const wsObj = liveAiPrompt.workspaceId ? { workspace_id: liveAiPrompt.workspaceId } : null;
         const fldObj = liveAiPrompt.folderId ? { folder_id: liveAiPrompt.folderId } : null;
@@ -760,7 +780,14 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
           snippet: { id: liveAiPrompt.id, category: 'aiPrompt' }
         });
         const shortcutsMap = await readAllShortcuts();
-        const sc = normalizeShortcutTrigger(shortcutsMap[compoundId] || '');
+        const sc = resolveItemShortcut(shortcutsMap, compoundId, requestedPromptId);
+        if (
+          !isMounted.current ||
+          activeAiPromptIdRef.current !== requestedPromptId ||
+          isShortcutManuallyEditedRef.current
+        ) {
+          return;
+        }
         if (sc) {
           setPromptShortcut(sc);
           lastSavedShortcutRef.current = sc;
@@ -870,7 +897,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     customModels,
     setCustomModels,
     promptShortcut,
-    setPromptShortcut,
+    setPromptShortcut: updatePromptShortcut,
     shortcutError,
     isShortcutOverrideable,
     handleOverrideShortcut,

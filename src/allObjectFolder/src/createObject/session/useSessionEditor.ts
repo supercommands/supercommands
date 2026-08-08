@@ -262,7 +262,22 @@ export function useSessionEditor(props: UseSessionEditorParams) {
     const loadSavedShortcut = async () => {
       try {
         const shortcutsMap = await readAllShortcuts();
-        const sc = normalizeShortcutTrigger(shortcutsMap[targetCompoundId] || '');
+        let sc = normalizeShortcutTrigger(
+          shortcutsMap[targetCompoundId] || shortcutsMap[currentId] || '',
+        );
+
+        // Board View historically stores Session shortcuts against the raw
+        // session ID, while the editor prefers a workspace/folder compound ID.
+        // Accept either representation so an existing shortcut is visible in
+        // the editor before the next save migrates it to the canonical key.
+        if (!sc) {
+          const matchingKey = Object.keys(shortcutsMap).find(
+            key => key === currentId || key.endsWith(`-${currentId}`),
+          );
+          if (matchingKey) {
+            sc = normalizeShortcutTrigger(shortcutsMap[matchingKey] || '');
+          }
+        }
         if (isMounted.current) {
           if (!isShortcutManuallyEditedRef.current) {
             setSessionShortcut(sc);

@@ -279,7 +279,7 @@ export const SidebarDashboardViewsSection: React.FC = () => {
                         isIndented ? 'pl-[38px] pr-2' : 'pl-[28px] pr-2'
                       } py-1 text-xs font-semibold cursor-pointer transition-colors ${
                         isActive
-                          ? 'bg-[var(--color-bgHover)] text-[var(--color-textPrimary)]'
+                          ? 'text-[var(--color-textPrimary)]'
                           : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]'
                       }`}>
                       <span className="min-w-0 flex-1 truncate">

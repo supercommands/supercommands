@@ -509,7 +509,17 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
             snippet: { id: activeSnippetId, category: 'snippet' }
           });
           const shortcutsMap = await readAllShortcuts();
-          const sc = normalizeShortcutTrigger(shortcutsMap[targetCompoundId] || '');
+          let sc = normalizeShortcutTrigger(
+            shortcutsMap[targetCompoundId] || shortcutsMap[activeSnippetId] || '',
+          );
+          if (!sc) {
+            const matchingKey = Object.keys(shortcutsMap).find(
+              key => key === activeSnippetId || key.endsWith(`-${activeSnippetId}`),
+            );
+            if (matchingKey) {
+              sc = normalizeShortcutTrigger(shortcutsMap[matchingKey] || '');
+            }
+          }
           if (isMounted.current) {
             if (!isShortcutManuallyEditedRef.current) {
               setSnippetShortcut(sc);
