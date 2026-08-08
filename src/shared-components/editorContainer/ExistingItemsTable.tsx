@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FaStar, FaFolder, FaKeyboard, FaTag } from 'react-icons/fa';
 import { FiStar, FiChevronRight, FiBookmark, FiExternalLink, FiSearch } from 'react-icons/fi';
 import { saveUserHotkey, deleteUserHotkeyByReference } from '../hotkeys/core/hotkeyDbData';
@@ -558,7 +559,7 @@ export function ExistingItemsTable<T extends ExistingItem>({
                                       }
                                       if (e.key === 'Enter') {
                                         if (recordingCombo && recordingCombo !== 'Press keys...') {
-                                          await saveUserHotkey(recordingCombo, compoundId, 'snippet');
+                                          await saveUserHotkey(recordingCombo, compoundId, getItemType(item) as any);
                                         } else {
                                           await deleteUserHotkeyByReference(compoundId);
                                         }
@@ -573,7 +574,7 @@ export function ExistingItemsTable<T extends ExistingItem>({
                                     }}
                                     onBlur={async () => {
                                       if (recordingCombo && recordingCombo !== 'Press keys...') {
-                                        await saveUserHotkey(recordingCombo, compoundId, 'snippet');
+                                        await saveUserHotkey(recordingCombo, compoundId, getItemType(item) as any);
                                       }
                                       setRecordingHotkeyId(null);
                                       setRecordingCombo('');

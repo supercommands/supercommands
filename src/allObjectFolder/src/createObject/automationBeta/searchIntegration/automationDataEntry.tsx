@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaTimes, FaExpand, FaPlus, FaChevronDown } from 'react-icons/fa';

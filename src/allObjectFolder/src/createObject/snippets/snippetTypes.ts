@@ -9,6 +9,17 @@
  * ```
  */
 
+import type { StructuredVersionHistory } from '../../../../shared-components/versionHistory/structuredVersionHistory';
+
+export interface SnippetSnapshot {
+  title: string;
+  config: string | Record<string, any>;
+  workspaceId: string;
+  folderId: string | null;
+  tagIds: string[];
+  shortcut?: string;
+}
+
 export interface SnippetRecord {
 
   id: string;
@@ -18,10 +29,13 @@ export interface SnippetRecord {
   title: string;
   config: string | Record<string, any>; // The main data payload for Snippets (AST/JSON)
   tagIds: string[];
+  shortcut?: string;
 
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;
+
+  versionHistory?: StructuredVersionHistory<SnippetSnapshot>;
 }
 
 export interface CreateSnippetInput {
@@ -30,6 +44,7 @@ export interface CreateSnippetInput {
   title: string;
   config: string | Record<string, any>;
   tagIds?: string[];
+  shortcut?: string;
 }
 
 export interface UpdateSnippetInput {
@@ -38,4 +53,5 @@ export interface UpdateSnippetInput {
   workspaceId?: string;
   folderId?: string | null;
   tagIds?: string[];
+  shortcut?: string;
 }

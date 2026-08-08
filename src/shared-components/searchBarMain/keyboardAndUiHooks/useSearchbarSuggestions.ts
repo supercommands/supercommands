@@ -30,6 +30,8 @@ import { isBookmarksCommand, trimQuery } from '../utilityFunctions/promptHelpers
 import { getUrlsFromQuery } from '../utilityFunctions/urlHelpers';
 import type { HistoryItem } from '../searchLogicAndAlgorithms/historyAlgo';
 import type { CommonCommandEntry } from '../searchLogicAndAlgorithms/commonResults';
+import { buildShortcutPrefixRegistry, getCommandSpacePrefix } from '../../../shared-components/triggers';
+import { PAGE_ACTION_ITEMS } from '../../../pages/AltS_search_websites/src/commands/pageActions';
 
 interface UseSearchbarSuggestionsProps {
   value: string;
@@ -61,6 +63,8 @@ interface UseSearchbarSuggestionsProps {
   userDbShortcuts?: any[];
   userDbHotkeys?: any[];
   customPrefixes?: any;
+  isEmbedded?: boolean;
+  contextUrl?: string;
 }
 const isSameSnippetIdentity = (left: any, right: any): boolean => {
   const leftId = String(left ?? '').trim().toLowerCase();
@@ -101,6 +105,8 @@ export function useSearchbarSuggestions({
   userDbShortcuts,
   userDbHotkeys,
   customPrefixes,
+  isEmbedded,
+  contextUrl,
 }: UseSearchbarSuggestionsProps) {
   // History cache state
   const [historyItems, setHistoryItems] = useState<HistoryItem[] | null>(null);
@@ -113,7 +119,7 @@ export function useSearchbarSuggestions({
   // Effect to prefetch history when search focus is enabled
   useEffect(() => {
     if (!isSearchFocusEnabled) {
-      setHistoryItems(null);
+      setHistoryItems(prev => (prev !== null ? null : prev));
       isFetchingHistoryRef.current = false;
       return;
     }
@@ -168,7 +174,7 @@ export function useSearchbarSuggestions({
   const commandSuggestions = useMemo<CommandSuggestionItem[]>(() => {
     if (lockedLocalDef || isBookmarksCommand(lockedCommand)) return [];
 
-    const safeCommandKey = (commandKey || 'c').trim().toLowerCase();
+    const safeCommandKey = getCommandSpacePrefix(commandKey || customPrefixes);
     const safeSystemKey = (customPrefixes?.system_command || 'sc').trim().toLowerCase();
     const valLower = value.toLowerCase();
 
@@ -200,69 +206,39 @@ export function useSearchbarSuggestions({
       ? valLower.slice(safeCommandKey.length + 1)
       : valLower;
 
-    let activeCategoryFilter: 'note' | 'link' | 'snippet' | 'session' | 'automation' | 'agent' | 'command' | 'todo' | 'system_command' | 'bookmark' | null = null;
+    type CategoryFilter = 'note' | 'link' | 'snippet' | 'session' | 'automation' | 'agent' | 'command' | 'todo' | 'system_command' | 'bookmark';
+    let activeCategoryFilter: CategoryFilter | null = null;
     let actualQuery = queryAfterCmd.trim(); // trimmed version for actual searching
     
     if (isCommandTrigger) {
       // All prefixes come from centralized storage (customSearchPrefixesForOmniboxStorage).
       // Defaults are defined there — never hardcode fallbacks here.
-      const notePrefix = customPrefixes?.note?.trim()?.toLowerCase();
-      const linkPrefix = customPrefixes?.link?.trim()?.toLowerCase();
-      const sessionPrefix = customPrefixes?.session?.trim()?.toLowerCase();
-      const automationPrefix = customPrefixes?.automation?.trim()?.toLowerCase();
-      const agentPrefix = customPrefixes?.agent?.trim()?.toLowerCase();
-      const commandPrefix = customPrefixes?.command?.trim()?.toLowerCase();
-      const snippetPrefix = customPrefixes?.snippet?.trim()?.toLowerCase();
-      const todoPrefix = customPrefixes?.todo?.trim()?.toLowerCase();
-      const systemCommandPrefix = customPrefixes?.system_command?.trim()?.toLowerCase() || 'sc';
-      const bookmarkPrefix = customPrefixes?.bookmark?.trim()?.toLowerCase() || 'bm';
-
       const matchPrefix = (prefix: string | undefined): boolean => {
         if (!prefix) return false;
-        if (value.startsWith('/')) {
-          return queryAfterCmd === prefix || queryAfterCmd.startsWith(`${prefix} `);
-        }
-        return queryAfterCmd.startsWith(`${prefix} `);
+        return queryAfterCmd === prefix || queryAfterCmd.startsWith(`${prefix} `);
       };
 
       const getSlicedQuery = (prefix: string): string => {
         return queryAfterCmd === prefix ? '' : queryAfterCmd.slice(prefix.length).trim();
       };
 
-      // Order by longest prefix first so 'sn' (snippet) is checked before 's' (session)
-      if (matchPrefix(systemCommandPrefix)) {
-         activeCategoryFilter = 'system_command';
-         actualQuery = getSlicedQuery(systemCommandPrefix!);
-      } else if (matchPrefix(automationPrefix)) {
-         activeCategoryFilter = 'automation';
-         actualQuery = getSlicedQuery(automationPrefix!);
-      } else if (matchPrefix(snippetPrefix) || matchPrefix('sn')) {
-         activeCategoryFilter = 'snippet';
-         actualQuery = getSlicedQuery(queryAfterCmd.startsWith('sn') ? 'sn' : snippetPrefix || 'sn');
-      } else if (matchPrefix(bookmarkPrefix) || matchPrefix('bm') || matchPrefix('b')) {
-         activeCategoryFilter = 'bookmark';
-         actualQuery = getSlicedQuery(queryAfterCmd.startsWith('bm') ? 'bm' : queryAfterCmd.startsWith('b') ? 'b' : bookmarkPrefix);
-      } else if (matchPrefix(sessionPrefix) || matchPrefix('se')) {
-         activeCategoryFilter = 'session';
-         actualQuery = getSlicedQuery(queryAfterCmd.startsWith('se') ? 'se' : sessionPrefix || 's');
-      } else if (matchPrefix(notePrefix) || matchPrefix('nm')) {
-         activeCategoryFilter = 'note';
-         actualQuery = getSlicedQuery(queryAfterCmd.startsWith('nm') ? 'nm' : notePrefix || 'n');
-      } else if (matchPrefix(linkPrefix)) {
-         activeCategoryFilter = 'link';
-         actualQuery = getSlicedQuery(linkPrefix!);
-      } else if (matchPrefix(agentPrefix) || matchPrefix('ca') || matchPrefix('g')) {
-         activeCategoryFilter = 'agent';
-         actualQuery = getSlicedQuery(queryAfterCmd.startsWith('ca') ? 'ca' : queryAfterCmd.startsWith('g') ? 'g' : agentPrefix || 'ca');
-      } else if (matchPrefix(todoPrefix)) {
-         activeCategoryFilter = 'todo';
-         actualQuery = getSlicedQuery(todoPrefix!);
-      } else if (matchPrefix(commandPrefix)) {
-         activeCategoryFilter = 'command';
-         actualQuery = getSlicedQuery(commandPrefix!);
+      const categoryPrefixes: Array<{ prefix: string; filter: CategoryFilter }> = Object.entries(
+        buildShortcutPrefixRegistry(customPrefixes),
+      )
+        .map(([prefix, filter]) => ({ filter: filter as CategoryFilter, prefix }))
+        .sort((a, b) => b.prefix.length - a.prefix.length);
+
+      const matchedCategory = categoryPrefixes.find(entry => matchPrefix(entry.prefix));
+      if (matchedCategory) {
+        activeCategoryFilter = matchedCategory.filter;
+        actualQuery = getSlicedQuery(matchedCategory.prefix);
       }
 
-      console.log('[SlashFilter Debug][Suggestions] value:', `"${value}"`, 'activeCategoryFilter:', activeCategoryFilter, 'actualQuery:', `"${actualQuery}"`);
+    }
+
+    const isBroadCommandSectionRequest = activeCategoryFilter === 'command' && !actualQuery;
+    if (isBroadCommandSectionRequest) {
+      activeCategoryFilter = null;
     }
 
     const results: any[] = [];
@@ -299,7 +275,7 @@ export function useSearchbarSuggestions({
           const isNote = refType === 'note' || refType === 'notes';
           const isLink = refType === 'link' || refType === 'links';
           const isSnippet = refType === 'snippet' || refType === 'snippets';
-          const isSession = refType === 'session' || refType === 'sessions';
+          const isSession = refType === 'session' || refType === 'sessions' || refType === 'tab session' || refType === 'tabgroup';
           const isPrompt = refType === 'ai_prompt' || refType === 'prompt' || refType === 'aiprompt';
           const isAutomation = refType === 'automation' || refType === 'automations';
           const isAgent = refType === 'chat_agent' || refType === 'agent';
@@ -317,6 +293,7 @@ export function useSearchbarSuggestions({
       const { referenceId, referenceType } = record;
       if (!referenceId || !referenceType || addedUserEntities.has(referenceId)) return;
       addedUserEntities.add(referenceId);
+      const normalizedReferenceType = String(referenceType || '').toLowerCase();
 
       let entity: any = null;
       // Fetch directly from Zustand state to avoid redundant React subscriptions (which the user objected to)
@@ -324,7 +301,7 @@ export function useSearchbarSuggestions({
       const dbState = useDbStore.getState();
       
       let commandMatch: any = null;
-      if (referenceType === 'command') {
+      if (normalizedReferenceType === 'command') {
           commandMatch = commandIndex.find((c: any) => c.definition.id === referenceId);
           if (!commandMatch) {
              const fallbackCommand = dbState.commands?.find((c: any) => c.id === referenceId);
@@ -384,36 +361,41 @@ export function useSearchbarSuggestions({
 
         if (rank !== null) {
           if (commandMatch) {
-             console.log('[Suggestions Debug] Pushing commandMatch:', commandMatch.definition.id, 'rank:', rank);
              userEntities.push({
                kind: commandMatch.kind,
+               _userShortcutRecord: !isHotkey ? record : undefined,
                definition: commandMatch.definition,
                score: 1000 - rank,
                matchedTokens: []
              });
           } else {
               const isWorkspaceItemType =
-                referenceType === 'note' ||
-                referenceType === 'link' ||
-                referenceType === 'snippet' ||
-                referenceType === 'session' ||
-                referenceType === 'aiPrompt' ||
-                referenceType === 'ai_prompt' ||
-                referenceType === 'prompt' ||
-                referenceType === 'agent' ||
-                referenceType === 'chat_agent' ||
-                referenceType === 'todo';
+                normalizedReferenceType === 'note' ||
+                normalizedReferenceType === 'link' ||
+                normalizedReferenceType === 'snippet' ||
+                normalizedReferenceType === 'session' ||
+                normalizedReferenceType === 'sessions' ||
+                normalizedReferenceType === 'tab session' ||
+                normalizedReferenceType === 'tabgroup' ||
+                normalizedReferenceType === 'aiprompt' ||
+                normalizedReferenceType === 'ai_prompt' ||
+                normalizedReferenceType === 'prompt' ||
+                normalizedReferenceType === 'agent' ||
+                normalizedReferenceType === 'chat_agent' ||
+                normalizedReferenceType === 'automation' ||
+                normalizedReferenceType === 'todo';
 
               if (isWorkspaceItemType) {
                 let prefixChar = '';
-                if (referenceType === 'note') prefixChar = customPrefixes?.note?.trim()?.toLowerCase() ?? '';
-                else if (referenceType === 'link') prefixChar = customPrefixes?.link?.trim()?.toLowerCase() ?? '';
-                else if (referenceType === 'snippet') prefixChar = customPrefixes?.snippet?.trim()?.toLowerCase() ?? '';
-                else if (referenceType === 'session') prefixChar = customPrefixes?.session?.trim()?.toLowerCase() ?? '';
-                else if (referenceType === 'prompt' || referenceType === 'aiPrompt' || referenceType === 'ai_prompt') prefixChar = customPrefixes?.prompt?.trim()?.toLowerCase() ?? '';
-                else if (referenceType === 'agent' || referenceType === 'chat_agent') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
-                else if (referenceType === 'automation') prefixChar = customPrefixes?.automation?.trim()?.toLowerCase() ?? '';
-                else if (referenceType === 'todo') prefixChar = customPrefixes?.todo?.trim()?.toLowerCase() ?? '';
+                if (normalizedReferenceType === 'note') prefixChar = customPrefixes?.note?.trim()?.toLowerCase() ?? '';
+                else if (normalizedReferenceType === 'link') prefixChar = customPrefixes?.link?.trim()?.toLowerCase() ?? '';
+                else if (normalizedReferenceType === 'snippet') prefixChar = customPrefixes?.snippet?.trim()?.toLowerCase() ?? '';
+                else if (normalizedReferenceType === 'session' || normalizedReferenceType === 'sessions' || normalizedReferenceType === 'tab session' || normalizedReferenceType === 'tabgroup')
+                  prefixChar = customPrefixes?.session?.trim()?.toLowerCase() ?? '';
+                else if (normalizedReferenceType === 'prompt' || normalizedReferenceType === 'aiprompt' || normalizedReferenceType === 'ai_prompt') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
+                else if (normalizedReferenceType === 'agent' || normalizedReferenceType === 'chat_agent') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
+                else if (normalizedReferenceType === 'automation') prefixChar = customPrefixes?.automation?.trim()?.toLowerCase() ?? '';
+                else if (normalizedReferenceType === 'todo') prefixChar = customPrefixes?.todo?.trim()?.toLowerCase() ?? '';
                   
                 let shortcutDisplay = '';
                 if (!isHotkey && record.trigger) {
@@ -423,17 +405,21 @@ export function useSearchbarSuggestions({
                 }
                 
                 const normalizedCategory =
-                  referenceType === 'ai_prompt' || referenceType === 'prompt'
+                  normalizedReferenceType === 'session' || normalizedReferenceType === 'sessions' || normalizedReferenceType === 'tab session' || normalizedReferenceType === 'tabgroup'
+                    ? 'session'
+                    : normalizedReferenceType === 'ai_prompt' || normalizedReferenceType === 'prompt'
                     ? 'aiPrompt'
-                    : referenceType === 'chat_agent'
+                    : normalizedReferenceType === 'chat_agent'
                     ? 'agent'
-                    : referenceType;
+                    : normalizedReferenceType;
 
                 const nativeItem: any = {
                   _kind: 'workspace_item',
+                  _userShortcutRecord: !isHotkey ? record : undefined,
                   item: {
                     ...entity,
                     category: normalizedCategory,
+                    _userShortcutRecord: !isHotkey ? record : undefined,
                   },
                   workspace: { id: entity.workspaceId, workspace_id: entity.workspaceId },
                   folder: entity.folderId ? { id: entity.folderId, folder_id: entity.folderId } : null,
@@ -453,19 +439,21 @@ export function useSearchbarSuggestions({
                  addedUserEntities.add(entity.id);
                }
              } else {
-               userEntities.push({
-                 _kind: 'command', // Map it as a command so it appears in the commands column
-                 commandType: 'proxy', // Indicate it's a proxy for native rendering
-                 id: `proxy_${referenceId}`,
-                 label: entity.title || entity.name || 'Untitled',
+                userEntities.push({
+                  _kind: 'command', // Map it as a command so it appears in the commands column
+                  _userShortcutRecord: !isHotkey ? record : undefined,
+                  commandType: 'proxy', // Indicate it's a proxy for native rendering
+                  id: `proxy_${referenceId}`,
+                  label: entity.title || entity.name || 'Untitled',
                  score: 1000 - rank, // Massive score boost for user assigned, minus rank so closer match is higher
                  matchedTokens: [],
-                 proxyEntity: {
-                   ...entity,
-                   _kind: 'snippet',
-                   snippet: { ...entity, category: referenceType }, // Native rendering expects this
-                 }
-               });
+                  proxyEntity: {
+                    ...entity,
+                    _kind: 'snippet',
+                    _userShortcutRecord: !isHotkey ? record : undefined,
+                    snippet: { ...entity, category: referenceType }, // Native rendering expects this
+                  }
+                });
              }
           }
         }
@@ -488,7 +476,7 @@ export function useSearchbarSuggestions({
         if (c === 'aiprompt' || c === 'ai_prompt' || c === 'prompt' || c === 'chat_agent' || c === 'agent') return 'agent';
         if (c === 'notes') return 'note';
         if (c === 'links') return 'link';
-        if (c === 'sessions') return 'session';
+        if (c === 'sessions' || c === 'tab session' || c === 'tabgroup') return 'session';
         if (c === 'snippets') return 'snippet';
         if (c === 'automations') return 'automation';
         if (c === 'todos') return 'todo';
@@ -504,6 +492,7 @@ export function useSearchbarSuggestions({
         if (e._kind === 'workspace_item') {
           return {
             _kind: 'command' as const,
+            _userShortcutRecord: e._userShortcutRecord || e.item?._userShortcutRecord,
             commandType: 'proxy',
             id: `proxy_${e.id || e.item?.id}`,
             label: e.item?.title || e.item?.name || 'Untitled',
@@ -513,6 +502,7 @@ export function useSearchbarSuggestions({
             // icon rendering, click, and double-click based on category (note/link/snippet etc.)
             proxyEntity: {
               _kind: 'workspace_item',
+              _userShortcutRecord: e._userShortcutRecord || e.item?._userShortcutRecord,
               item: e.item,
               workspace: e.workspace,
               folder: e.folder || null,
@@ -524,9 +514,21 @@ export function useSearchbarSuggestions({
     }
     results.push(...filteredUserEntities);
 
-    console.log('[Suggestions Debug] value:', `"${value}"`, 'fixed trigger:', `"${safeCommandKey} "`);
+    if (isEmbedded && (!activeCategoryFilter || activeCategoryFilter === 'command')) {
+      const filteredPageActions = PAGE_ACTION_ITEMS.filter(item => {
+        if (!actualQuery) return true;
+        const q = actualQuery.toLowerCase();
+        return item.name.toLowerCase().includes(q) || item.prefix.toLowerCase().includes(q) || item.keywords.some(k => k.toLowerCase().includes(q));
+      }).map(item => ({
+        kind: 'remote',
+        definition: item,
+        score: rankByQuery(item.name, actualQuery) !== null ? 10 - rankByQuery(item.name, actualQuery)! + 500 : 500,
+        matchedTokens: []
+      }));
+      results.push(...filteredPageActions);
+    }
 
-    if (value === `${safeCommandKey} ` || (!queryAfterCmd && !activeCategoryFilter)) {
+    if (value === `${safeCommandKey} ` || isBroadCommandSectionRequest || (!queryAfterCmd && !activeCategoryFilter)) {
       const baseCmds = searchCommands(commandIndex, '').filter(cmd => {
         if (cmd.definition.category === 'browser' && (!cmd.definition.prefix || cmd.definition.prefix.trim() === '')) return false;
         // If system_command filter is not active, include only user-customized commands in 'c '
@@ -731,7 +733,20 @@ export function useSearchbarSuggestions({
           ...converted,
         ]
       : converted;
-  }, [commandQuery, lockedCommand, lockedLocalDef, value, commandIndex]);
+  }, [
+    commandQuery,
+    lockedCommand,
+    lockedLocalDef,
+    value,
+    commandIndex,
+    commandKey,
+    customPrefixes,
+    userDbShortcuts,
+    userDbHotkeys,
+    automationSuggestions,
+    agentCollectionSuggestions,
+    moduleSuggestions,
+  ]);
 
   const historySuggestions = useMemo<HistorySuggestionItem[]>(() => {
     if (
@@ -831,7 +846,7 @@ export function useSearchbarSuggestions({
           (lockedCommand !== 'calendar' && !value.trim() && selectedImages.length === 0);
 
     if (shouldSkip) {
-      setDebouncedFuseResults([]);
+      setDebouncedFuseResults(prev => (prev.length > 0 ? [] : prev));
       return;
     }
 
@@ -989,7 +1004,7 @@ export function useSearchbarSuggestions({
 
       // De-duplicate snippets and inject shortcuts
       const snippetIds = new Set();
-      const safeCommandKey = (commandKey || 'c').trim();
+      const safeCommandKey = getCommandSpacePrefix(commandKey || customPrefixes);
 
       const finalResults = converted.filter(item => {
         if (item._kind === 'workspace_item') {
@@ -1006,7 +1021,7 @@ export function useSearchbarSuggestions({
           else if (category === 'link') prefixChar = customPrefixes?.link?.trim()?.toLowerCase() ?? '';
           else if (category === 'snippet') prefixChar = customPrefixes?.snippet?.trim()?.toLowerCase() ?? '';
           else if (category === 'session') prefixChar = customPrefixes?.session?.trim()?.toLowerCase() ?? '';
-          else if (category === 'aiPrompt' || category === 'ai_prompt' || category === 'prompt') prefixChar = customPrefixes?.prompt?.trim()?.toLowerCase() ?? '';
+          else if (category === 'aiPrompt' || category === 'ai_prompt' || category === 'prompt') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
           else if (category === 'agent' || category === 'chat_agent') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
           else if (category === 'automation') prefixChar = customPrefixes?.automation?.trim()?.toLowerCase() ?? '';
           else if (category === 'todo') prefixChar = customPrefixes?.todo?.trim()?.toLowerCase() ?? '';
@@ -1057,6 +1072,9 @@ export function useSearchbarSuggestions({
     moduleSuggestions,
     isInitialAltSFocus,
     isFocused,
+    commandKey,
+    customPrefixes,
+    userDbShortcuts,
   ]);
 
   const openUrlSuggestion = useMemo<OpenUrlSuggestionItem | null>(() => {
@@ -1104,7 +1122,7 @@ export function useSearchbarSuggestions({
         return commonCommandSuggestions.filter(s => AI_GROUP.members.includes(s.id as CommandId) || s.id === 'ai');
       }
 
-      const safeKey = (commandKey || 'c').trim().toLowerCase();
+      const safeKey = getCommandSpacePrefix(commandKey || customPrefixes);
       const safeSystemKey = (customPrefixes?.system_command || 'sc').trim().toLowerCase();
       const valLower = value.toLowerCase();
 
@@ -1144,6 +1162,8 @@ export function useSearchbarSuggestions({
     showAIHistoryPanel,
     isInitialAltSFocus,
     activeCollection,
+    commandKey,
+    customPrefixes,
   ]);
 
   return {

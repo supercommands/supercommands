@@ -16,8 +16,7 @@ import { CustomSearchPrefixesForOmniboxStorage } from '../../../storage/localSto
 import { VisualKeyDisplay } from '../../../shared-components/hotkeys/ui/VisualKeyDisplay';
 import { EditablePrefixKey } from '../../../shared-components/shortcuts/ui/EditablePrefixKey';
 import { DestinationPicker } from '../../../shared-components/editorToolbar/DestinationPicker';
-import {
-  FaPlus,
+import { FaPlus,
   FaTrash,
   FaLock,
   FaGlobe,
@@ -33,9 +32,7 @@ import {
   FaCheck,
   FaRobot,
   FaBookmark,
-  FaLayerGroup,
-  FaPuzzlePiece,
-} from 'react-icons/fa';
+  FaPuzzlePiece } from 'react-icons/fa';
 
 import { BsPersonFill, BsPeopleFill, BsHourglassSplit } from 'react-icons/bs';
 import { MdLockOutline } from 'react-icons/md';
@@ -60,6 +57,7 @@ import {
   FiMonitor,
   FiLink,
   FiFolder,
+  FiCheckSquare,
 } from 'react-icons/fi';
 import { SiGooglechrome } from 'react-icons/si';
 import { TbBrandGithub, TbWorld, TbStack2 } from 'react-icons/tb';
@@ -77,6 +75,8 @@ import { SpreadsheetMultiLinkInput } from './spreadsheetMultiLinkInput';
 
 import { getItemCompoundId, readAllHotkeys, readAllShortcuts } from '../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { BsCalendarCheck } from 'react-icons/bs';
+import { SessionGridIcon } from '../../icons/sessionGridIcon';
+
 
 // Helper to resolve icon strings to emojis
 const resolveIcon = (iconStr: string | null | undefined, defaultEmoji: string) => {
@@ -89,6 +89,26 @@ const resolveIcon = (iconStr: string | null | undefined, defaultEmoji: string) =
     }
   }
   return defaultEmoji;
+};
+
+const supportsTitleInlinePreview = (row: any) => {
+  if (['bookmark', 'bookmarks'].includes(String(row.category || '').toLowerCase())) return false;
+
+  const isNote = row.section === 'Notes' || row.itemType === 'note';
+  const isSnippet = row.section === 'Snippets' || row.itemType === 'snippet';
+  const isLink =
+    row.section === 'Smart Links' ||
+    row.section === 'Tab Sessions' ||
+    row.itemType === 'link' ||
+    row.itemType === 'session' ||
+    row.category === 'link' ||
+    row.category === 'session';
+  const isCommand =
+    row.category === 'commands' ||
+    row.category === 'general_commands' ||
+    row.section === 'Browser Commands';
+
+  return isNote || isSnippet || isLink || isCommand;
 };
 
 const getWorkspaceAndFolderLocation = (workspaceId: string | null, folderId: string | null) => {
@@ -403,6 +423,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
       if (lower.includes('note') && categoryFilter.includes('note')) return true;
       if (lower.includes('link') && categoryFilter.includes('link')) return true;
       if (lower.includes('snippet') && categoryFilter.includes('snippet')) return true;
+      if (lower.includes('todo') && categoryFilter.includes('todo')) return true;
       if (lower.includes('automation') && categoryFilter.includes('automation')) return true;
       if (lower.includes('agent') && categoryFilter.includes('agent')) return true;
       if (lower.includes('session') && categoryFilter.includes('session')) return true;
@@ -665,10 +686,13 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
       // 🚀 1. ESCAPE -> Cancel edit mode OR Close Sheet
       // Handle this at the very top to ensure it's never blocked
       if (e.key === 'Escape') {
-        // If an overlay editor (note/link/snippet opened from sheet) is active,
+        if (e.defaultPrevented) {
+          return;
+        }
+        // If an editor (note/link/snippet/todo/session) is active,
         // let the global uiStateManager escape chain handle it — do NOT close the sheet.
         const activeEditor = useUIStore.getState().activeEditor;
-        if (activeEditor?.props?.isOverlay) {
+        if (activeEditor) {
           return;
         }
 
@@ -897,6 +921,26 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                 type: 'link', 
                 id: currentRow.id, 
                 props: { category: 'link', isOverlay: true, editMode: true, snippet: currentRow } 
+              });
+              return;
+            }
+            const isTodo = (currentRow as any).section === 'Todos' || currentRow.itemType === 'todo' || (currentRow as any).category === 'todo';
+            if (isTodo) {
+              const prefill = {
+                todo_id: currentRow.id,
+                snippet_id: currentRow.id,
+                is_todo_type: true,
+                key: currentRow.name || '',
+                title: currentRow.name || '',
+                value: currentRow.value || '',
+                shortcut: currentRow.command || '',
+                tags: (currentRow as any).tagIds || (currentRow as any).tags || [],
+              };
+              useUIStore.getState().setTodoCreatePrefill(prefill);
+              useUIStore.getState().openEditor({ 
+                type: 'todo', 
+                id: currentRow.id, 
+                props: { category: 'todo', isOverlay: true, editMode: true, snippet: currentRow, prefill } 
               });
               return;
             }
@@ -1148,7 +1192,9 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                       case 'Snippets':
                         return <FaCode className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />;
                       case 'Tab Sessions':
-                        return <FaLayerGroup className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />;
+                        return <SessionGridIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />;
+                      case 'Todos':
+                        return <BsCalendarCheck className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />;
                       default:
                         return null;
                     }
@@ -1193,8 +1239,8 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                             
                             {/* Unified Row Background */}
                             <div className={clsx(
-                              "w-full rounded-md transition-colors relative shadow-sm text-white group overflow-hidden",
-                              isSelectedSection ? 'bg-white/10 ring-1 ring-white/20 ring-inset z-10' : 'bg-transparent border-b border-white/5'
+                              "w-full transition-colors relative text-[var(--color-textPrimary)] group overflow-hidden",
+                              isSelectedSection ? 'bg-[var(--color-selectedBg)] ring-1 ring-[var(--color-borderActive)] ring-inset z-10' : 'bg-[var(--color-cardBg)]/30 border-l border-b border-[var(--color-borderDefault)]'
                             )}>
                               <table className="w-full h-full table-fixed border-collapse">
                                 <colgroup>
@@ -1203,12 +1249,12 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                   ))}
                                 </colgroup>
                                 <tbody>
-                                  <tr className="divide-x divide-black/10 dark:divide-white/10">
+                                  <tr className="divide-x divide-[var(--color-borderDefault)]">
                                     <td className="p-0 align-middle">
                                       <div className="flex items-center gap-2 pl-2 pr-3 py-1">
                                 <span className="text-[var(--color-iconDefault)]">{getIcon(row.title)}</span>
                                 <span className="flex items-center flex-1">
-                                  <span className="w-[135px] shrink-0 flex items-center truncate">
+                                  <span className="min-w-[135px] shrink-0 flex items-center gap-1.5 text-[var(--color-textPrimary)] font-semibold">
                                     {row.title}
                                     <span className={clsx("ml-2 text-[10px] font-bold text-[var(--color-sectionCountText)] transition-opacity", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                       {count}
@@ -1219,7 +1265,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           e.stopPropagation();
                                           useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'note', isOverlay: true } });
                                         }}
-                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                         <FiPlus size={12} />
                                       </button>
                                     )}
@@ -1229,7 +1275,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           e.stopPropagation();
                                           useUIStore.getState().openEditor({ type: 'link', id: 'new', props: { category: 'link', isOverlay: true } });
                                         }}
-                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                         <FiPlus size={12} />
                                       </button>
                                     )}
@@ -1239,7 +1285,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           e.stopPropagation();
                                           useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'snippet', isOverlay: true } });
                                         }}
-                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                         <FiPlus size={12} />
                                       </button>
                                     )}
@@ -1249,10 +1295,21 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           e.stopPropagation();
                                           useUIStore.getState().openEditor({ type: 'session', id: 'new', props: { category: 'session', isOverlay: true } });
                                         }}
-                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                         <FiPlus size={12} />
                                       </button>
                                     )}
+                                    {row.title === 'Todos' && (
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          useUIStore.getState().openEditor({ type: 'todo', id: 'new', props: { category: 'todo', isOverlay: true, prefill: { isCreateModalOnly: true } as any } });
+                                        }}
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer transition-opacity duration-200", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100 group-hover:opacity-100")}>
+                                        <FiPlus size={12} />
+                                      </button>
+                                    )}
+                                    
                                   </span>
                                   {omniboxPrefixes && (row.title === 'Notes' || row.title === 'Smart Links' || row.title === 'Tab Sessions' || row.title === 'Browser Commands' || row.title === 'System Commands' || row.title === 'Commands' || row.title === 'Saved Automations' || row.title === 'Chat Agents' || row.title === 'AI Prompts' || row.title === 'Todos') && (
                                     <span className={clsx("flex items-center gap-1 transition-opacity", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
@@ -1349,7 +1406,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                       ) : (
                         <td
                           colSpan={table.getVisibleLeafColumns().length}
-                          className="p-0 text-sm font-normal tracking-tight bg-[var(--color-sheetBg)] z-[50]">
+                          className="pt-4 pb-0 px-0 text-sm font-normal tracking-tight bg-[var(--color-sheetBg)] z-[50]">
                           <div className="flex items-stretch h-full -ml-6 relative pr-0 gap-1 bg-transparent">
                             <div
                               className={clsx(
@@ -1369,8 +1426,8 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
 
                             {/* Unified Row Background */}
                             <div className={clsx(
-                              "w-full rounded-md transition-colors relative shadow-sm text-white group overflow-hidden",
-                              isSelectedSection ? 'bg-white/10 ring-1 ring-white/20 ring-inset z-10' : 'bg-transparent border-b border-white/5'
+                              "w-full transition-colors relative text-[var(--color-textPrimary)] group overflow-hidden",
+                              isSelectedSection ? 'bg-[var(--color-selectedBg)] ring-1 ring-[var(--color-borderActive)] ring-inset z-10' : 'bg-[var(--color-cardBg)]/30 border-l border-y border-[var(--color-borderDefault)]'
                             )}>
                               <table className="w-full h-full table-fixed border-collapse">
                                 <colgroup>
@@ -1379,12 +1436,12 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                   ))}
                                 </colgroup>
                                 <tbody>
-                                  <tr className="divide-x divide-black/10 dark:divide-white/10">
-                                    <td className="p-0 align-middle">
+                                  <tr>
+                                    <td colSpan={table.getVisibleLeafColumns().length} className="p-0 align-middle">
                                       <div className="flex items-center gap-2 pl-2 pr-3 py-1">
                                 <span className="text-[var(--color-iconDefault)]">{getIcon(row.title)}</span>
                                 <span className="flex items-center flex-1">
-                                  <span className="w-[135px] shrink-0 flex items-center truncate">
+                                  <span className="min-w-[135px] shrink-0 flex items-center gap-1.5 text-[var(--color-textPrimary)] font-semibold">
                                     {row.title}
                                     <span className={clsx("ml-2 text-[10px] font-bold text-[var(--color-sectionCountText)] transition-opacity", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                       {count}
@@ -1395,7 +1452,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           e.stopPropagation();
                                           useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'note', isOverlay: true } });
                                         }}
-                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                         <FiPlus size={12} />
                                       </button>
                                     )}
@@ -1405,7 +1462,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           e.stopPropagation();
                                           useUIStore.getState().openEditor({ type: 'link', id: 'new', props: { category: 'link', isOverlay: true } });
                                         }}
-                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                         <FiPlus size={12} />
                                       </button>
                                     )}
@@ -1415,7 +1472,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           e.stopPropagation();
                                           useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'snippet', isOverlay: true } });
                                         }}
-                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
                                         <FiPlus size={12} />
                                       </button>
                                     )}
@@ -1425,7 +1482,17 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           e.stopPropagation();
                                           useUIStore.getState().openEditor({ type: 'session', id: 'new', props: { category: 'session', isOverlay: true } });
                                         }}
-                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100")}>
+                                        <FiPlus size={12} />
+                                      </button>
+                                    )}
+                                    {row.title === 'Todos' && (
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          useUIStore.getState().openEditor({ type: 'todo', id: 'new', props: { category: 'todo', isOverlay: true, prefill: { isCreateModalOnly: true } as any } });
+                                        }}
+                                        className={clsx("ml-2 p-[2px] rounded text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all focus:outline-none flex items-center justify-center cursor-pointer transition-opacity duration-200", isSelectedSection ? "opacity-100" : "opacity-0 group-hover/section-row:opacity-100 group-hover:opacity-100")}>
                                         <FiPlus size={12} />
                                       </button>
                                     )}
@@ -1461,13 +1528,6 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                 </span>
                                       </div>
                                     </td>
-                                    
-                                    {/* Remaining Columns: Render empty cells to carry the column borders */}
-                                    {table.getVisibleLeafColumns().slice(1).map((col, i) => (
-                                      <td key={col.id} className="p-0 align-middle">
-                                        <div className="flex items-center py-1" />
-                                      </td>
-                                    ))}
                                   </tr>
                                 </tbody>
                               </table>
@@ -1532,9 +1592,9 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                               ) : (
                                 <FiBox className="text-[var(--color-iconDefault)]" size={14} />
                               )}
-                              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-white">
+                              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--color-textPrimary)]">
                                 {row.name}
-                                <span className="ml-2 text-[10px] font-bold text-neutral-400">
+                                <span className="ml-2 text-[10px] font-bold text-[var(--color-textMuted)]">
                                   {row.moduleCount}
                                 </span>
                               </span>
@@ -1576,6 +1636,8 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                 const tableRow = table.getRowModel().rows[dataIndex++];
                 if (!tableRow) return null;
 
+                const isSelectedRow = selectedCell?.rowIndex === visualIndex;
+
                 return (
                   <tr
                     key={tableRow.id}
@@ -1583,15 +1645,16 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                     onMouseEnter={() => setHoveredSection(tableRow.original.section)}
                     onMouseLeave={() => setHoveredSection(null)}
                     className={clsx(
-                      'group/row grow h-auto min-h-[36px] transition-all duration-300',
-                      'border-b border-black/10 dark:border-white/10 divide-x divide-black/10 dark:divide-white/10',
+                      'group/row grow h-auto min-h-[36px] transition-all duration-150',
+                      'border-b border-[var(--color-borderDefault)] divide-x divide-[var(--color-borderDefault)]',
                       (tableRow.original as any).isDeleting
                         ? 'bg-red-900/20'
-                        : 'bg-transparent hover:bg-white/5',
+                        : isSelectedRow
+                        ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] font-medium'
+                        : 'bg-transparent hover:bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)]',
                     )}>
                     {tableRow.getVisibleCells().map((cell, index) => {
                       const isSelected = selectedCell?.rowIndex === visualIndex && selectedCell?.colIndex === index;
-                      const isSelectedRow = selectedCell?.rowIndex === visualIndex;
 
                       const isEditing = editingCell?.rowIndex === visualIndex && editingCell?.colIndex === index;
 
@@ -1610,11 +1673,19 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                 const isSnippet = row.section === 'Snippets' || row.itemType === 'snippet';
                                 const isLink = row.section === 'Smart Links' || row.itemType === 'link';
                                 
+                                const mappedRow = {
+                                  ...row,
+                                  ...(row.originalItem || {}),
+                                  name: row.name || row.title || row.originalItem?.name || row.originalItem?.title || '',
+                                  title: row.name || row.title || row.originalItem?.name || row.originalItem?.title || '',
+                                  description: row.value || row.description || row.originalItem?.description || row.originalItem?.value || '',
+                                };
+
                                 if (isNote) {
                                   useUIStore.getState().openEditor({ 
                                     type: 'note', 
                                     id: row.id, 
-                                    props: { category: 'note', isOverlay: true, editMode: true, snippet: row } 
+                                    props: { category: 'note', isOverlay: true, editMode: true, snippet: mappedRow } 
                                   });
                                   return;
                                 }
@@ -1622,7 +1693,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                   useUIStore.getState().openEditor({ 
                                     type: 'note', 
                                     id: row.id, 
-                                    props: { category: 'snippet', isOverlay: true, editMode: true, snippet: row } 
+                                    props: { category: 'snippet', isOverlay: true, editMode: true, snippet: mappedRow } 
                                   });
                                   return;
                                 }
@@ -1630,7 +1701,24 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                   useUIStore.getState().openEditor({ 
                                     type: 'link', 
                                     id: row.id, 
-                                    props: { category: 'link', isOverlay: true, editMode: true, snippet: row } 
+                                    props: { category: 'link', isOverlay: true, editMode: true, snippet: mappedRow } 
+                                  });
+                                  return;
+                                }
+                                if (row.section === 'Todos' || row.itemType === 'todo' || row.category === 'todo') {
+                                  const possibleIds = [row.todo_id, row.id, row.snippet_todo_id];
+                                  const numericId = possibleIds.find(id => typeof id === 'number' || (typeof id === 'string' && id.length > 0 && !isNaN(Number(id)) && !id.includes('-')));
+
+                                  const prefill = {
+                                    ...mappedRow,
+                                    todo_id: numericId || row.todo_id || row.id,
+                                    is_todo_type: true,
+                                  };
+                                  useUIStore.getState().setTodoCreatePrefill(prefill);
+                                  useUIStore.getState().openEditor({
+                                    type: 'todo',
+                                    id: String(prefill.todo_id || prefill.snippet_id || ''),
+                                    props: { category: 'todo', isOverlay: true, editMode: true, snippet: row, prefill },
                                   });
                                   return;
                                 }
@@ -1676,6 +1764,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                           }}
                           className={clsx(
                             'text-[11px] cursor-pointer transition-all relative h-auto min-h-[36px]',
+                            index === 0 && 'border-l border-[var(--color-borderDefault)]',
                             cell.column.id === 'id'
                               ? 'p-0 text-center align-middle'
                               : cell.column.id === 'key' || cell.column.id === 'fav'
@@ -1684,8 +1773,8 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                   ? 'px-[2px]'
                                   : 'px-2 py-1',
                             isSelected
-                              ? 'text-white ring-1 ring-white/30 ring-inset rounded bg-white/5 z-[50] overflow-visible py-[2px]'
-                              : 'text-neutral-300/90 py-[1.5px]',
+                              ? 'text-[var(--color-textPrimary)] ring-1 ring-[var(--color-borderActive)] ring-inset rounded bg-[var(--color-selectedBg)] z-[50] overflow-visible py-[2px]'
+                              : 'text-[var(--color-textPrimary)] py-[1.5px]',
                             (tableRow.original as any).isDeleting && (cell.column.id !== 'id' ? 'opacity-40 grayscale pointer-events-none' : 'opacity-100'),
                           )}
                           style={{ width: cell.column.getSize() }}>
@@ -1709,7 +1798,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                       useSpreadsheetStore.getState().removeRow(tableRow.original.id);
                                     }}
                                     className={clsx(
-                                      'flex items-center justify-center w-7 h-7 rounded hover:text-red-500 transition-all opacity-70 hover:opacity-100',
+                                      'flex items-center justify-center w-7 h-7 rounded text-[var(--color-iconDefault)] hover:text-[var(--color-error)] transition-all opacity-70 hover:opacity-100',
                                       isSelectedRow ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100',
                                     )}>
                                     <FiTrash size={14} />
@@ -1731,7 +1820,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                       ) : tableRow.original.fav ? (
                                         <FaStar className="text-amber-400 text-xs" />
                                       ) : (
-                                        <FiStar className="text-[var(--color-iconDefault)] text-xs hover:opacity-80" />
+                                        <FiStar className="text-[var(--color-iconDefault)] hover:text-[var(--color-accent)] text-xs transition-colors" />
                                       )}
                                     </button>
                                   </div>
@@ -1913,7 +2002,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                       ) : tableRow.original.fav ? (
                                         <FaStar className="text-amber-400 text-xs" />
                                       ) : (
-                                        <FiStar className="text-[var(--color-iconDefault)] text-xs hover:opacity-80" />
+                                        <FiStar className="text-[var(--color-iconDefault)] hover:text-[var(--color-accent)] text-xs transition-colors" />
                                       )}
                                     </button>
                                   </div>
@@ -1924,7 +2013,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                 <div className="flex items-center justify-between gap-1 w-full h-full px-2 overflow-hidden">
                                   {tableRow.original.path && (
                                     <>
-                                      <div className="truncate flex-1 min-w-0 text-white/70">
+                                      <div className="truncate flex-1 min-w-0 text-[var(--color-textPrimary)]">
                                         <span
                                           className={clsx(
                                             'truncate whitespace-nowrap transition-all duration-200',
@@ -1946,10 +2035,14 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                               ) : cell.column.id === 'name' ? (
                                 <div
                                   className={clsx(
-                                    'flex items-center gap-2 truncate max-w-full py-1 h-full',
+                                    'truncate max-w-full w-full min-w-0 py-1 h-full',
+                                    supportsTitleInlinePreview(tableRow.original)
+                                      ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-3'
+                                      : 'flex items-center gap-2',
                                     tableRow.original.type === 'automationModule' && 'ml-8',
                                   )}>
-                                  <div className="flex items-center gap-1.5 shrink min-w-[20px]">
+                                  <div className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-1.5 min-w-0 w-full overflow-hidden">
+                                  <div className="w-6 min-w-6 flex items-center justify-center overflow-hidden">
                                   {(() => {
                                     const rowItem = tableRow.original;
                                     const isLink = rowItem.itemType === 'link' || rowItem.itemType === 'session' || ['bookmark', 'bookmarks'].includes(String(rowItem.category || '').toLowerCase());
@@ -1963,7 +2056,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                             fallback={
                                               ['bookmark', 'bookmarks'].includes(String(rowItem.category || '').toLowerCase())
                                                 ? 'link'
-                                                : ['tabgroup', 'session', 'sessions', 'tab session', 'bulk_link'].includes(String(rowItem.category || '').toLowerCase())
+                                                : ['tabgroup', 'session', 'sessions', 'tab session'].includes(String(rowItem.category || '').toLowerCase())
                                                   ? 'tabgroup'
                                                   : 'link'
                                             }
@@ -1975,6 +2068,9 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                         )}
                                         {rowItem.itemType === 'snippet' && (
                                           <FaCode size={14} className="shrink-0 text-[var(--color-iconDefault)] ml-0.5" />
+                                        )}
+                                        {(String(rowItem.itemType) === 'todo' || rowItem.section === 'Todos' || rowItem.category === 'todo') && (
+                                          <BsCalendarCheck size={14} className="shrink-0 text-[var(--color-iconDefault)] ml-0.5" />
                                         )}
                                         {(
                                           rowItem.itemType === 'agent' ||
@@ -2004,144 +2100,147 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                       </>
                                     );
                                   })()}
-                                  <span className="truncate font-normal flex items-center gap-1">
-                                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                  </div>
+                                  <span className="font-medium text-[var(--color-textSecondary)] flex items-center gap-1.5 min-w-0">
+                                    <span className="truncate min-w-0">
+                                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                    </span>
+                                    {(tableRow.original.section === 'Smart Links' || tableRow.original.section === 'Tab Sessions') && (
+                                      <button
+                                        onClick={e => {
+                                          e.stopPropagation();
+
+                                          if (tableRow.original.section === 'Tab Sessions' || tableRow.original.category === 'session') {
+                                            const item = tableRow.original as any;
+                                            const sessionId = item.id;
+                                            const sessionName = item.key || item.name || item.title || 'Untitled Tab Session';
+                                            const openSettings = item.sessionOpenSettings || item.data?.sessionOpenSettings || {};
+                                            let initialUrls = item.urls || [];
+                                            let initialNames = item.names || [];
+                                            
+                                            if (initialUrls.length === 0) {
+                                              try {
+                                                const parsed = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+                                                if (Array.isArray(parsed)) {
+                                                  initialUrls = parsed.map((l: any) => l.url || l);
+                                                  initialNames = parsed.map((l: any) => l.name || '');
+                                                } else if (parsed && typeof parsed === 'object') {
+                                                  if (Array.isArray(parsed.urls)) initialUrls = parsed.urls;
+                                                  if (Array.isArray(parsed.names)) initialNames = parsed.names;
+                                                }
+                                              } catch (err) {}
+                                            }
+
+                                            const chromeAny = (window as any)?.chrome;
+                                            if (!chromeAny?.tabs?.query) return;
+
+                                            chromeAny.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+                                              const activeTab = tabs?.[0];
+                                              const activeTabContext = {
+                                                currentTabId: activeTab?.id ?? null,
+                                                currentWindowId: activeTab?.windowId ?? null,
+                                                currentPageUrl: activeTab?.url || window.location.href,
+                                              };
+
+                                              chrome.runtime.sendMessage(
+                                                {
+                                                  action: 'start_session',
+                                                  sessionId,
+                                                  sessionName,
+                                                  workspaceId: item.workspace_id || item.workspaceId || null,
+                                                  folderId: item.folder_id || item.folderId || null,
+                                                  teamId: 'local',
+                                                  storageMode: 'local',
+                                                  initialUrls,
+                                                  initialNames,
+                                                  openSettings,
+                                                  isInlineCreation: true,
+                                                  ...activeTabContext,
+                                                },
+                                                (response: any) => {
+                                                  if (response?.ok && openSettings?.openMode === 'same_window') {
+                                                    if (response?.reused || response?.reusedCurrentTab) {
+                                                      return;
+                                                    }
+                                                    const encodedName = encodeURIComponent(sessionName);
+                                                    window.history.replaceState(
+                                                      null,
+                                                      '',
+                                                      `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`,
+                                                    );
+                                                    useUIStore.getState().openEditor({
+                                                      type: 'session',
+                                                      id: sessionId,
+                                                      props: {
+                                                        session: {
+                                                          id: sessionId,
+                                                          title: sessionName,
+                                                        },
+                                                      },
+                                                    });
+                                                  }
+                                                },
+                                              );
+                                            });
+                                            return;
+                                          }
+
+                                          const urls = tableRow.original.urls || [];
+                                          if (urls.length > 0) {
+                                            const finalUrls = urls
+                                              .map((url: string) => {
+                                                if (url.startsWith('note:')) {
+                                                  const sid = url.substring(5);
+                                                  return chrome.runtime.getURL(
+                                                    `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(sid)}`,
+                                                  );
+                                                }
+                                                return url;
+                                              })
+                                              .filter(Boolean);
+
+                                            if (finalUrls.length > 0) {
+                                              finalUrls.slice(1).forEach((url: string) => {
+                                                if (url.startsWith('agent_chat?id=')) {
+                                                  const agentId = url.split('id=')[1];
+                                                  const extensionUrl = chrome.runtime.getURL(
+                                                    `AltS_search_newtab/index.html?lock_command=ai&agent_id=${encodeURIComponent(agentId)}`,
+                                                  );
+                                                  chrome.tabs.create({ url: extensionUrl, active: false });
+                                                } else {
+                                                  chrome.tabs.create({ url, active: false });
+                                                }
+                                              });
+
+                                              const firstUrl = finalUrls[0];
+                                              if (firstUrl.startsWith('agent_chat?id=')) {
+                                                const agentId = firstUrl.split('id=')[1];
+                                                const extensionUrl = chrome.runtime.getURL(
+                                                  `AltS_search_newtab/index.html?lock_command=ai&agent_id=${encodeURIComponent(agentId)}`,
+                                                );
+                                                window.location.href = extensionUrl;
+                                              } else if (firstUrl.startsWith('chrome://') || firstUrl.startsWith('edge://') || firstUrl.startsWith('brave://')) {
+                                                chrome.tabs.update({ url: firstUrl });
+                                              } else {
+                                                window.location.href = firstUrl;
+                                              }
+                                            }
+                                          }
+                                        }}
+                                        className={clsx(
+                                          'w-6 h-6 rounded-md transition-all cursor-pointer shrink-0 flex items-center justify-center text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300',
+                                          isSelectedRow || isSelected
+                                            ? 'opacity-100'
+                                            : 'opacity-0 group-hover/row:opacity-100',
+                                        )}
+                                        title="Open Link">
+                                        <FiExternalLink size={15} strokeWidth={2.4} />
+                                      </button>
+                                    )}
                                     {!cell.getValue() && !tableRow.original.isReal && (
                                       <span className="text-red-500 font-bold text-[10px]">*</span>
                                     )}
                                   </span>
-                                  {(tableRow.original.section === 'Smart Links' || tableRow.original.section === 'Tab Sessions') && (
-                                    <button
-                                      onClick={e => {
-                                        e.stopPropagation();
-
-                                        if (tableRow.original.section === 'Tab Sessions' || tableRow.original.category === 'session') {
-                                          const item = tableRow.original as any;
-                                          const sessionId = item.id;
-                                          const sessionName = item.key || item.name || item.title || 'Untitled Tab Session';
-                                          const openSettings = item.sessionOpenSettings || item.data?.sessionOpenSettings || {};
-                                          let initialUrls = item.urls || [];
-                                          let initialNames = item.names || [];
-                                          
-                                          if (initialUrls.length === 0) {
-                                            try {
-                                              const parsed = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
-                                              if (Array.isArray(parsed)) {
-                                                initialUrls = parsed.map((l: any) => l.url || l);
-                                                initialNames = parsed.map((l: any) => l.name || '');
-                                              } else if (parsed && typeof parsed === 'object') {
-                                                if (Array.isArray(parsed.urls)) initialUrls = parsed.urls;
-                                                if (Array.isArray(parsed.names)) initialNames = parsed.names;
-                                              }
-                                            } catch (err) {}
-                                          }
-
-                                          const chromeAny = (window as any)?.chrome;
-                                          if (!chromeAny?.tabs?.query) return;
-
-                                          chromeAny.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
-                                            const activeTab = tabs?.[0];
-                                            const activeTabContext = {
-                                              currentTabId: activeTab?.id ?? null,
-                                              currentWindowId: activeTab?.windowId ?? null,
-                                              currentPageUrl: activeTab?.url || window.location.href,
-                                            };
-
-                                            chrome.runtime.sendMessage(
-                                              {
-                                                action: 'start_session',
-                                                sessionId,
-                                                sessionName,
-                                                workspaceId: item.workspace_id || item.workspaceId || null,
-                                                folderId: item.folder_id || item.folderId || null,
-                                                teamId: 'local',
-                                                storageMode: 'local',
-                                                initialUrls,
-                                                initialNames,
-                                                openSettings,
-                                                isInlineCreation: true,
-                                                ...activeTabContext,
-                                              },
-                                              (response: any) => {
-                                                if (response?.ok && openSettings?.openMode === 'same_window') {
-                                                  if (response?.reused || response?.reusedCurrentTab) {
-                                                    return;
-                                                  }
-                                                  const encodedName = encodeURIComponent(sessionName);
-                                                  window.history.replaceState(
-                                                    null,
-                                                    '',
-                                                    `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`,
-                                                  );
-                                                  useUIStore.getState().openEditor({
-                                                    type: 'session',
-                                                    id: sessionId,
-                                                    props: {
-                                                      session: {
-                                                        id: sessionId,
-                                                        title: sessionName,
-                                                      },
-                                                    },
-                                                  });
-                                                }
-                                              },
-                                            );
-                                          });
-                                          return;
-                                        }
-
-                                        const urls = tableRow.original.urls || [];
-                                        if (urls.length > 0) {
-                                          const finalUrls = urls
-                                            .map((url: string) => {
-                                              if (url.startsWith('note:')) {
-                                                const sid = url.substring(5);
-                                                return chrome.runtime.getURL(
-                                                  `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(sid)}`,
-                                                );
-                                              }
-                                              return url;
-                                            })
-                                            .filter(Boolean);
-
-                                          if (finalUrls.length > 0) {
-                                            finalUrls.slice(1).forEach((url: string) => {
-                                              if (url.startsWith('agent_chat?id=')) {
-                                                const agentId = url.split('id=')[1];
-                                                const extensionUrl = chrome.runtime.getURL(
-                                                  `AltS_search_newtab/index.html?lock_command=ai&agent_id=${encodeURIComponent(agentId)}`,
-                                                );
-                                                chrome.tabs.create({ url: extensionUrl, active: false });
-                                              } else {
-                                                chrome.tabs.create({ url, active: false });
-                                              }
-                                            });
-
-                                            const firstUrl = finalUrls[0];
-                                            if (firstUrl.startsWith('agent_chat?id=')) {
-                                              const agentId = firstUrl.split('id=')[1];
-                                              const extensionUrl = chrome.runtime.getURL(
-                                                `AltS_search_newtab/index.html?lock_command=ai&agent_id=${encodeURIComponent(agentId)}`,
-                                              );
-                                              window.location.href = extensionUrl;
-                                            } else if (firstUrl.startsWith('chrome://') || firstUrl.startsWith('edge://') || firstUrl.startsWith('brave://')) {
-                                              chrome.tabs.update({ url: firstUrl });
-                                            } else {
-                                              window.location.href = firstUrl;
-                                            }
-                                          }
-                                        }
-                                      }}
-                                      className={clsx(
-                                        'p-0.5 rounded transition-all cursor-pointer mr-2 shrink-0 flex items-center justify-center hover:bg-white/10',
-                                        isSelectedRow || isSelected
-                                          ? 'opacity-100'
-                                          : 'opacity-0 group-hover/row:opacity-100',
-                                      )}
-                                      title="Open Link">
-                                      <FiExternalLink size={12} className="text-emerald-500" />
-                                    </button>
-                                  )}
                                   <AnimatePresence mode="popLayout">
                                     {tableRow.original.syncStatus === 'syncing' && (
                                       <motion.div
@@ -2197,7 +2296,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                       const text = String(row.description || '').replace(/<[^>]*>?/gm, '').trim();
                                       if (!text) return null;
                                       return (
-                                        <div className="text-[10px] text-white/50 truncate flex-1">
+                                        <div className="text-[10px] text-[var(--color-textSecondary)] truncate min-w-0">
                                           {text}
                                         </div>
                                       );
@@ -2242,7 +2341,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                         .trim();
                                       if (!text || text.toLowerCase() === 'note data' || text.toLowerCase() === 'snippet data') return null;
                                       return (
-                                        <div className="text-[10px] text-white/50 truncate flex-1">
+                                        <div className="text-[10px] text-[var(--color-textSecondary)] truncate min-w-0">
                                           {text}
                                         </div>
                                       );
@@ -2261,7 +2360,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                        if (domains.length === 0) return null;
                                        const topThree = domains.slice(0, 3).join(', ');
                                        return (
-                                         <div className="text-[10px] text-white/50 truncate flex-1 flex items-center gap-1">
+                                         <div className="text-[10px] text-[var(--color-textSecondary)] truncate min-w-0 flex items-center gap-1">
                                            {topThree}
                                          </div>
                                        );
@@ -2291,7 +2390,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                     }}>
                                     {tableRow.original.path ? (
                                       <>
-                                        <div className="truncate flex-1 min-w-0 text-white/70">
+                                        <div className="truncate flex-1 min-w-0 text-[var(--color-textPrimary)]">
                                           <span className="truncate whitespace-nowrap">
                                             {tableRow.original.plainPath || tableRow.original.path}
                                           </span>
@@ -2349,16 +2448,10 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
 
                                   const tagIds = row.tagIds || [];
                                   
-                                  if (tagIds.length === 0) {
-                                    return (
-                                      <div className="truncate flex-1 min-w-0 text-white/40 text-[10px] italic font-normal px-2">
-                                        Tag not added
-                                      </div>
-                                    );
-                                  }
+                                  if (tagIds.length === 0) return null;
 
                                   return (
-                                    <div className="truncate flex-1 min-w-0 text-white/70 text-[11px] font-normal px-2">
+                                    <div className="truncate flex-1 min-w-0 text-[var(--color-textSecondary)] text-[11px] font-normal px-2">
                                       {tagIds.map((tid: string) => tagNamesMap[tid] || tid).join(', ')}
                                     </div>
                                   );
@@ -2390,7 +2483,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                   return (
                                     <div className="flex items-center w-full px-1">
                                       <span
-                                        className="text-[11px] font-normal text-white/70 whitespace-nowrap"
+                                        className="text-[11px] font-normal text-[var(--color-textSecondary)] whitespace-nowrap"
                                         title={value ? `c_${String(value)}` : undefined}>
                                         {value ? `c_${String(value)}` : ''}
                                       </span>
@@ -2409,7 +2502,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                       // Fall through to standard URL rendering logic below
                                     } else {
                                       return (
-                                        <div className="flex-1 truncate text-[11px] leading-tight flex items-center gap-1 text-white/70">
+                                        <div className="flex-1 truncate text-[11px] leading-tight flex items-center gap-1 text-[var(--color-textSecondary)]">
                                           {tableRow.original.value ? (
                                             String(tableRow.original.value)
                                               .replace(/<[^>]*>?/gm, '')
@@ -2554,7 +2647,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                   const moreCount = domains.length - 3;
 
                                   return (
-                                    <div className="group/url flex items-center w-full text-[10px] overflow-hidden font-normal relative h-full text-white">
+                                    <div className="group/url flex items-center w-full text-[10px] overflow-hidden font-normal relative h-full text-[var(--color-textPrimary)]">
                                       <div className="flex flex-col w-full group-hover/row:py-1">
                                         {/* Collapsed View */}
                                         <div
@@ -2570,7 +2663,7 @@ const SpreadsheetTable: React.FC<SpreadsheetTableProps> = ({
                                           {urls.map((u, i) => (
                                             <div
                                               key={i}
-                                              className="text-[10px] hover:text-blue-600 transition-colors break-all leading-tight border-b last:border-0 pb-1 text-white border-white/5">
+                                              className="text-[10px] hover:text-blue-600 transition-colors break-all leading-tight border-b last:border-0 pb-1 text-[var(--color-textPrimary)] border-[var(--color-borderDefault)]">
                                               {u}
                                             </div>
                                           ))}

@@ -11,7 +11,7 @@
  * ```
  */
 
-import type React from 'react';
+import type * as React from 'react';
 
 import { useAppearance } from '@extension/ui';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -157,6 +157,13 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
     if (!activeAiSession) return null;
     return myChats.find(a => String(a.id) === String(activeAiSession.id)) || null;
   }, [activeAiSession, myChats]);
+
+  const openSaveModal = useCallback(() => {
+    setTargetWorkspaceId(activeSavedAgent?.workspaceId || null);
+    setTargetFolderId(activeSavedAgent?.folderId || null);
+    setTargetTagIds(activeSavedAgent?.tagIds || []);
+    setIsSaveModalOpen(true);
+  }, [activeSavedAgent]);
 
   const handleManualSave = async () => {
     const savedId = await handleSave(targetWorkspaceId || undefined, targetFolderId, targetTagIds);
@@ -521,7 +528,7 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
           ) : (
             isDirty ? (
               <button
-                onClick={() => setIsSaveModalOpen(true)}
+                onClick={openSaveModal}
                 className={`flex items-center justify-center gap-2 rounded-md border w-auto px-3 py-2 text-[11px] font-bold transition-all shadow-lg active:scale-95 ${isDark
                     ? 'border-white/20 bg-neutral-800 text-white/90 hover:bg-neutral-700 hover:text-white'
                     : 'border-[#d8d2bf] bg-[#eee8d5] text-[#073642] hover:bg-[#e7e0cc]'
@@ -544,7 +551,7 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
             <div className="relative">
               <AutomationSaveNotification 
                 onClose={() => setShowSaveToast(false)} 
-                onSave={() => { setIsSaveModalOpen(true); setShowSaveToast(false); }} 
+                onSave={() => { openSaveModal(); setShowSaveToast(false); }}
                 isDarkMode={isDark}
                 isMac={isMac}
               />
@@ -557,4 +564,3 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
 };
 
 export default ChatAgent;
-

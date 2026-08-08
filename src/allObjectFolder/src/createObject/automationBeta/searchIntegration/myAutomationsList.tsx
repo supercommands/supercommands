@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppearance } from '@extension/ui';
 import {
   FaEdit,

@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useMemo } from 'react';
 import { FiEdit2, FiFolder, FiBriefcase } from 'react-icons/fi';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
@@ -24,7 +24,7 @@ interface EditorItemsPanelProps {
   openSpreadsheetView?: (section?: string) => void;
 }
 
-import { FaCode, FaRobot, FaLayerGroup } from 'react-icons/fa';
+import { FaCode, FaRobot } from 'react-icons/fa';
 
 import { BsCalendarCheck } from 'react-icons/bs';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
@@ -32,6 +32,8 @@ import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/ut
 import { useSpreadsheetStore } from '../../../../../shared-components/spreadsheetUi/logic/spreadsheetStateStore';
 
 import StackedLinkIcon from '../../../../../shared-components/icons/stackedLinkIcon';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 export const EditorItemsPanel: React.FC<EditorItemsPanelProps> = ({
   activeEditor,

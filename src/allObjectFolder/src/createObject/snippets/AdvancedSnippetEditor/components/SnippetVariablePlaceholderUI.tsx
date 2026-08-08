@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
 import type { FieldConfig, FieldType, TextFieldConfig } from '@extension/shared';
 import { useSnippetBuilder } from '../context/SnippetBuilderContext';

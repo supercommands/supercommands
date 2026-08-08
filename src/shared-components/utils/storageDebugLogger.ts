@@ -1,5 +1,5 @@
 const DEBUG_FLAG = 'tasklabs_debug_storage';
-const PREFIX = '[TaskLabsStorageDebug]';
+const PREFIX = '[cmdOSStorageDebug]';
 
 const isDebugEnabled = () => {
   try {

@@ -2,7 +2,7 @@
  * @file noteData.ts
  * @description Handles CRUD database operations for Note records in IndexedDB.
  * Supports retrieval scoped to workspaces, specific folders, or at the workspace root.
- * 
+ *
  * @usage
  * ```ts
  * import { createNote, updateNote, getNote } from './noteData';
@@ -17,14 +17,14 @@ import { generateEntityId } from '../../../../shared-components/utils';
 import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { normalizeNoteBody } from './noteHelpers';
+import { runAssetGarbageCollection } from '../../../../storage/assets/assetGarbageCollector';
+import { createCheckpoint, createInitialHistory, shouldCreateCheckpoint, extractNoteSnapshotFromRecord } from './noteHistory';
 
 /**
  * Creates a new note record.
  */
 export async function createNote(input: CreateNoteInput): Promise<NoteRecord> {
-  const defaultWorkspace = input.workspaceId
-    ? null
-    : await getSmartDefaultWorkspace();
+  const defaultWorkspace = input.workspaceId ? null : await getSmartDefaultWorkspace();
 
   const workspaceId = input.workspaceId ?? defaultWorkspace?.id;
 
@@ -34,20 +34,26 @@ export async function createNote(input: CreateNoteInput): Promise<NoteRecord> {
 
   const now = Date.now();
   const folderId = input.folderId ?? null;
-
+  const body = normalizeNoteBody(input.body);
   const note: NoteRecord = {
     id: generateEntityId('note'),
     workspaceId,
     folderId,
 
     title: input.title.trim() || 'Untitled Note',
-    body: normalizeNoteBody(input.body),
+    body,
+    shortcut: input.shortcut || '',
     tagIds: input.tagIds ?? [],
+    assetIds: input.assetIds ?? [],
+    versionHistory: undefined as any,
 
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
   };
+
+  const initialSnapshot = extractNoteSnapshotFromRecord(note);
+  note.versionHistory = createInitialHistory(initialSnapshot, now);
 
   try {
     await db.notes.add(note);
@@ -73,25 +79,47 @@ export class ConflictError extends Error {
  * Updates an existing note record.
  */
 export async function updateNote(noteId: string, input: UpdateNoteInput): Promise<NoteRecord> {
+  const now = Date.now();
   const changes: Partial<NoteRecord> = {
-    updatedAt: Date.now(),
+    updatedAt: now,
   };
+  let shouldRunAssetGarbageCollection = false;
 
   if (input.title !== undefined) changes.title = input.title.trim() || 'Untitled Note';
   if (input.body !== undefined) changes.body = normalizeNoteBody(input.body);
+  if (input.shortcut !== undefined) changes.shortcut = input.shortcut;
   if (input.workspaceId !== undefined) changes.workspaceId = input.workspaceId;
   if (input.folderId !== undefined) changes.folderId = input.folderId;
   if (input.tagIds !== undefined) changes.tagIds = input.tagIds;
+  if (input.assetIds !== undefined) changes.assetIds = input.assetIds;
 
   try {
-    return await db.transaction('rw', [db.notes, db.snippets, db.todos], async () => {
+    const updatedNote = await db.transaction('rw', [db.notes, db.snippets, db.todos], async () => {
       let existing = await db.notes.get(noteId);
       if (existing) {
         if (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) {
           throw new ConflictError('Note was modified in another tab.', existing);
         }
-        await db.notes.update(noteId, changes);
-        return { ...existing, ...changes } as NoteRecord;
+
+        if (input.assetIds !== undefined) {
+          const nextAssetIds = new Set(input.assetIds);
+          shouldRunAssetGarbageCollection = (existing.assetIds ?? []).some(id => !nextAssetIds.has(id));
+        }
+
+        const prevSnapshot = extractNoteSnapshotFromRecord(existing);
+        const nextSnapshot = extractNoteSnapshotFromRecord({ ...existing, ...changes });
+
+        let newHistoryState = existing.versionHistory;
+        if (!newHistoryState || typeof newHistoryState.lastSavedText !== 'string') {
+          newHistoryState = createInitialHistory(prevSnapshot, existing.updatedAt || now);
+        }
+
+        newHistoryState = createCheckpoint(nextSnapshot, newHistoryState, now, prevSnapshot);
+
+        const changesWithVersionHistory = { ...changes, versionHistory: newHistoryState };
+
+        await db.notes.update(noteId, changesWithVersionHistory);
+        return { ...existing, ...changesWithVersionHistory } as NoteRecord;
       }
 
       const existingSnippet = await db.snippets.get(noteId);
@@ -102,7 +130,11 @@ export async function updateNote(noteId: string, input: UpdateNoteInput): Promis
         if (input.workspaceId !== undefined) snippetChanges.workspaceId = input.workspaceId;
         if (input.folderId !== undefined) snippetChanges.folderId = input.folderId;
         await db.snippets.update(noteId, snippetChanges);
-        const configStr = snippetChanges.config ?? (typeof existingSnippet.config === 'string' ? existingSnippet.config : JSON.stringify(existingSnippet.config || ''));
+        const configStr =
+          snippetChanges.config ??
+          (typeof existingSnippet.config === 'string'
+            ? existingSnippet.config
+            : JSON.stringify(existingSnippet.config || ''));
         return {
           ...existingSnippet,
           ...snippetChanges,
@@ -135,6 +167,14 @@ export async function updateNote(noteId: string, input: UpdateNoteInput): Promis
 
       throw new Error('Note not found.');
     });
+
+    if (shouldRunAssetGarbageCollection) {
+      runAssetGarbageCollection().catch(err => {
+        console.error('[updateNote] GC failed:', err);
+      });
+    }
+
+    return updatedNote;
   } catch (error: unknown) {
     if (error instanceof ConflictError) throw error;
     const message = error instanceof Error ? error.message : 'Unknown database error';
@@ -242,6 +282,10 @@ export async function deleteNote(noteId: string): Promise<void> {
     const note = await db.notes.get(noteId);
     if (note) {
       await db.notes.delete(noteId);
+      // Run GC to clean up any orphaned images that only belonged to this note
+      runAssetGarbageCollection().catch(err => {
+        console.error('[deleteNote] GC failed:', err);
+      });
       return;
     }
     const snippet = await db.snippets.get(noteId);

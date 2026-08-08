@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import type { Header } from '@tanstack/react-table';
 import { clsx } from 'clsx';
 import type { RowData, AutomationModuleRow } from '../types/spreadsheetTypes';

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import * as React from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { FiCheck, FiExternalLink, FiLoader, FiZap, FiSearch, FiTrash, FiZapOff } from 'react-icons/fi';
 import { useUIStore } from '../../shared-components/uiStateManager';
@@ -287,29 +288,38 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
   const padding = 12;
 
   // Calculate estimated height
-  const inputModeHeight = 220; // approximate height for input mode
-  // If no actions, we don't count their height
-  const menuHeight = hasActions ? actions.length * 36 + 24 : 0;
-  // Increase estimated height for better safety margin in tall menus
-  const estimatedHeight = isInputMode ? Math.max(inputModeHeight, menuHeight) : menuHeight;
-  const safetyBuffer = 450; // Use a more generous buffer for complex content
+  const quickActionsHeight = quickActions.length > 0 ? 44 : 0;
+  const headerHeight = menuTarget?.label ? 36 : 0;
+  const searchHeight = showSearch ? 44 : 0;
+  const actionsListHeight = hasActions ? actions.length * 36 : 0;
+  const actionsHeight = hasActions ? quickActionsHeight + headerHeight + searchHeight + actionsListHeight + 16 : 0;
+  const inputModeHeight = isInputMode ? 220 : 0;
+  const estimatedHeight = Math.max(actionsHeight, inputModeHeight, 100);
 
   // Calculate available space
   const spaceAbove = y - padding;
   const spaceBelow = window.innerHeight - y - padding;
 
   // Smart Flip & Constraint Logic
-  const preferredHeight = Math.max(estimatedHeight, hasActions && actions.length > 5 ? safetyBuffer : estimatedHeight);
+  const fitsBelow = spaceBelow >= estimatedHeight;
+  const fitsAbove = spaceAbove >= estimatedHeight;
 
-  // Decide whether to flip based on best fit
-  // Flip if:
-  // 1. Doesn't fit below AND (space above > space below)
-  const wouldOverflowBottom = y + preferredHeight + padding > window.innerHeight;
-  const shouldFlip = !preferDown && wouldOverflowBottom && spaceAbove > spaceBelow;
+  let shouldFlip = false;
+  if (!preferDown) {
+    if (!fitsBelow && fitsAbove) {
+      shouldFlip = true;
+    } else if (!fitsBelow && !fitsAbove) {
+      shouldFlip = spaceAbove > spaceBelow;
+    }
+  } else {
+    if (!fitsBelow && fitsAbove && spaceAbove > spaceBelow) {
+      shouldFlip = true;
+    }
+  }
 
   // Calculate dynamic constraints
   const availableSpace = shouldFlip ? spaceAbove : spaceBelow;
-  const maxHeight = Math.max(100, availableSpace); // Minimum height of 100px
+  const maxHeight = Math.max(120, availableSpace);
 
   // Calculate adjusted top/left
   let finalLeft = x;
@@ -318,15 +328,14 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
   if (wouldOverflowRight) {
     // SHIFT LEFT Strategy:
     finalLeft = window.innerWidth - totalWidth - padding;
-    // Double check left boundary
     if (finalLeft < padding) finalLeft = padding;
   }
 
-  // Final top position if NOT flipping
+  // Final top position if NOT flipping: shift upward if space allows to prevent unnecessary scrolling
   let finalTop = y;
-  if (!shouldFlip && y + maxHeight > window.innerHeight - padding) {
-    // If it still overflows after max-height (unlikely but safe), we don't want it anchored too high
-    // unless necessary. But position fixed + maxHeight handles most cutoffs.
+  if (!shouldFlip && y + estimatedHeight > window.innerHeight - padding) {
+    const idealTop = window.innerHeight - estimatedHeight - padding;
+    finalTop = Math.max(padding, idealTop);
   }
 
   const style: React.CSSProperties = {
@@ -342,20 +351,40 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
     <div
       ref={menuRef}
       data-unified-menu="true"
-      className={`bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-row transition-[width,left] ease-out`}
+      className={`bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-row transition-[width,left] ease-out custom-scrollbar`}
       style={{
         ...style,
         width: 'max-content',
         maxWidth: 'calc(100vw - 24px)',
         pointerEvents: 'auto',
       }}>
-      <style>{shakeKeyframes}</style>
+      <style>{`
+        ${shakeKeyframes}
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+          height: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 9999px;
+        }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.4);
+        }
+        .custom-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+        }
+      `}</style>
 
       {hasActions && (
       <div className="flex flex-col min-w-fit w-max">
         {/* QUICK ACTIONS ROW (TOP LEVEL) */}
         {quickActions.length > 0 && (
-          <div className="px-3 py-2 flex items-center gap-2 border-b border-slate-100 dark:border-white/10 bg-slate-50/30 dark:bg-white/5 last:border-b-0">
+          <div className="px-3 py-2 flex items-center gap-2 border-b border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] last:border-b-0">
             {quickActions.map((action, idx) => (
               <button
                 key={`quick-${action.key || idx}`}
@@ -365,7 +394,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                   if (action.onSelect) action.onSelect();
                   if ((action as any).closeOnExecute !== false) onClose();
                 }}
-                className={`flex-1 flex items-center justify-center gap-2.5 px-4 py-2 rounded-lg text-[12.5px] font-bold transition-all whitespace-nowrap shadow-sm hover:shadow-md ${action.className || 'text-slate-600 dark:text-neutral-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                className={`flex-1 flex items-center justify-center gap-2.5 px-4 py-2 rounded-lg text-[12.5px] font-bold transition-all whitespace-nowrap shadow-sm hover:shadow-md ${action.className || 'text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                   } ${action.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {action.icon}
@@ -377,7 +406,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
         {/* HEADER */}
         {menuTarget?.label && (
-          <div className="px-3 py-2 border-b border-slate-100 dark:border-white/10">
+          <div className="px-3 py-2 border-b border-[var(--color-borderDefault)]">
             <div className="flex items-center gap-2 min-w-0">
               {menuTarget.iconUrl ? (
                 <img src={menuTarget.iconUrl} alt={menuTarget.label} className="w-4 h-4 rounded-sm object-cover" />
@@ -386,10 +415,10 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                   {menuTarget.icon}
                 </span>
               ) : (
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-neutral-500" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-textMuted)]" />
               )}
               <span 
-                className="text-[11px] font-semibold text-slate-500 dark:text-neutral-300 truncate whitespace-nowrap flex-1 block"
+                className="text-[11px] font-semibold text-[var(--color-textSecondary)] truncate whitespace-nowrap flex-1 block"
                 style={{ maxWidth: '300px' }}
                 title={menuTarget.label}
               >
@@ -407,7 +436,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                 filteredActions.map((action, idx) => {
                   if (action.divider) {
                     return (
-                      <div key={`divider-${idx}`} className="border-b border-slate-100 dark:border-white/10 mx-2 my-1" />
+                      <div key={`divider-${idx}`} className="border-b border-[var(--color-borderDefault)] mx-2 my-1" />
                     );
                   }
 
@@ -437,12 +466,12 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         }
                       }}
                       className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 transition-colors ${isSelected
-                        ? 'bg-slate-100 bg-[var(--color-accentBg)] text-blue-600 text-[var(--color-accent)] font-medium'
+                        ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
                         : isFocused
-                          ? 'bg-slate-100 dark:bg-neutral-800 text-slate-900 dark:text-white'
+                          ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-medium'
                           : action.className
                             ? action.className
-                            : 'text-slate-600 dark:text-neutral-300 hover:bg-slate-50 dark:hover:bg-neutral-700/50'
+                            : 'text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] font-medium'
                         } ${action.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
                       <div className="flex items-center gap-2">
                         {action.icon}
@@ -457,7 +486,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         {!action.divider &&
                           (action as any).shortcut &&
                           (typeof (action as any).shortcut === 'string' ? (
-                            <span className="text-[10px] text-slate-400 dark:text-neutral-400 font-medium ml-2">
+                            <span className="text-[10px] text-[var(--color-textSecondary)] font-medium ml-2">
                               {(action as any).shortcut}
                             </span>
                           ) : (
@@ -531,7 +560,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
             )}
 
             {/* Unified Conflict Link at Bottom Left */}
-            {error && conflictId && conflictId !== 'extension-reserved' && showAllHotkeysOption && (
+            {error && conflictId && !conflictId.endsWith('-reserved') && showAllHotkeysOption && (
               <div className="px-2 pb-2 pt-1 mt-auto border-t border-slate-100 dark:border-white/5 flex flex-col gap-1">
                 <button
                   onClick={e => {
@@ -602,6 +631,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     <input
                       ref={inputRef}
                       type="text"
+                      data-is-hotkey-input="true"
                       value={hotkeyInput.value}
                       readOnly
                       onKeyDown={hotkeyInput.onChange}
@@ -642,7 +672,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                               let typeDisplay = typeRaw;
                               if (typeRaw === 'note') typeDisplay = 'Note';
                               else if (typeRaw === 'link') typeDisplay = 'Link';
-                              else if (typeRaw === 'snippet') typeDisplay = 'Snippet';
+                              else if (typeRaw === 'snippet') typeDisplay = 'Text Expander';
                               else if (typeRaw === 'command') typeDisplay = 'Command';
                               else if (typeRaw) typeDisplay = typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1);
 
@@ -694,8 +724,8 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     title="Cancel">
                     Cancel
                   </button>
-                  {/* Only show Overwrite button if error exists, onOverwrite is defined, AND it's NOT an extension conflict */}
-                  {error && hotkeyInput.onOverwrite && conflictId !== 'extension-reserved' ? (
+                  {/* Only show Overwrite button if error exists, onOverwrite is defined, AND it's NOT an extension/OS conflict */}
+                  {error && hotkeyInput.onOverwrite && !conflictId?.endsWith('-reserved') ? (
                     <button
                       onClick={e => {
                         e.stopPropagation();
@@ -797,7 +827,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                               let typeDisplay = typeRaw;
                               if (typeRaw === 'note') typeDisplay = 'Note';
                               else if (typeRaw === 'link') typeDisplay = 'Link';
-                              else if (typeRaw === 'snippet') typeDisplay = 'Snippet';
+                              else if (typeRaw === 'snippet') typeDisplay = 'Text Expander';
                               else if (typeRaw === 'command') typeDisplay = 'Command';
                               else if (typeRaw) typeDisplay = typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1);
 
@@ -856,7 +886,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     title="Cancel">
                     Cancel
                   </button>
-                  {error && shortcutInput.onOverwrite ? (
+                  {error && shortcutInput.onOverwrite && !conflictId?.endsWith('-reserved') ? (
                     <button
                       onClick={e => {
                         e.stopPropagation();

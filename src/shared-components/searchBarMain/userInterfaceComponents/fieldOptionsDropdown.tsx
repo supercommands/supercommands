@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useState, useRef, useEffect } from 'react';
 import { FaChevronDown, FaTimes } from 'react-icons/fa';
 

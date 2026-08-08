@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import * as React from 'react';
+import { useEffect } from 'react';
 import { BsPinAngleFill } from 'react-icons/bs';
 import TodoList from './TodoList';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
@@ -35,11 +36,7 @@ const TodoWorkspace: React.FC<TodoWorkspaceProps> = ({
       className={
         isCreateModalOnly
           ? "fixed inset-0 z-[45] pointer-events-none"
-          : `fixed right-4 top-[14vh] max-h-[85vh] w-[360px] z-[45] flex flex-col border rounded-2xl shadow-2xl overflow-hidden ${
-              isDarkMode
-                ? 'bg-frostedwhite border-white/10 backdrop-blur-md'
-                : 'bg-[#fdf6e3]/90 border-[#eee8d5]/80 backdrop-blur-md'
-            }`
+          : 'fixed right-4 top-[14vh] max-h-[85vh] w-[360px] z-[45] flex flex-col border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)] backdrop-blur-md rounded-2xl shadow-2xl overflow-hidden'
       }
     >
       {/* Content */}

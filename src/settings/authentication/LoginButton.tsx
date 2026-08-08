@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import { motion } from 'framer-motion';
 
 import { FEATURE_FLAGS } from '../../pages/AltS_search_newtab/src/utils/featureFlags';

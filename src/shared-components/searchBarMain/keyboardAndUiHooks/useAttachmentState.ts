@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import type React from 'react';
+import type * as React from 'react';
 import { useUIStore } from '../../../shared-components/uiStateManager';
 import type { Attachment, AnyCommandId, FooterStatus } from '../utilityFunctions/types';
 

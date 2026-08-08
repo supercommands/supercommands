@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type React from 'react';
+import type * as React from 'react';
 import type { Attachment, AnyCommandId, FooterStatus } from '../utilityFunctions/types';
 
 interface UseKeyboardNavigationProps {
@@ -81,6 +81,7 @@ interface UseKeyboardNavigationProps {
   onRequestFocusChange?: (direction: 'up' | 'down') => void;
   isSuggestionVisible: boolean;
   updateCursorPosition: () => void;
+  slashFilterMeta?: Record<string, { label: string }>;
 }
 
 export function useKeyboardNavigation({
@@ -162,6 +163,7 @@ export function useKeyboardNavigation({
   onRequestFocusChange,
   isSuggestionVisible,
   updateCursorPosition,
+  slashFilterMeta,
 }: UseKeyboardNavigationProps) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -174,12 +176,29 @@ export function useKeyboardNavigation({
       // Handle space bar after a shorthand board view filter command to convert to locked card
       if (e.key === ' ') {
         const text = (inputRef.current?.innerText || '').replace(/\u00A0/g, ' ').trim().toLowerCase();
-        const labelToFilterChar: Record<string, string> = {
-          '/a': 'a', '/n': 'n', '/nm': 'nm', '/s': 'se', '/sn': 'sn', '/p': 'p', '/l': 'l', '/c': 'c', '/b': 'bm', '/bm': 'bm', '/t': 't',
-          '/sc': 'sc', '/se': 'se', '/au': 'au', '/ca': 'ca', '/g': 'ca',
-          'all': 'a', 'notes': 'n', 'snippets': 'sn', 'prompts': 'p', 'links': 'l', 'commands': 'c', 'bookmarks': 'bm', 'todos': 't', 'tab sessions': 'se',
-        };
-        const filterChar = labelToFilterChar[text];
+        let filterChar = '';
+        if (slashFilterMeta) {
+          const isSlashInput = text.startsWith('/');
+          const textWithoutSlash = text.startsWith('/') ? text.substring(1) : text;
+          const matchedMeta = slashFilterMeta[textWithoutSlash];
+          if (!isSlashInput && matchedMeta?.label === 'Commands') {
+            filterChar = '';
+          } else if (matchedMeta) {
+            filterChar = textWithoutSlash;
+          } else {
+            for (const [alias, meta] of Object.entries(slashFilterMeta)) {
+               if (meta.label.toLowerCase() === text) { filterChar = alias; break; }
+            }
+          }
+        } else {
+          const labelToFilterChar: Record<string, string> = {
+            '/a': 'a', '/n': 'n', '/nm': 'nm', '/s': 'se', '/sn': 'sn', '/p': 'p', '/l': 'l', '/c': 'c', '/b': 'bm', '/bm': 'bm', '/t': 't',
+            '/sc': 'sc', '/se': 'se', '/au': 'au', '/ca': 'ca', '/g': 'g',
+            'all': 'a', 'notes': 'n', 'snippets': 'sn', 'prompts': 'p', 'links': 'l', 'bookmarks': 'bm', 'todos': 't', 'tab sessions': 'se', 'chat agents': 'g',
+          };
+          filterChar = labelToFilterChar[text];
+        }
+
         if (filterChar) {
           e.preventDefault();
           e.stopPropagation();
@@ -202,17 +221,28 @@ export function useKeyboardNavigation({
       if (e.key === 'Backspace') {
         lastActionRef.current = 'backspace';
         const hasSelection = false;
+        const hasEditableSlashChip = !!inputRef.current?.querySelector('[data-slash-filter-chip="true"]');
+        const editableTextWithoutSlashChip = (() => {
+          const inputEl = inputRef.current;
+          if (!inputEl) return value;
+          const clone = inputEl.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('[data-slash-filter-chip="true"]').forEach(node => node.remove());
+          return (clone.textContent || '').replace(/\u00A0/g, ' ').trim();
+        })();
 
-        const isShortcutText = 
-          [
+        let isShortcutText = false;
+        const normalizedVal = value.trim().toLowerCase();
+        if (slashFilterMeta) {
+          const valWithoutSlash = normalizedVal.startsWith('/') ? normalizedVal.substring(1) : normalizedVal;
+          isShortcutText = !!slashFilterMeta[valWithoutSlash];
+        } else {
+          isShortcutText = [
             '/a', '/n', '/s', '/p', '/l', '/c', '/b', '/t', '/se', '/au', '/ca',
             'a', 'n', 's', 'p', 'l', 'c', 'b', 't', 'se', 'au', 'ca'
-          ].includes(value.trim().toLowerCase());
+          ].includes(normalizedVal);
+        }
 
-        console.log('[KeyboardNavigation Backspace Debug]', { value, isShortcutText, activeSlashFilter });
-
-        if (activeSlashFilter && value.trim() === '' && !hasSelection) {
-          console.log('[KeyboardNavigation Backspace] Clearing activeSlashFilter because input is empty:', activeSlashFilter);
+        if (hasEditableSlashChip && !editableTextWithoutSlashChip && !hasSelection) {
           e.preventDefault();
           e.stopPropagation();
           activeSlashFilterRef.current = null;
@@ -222,13 +252,27 @@ export function useKeyboardNavigation({
             inputRef.current.innerHTML = '';
             inputRef.current.innerText = '';
           }
+          onQueryChange?.('');
+          return;
+        }
+
+        if (activeSlashFilter && value.trim() === '' && !hasSelection) {
+          e.preventDefault();
+          e.stopPropagation();
+          activeSlashFilterRef.current = null;
+          setActiveSlashFilter(null);
+          setValue('');
+          if (inputRef.current) {
+            inputRef.current.innerHTML = '';
+            inputRef.current.innerText = '';
+          }
+          onQueryChange?.('');
           return;
         }
 
         if ((value.trim() === '' || isShortcutText) && !hasSelection) {
 
           if (isShortcutText) {
-            console.log('[KeyboardNavigation Backspace] Clearing raw shortcut text:', value);
             e.preventDefault();
             e.stopPropagation();
             setValue('');
@@ -236,6 +280,7 @@ export function useKeyboardNavigation({
               inputRef.current.innerHTML = '';
               inputRef.current.innerText = '';
             }
+            onQueryChange?.('');
             return;
           }
           if (selectedImages.length > 0) {

@@ -4,7 +4,7 @@ export type MainView =
   | { type: 'sheet'; sheetId?: string }
   | { type: 'todo' }
   | { type: 'tutorial' }
-  | { type: 'settings'; section?: 'profile' | 'appearance' | 'searchView' | 'todoSettings' | 'allWorkspaces' | 'workspaceSettings' | 'generalSettings' | 'googleDriveBackup' | 'importCloudData' }
+  | { type: 'settings'; section?: 'profile' | 'usage' | 'appearance' | 'searchView' | 'todoSettings' | 'allWorkspaces' | 'workspaceSettings' | 'generalSettings' | 'googleDriveBackup' | 'importCloudData' }
   | { type: 'organization'; orgId?: string; orgName?: string }
   | { type: 'store' }
   | { type: 'subscriptions' }
@@ -27,6 +27,7 @@ export type EditorType = 'note' | 'automation' | 'agent' | 'snippet' | 'link' | 
 export interface ActiveEditorState {
   type: EditorType;
   id: string;
+  openInstanceId?: number;
   isNew?: boolean;
   readOnly?: boolean;
   props?: any;

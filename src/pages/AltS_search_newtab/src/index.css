@@ -9,7 +9,7 @@
   --color-sidebarBg: #080808;
   --color-panelBg: rgba(12, 12, 12, 0.32);
   --color-editorBg: #171821;
-  --color-sheetBg: #171821;
+  --color-sheetBg: #171821; 
   --color-contextMenuBg: #080808;
   --color-backdrop: blur(12px);
   --color-tutorialCardBg: #171821;
@@ -30,6 +30,7 @@
 
   --color-borderDefault: rgba(255, 255, 255, 0.1);
   --color-panelBg: rgba(255, 255, 255, 0.05);
+  --color-backgroundGradient: transparent;
 
 }
 
@@ -181,6 +182,53 @@ html.dark body {
   border: none !important;
 }
 
+.favorites-widget-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-borderActive) transparent;
+}
+
+.favorites-widget-scroll::-webkit-scrollbar {
+  width: 5px !important;
+  height: 5px !important;
+}
+
+.favorites-widget-scroll::-webkit-scrollbar-track,
+.favorites-widget-scroll::-webkit-scrollbar-track-piece,
+.favorites-widget-scroll::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.favorites-widget-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-borderActive) !important;
+  border-radius: 9999px !important;
+  transition: opacity 0.2s, background-color 0.2s;
+}
+
+.favorites-widget-scroll::-webkit-scrollbar-button,
+.favorites-widget-scroll::-webkit-scrollbar-button:single-button,
+.favorites-widget-scroll::-webkit-scrollbar-button:start,
+.favorites-widget-scroll::-webkit-scrollbar-button:end,
+.favorites-widget-scroll::-webkit-scrollbar-button:vertical:start:decrement,
+.favorites-widget-scroll::-webkit-scrollbar-button:vertical:end:increment,
+.favorites-widget-scroll::-webkit-scrollbar-button:vertical:decrement,
+.favorites-widget-scroll::-webkit-scrollbar-button:vertical:increment {
+  display: none !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+}
+
 .custom-scrollbar-thin {
   overflow-y: auto;
 }
@@ -314,33 +362,186 @@ html.dark body {
   background-color: rgba(200, 200, 200, 0.6) !important;
 }
 
-/* Custom scrollbar for BoardView (always visible, thin, matching cmdOS dark theme) */
+/* Custom scrollbar for BoardView (always visible, thin, theme-aware) */
 .board-scrollbar {
   scrollbar-width: thin !important;
-  scrollbar-color: rgba(255, 255, 255, 0.3) rgba(255, 255, 255, 0.05) !important;
+  scrollbar-color: var(--color-iconDefault, rgba(255, 255, 255, 0.45)) var(--color-borderDefault, rgba(255, 255, 255, 0.08)) !important;
 }
 
 .board-scrollbar::-webkit-scrollbar {
-  width: 5px !important;
-  height: 6px !important;
+  width: 6px !important;
+  height: 8px !important;
   display: block !important;
 }
 
 .board-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05) !important;
+  background: var(--color-borderDefault, rgba(255, 255, 255, 0.08)) !important;
   border-radius: 10px !important;
 }
 
 .board-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.3) !important;
+  background-color: var(--color-iconDefault, rgba(255, 255, 255, 0.45)) !important;
   border-radius: 10px !important;
 }
 
 .board-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.5) !important;
+  background-color: var(--color-textPrimary, rgba(255, 255, 255, 0.6)) !important;
 }
 
+/* Theme-aware Widget Drag/Rearrange State */
+.react-grid-item.react-grid-placeholder {
+  background: transparent !important;
+  opacity: 0.72 !important;
+  border-radius: 26px !important;
+  border: 1px solid var(--color-widgetDragOutline, rgba(255, 255, 255, 0.18)) !important;
+  box-shadow: none !important;
+  transition-duration: 150ms !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  z-index: 2 !important;
+}
 
+.react-grid-item.react-draggable-dragging {
+  box-shadow: 0 20px 45px var(--color-widgetDragShadow, rgba(0, 0, 0, 0.60)) !important;
+  border-color: var(--color-widgetDragOutline, rgba(255, 255, 255, 0.18)) !important;
+  z-index: 100 !important;
+}
+
+.react-grid-item > .react-resizable-handle {
+  position: absolute;
+  z-index: 1020;
+  width: 26px;
+  height: 26px;
+  right: 4px;
+  bottom: 4px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: none !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  opacity: 0.15;
+  transition: opacity 150ms ease, color 150ms ease;
+}
+
+.react-grid-item > .react-resizable-handle::before,
+.react-grid-item > .react-resizable-handle::after {
+  content: "" !important;
+  position: absolute !important;
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  height: 2px !important;
+  border: 0 !important;
+  border-top: 0 !important;
+  border-right: 0 !important;
+  border-bottom: 0 !important;
+  border-left: 0 !important;
+  box-shadow: none !important;
+  border-radius: 999px !important;
+  background-color: var(--color-widgetResizeHandle, var(--color-iconDefault)) !important;
+  background-image: none !important;
+  transform: rotate(-45deg) !important;
+  transform-origin: center !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  transition: background-color 150ms ease, opacity 150ms ease;
+}
+
+/* Longer outer diagonal line */
+.react-grid-item > .react-resizable-handle::after {
+  width: 17px !important;
+  right: 1px !important;
+  bottom: 7px !important;
+}
+
+/* Shorter inner diagonal line */
+.react-grid-item > .react-resizable-handle::before {
+  width: 11px !important;
+  right: 7px !important;
+  bottom: 12px !important;
+}
+
+.react-grid-item.react-resizable-resizing [data-widget-card="true"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.react-grid-item:hover > .react-resizable-handle,
+.react-grid-item.react-resizable-resizing > .react-resizable-handle {
+  opacity: 0.65;
+}
+
+.react-grid-item > .react-resizable-handle:hover::before,
+.react-grid-item > .react-resizable-handle:hover::after,
+.react-grid-item.react-resizable-resizing > .react-resizable-handle::before,
+.react-grid-item.react-resizable-resizing > .react-resizable-handle::after {
+  background-color: var(--color-textPrimary) !important;
+}
+
+.widget-grid-edit-guide {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 28px;
+  opacity: 0.62;
+  background-image: linear-gradient(
+      var(--color-widgetGridGuideLine, color-mix(in srgb, var(--color-textPrimary, #ffffff) 22%, transparent)) 0.5px,
+      transparent 0.5px
+    ),
+    linear-gradient(
+      90deg,
+      var(--color-widgetGridGuideLine, color-mix(in srgb, var(--color-textPrimary, #ffffff) 22%, transparent)) 0.5px,
+      transparent 0.5px
+    );
+  background-size:
+    18px 18px,
+    18px 18px;
+  background-position: 0 0;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
+}
+
+.dark .widget-grid-edit-guide {
+  opacity: 0.48;
+}
+
+@keyframes widgetEditModeWiggle {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  25% {
+    transform: translate3d(-0.4px, 0.3px, 0) rotate(-0.25deg);
+  }
+
+  50% {
+    transform: translate3d(0.4px, -0.3px, 0) rotate(0.25deg);
+  }
+
+  75% {
+    transform: translate3d(-0.3px, -0.4px, 0) rotate(-0.15deg);
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+}
+
+.widget-edit-mode-wiggle {
+  animation: widgetEditModeWiggle 700ms ease-in-out infinite;
+  animation-delay: var(--widget-edit-wiggle-delay, 0ms);
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-edit-mode-wiggle {
+    animation: none;
+  }
+}
 
 
 /* ============================================

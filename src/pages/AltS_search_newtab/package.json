@@ -44,6 +44,7 @@
     "quill": "^2.0.3",
     "react-dnd": "^16.0.1",
     "react-dnd-html5-backend": "^16.0.1",
+    "react-grid-layout": "^2.2.4",
     "react-window": "^1.8.7",
     "recharts": "^3.8.1",
     "redux-persist": "^6.0.0",

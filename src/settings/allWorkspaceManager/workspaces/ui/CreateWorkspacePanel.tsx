@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useEffect } from 'react';
 import { FaTimes } from 'react-icons/fa';
 import { getAvatarColor, getSingleInitial } from '../../../../shared-components/utils/avatarColors';
 import { createWorkspace } from '../workspaceData';
@@ -84,13 +85,13 @@ const CreateWorkspacePanel: React.FC<CreateWorkspacePanelProps> = ({ onClose, on
           </div>
 
           <div className="mb-4 w-full">
-            <div className="relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-4 py-2.5 flex items-center">
+            <div className="relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] overflow-hidden px-4 py-2.5 flex items-center">
               <input
                 type="text"
                 value={workspaceName}
                 onChange={e => setWorkspaceName(e.target.value)}
                 placeholder="Give your organization a name..."
-                className="flex-1 text-sm font-medium text-black dark:text-white placeholder-[var(--color-textPlaceholder)]/70 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0"
+                className="flex-1 text-sm font-medium text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0"
                 autoFocus
               />
             </div>
@@ -103,7 +104,7 @@ const CreateWorkspacePanel: React.FC<CreateWorkspacePanelProps> = ({ onClose, on
       <div
         className="flex items-center justify-between gap-3 px-6 py-4 
                 border-t border-[var(--color-borderDefault)]
-                bg-black/10 
+                bg-[var(--color-panelBg)] 
                 text-xs text-[var(--color-textSecondary)] flex-shrink-0"
       >
         <div className="flex items-center gap-4">
@@ -118,10 +119,10 @@ const CreateWorkspacePanel: React.FC<CreateWorkspacePanelProps> = ({ onClose, on
         <button
           onClick={handleCreate}
           disabled={isCreating || !workspaceName.trim()}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--color-accent)] hover:bg-[var(--color-accentHover)] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all shadow-md border-none cursor-pointer"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] text-xs font-semibold transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isCreating ? 'Creating...' : 'Create'}
-          <span className="px-1.5 py-0.5 rounded bg-white/20 text-[9px] font-bold">Alt+Enter</span>
+          <span className="px-1.5 py-0.5 rounded bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textSecondary)] text-[9px] font-bold">Alt+Enter</span>
         </button>
       </div>
     </div>

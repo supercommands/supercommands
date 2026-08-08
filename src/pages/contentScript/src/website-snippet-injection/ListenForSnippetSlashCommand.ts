@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import InjectedSnippetDropdownUI from './InjectedSnippetDropdownUI';
 import type { NoteItem, PopupPosition, SupportedInputElement } from '../types';
@@ -14,29 +14,126 @@ import {
 
 type TriggerContext =
   | {
-      type: 'input';
-      element: HTMLInputElement | HTMLTextAreaElement;
-      selectionStart: number;
-    }
+    type: 'input';
+    element: HTMLInputElement | HTMLTextAreaElement;
+    selectionStart: number;
+  }
   | {
-      type: 'contentEditable';
-      element: HTMLElement;
-      slashRange: Range;
-    }
+    type: 'codeEditor';
+    element: HTMLInputElement | HTMLTextAreaElement | null;
+    editor: HTMLElement;
+    selectionStart: number;
+  }
   | {
-      type: 'googleDocs';
-      iframe: HTMLIFrameElement;
-      caretRange: Range;
-    }
+    type: 'contentEditable';
+    element: HTMLElement;
+    slashRange: Range;
+  }
   | {
-      type: 'googleSheets';
-      element: HTMLInputElement | HTMLTextAreaElement;
-      selectionStart: number;
-    };
+    type: 'googleDocs';
+    iframe: HTMLIFrameElement;
+    caretRange: Range;
+  }
+  | {
+    type: 'googleSheets';
+    element: HTMLInputElement | HTMLTextAreaElement;
+    selectionStart: number;
+  }
+  | {
+    type: 'googleSheetsGrid';
+    deleteCount: number;
+  };
 
 const isTextInput = (element: HTMLInputElement) => {
   const allowedTypes = ['text', 'search', 'email', 'url', 'tel', 'password', 'number'];
   return allowedTypes.includes(element.type);
+};
+
+const SNIPPET_POPUP_TRIGGER = 'c/';
+
+const findLastSnippetPopupTrigger = (text: string): number => {
+  return text.toLowerCase().lastIndexOf(SNIPPET_POPUP_TRIGGER);
+};
+
+const endsWithSnippetPopupTrigger = (text: string): boolean => {
+  return text.toLowerCase().endsWith(SNIPPET_POPUP_TRIGGER);
+};
+
+const CODE_EDITOR_SELECTOR = [
+  '.monaco-editor',
+  '.cm-editor',
+  '.CodeMirror',
+  '.ace_editor',
+].join(',');
+
+const CODE_EDITOR_CURSOR_SELECTOR = [
+  '.cursor',
+  '.monaco-cursor',
+  '.cm-cursor',
+  '.CodeMirror-cursor',
+  '.ace_cursor',
+].join(',');
+
+const getCodeEditorHost = (target: HTMLElement | null): HTMLElement | null => {
+  return (target?.closest(CODE_EDITOR_SELECTOR) as HTMLElement | null) ?? null;
+};
+
+const logGoogleDocsDebug = (message: string, data?: Record<string, unknown>) => {
+  console.info(`[cmdOS Snippets][Docs] ${message}`, data ?? '');
+};
+
+const getContentEditableHost = (target: HTMLElement | null): HTMLElement | null => {
+  if (!target) return null;
+
+  const doc = target.ownerDocument;
+  if (doc?.designMode?.toLowerCase() === 'on') {
+    return doc.body;
+  }
+
+  let current: HTMLElement | null = target;
+  let editableHost: HTMLElement | null = null;
+
+  while (current && current !== doc.documentElement) {
+    const editable = current.getAttribute('contenteditable');
+
+    if (editable === 'false') {
+      return null;
+    }
+
+    if (editable === '' || editable === 'true' || editable === 'plaintext-only') {
+      editableHost = current;
+    }
+
+    current = current.parentElement;
+  }
+
+  return editableHost ?? (target.isContentEditable ? target : null);
+};
+
+const getEditableTargetFromEvent = (event: Event): HTMLElement | null => {
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+
+  for (const item of path) {
+    if (!(item instanceof HTMLElement)) continue;
+
+    if (item instanceof HTMLInputElement && isTextInput(item)) {
+      return item;
+    }
+
+    if (item instanceof HTMLTextAreaElement) {
+      return item;
+    }
+
+    if (getContentEditableHost(item)) {
+      return item;
+    }
+
+    if (getCodeEditorHost(item)) {
+      return item;
+    }
+  }
+
+  return event.target instanceof HTMLElement ? event.target : null;
 };
 
 const sanitizeHtml = (html: string): string => {
@@ -223,8 +320,9 @@ const isSpecialVariable = (varName: string): boolean => {
   return varName.toLowerCase() in specialVariableResolvers;
 };
 
-// Slight offset so the popup appears lower on the page and avoids overlapping host UI.
+// Slight offset so the popup appears lower on standard inputs and avoids overlapping host UI.
 const POPUP_VERTICAL_OFFSET = 36;
+const CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET = 8;
 
 const CARET_MIRROR_PROPS = [
   'boxSizing',
@@ -341,17 +439,30 @@ const extractTabsValue = (value: any): string => {
     .join('\n');
 };
 
+const isRawTagId = (tag: string): boolean => {
+  if (!tag || typeof tag !== 'string') return true;
+  const trimmed = tag.trim();
+  if (/^TAG_/i.test(trimmed)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) return true;
+  return false;
+};
+
 const normalizeSnippetTags = (raw: unknown): string[] => {
   if (!Array.isArray(raw)) return [];
   return raw
     .map(tag => {
       if (!tag) return null;
-      if (typeof tag === 'string') return tag;
       if (typeof tag === 'object' && typeof (tag as { name?: unknown }).name === 'string') {
-        return ((tag as { name: string }).name || '').trim();
+        const name = ((tag as { name: string }).name || '').trim();
+        if (name && !isRawTagId(name)) return name;
       }
       if (typeof tag === 'object' && typeof (tag as { label?: unknown }).label === 'string') {
-        return ((tag as { label: string }).label || '').trim();
+        const label = ((tag as { label: string }).label || '').trim();
+        if (label && !isRawTagId(label)) return label;
+      }
+      if (typeof tag === 'string') {
+        const str = tag.trim();
+        if (str && !isRawTagId(str)) return str;
       }
       return null;
     })
@@ -480,6 +591,161 @@ const getElementAnchorPosition = (element: HTMLElement): PopupPosition => {
   });
 };
 
+const getGoogleSheetsCellPosition = (): PopupPosition | null => {
+  const selectors = [
+    '.waffle-cell-selected',
+    '.waffle-cell-active',
+    '.grid-cell-input',
+    '.cell-input',
+    '[role="gridcell"][aria-selected="true"]',
+  ];
+
+  for (const selector of selectors) {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) continue;
+
+    const rect = element.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) continue;
+
+    return clampPositionToViewport({
+      x: rect.left + window.scrollX,
+      y: rect.bottom + window.scrollY + 8,
+      caretHeight: rect.height || 20,
+    });
+  }
+
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
+  return active ? getElementAnchorPosition(active) : null;
+};
+
+const getGoogleDocsVisibleCaretPosition = (): PopupPosition | null => {
+  const selectors = [
+    '.kix-cursor-caret',
+    '.kix-cursor',
+    '.docs-text-ui-cursor-blink',
+    '.docs-text-ui-cursor',
+    '.kix-insert-cursor',
+  ];
+
+  for (const selector of selectors) {
+    const cursors = Array.from(document.querySelectorAll<HTMLElement>(selector));
+    for (const cursor of cursors) {
+      const style = window.getComputedStyle(cursor);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+      const rect = cursor.getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0)) continue;
+
+      return clampPositionToViewport({
+        x: rect.left + window.scrollX,
+        y: rect.bottom + window.scrollY + 8,
+        caretHeight: rect.height || parseFloat(style.height || '') || 18,
+      });
+    }
+  }
+
+  return null;
+};
+
+const getAceCaretPosition = (editor: HTMLElement): PopupPosition | null => {
+  if (!editor.classList.contains('ace_editor')) return null;
+
+  const cursor =
+    editor.querySelector<HTMLElement>('.ace_cursor-layer .ace_cursor') ??
+    editor.querySelector<HTMLElement>('.ace_cursor');
+  if (!cursor) return null;
+
+  const style = window.getComputedStyle(cursor);
+  if (style.display === 'none' || style.visibility === 'hidden') return null;
+
+  const rect = cursor.getBoundingClientRect();
+  if (rect && (rect.width > 0 || rect.height > 0)) {
+    return clampPositionToViewport({
+      x: rect.left + window.scrollX,
+      y: rect.bottom + window.scrollY + 8,
+      caretHeight: rect.height || parseFloat(style.height || '') || 18,
+    });
+  }
+
+  const cursorLayer = cursor.closest<HTMLElement>('.ace_cursor-layer');
+  const layerRect = cursorLayer?.getBoundingClientRect();
+  const left = parseFloat(style.left || cursor.style.left || '');
+  const top = parseFloat(style.top || cursor.style.top || '');
+  const height = parseFloat(style.height || cursor.style.height || '') || 18;
+
+  if (!layerRect || !Number.isFinite(left) || !Number.isFinite(top)) return null;
+
+  return clampPositionToViewport({
+    x: layerRect.left + left + window.scrollX,
+    y: layerRect.top + top + height + window.scrollY + 8,
+    caretHeight: height,
+  });
+};
+
+const getMonacoCaretPosition = (editor: HTMLElement): PopupPosition | null => {
+  if (!editor.classList.contains('monaco-editor')) return null;
+
+  const cursor =
+    editor.querySelector<HTMLElement>('.cursors-layer .cursor') ??
+    editor.querySelector<HTMLElement>('.view-cursors .cursor') ??
+    editor.querySelector<HTMLElement>('.cursor');
+  if (!cursor) return null;
+
+  const style = window.getComputedStyle(cursor);
+  if (style.display === 'none' || style.visibility === 'hidden') return null;
+
+  const rect = cursor.getBoundingClientRect();
+  if (rect && (rect.width > 0 || rect.height > 0)) {
+    return clampPositionToViewport({
+      x: rect.left + window.scrollX,
+      y: rect.bottom + window.scrollY + 8,
+      caretHeight: rect.height || parseFloat(style.height || '') || 18,
+    });
+  }
+
+  const cursorLayer =
+    cursor.closest<HTMLElement>('.cursors-layer') ?? cursor.closest<HTMLElement>('.view-cursors');
+  const layerRect = cursorLayer?.getBoundingClientRect();
+  const left = parseFloat(style.left || cursor.style.left || '');
+  const top = parseFloat(style.top || cursor.style.top || '');
+  const height = parseFloat(style.height || cursor.style.height || '') || 18;
+
+  if (!layerRect || !Number.isFinite(left) || !Number.isFinite(top)) return null;
+
+  return clampPositionToViewport({
+    x: layerRect.left + left + window.scrollX,
+    y: layerRect.top + top + height + window.scrollY + 8,
+    caretHeight: height,
+  });
+};
+
+const getCodeEditorCaretPosition = (editor: HTMLElement): PopupPosition | null => {
+  const monacoPosition = getMonacoCaretPosition(editor);
+  if (monacoPosition) return monacoPosition;
+
+  const acePosition = getAceCaretPosition(editor);
+  if (acePosition) return acePosition;
+
+  const cursors = Array.from(editor.querySelectorAll<HTMLElement>(CODE_EDITOR_CURSOR_SELECTOR));
+  const cursor = cursors.find(el => {
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 || rect.height > 0;
+  });
+
+  if (!cursor) return null;
+
+  const rect = cursor.getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0)) return null;
+
+  return clampPositionToViewport({
+    x: rect.left + window.scrollX,
+    y: rect.bottom + window.scrollY + 8,
+    caretHeight: rect.height || 18,
+  });
+};
+
 const getRangeAnchorPosition = (range: Range): PopupPosition | null => {
   const rect = range.getBoundingClientRect();
   if (!rect || (rect.width === 0 && rect.height === 0)) {
@@ -490,6 +756,69 @@ const getRangeAnchorPosition = (range: Range): PopupPosition | null => {
     y: rect.bottom + window.scrollY + 8,
     caretHeight: rect.height,
   });
+};
+
+const getContentEditableCaretPosition = (element: HTMLElement, range: Range): PopupPosition | null => {
+  const rangePosition = getRangeAnchorPosition(range);
+  if (rangePosition) return rangePosition;
+
+  const doc = element.ownerDocument;
+  const win = doc?.defaultView ?? window;
+  if (!doc) return null;
+
+  const marker = doc.createElement('span');
+  marker.setAttribute('data-tasklabs-caret-marker', 'true');
+  marker.textContent = '\u200B';
+  Object.assign(marker.style, {
+    display: 'inline-block',
+    width: '0',
+    height: '1em',
+    overflow: 'hidden',
+    lineHeight: '1',
+    verticalAlign: 'baseline',
+    pointerEvents: 'none',
+  });
+
+  const markerRange = range.cloneRange();
+
+  try {
+    markerRange.collapse(true);
+    markerRange.insertNode(marker);
+
+    const rect = marker.getBoundingClientRect();
+    const computed = win.getComputedStyle(element);
+    const elementRect = element.getBoundingClientRect();
+    let caretHeight =
+      rect.height ||
+      parseFloat(computed.lineHeight || '') ||
+      parseFloat(computed.fontSize || '') ||
+      elementRect.height ||
+      16;
+
+    if (!Number.isFinite(caretHeight)) caretHeight = 16;
+
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      return null;
+    }
+
+    return clampPositionToViewport({
+      x: rect.left + win.scrollX,
+      y: rect.bottom + win.scrollY + 8,
+      caretHeight,
+    });
+  } catch {
+    return null;
+  } finally {
+    const parent = marker.parentNode;
+    marker.remove();
+    parent?.normalize();
+
+    const selection = win.getSelection();
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
 };
 
 const getRangeRelativeToIframe = (iframe: HTMLIFrameElement, range: Range): PopupPosition | null => {
@@ -562,6 +891,45 @@ const dispatchInputEvents = (element: HTMLInputElement | HTMLTextAreaElement) =>
   element.dispatchEvent(changeEvent);
 };
 
+const CURSOR_MARKER = '\u200B__CURSOR__\u200B';
+const FALLBACK_CURSOR_MARKER = '__CURSOR__';
+
+const resolveCursorMarker = (text: string, cursorOffset?: number) => {
+  let cleanedText = text;
+  let resolvedOffset = cursorOffset;
+
+  const markerIndex = cleanedText.indexOf(CURSOR_MARKER);
+  if (markerIndex !== -1) {
+    cleanedText = cleanedText.replace(CURSOR_MARKER, '');
+    resolvedOffset = markerIndex;
+  } else {
+    const fallbackIndex = cleanedText.indexOf(FALLBACK_CURSOR_MARKER);
+    if (fallbackIndex !== -1) {
+      cleanedText = cleanedText.replace(FALLBACK_CURSOR_MARKER, '');
+      resolvedOffset = fallbackIndex;
+    }
+  }
+
+  return { cleanedText, resolvedOffset };
+};
+
+const setStandardInputCaret = (element: HTMLInputElement | HTMLTextAreaElement, position: number) => {
+  const caretPosition = Math.max(0, Math.min(position, element.value.length));
+
+  try {
+    element.focus({ preventScroll: true });
+  } catch {
+    element.focus();
+  }
+
+  element.setSelectionRange(caretPosition, caretPosition);
+
+  requestAnimationFrame(() => {
+    if (!element.isConnected) return;
+    element.setSelectionRange(caretPosition, caretPosition);
+  });
+};
+
 class WebsiteSnippetInjector {
   private notes: NoteItem[] = [];
   private popupContainer: HTMLDivElement | null = null;
@@ -581,7 +949,10 @@ class WebsiteSnippetInjector {
   private loadNotesPromise: Promise<void> | null = null;
   private pendingTrigger: (() => void) | null = null;
   private injectedDocsIframes = new WeakSet<HTMLIFrameElement>();
+  private injectedDocsIframeLoaders = new WeakMap<HTMLIFrameElement, Promise<void>>();
   private docsTypedBuffer = '';
+  private sheetsTypedBuffer = '';
+  private codeEditorTypedBuffer = '';
   private searchQuery = ''; // Track text typed after c/
   private slashPosition = -1; // Position of c/ in the input when popup opened
 
@@ -720,6 +1091,45 @@ class WebsiteSnippetInjector {
     return false;
   }
 
+  private getFilteredSnippetNotes(query: string = this.searchQuery): NoteItem[] {
+    const snippetNotes = this.notes.filter(note => note.category?.toLowerCase() === 'snippet');
+    const trimmedQuery = query.trim().toLowerCase();
+
+    if (!trimmedQuery) {
+      return snippetNotes;
+    }
+
+    return snippetNotes.filter(note => {
+      const titleMatch = note.key.toLowerCase().includes(trimmedQuery);
+      const valueMatch = note.plainText.toLowerCase().includes(trimmedQuery);
+      const tagsMatch = note.tags.some(tag => tag.toLowerCase().includes(trimmedQuery));
+      return titleMatch || valueMatch || tagsMatch;
+    });
+  }
+
+  private selectFirstPopupSnippet(event?: KeyboardEvent) {
+    const note = this.getFilteredSnippetNotes()[0];
+    if (!note) {
+      if (this.triggerContext?.type === 'googleDocs') {
+        logGoogleDocsDebug('Popup selection requested but no matching snippet exists', {
+          query: this.searchQuery,
+          notesCount: this.notes.length,
+        });
+      }
+      return;
+    }
+
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (this.triggerContext?.type === 'googleDocs') {
+      logGoogleDocsDebug('Selecting first popup snippet', {
+        snippetId: note.id,
+        key: note.key,
+      });
+    }
+    void this.insertNote(note);
+  }
+
   private runWithNotes(callback: () => void) {
     if (this.notes.length) {
       callback();
@@ -738,14 +1148,17 @@ class WebsiteSnippetInjector {
     document.addEventListener(
       'focusin',
       event => {
-        const target = event.target as HTMLElement | null;
+        const target = getEditableTargetFromEvent(event);
         if (!target) return;
         if (target instanceof HTMLInputElement && isTextInput(target)) {
           this.focusedElement = target;
         } else if (target instanceof HTMLTextAreaElement) {
           this.focusedElement = target;
-        } else if (target.isContentEditable) {
-          this.focusedElement = target;
+        } else {
+          const contentEditableHost = getContentEditableHost(target);
+          if (contentEditableHost) {
+            this.focusedElement = contentEditableHost;
+          }
         }
       },
       true,
@@ -754,7 +1167,8 @@ class WebsiteSnippetInjector {
     document.addEventListener(
       'focusout',
       event => {
-        if (event.target === this.focusedElement) {
+        const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+        if (event.target === this.focusedElement || path.includes(this.focusedElement as EventTarget)) {
           this.focusedElement = null;
         }
       },
@@ -771,15 +1185,18 @@ class WebsiteSnippetInjector {
           return;
         }
 
-        const target = event.target as HTMLElement | null;
+        const target = getEditableTargetFromEvent(event);
         if (!target) return;
 
         if (target instanceof HTMLInputElement && isTextInput(target)) {
           this.tryTriggerForInput(target);
         } else if (target instanceof HTMLTextAreaElement) {
           this.tryTriggerForInput(target);
-        } else if (target.isContentEditable) {
-          this.tryTriggerForContentEditable(target);
+        } else {
+          const contentEditableHost = getContentEditableHost(target);
+          if (contentEditableHost) {
+            this.tryTriggerForContentEditable(contentEditableHost);
+          }
         }
       },
       true,
@@ -793,6 +1210,25 @@ class WebsiteSnippetInjector {
         if (event.key === 'Escape' && this.isOpen) {
           event.stopPropagation();
           this.closePopup();
+          return;
+        }
+
+        if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') {
+          const target =
+            getEditableTargetFromEvent(event) ||
+            (document.activeElement instanceof HTMLElement ? document.activeElement : null) ||
+            this.focusedElement;
+          const codeEditor = getCodeEditorHost(target) || getCodeEditorHost(document.activeElement as HTMLElement | null);
+
+          if (codeEditor && !(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) {
+            this.handleCodeEditorSurfaceKey(event, codeEditor);
+            return;
+          }
+
+          const contentEditableHost = getContentEditableHost(target) || getContentEditableHost(this.focusedElement);
+          if (contentEditableHost) {
+            this.tryTriggerForContentEditable(contentEditableHost);
+          }
         }
       },
       true,
@@ -810,6 +1246,10 @@ class WebsiteSnippetInjector {
       this.docsIframe = iframe;
       const doc = iframe.contentDocument;
       doc.addEventListener('keydown', this.handleGoogleDocsKeyDown, true);
+      logGoogleDocsDebug('Attached key listener to docs text event iframe', {
+        iframeSrc: iframe.src || '(no src)',
+        iframeReadyState: doc.readyState,
+      });
     };
 
     pollIframe();
@@ -821,8 +1261,48 @@ class WebsiteSnippetInjector {
       event => {
         if (!this.googleSheets) return;
 
-        const target = event.target as HTMLElement | null;
+        const target = getEditableTargetFromEvent(event);
         if (!target) return;
+
+        if (this.isOpen && this.triggerContext?.type === 'googleSheetsGrid') {
+          if (event.key === 'Enter') {
+            this.selectFirstPopupSnippet(event);
+            return;
+          }
+
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            this.closePopup();
+            return;
+          }
+
+          if (event.key === 'Backspace') {
+            if (!this.searchQuery) {
+              this.closePopup();
+              this.sheetsTypedBuffer = '';
+              return;
+            }
+
+            this.searchQuery = this.searchQuery.slice(0, -1);
+            this.sheetsTypedBuffer = `c/${this.searchQuery}`;
+            const position = getGoogleSheetsCellPosition();
+            if (position) {
+              this.renderPopup(position, this.searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+            }
+            return;
+          }
+
+          if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            this.searchQuery += event.key;
+            this.sheetsTypedBuffer = `c/${this.searchQuery}`;
+            const position = getGoogleSheetsCellPosition();
+            if (position) {
+              this.renderPopup(position, this.searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+            }
+            return;
+          }
+        }
 
         const isFormulaBar =
           target instanceof HTMLInputElement &&
@@ -841,6 +1321,31 @@ class WebsiteSnippetInjector {
             });
           }
         }
+
+        if (isFormulaBar) return;
+
+        if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          this.sheetsTypedBuffer = `${this.sheetsTypedBuffer}${event.key}`.slice(-50);
+        } else if (event.key === 'Backspace') {
+          this.sheetsTypedBuffer = this.sheetsTypedBuffer.slice(0, -1);
+        } else if (event.key === 'Escape' || event.key === 'Enter') {
+          this.sheetsTypedBuffer = '';
+        }
+
+        if (!endsWithSnippetPopupTrigger(this.sheetsTypedBuffer)) return;
+
+        this.sheetsTypedBuffer = '';
+        const position = getGoogleSheetsCellPosition();
+        if (!position) return;
+
+        this.runWithNotes(() => {
+          this.triggerContext = {
+            type: 'googleSheetsGrid',
+            deleteCount: 2,
+          };
+          this.searchQuery = '';
+          this.renderPopup(position, '', CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+        });
       },
       true,
     );
@@ -852,11 +1357,81 @@ class WebsiteSnippetInjector {
     const doc = iframe.contentDocument;
     if (!doc) return;
 
+    if (this.isOpen && this.triggerContext?.type === 'googleDocs') {
+      if (event.key === 'Enter') {
+        logGoogleDocsDebug('Enter pressed while popup is open');
+        this.selectFirstPopupSnippet(event);
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closePopup();
+        return;
+      }
+
+      if (event.key === 'Backspace') {
+        if (!this.searchQuery) {
+          this.closePopup();
+          this.docsTypedBuffer = '';
+          return;
+        }
+
+        this.searchQuery = this.searchQuery.slice(0, -1);
+        this.docsTypedBuffer = `c/${this.searchQuery}`;
+        requestAnimationFrame(() => {
+          const selection = iframe.contentWindow?.getSelection();
+          const currentRange =
+            selection && selection.rangeCount
+              ? selection.getRangeAt(0).cloneRange()
+              : this.triggerContext?.type === 'googleDocs'
+                ? this.triggerContext.caretRange.cloneRange()
+                : null;
+          const position =
+            getGoogleDocsVisibleCaretPosition() ||
+            (currentRange ? getRangeRelativeToIframe(iframe, currentRange) : null) ||
+            getElementAnchorPosition(iframe);
+          if (position) {
+            this.renderPopup(position, this.searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+          }
+        });
+        return;
+      }
+
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        this.searchQuery += event.key;
+        this.docsTypedBuffer = `c/${this.searchQuery}`;
+        requestAnimationFrame(() => {
+          const selection = iframe.contentWindow?.getSelection();
+          const currentRange =
+            selection && selection.rangeCount
+              ? selection.getRangeAt(0).cloneRange()
+              : this.triggerContext?.type === 'googleDocs'
+                ? this.triggerContext.caretRange.cloneRange()
+                : null;
+          const position =
+            getGoogleDocsVisibleCaretPosition() ||
+            (currentRange ? getRangeRelativeToIframe(iframe, currentRange) : null) ||
+            getElementAnchorPosition(iframe);
+          if (position) {
+            this.renderPopup(position, this.searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+          }
+        });
+        return;
+      }
+    }
+
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
       this.docsTypedBuffer += event.key;
 
       this.checkAndReplaceSnippet(this.docsTypedBuffer, (deleteCount, text, html) => {
         this.docsTypedBuffer = '';
+        logGoogleDocsDebug('Direct exact snippet trigger matched', {
+          deleteCount,
+          textLength: text.length,
+          hasHtml: Boolean(html),
+        });
 
         const selection = iframe.contentWindow?.getSelection();
         const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
@@ -873,7 +1448,7 @@ class WebsiteSnippetInjector {
       }
     }
 
-    if (event.key === 'c') {
+    if (event.key.toLowerCase() === 'c') {
       this.docsSlashCount = 1;
     } else if (event.key === '/' && this.docsSlashCount === 1) {
       this.docsSlashCount = 2;
@@ -884,21 +1459,36 @@ class WebsiteSnippetInjector {
     if (this.docsSlashCount >= 2) {
       this.docsSlashCount = 0;
       const selection = iframe.contentWindow?.getSelection();
-      if (!selection || !selection.rangeCount) return;
+      if (!selection || !selection.rangeCount) {
+        logGoogleDocsDebug('c/ detected but iframe selection range is missing');
+        return;
+      }
 
       const caretRange = selection.getRangeAt(0).cloneRange();
       const openPopup = () => {
         const docSelection = iframe.contentWindow?.getSelection();
         const currentRange =
           docSelection && docSelection.rangeCount ? docSelection.getRangeAt(0).cloneRange() : caretRange.cloneRange();
-        const position = getRangeRelativeToIframe(iframe, currentRange) || getElementAnchorPosition(iframe);
-        if (!position) return;
+        const position =
+          getGoogleDocsVisibleCaretPosition() ||
+          getRangeRelativeToIframe(iframe, currentRange) ||
+          getElementAnchorPosition(iframe);
+        if (!position) {
+          logGoogleDocsDebug('c/ detected but no popup position could be resolved');
+          return;
+        }
         this.triggerContext = {
           type: 'googleDocs',
           iframe,
           caretRange: currentRange,
         };
-        this.renderPopup(position);
+        logGoogleDocsDebug('Opening popup for c/ trigger', {
+          x: Math.round(position.x),
+          y: Math.round(position.y),
+          visibleCaretFound: Boolean(getGoogleDocsVisibleCaretPosition()),
+          notesCount: this.notes.length,
+        });
+        this.renderPopup(position, '', CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
       };
 
       this.runWithNotes(() => {
@@ -907,19 +1497,105 @@ class WebsiteSnippetInjector {
     }
   };
 
+  private handleCodeEditorSurfaceKey(event: KeyboardEvent, editor: HTMLElement) {
+    if (this.isOpen && this.triggerContext?.type === 'codeEditor') {
+      if (event.key === 'Enter') {
+        this.selectFirstPopupSnippet(event);
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closePopup();
+        return;
+      }
+
+      if (event.key === 'Backspace') {
+        if (!this.searchQuery) {
+          this.closePopup();
+          this.codeEditorTypedBuffer = '';
+          return;
+        }
+
+        this.searchQuery = this.searchQuery.slice(0, -1);
+        this.codeEditorTypedBuffer = `c/${this.searchQuery}`;
+        const position = getCodeEditorCaretPosition(editor) || getElementAnchorPosition(editor);
+        this.renderPopup(position, this.searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+        return;
+      }
+
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        this.searchQuery += event.key;
+        this.codeEditorTypedBuffer = `c/${this.searchQuery}`;
+        const position = getCodeEditorCaretPosition(editor) || getElementAnchorPosition(editor);
+        this.renderPopup(position, this.searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+        return;
+      }
+    }
+
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      this.codeEditorTypedBuffer = `${this.codeEditorTypedBuffer}${event.key}`.slice(-50);
+    } else if (event.key === 'Backspace') {
+      this.codeEditorTypedBuffer = this.codeEditorTypedBuffer.slice(0, -1);
+    } else if (event.key === 'Escape' || event.key === 'Enter') {
+      this.codeEditorTypedBuffer = '';
+    }
+
+    if (!endsWithSnippetPopupTrigger(this.codeEditorTypedBuffer)) return;
+
+    this.codeEditorTypedBuffer = '';
+    const position = getCodeEditorCaretPosition(editor) || getElementAnchorPosition(editor);
+
+    this.runWithNotes(() => {
+      this.triggerContext = {
+        type: 'codeEditor',
+        element:
+          document.activeElement instanceof HTMLTextAreaElement || document.activeElement instanceof HTMLInputElement
+            ? document.activeElement
+            : null,
+        editor,
+        selectionStart: 0,
+      };
+      this.searchQuery = '';
+      this.renderPopup(position, '', CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+    });
+  }
+
   private tryTriggerForInput(element: HTMLInputElement | HTMLTextAreaElement) {
     if (element.selectionStart === null) return;
 
     const selectionStart = element.selectionStart;
     const valueBefore = element.value.slice(0, selectionStart);
+    const codeEditor = getCodeEditorHost(element);
 
     const handled = this.checkAndReplaceSnippet(valueBefore, (deleteCount, text, html) => {
+      if (codeEditor) {
+        this.insertIntoCodeEditor(element, selectionStart, text, deleteCount);
+        return;
+      }
       this.insertIntoStandardInput(element, selectionStart, text, deleteCount);
     });
 
     if (handled) return;
 
-    const slashIndex = valueBefore.lastIndexOf('c/');
+    const slashIndex = findLastSnippetPopupTrigger(valueBefore);
+
+    if (this.isOpen && this.triggerContext?.type === 'codeEditor') {
+      if (slashIndex === -1) {
+        this.closePopup();
+        return;
+      }
+
+      const newQuery = valueBefore.slice(slashIndex + 2);
+      this.searchQuery = newQuery;
+
+      const editorPosition = getCodeEditorCaretPosition(this.triggerContext.editor);
+      const caretPosition = editorPosition || getInputCaretPosition(element, selectionStart);
+      const position = caretPosition || getElementAnchorPosition(this.triggerContext.editor);
+      this.renderPopup(position, this.searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+      return;
+    }
 
     if (this.isOpen && this.triggerContext?.type === 'input') {
       if (slashIndex === -1) {
@@ -936,14 +1612,29 @@ class WebsiteSnippetInjector {
       return;
     }
 
-    if (!valueBefore.endsWith('c/')) return;
+    if (!endsWithSnippetPopupTrigger(valueBefore)) return;
 
     const openPopup = () => {
       if (!element.isConnected) return;
-      if (!element.value.slice(0, selectionStart).endsWith('c/')) return;
+      if (!endsWithSnippetPopupTrigger(element.value.slice(0, selectionStart))) return;
 
       this.slashPosition = selectionStart - 2;
       this.searchQuery = '';
+
+      if (codeEditor) {
+        const editorPosition = getCodeEditorCaretPosition(codeEditor);
+        const caretPosition = editorPosition || getInputCaretPosition(element, selectionStart);
+        const position = caretPosition || getElementAnchorPosition(codeEditor);
+
+        this.triggerContext = {
+          type: 'codeEditor',
+          element,
+          editor: codeEditor,
+          selectionStart,
+        };
+        this.renderPopup(position, '', CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
+        return;
+      }
 
       this.openPopupForElement(element, selectionStart, 'input');
     };
@@ -974,7 +1665,7 @@ class WebsiteSnippetInjector {
 
     if (handled) return;
 
-    const slashIndex = textBefore.lastIndexOf('c/');
+    const slashIndex = findLastSnippetPopupTrigger(textBefore);
 
     if (this.isOpen && this.triggerContext?.type === 'contentEditable') {
       if (slashIndex === -1) {
@@ -987,20 +1678,20 @@ class WebsiteSnippetInjector {
 
       const currentSelection = window.getSelection();
       const currentRange = currentSelection && currentSelection.rangeCount ? currentSelection.getRangeAt(0) : range;
-      const anchorPosition = getRangeAnchorPosition(currentRange) || getElementAnchorPosition(element);
+      const anchorPosition = getContentEditableCaretPosition(element, currentRange) || getElementAnchorPosition(element);
 
       if (anchorPosition) {
-        this.renderPopup(anchorPosition, this.searchQuery);
+        this.renderPopup(anchorPosition, this.searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
       }
       return;
     }
 
-    if (!textBefore.endsWith('c/')) return;
+    if (!endsWithSnippetPopupTrigger(textBefore)) return;
 
     const slashRange = buildSlashRange(element, range, 2);
     if (!slashRange) return;
 
-    const slashIndexForQuery = textBefore.lastIndexOf('c/');
+    const slashIndexForQuery = findLastSnippetPopupTrigger(textBefore);
     const searchQuery = slashIndexForQuery !== -1 ? textBefore.slice(slashIndexForQuery + 2) : '';
 
     const storedRange = slashRange.cloneRange();
@@ -1012,7 +1703,7 @@ class WebsiteSnippetInjector {
       const currentSelection = window.getSelection();
       const currentRange =
         currentSelection && currentSelection.rangeCount ? currentSelection.getRangeAt(0) : storedRange;
-      const anchorPosition = getRangeAnchorPosition(currentRange) || getElementAnchorPosition(element);
+      const anchorPosition = getContentEditableCaretPosition(element, currentRange) || getElementAnchorPosition(element);
 
       if (!anchorPosition) return;
       this.triggerContext = {
@@ -1020,7 +1711,7 @@ class WebsiteSnippetInjector {
         element,
         slashRange: storedRange.cloneRange(),
       };
-      this.renderPopup(anchorPosition, searchQuery);
+      this.renderPopup(anchorPosition, searchQuery, CONTENT_EDITABLE_POPUP_VERTICAL_OFFSET);
     };
 
     this.runWithNotes(openPopup);
@@ -1044,23 +1735,24 @@ class WebsiteSnippetInjector {
     this.triggerContext =
       type === 'googleSheets'
         ? {
-            type: 'googleSheets',
-            element,
-            selectionStart,
-          }
+          type: 'googleSheets',
+          element,
+          selectionStart,
+        }
         : {
-            type: 'input',
-            element,
-            selectionStart,
-          };
+          type: 'input',
+          element,
+          selectionStart,
+        };
 
     this.renderPopup(position);
   }
 
-  private renderPopup(position: PopupPosition, externalQuery: string = '') {
+  private renderPopup(position: PopupPosition, externalQuery: string = '', verticalOffset: number = POPUP_VERTICAL_OFFSET) {
     const finalPosition = clampPositionToViewport({
       x: position.x,
-      y: position.y + POPUP_VERTICAL_OFFSET,
+      y: position.y + verticalOffset,
+      caretHeight: position.caretHeight,
     });
     if (!this.popupContainer) {
       // Clean up any existing popup root left over from previous script versions (e.g. after extension reloads)
@@ -1088,6 +1780,7 @@ class WebsiteSnippetInjector {
         notes: this.notes,
         position: finalPosition,
         onClose: () => this.closePopup(),
+        verticalOffset,
         onSelect: note => this.insertNote(note),
         onEdit: note => {
           try {
@@ -1175,7 +1868,7 @@ class WebsiteSnippetInjector {
           if (evalResult.cursorPosition !== undefined) {
             textToInsert =
               textToInsert.slice(0, evalResult.cursorPosition) +
-              '\u200B__CURSOR__\u200B' +
+              CURSOR_MARKER +
               textToInsert.slice(evalResult.cursorPosition);
 
             // Safely insert cursor into HTML using DOM traversal instead of plain string slicing
@@ -1191,7 +1884,7 @@ class WebsiteSnippetInjector {
               if (currentOffset + textLength >= evalResult.cursorPosition) {
                 const splitIndex = evalResult.cursorPosition - currentOffset;
                 const text = node.nodeValue || '';
-                node.nodeValue = text.slice(0, splitIndex) + '\u200B__CURSOR__\u200B' + text.slice(splitIndex);
+                node.nodeValue = text.slice(0, splitIndex) + CURSOR_MARKER + text.slice(splitIndex);
                 inserted = true;
                 break;
               }
@@ -1200,7 +1893,7 @@ class WebsiteSnippetInjector {
             }
 
             if (!inserted) {
-              tempDiv.appendChild(document.createTextNode('\u200B__CURSOR__\u200B'));
+              tempDiv.appendChild(document.createTextNode(CURSOR_MARKER));
             }
 
             htmlToInsert = tempDiv.innerHTML;
@@ -1230,7 +1923,7 @@ class WebsiteSnippetInjector {
           const parsed = JSON.parse(url);
           if (parsed.url) url = parsed.url;
           else if (Array.isArray(parsed.urls) && parsed.urls.length > 0) url = parsed.urls[0];
-        } catch {}
+        } catch { }
       }
       // Ensure URL has a protocol
       if (url && !/^https?:\/\//i.test(url)) {
@@ -1299,6 +1992,16 @@ class WebsiteSnippetInjector {
 
     if (!context) return;
 
+    if (context.type === 'googleDocs') {
+      logGoogleDocsDebug('Snippet variable decision', {
+        astFieldsCount: astFields.length,
+        rawVariables: rawStrings,
+        customVariablesCount: customVariables.length,
+        interactiveVariablesCount: interactiveVariables.length,
+        textPreview: textToInsert.slice(0, 120),
+      });
+    }
+
     // If there are custom variables, we'll insert text first then prompt for each
     const performInsertion = (text: string, html: string, cursorIndex?: number) => {
       switch (context.type) {
@@ -1312,8 +2015,24 @@ class WebsiteSnippetInjector {
             cursorIndex,
           );
           break;
+        case 'codeEditor':
+          if (context.element) {
+            this.insertIntoCodeEditor(
+              context.element,
+              context.selectionStart + queryLength,
+              text,
+              2 + queryLength,
+              cursorIndex,
+            );
+          } else {
+            this.insertIntoCodeEditorSurface(context.editor, text, 2 + queryLength, cursorIndex);
+          }
+          break;
         case 'googleSheets':
           this.insertIntoSheets(context.element, context.selectionStart, text, 2);
+          break;
+        case 'googleSheetsGrid':
+          this.insertIntoGoogleSheetsGrid(text, context.deleteCount);
           break;
         case 'contentEditable': {
           // Extend the slashRange to also cover the search query typed after c/
@@ -1375,22 +2094,53 @@ class WebsiteSnippetInjector {
     };
 
     // If there are custom variables, show the inline modal first
-    if (interactiveVariables.length > 0 && (context.type === 'input' || context.type === 'contentEditable')) {
-      const element = context.type === 'input' ? context.element : context.element;
+    if (
+      interactiveVariables.length > 0 &&
+      (context.type === 'input' ||
+        context.type === 'codeEditor' ||
+        context.type === 'contentEditable' ||
+        context.type === 'googleDocs')
+    ) {
+      const element =
+        context.type === 'contentEditable'
+          ? context.element
+          : context.type === 'codeEditor'
+            ? context.editor
+            : context.type === 'googleDocs'
+              ? document.body
+              : context.element;
+      if (context.type === 'googleDocs') {
+        logGoogleDocsDebug('Showing configuration modal before insert', {
+          interactiveVariablesCount: interactiveVariables.length,
+        });
+      }
       this.showInlineVariablesModal(
         element,
         interactiveVariables,
         textToInsert,
         htmlToInsert,
         (finalText, finalHtml) => {
+          this.closePopup();
+          if (context.type === 'googleDocs') {
+            logGoogleDocsDebug('Configuration modal submitted', {
+              finalTextPreview: finalText.slice(0, 120),
+            });
+          }
           performInsertion(finalText, finalHtml, cursorOffset);
-          this.finalizeCursor(element);
+          if (context.type !== 'googleDocs') {
+            this.finalizeCursor(element);
+          }
         },
       );
     } else {
       performInsertion(textToInsert, htmlToInsert, cursorOffset);
-      if (context.type === 'input' || context.type === 'contentEditable') {
-        const element = context.type === 'input' ? context.element : context.element;
+      if (context.type === 'input' || context.type === 'codeEditor' || context.type === 'contentEditable') {
+        const element =
+          context.type === 'contentEditable'
+            ? context.element
+            : context.type === 'codeEditor'
+              ? context.editor
+              : context.element;
         this.finalizeCursor(element);
       }
     }
@@ -1410,45 +2160,37 @@ class WebsiteSnippetInjector {
       left: '0',
       width: '100vw',
       height: '100vh',
-      backgroundColor: 'rgba(0,0,0,0.55)',
+      backgroundColor: 'rgba(0, 0, 0, 0.55)',
       zIndex: '2147483646',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      backdropFilter: 'blur(3px)',
+      backdropFilter: 'blur(4px)',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      colorScheme: 'dark',
     });
 
     const modal = document.createElement('div');
     Object.assign(modal.style, {
-      backgroundColor: '#1a1f2e',
-      border: '1px solid #2d3548',
-      borderRadius: '14px',
-      padding: '24px 24px 20px',
-      boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
-      width: '460px',
+      backgroundColor: '#161722',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      borderRadius: '12px',
+      padding: '18px 20px 12px',
+      boxShadow: '0 20px 50px rgba(0, 0, 0, 0.75)',
+      width: '700px',
       maxWidth: '92vw',
-      maxHeight: '80vh',
+      maxHeight: '86vh',
       display: 'flex',
       flexDirection: 'column',
-      gap: '0',
-      overflowY: 'auto',
+      gap: '12px',
+      overflow: 'hidden',
+      colorScheme: 'dark',
     });
-
-    // Header
-    const header = document.createElement('div');
-    Object.assign(header.style, { marginBottom: '16px' });
-    const title = document.createElement('div');
-    title.textContent = 'Fill in the Blanks';
-    Object.assign(title.style, { color: '#f1f5f9', fontSize: '16px', fontWeight: '600', letterSpacing: '-0.01em' });
-    header.appendChild(title);
-    modal.appendChild(header);
 
     // Deduplicate variables & exclude clipboard and date types
     const seen = new Set<string>();
     const uniqueVariables: Array<string | FieldNode> = [];
     variables.forEach(v => {
-      // Exclude special resolved fields (clipboard, date) from being treated as variables
       if (typeof v !== 'string' && (v.fieldType === 'clipboard' || v.fieldType === 'date')) {
         return;
       }
@@ -1462,266 +2204,609 @@ class WebsiteSnippetInjector {
         uniqueVariables.push(v);
       }
     });
-    const elementsMap = new Map<string, { getValue: () => string }>();
-    let firstInput: HTMLElement | null = null;
 
-    // Body: The text flows naturally like a document with inline elements
-    const bodyWrapper = document.createElement('div');
-    Object.assign(bodyWrapper.style, {
-      color: '#e2e8f0',
-      fontSize: '14px',
-      lineHeight: '1.7',
-      backgroundColor: '#0f1420',
-      border: '1px solid #2d3548',
-      borderRadius: '8px',
-      padding: '16px',
-      marginBottom: '20px',
-      whiteSpace: 'pre-wrap',
-      wordBreak: 'break-word',
+    // Map variable keys to their FieldNode definition or null
+    const varNodeMap = new Map<string, FieldNode | null>();
+    uniqueVariables.forEach(v => {
+      const key = typeof v === 'string' ? v : (v.config as any)?.label || v.alias || v.id;
+      varNodeMap.set(key, typeof v === 'string' ? null : v);
     });
 
-    // We split rawText by variable placeholders to build the inline structure
-    const currentText = rawText;
-    // Exclude clipboard and date types from sortedKeys to prevent rendering as input in text splits
-    const sortedKeys = uniqueVariables
-      .filter(v => {
-        if (typeof v === 'string') {
-          const lower = v.toLowerCase();
-          return lower !== 'clipboard' && lower !== 'date';
-        }
-        return v.fieldType !== 'clipboard' && v.fieldType !== 'date';
-      })
-      .map(v => {
-        const key = typeof v === 'string' ? v : (v.config as any)?.label || v.alias || v.id;
-        return { key, node: typeof v === 'string' ? null : v };
-      });
-    // Build the inline text element sequence
-    const renderInlineElements = () => {
-      // Find matches for any variable key format {{key}}
-      // We will match the placeholders in order of their appearance in the text
-      const regexParts: string[] = [];
-      sortedKeys.forEach(({ key }) => {
-        regexParts.push(`\\{\\{\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}`);
-      });
+    // Map to track current value getters for each variable
+    const elementsMap = new Map<string, { getValue: () => string }>();
+    let firstInteractiveControl: HTMLElement | null = null;
 
-      // Filter out the cursor marker from the preview text so the user does not see it
-      const previewText = rawText.replace(/\u200B__CURSOR__\u200B/g, '').replace(/__CURSOR__/g, '');
-      if (regexParts.length === 0) {
-        bodyWrapper.textContent = previewText;
-        return;
-      }
+    // 1. Header Section
+    const header = document.createElement('div');
+    Object.assign(header.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '2px',
+      paddingBottom: '20px',
+      flexShrink: '0',
+    });
 
-      const combinedRegex = new RegExp(`(${regexParts.join('|')})`, 'g');
-      const parts = previewText.split(combinedRegex);
+    const title = document.createElement('div');
+    title.textContent = 'Configure Variables';
+    Object.assign(title.style, {
+      color: '#f9fafb',
+      fontSize: '14.5px',
+      fontWeight: '650',
+      letterSpacing: '-0.01em',
+    });
 
-      parts.forEach(part => {
-        // Check if this part matches one of our variable keys
-        const matchedVar = sortedKeys.find(({ key }) => {
-          const re = new RegExp(`^\\{\\{\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}$`);
-          return re.test(part);
+    const subtitle = document.createElement('div');
+    subtitle.textContent = 'Fill the highlighted values before inserting.';
+    Object.assign(subtitle.style, {
+      color: 'rgba(255, 255, 255, 0.42)',
+      fontSize: '11.5px',
+      fontWeight: '400',
+      textAlign: 'left',
+    });
+
+    header.appendChild(title);
+    header.appendChild(subtitle);
+    modal.appendChild(header);
+
+    // 2. Document Area Outer Scroll Container
+    const docContainer = document.createElement('div');
+    Object.assign(docContainer.style, {
+      display: 'block',
+      overflowY: 'auto',
+      maxHeight: '65vh',
+      padding: '16px',
+      border: '1px solid rgba(255, 255, 255, 0.06)',
+      borderRadius: '4px',
+      backgroundColor: 'transparent',
+      color: 'rgba(255, 255, 255, 0.90)',
+      fontSize: '15px',
+      flexShrink: '1',
+      textAlign: 'left',
+    });
+
+    // Inner Flex Wrap Flow Container for Perfect Row Calculation & Spacing
+    const flexFlow = document.createElement('div');
+    Object.assign(flexFlow.style, {
+      display: 'flex',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      columnGap: '4px',
+      rowGap: '10px',
+      lineHeight: '1.5',
+    });
+    docContainer.appendChild(flexFlow);
+
+    // Helper to create helper text hidden canvas for auto-sizing text inputs
+    const hiddenMeasurer = document.createElement('span');
+    Object.assign(hiddenMeasurer.style, {
+      position: 'absolute',
+      visibility: 'hidden',
+      whiteSpace: 'pre',
+      fontSize: '14px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      padding: '0 8px',
+    });
+    document.body.appendChild(hiddenMeasurer);
+
+    // Helper function to build per-component custom inline variable elements
+    const createInlineVariableElement = (key: string): HTMLElement => {
+      const fieldNode = varNodeMap.get(key);
+      const fieldType = (fieldNode?.fieldType as string) || 'text';
+
+      if (fieldType === 'dropdown') {
+        const select = document.createElement('select');
+        Object.assign(select.style, {
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          whiteSpace: 'nowrap',
+          flexShrink: '0',
+          height: '28px',
+          padding: '0 20px 0 8px',
+          backgroundColor: '#20212A',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '8px',
+          color: 'rgba(255, 255, 255, 0.90)',
+          fontSize: '14px',
+          outline: 'none',
+          cursor: 'pointer',
+          appearance: 'none',
+          colorScheme: 'dark',
+          backgroundImage:
+            "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'right 6px center',
+          backgroundSize: '10px',
+          transition: 'all 150ms ease',
         });
 
-        if (matchedVar) {
-          const { key, node } = matchedVar;
-          const fieldType = node?.fieldType || 'text';
-          if (fieldType === 'dropdown') {
-            const select = document.createElement('select');
-            Object.assign(select.style, {
-              display: 'inline-block',
-              padding: '4px 26px 4px 10px',
-              margin: '0 4px',
-              backgroundColor: '#1e2538',
-              border: '1px solid #3b455c',
-              borderRadius: '6px',
-              color: '#f1f5f9',
-              fontSize: '13px',
-              outline: 'none',
-              cursor: 'pointer',
-              verticalAlign: 'baseline',
-              appearance: 'none',
-              backgroundImage:
-                "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23B89DF5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-              backgroundRepeat: 'no-repeat',
-              backgroundPosition: 'right 8px center',
-              backgroundSize: '12px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-            });
-            const opts = (node!.config as any)?.options || [];
-            opts.forEach((opt: string) => {
-              const o = document.createElement('option');
-              o.value = opt;
-              o.textContent = opt;
-              select.appendChild(o);
-            });
-            select.addEventListener('focus', () => {
-              select.style.borderColor = '#B89DF5';
-              select.style.boxShadow = '0 0 0 2px rgba(184,157,245,0.25)';
-            });
-            select.addEventListener('blur', () => {
-              select.style.borderColor = '#3b455c';
-              select.style.boxShadow = 'none';
-            });
-            bodyWrapper.appendChild(select);
-            elementsMap.set(key, { getValue: () => select.value });
-            if (!firstInput) firstInput = select;
-          } else if (fieldType === 'toggle') {
-            const cfg = (node!.config as any) || {};
-            const trueLabel = cfg.trueLabel || 'Yes';
-            const falseLabel = cfg.falseLabel || 'No';
+        const opts = (fieldNode!.config as any)?.options || [];
+        opts.forEach((opt: string) => {
+          const o = document.createElement('option');
+          o.value = opt;
+          o.textContent = opt;
+          o.style.backgroundColor = '#161722';
+          o.style.color = '#f9fafb';
+          o.style.colorScheme = 'dark';
+          select.appendChild(o);
+        });
 
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.defaultChecked = cfg.defaultValue === true;
-            Object.assign(checkbox.style, {
-              display: 'inline-block',
-              margin: '0 6px',
-              width: '16px',
-              height: '16px',
-              accentColor: '#B89DF5',
-              cursor: 'pointer',
-              verticalAlign: 'middle',
-            });
-            bodyWrapper.appendChild(checkbox);
-            elementsMap.set(key, { getValue: () => (checkbox.checked ? trueLabel : falseLabel) });
-            if (!firstInput) firstInput = checkbox;
-          } else {
-            // Text blank
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.placeholder = key.toLowerCase();
-            Object.assign(input.style, {
-              display: 'inline-block',
-              padding: '4px 10px',
-              margin: '0 4px',
-              backgroundColor: '#1e2538',
-              border: '1px solid #3b455c',
-              borderRadius: '6px',
-              color: '#f1f5f9',
-              fontSize: '13px',
-              outline: 'none',
-              width: '100px',
-              verticalAlign: 'baseline',
-              boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.2)',
-              transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-            });
-            input.addEventListener('focus', () => {
-              input.style.borderColor = '#B89DF5';
-              input.style.boxShadow = '0 0 0 2px rgba(184,157,245,0.25)';
-            });
-            input.addEventListener('blur', () => {
-              input.style.borderColor = '#3b455c';
-              input.style.boxShadow = 'none';
-            });
-            bodyWrapper.appendChild(input);
-            elementsMap.set(key, { getValue: () => input.value });
-            if (!firstInput) firstInput = input;
+        select.addEventListener('focus', () => {
+          select.style.backgroundColor = '#242630';
+          select.style.borderColor = 'rgba(255, 255, 255, 0.24)';
+          select.style.boxShadow = '0 0 0 2px rgba(255, 255, 255, 0.04)';
+        });
+        select.addEventListener('blur', () => {
+          select.style.backgroundColor = '#20212A';
+          select.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          select.style.boxShadow = 'none';
+        });
+        select.addEventListener('mouseenter', () => {
+          if (document.activeElement !== select) {
+            select.style.backgroundColor = '#242630';
+            select.style.borderColor = 'rgba(255, 255, 255, 0.15)';
           }
-        } else {
-          // Regular text
-          bodyWrapper.appendChild(document.createTextNode(part));
-        }
+        });
+        select.addEventListener('mouseleave', () => {
+          if (document.activeElement !== select) {
+            select.style.backgroundColor = '#20212A';
+            select.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          }
+        });
+
+        elementsMap.set(key, { getValue: () => select.value });
+        if (!firstInteractiveControl) firstInteractiveControl = select;
+        return select;
+
+      } else if (fieldType === 'checkbox') {
+        const wrapper = document.createElement('label');
+        Object.assign(wrapper.style, {
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+          whiteSpace: 'nowrap',
+          flexShrink: '0',
+          height: '28px',
+          padding: '0 8px',
+          backgroundColor: '#20212A',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '8px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          boxSizing: 'border-box',
+          transition: 'all 150ms ease',
+        });
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = (fieldNode!.config as any)?.defaultValue === true;
+        Object.assign(checkbox.style, {
+          width: '14px',
+          height: '14px',
+          margin: '0',
+          appearance: 'none',
+          WebkitAppearance: 'none',
+          backgroundColor: checkbox.checked ? '#3A3C46' : 'transparent',
+          border: checkbox.checked ? '1px solid rgba(255, 255, 255, 0.24)' : '1px solid rgba(255, 255, 255, 0.18)',
+          borderRadius: '4px',
+          cursor: 'pointer',
+          outline: 'none',
+          position: 'relative',
+          transition: 'all 150ms ease',
+        });
+
+        const updateCheckboxVisual = () => {
+          if (checkbox.checked) {
+            checkbox.style.backgroundColor = '#3A3C46';
+            checkbox.style.borderColor = 'rgba(255, 255, 255, 0.24)';
+            checkbox.style.backgroundImage =
+              "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E\")";
+            checkbox.style.backgroundRepeat = 'no-repeat';
+            checkbox.style.backgroundPosition = 'center';
+            checkbox.style.backgroundSize = '9px';
+          } else {
+            checkbox.style.backgroundColor = 'transparent';
+            checkbox.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+            checkbox.style.backgroundImage = 'none';
+          }
+        };
+        updateCheckboxVisual();
+
+        checkbox.addEventListener('focus', () => {
+          wrapper.style.backgroundColor = '#242630';
+          wrapper.style.borderColor = 'rgba(255, 255, 255, 0.24)';
+          wrapper.style.boxShadow = '0 0 0 2px rgba(255, 255, 255, 0.04)';
+        });
+        checkbox.addEventListener('blur', () => {
+          wrapper.style.backgroundColor = '#20212A';
+          wrapper.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          wrapper.style.boxShadow = 'none';
+          updateCheckboxVisual();
+        });
+        wrapper.addEventListener('mouseenter', () => {
+          if (document.activeElement !== checkbox) {
+            wrapper.style.backgroundColor = '#242630';
+            wrapper.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+          }
+        });
+        wrapper.addEventListener('mouseleave', () => {
+          if (document.activeElement !== checkbox) {
+            wrapper.style.backgroundColor = '#20212A';
+            wrapper.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          }
+        });
+        checkbox.addEventListener('change', () => {
+          updateCheckboxVisual();
+        });
+
+        const labelText = document.createElement('span');
+        labelText.textContent = key;
+        Object.assign(labelText.style, {
+          fontSize: '14px',
+          color: 'rgba(255, 255, 255, 0.90)',
+          fontWeight: '500',
+        });
+
+        wrapper.appendChild(checkbox);
+        wrapper.appendChild(labelText);
+
+        elementsMap.set(key, { getValue: () => (checkbox.checked ? key : '') });
+        if (!firstInteractiveControl) firstInteractiveControl = checkbox;
+        return wrapper;
+
+      } else if (fieldType === 'toggle') {
+        const cfg = (fieldNode!.config as any) || {};
+        const trueLabel = cfg.trueLabel || 'Yes';
+        const falseLabel = cfg.falseLabel || 'No';
+        let isChecked = cfg.defaultValue === true;
+
+        const segmentedControl = document.createElement('div');
+        Object.assign(segmentedControl.style, {
+          display: 'inline-flex',
+          alignItems: 'center',
+          whiteSpace: 'nowrap',
+          flexShrink: '0',
+          backgroundColor: 'rgba(255, 255, 255, 0.04)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '8px',
+          padding: '1.5px',
+          gap: '2px',
+          height: '28px',
+          boxSizing: 'border-box',
+          transition: 'all 150ms ease',
+        });
+
+        const yesBtn = document.createElement('button');
+        yesBtn.type = 'button';
+        yesBtn.textContent = trueLabel;
+
+        const noBtn = document.createElement('button');
+        noBtn.type = 'button';
+        noBtn.textContent = falseLabel;
+
+        const updateSegmentStyles = () => {
+          Object.assign(yesBtn.style, {
+            height: '22px',
+            padding: '0 10px',
+            borderRadius: '5.5px',
+            fontSize: '13px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            border: isChecked ? '1px solid rgba(255, 255, 255, 0.12)' : 'none',
+            backgroundColor: isChecked ? '#3A3C46' : 'transparent',
+            color: isChecked ? '#FFFFFF' : 'rgba(255, 255, 255, 0.62)',
+            transition: 'all 150ms ease',
+          });
+
+          Object.assign(noBtn.style, {
+            height: '22px',
+            padding: '0 10px',
+            borderRadius: '5.5px',
+            fontSize: '13px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            border: !isChecked ? '1px solid rgba(255, 255, 255, 0.12)' : 'none',
+            backgroundColor: !isChecked ? '#3A3C46' : 'transparent',
+            color: !isChecked ? '#FFFFFF' : 'rgba(255, 255, 255, 0.62)',
+            transition: 'all 150ms ease',
+          });
+        };
+
+        updateSegmentStyles();
+
+        yesBtn.addEventListener('focus', () => {
+          segmentedControl.style.backgroundColor = '#242630';
+          segmentedControl.style.borderColor = 'rgba(255, 255, 255, 0.24)';
+          segmentedControl.style.boxShadow = '0 0 0 2px rgba(255, 255, 255, 0.04)';
+        });
+        yesBtn.addEventListener('blur', () => {
+          segmentedControl.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+          segmentedControl.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          segmentedControl.style.boxShadow = 'none';
+        });
+        noBtn.addEventListener('focus', () => {
+          segmentedControl.style.backgroundColor = '#242630';
+          segmentedControl.style.borderColor = 'rgba(255, 255, 255, 0.24)';
+          segmentedControl.style.boxShadow = '0 0 0 2px rgba(255, 255, 255, 0.04)';
+        });
+        noBtn.addEventListener('blur', () => {
+          segmentedControl.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+          segmentedControl.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          segmentedControl.style.boxShadow = 'none';
+        });
+
+        yesBtn.addEventListener('click', () => {
+          isChecked = true;
+          updateSegmentStyles();
+        });
+
+        noBtn.addEventListener('click', () => {
+          isChecked = false;
+          updateSegmentStyles();
+        });
+
+        segmentedControl.appendChild(yesBtn);
+        segmentedControl.appendChild(noBtn);
+
+        elementsMap.set(key, { getValue: () => (isChecked ? trueLabel : falseLabel) });
+        if (!firstInteractiveControl) firstInteractiveControl = yesBtn;
+        return segmentedControl;
+
+      } else {
+        // Default text variable input with neutral styling
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = key;
+
+        const autoFitWidth = () => {
+          hiddenMeasurer.textContent = input.value || input.placeholder || key;
+          const measuredWidth = Math.max(90, Math.min(hiddenMeasurer.offsetWidth + 40, 260));
+          input.style.width = `${measuredWidth}px`;
+        };
+
+        Object.assign(input.style, {
+          display: 'inline-block',
+          flexShrink: '1',
+          maxWidth: '100%',
+          height: '28px',
+          padding: '0 8px',
+          backgroundColor: '#20212A',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '4px',
+          color: 'rgba(255, 255, 255, 0.90)',
+          fontSize: '14px',
+          outline: 'none',
+          boxSizing: 'border-box',
+          colorScheme: 'dark',
+          transition: 'all 150ms ease',
+        });
+
+        const updatePlaceholderStyle = () => {
+          input.style.color = input.value ? 'rgba(255, 255, 255, 0.90)' : 'rgba(255, 255, 255, 0.90)';
+        };
+
+        autoFitWidth();
+        updatePlaceholderStyle();
+
+        input.addEventListener('focus', () => {
+          input.style.backgroundColor = '#242630';
+          input.style.borderColor = 'rgba(255, 255, 255, 0.24)';
+          input.style.boxShadow = '0 0 0 2px rgba(255, 255, 255, 0.04)';
+        });
+        input.addEventListener('blur', () => {
+          input.style.backgroundColor = '#20212A';
+          input.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          input.style.boxShadow = 'none';
+        });
+        input.addEventListener('mouseenter', () => {
+          if (document.activeElement !== input) {
+            input.style.backgroundColor = '#242630';
+            input.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+          }
+        });
+        input.addEventListener('mouseleave', () => {
+          if (document.activeElement !== input) {
+            input.style.backgroundColor = '#20212A';
+            input.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          }
+        });
+        input.addEventListener('input', () => {
+          autoFitWidth();
+          updatePlaceholderStyle();
+        });
+
+        elementsMap.set(key, { getValue: () => input.value });
+        if (!firstInteractiveControl) firstInteractiveControl = input;
+        return input;
+      }
+    };
+
+    // Helper to append text fragments safely into flexFlow
+    const appendTextFragments = (text: string) => {
+      if (!text) return;
+      const parts = text.split(/(\s+)/);
+      parts.forEach(part => {
+        if (!part) return;
+        const span = document.createElement('span');
+        span.textContent = part;
+        span.style.whiteSpace = 'pre-wrap';
+        flexFlow.appendChild(span);
       });
     };
 
-    renderInlineElements();
-    modal.appendChild(bodyWrapper);
+    // Render snippet text into flex items flow
+    let textToProcess = rawText.split(CURSOR_MARKER).join('').replace(/__CURSOR__/g, '');
+    const placeholderRegex = /\{\{\s*([^}]+)\s*\}\}/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
 
-    // Buttons
+    while ((match = placeholderRegex.exec(textToProcess)) !== null) {
+      const varKey = match[1].trim();
+
+      // Skip non-interactive variables (clipboard, date)
+      if (varKey.toLowerCase() === 'clipboard' || varKey.toLowerCase() === 'date') {
+        const textBefore = textToProcess.substring(lastIndex, match.index);
+        if (textBefore) {
+          appendTextFragments(textBefore);
+        }
+        lastIndex = placeholderRegex.lastIndex;
+        continue;
+      }
+
+      const textBefore = textToProcess.substring(lastIndex, match.index);
+      if (textBefore) {
+        appendTextFragments(textBefore);
+      }
+
+      if (varNodeMap.has(varKey)) {
+        const inlineCtrl = createInlineVariableElement(varKey);
+        flexFlow.appendChild(inlineCtrl);
+      } else {
+        appendTextFragments(match[0]);
+      }
+
+      lastIndex = placeholderRegex.lastIndex;
+    }
+
+    const remainingText = textToProcess.substring(lastIndex);
+    if (remainingText) {
+      appendTextFragments(remainingText);
+    }
+
+    // 3. Action Buttons placed inside docContainer at bottom right
     const buttons = document.createElement('div');
-    Object.assign(buttons.style, { display: 'flex', justifyContent: 'flex-end', gap: '10px' });
+    buttons.style.display = 'flex';
+    buttons.style.alignItems = 'center';
+    buttons.style.justifyContent = 'flex-end';
+    buttons.style.gap = '8px';
+    buttons.style.marginTop = '28px';
+    buttons.style.flexShrink = '0';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'Cancel';
     Object.assign(cancelBtn.style, {
-      padding: '8px 16px',
-      border: '1px solid #2d3548',
-      borderRadius: '6px',
+      height: '34px',
+      padding: '0 14px',
+      border: '1px solid rgba(255, 255, 255, 0.10)',
+      borderRadius: '9px',
       backgroundColor: 'transparent',
-      color: '#94a3b8',
+      color: 'rgba(255, 255, 255, 0.62)',
       cursor: 'pointer',
-      fontSize: '13px',
+      fontSize: '14px',
       fontWeight: '500',
+      transition: 'all 150ms ease',
     });
     cancelBtn.addEventListener('mouseenter', () => {
-      cancelBtn.style.backgroundColor = '#1e2635';
-      cancelBtn.style.color = '#e2e8f0';
+      cancelBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+      cancelBtn.style.color = 'rgba(255, 255, 255, 0.88)';
     });
     cancelBtn.addEventListener('mouseleave', () => {
       cancelBtn.style.backgroundColor = 'transparent';
-      cancelBtn.style.color = '#94a3b8';
+      cancelBtn.style.color = 'rgba(255, 255, 255, 0.62)';
     });
 
     const insertBtn = document.createElement('button');
     insertBtn.textContent = 'Insert';
     Object.assign(insertBtn.style, {
-      padding: '8px 18px',
-      border: 'none',
-      borderRadius: '6px',
-      background: 'linear-gradient(135deg, #B89DF5 0%, #9b73f0 100%)',
-      color: 'white',
+      height: '34px',
+      padding: '0 18px',
+      border: '1px solid rgba(255, 255, 255, 0.18)',
+      borderRadius: '9px',
+      backgroundColor: '#E7E7EA',
+      color: '#17181F',
       cursor: 'pointer',
-      fontSize: '13px',
+      fontSize: '14px',
       fontWeight: '600',
-      boxShadow: '0 2px 10px rgba(184,157,245,0.2)',
+      boxShadow: '0 6px 18px rgba(0, 0, 0, 0.22)',
+      transition: 'all 150ms ease',
+    });
+    insertBtn.addEventListener('mouseenter', () => {
+      insertBtn.style.backgroundColor = '#F2F2F4';
+    });
+    insertBtn.addEventListener('mouseleave', () => {
+      insertBtn.style.backgroundColor = '#E7E7EA';
+    });
+    insertBtn.addEventListener('mousedown', () => {
+      insertBtn.style.backgroundColor = '#DADAE0';
+    });
+    insertBtn.addEventListener('mouseup', () => {
+      insertBtn.style.backgroundColor = '#F2F2F4';
     });
 
     buttons.appendChild(cancelBtn);
     buttons.appendChild(insertBtn);
-    modal.appendChild(buttons);
+    docContainer.appendChild(buttons);
+    modal.appendChild(docContainer);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    if (firstInput) setTimeout(() => (firstInput as HTMLElement).focus(), 50);
+    if (firstInteractiveControl) setTimeout(() => (firstInteractiveControl as HTMLElement).focus(), 50);
     else setTimeout(() => insertBtn.focus(), 50);
 
-    const doInsert = () => {
+    const doInsert = (event?: Event) => {
+      event?.preventDefault();
+      event?.stopPropagation();
+
       let finalText = rawText;
       let finalHtml = rawHtml;
-      elementsMap.forEach((data, varKey) => {
-        const val = data.getValue();
-        const re = new RegExp(`\\{\\{\\s*${varKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}`, 'g');
+
+      for (const [key, getter] of elementsMap.entries()) {
+        const val = getter.getValue();
+        const re = new RegExp(`\\{\\{\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}`, 'g');
         finalText = finalText.replace(re, val);
-        finalHtml = finalHtml.replace(re, val);
-      });
+        if (finalHtml) {
+          finalHtml = finalHtml.replace(re, val);
+        }
+      }
+
+      hiddenMeasurer.remove();
       overlay.remove();
+      this.closePopup();
       onComplete(finalText, finalHtml);
     };
 
-    const doCancel = () => overlay.remove();
+    const doCancel = (event?: Event) => {
+      event?.preventDefault();
+      event?.stopPropagation();
+      hiddenMeasurer.remove();
+      overlay.remove();
+      this.closePopup();
+    };
 
     insertBtn.addEventListener('click', doInsert);
     cancelBtn.addEventListener('click', doCancel);
-    overlay.addEventListener('click', e => {
-      if (e.target === overlay) doCancel();
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        doCancel(e);
+      }
     });
 
-    modal.addEventListener('keydown', e => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        doCancel();
-      } else if (e.key === 'Enter' && document.activeElement?.tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        doInsert();
+    modal.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        doInsert(e);
+      } else if (e.key === 'Escape') {
+        doCancel(e);
       }
     });
   }
 
   private finalizeCursor(element: HTMLElement) {
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-      const idx = element.value.indexOf('\u200B__CURSOR__\u200B');
+      const idx = element.value.indexOf(CURSOR_MARKER);
       if (idx !== -1) {
-        element.value = element.value.replace('\u200B__CURSOR__\u200B', '');
-        element.setSelectionRange(idx, idx);
+        element.value = element.value.replace(CURSOR_MARKER, '');
         element.dispatchEvent(new Event('input', { bubbles: true }));
+        setStandardInputCaret(element, idx);
       }
     } else if (element.isContentEditable) {
       // Robust TreeWalker to find the zero-width cursor marker in text nodes
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
       let node = walker.nextNode();
       while (node) {
-        if (node.nodeValue && node.nodeValue.includes('\u200B__CURSOR__\u200B')) {
-          const idx = node.nodeValue.indexOf('\u200B__CURSOR__\u200B');
-          node.nodeValue = node.nodeValue.replace('\u200B__CURSOR__\u200B', '');
+        if (node.nodeValue && node.nodeValue.includes(CURSOR_MARKER)) {
+          const idx = node.nodeValue.indexOf(CURSOR_MARKER);
+          node.nodeValue = node.nodeValue.replace(CURSOR_MARKER, '');
 
           const selection = window.getSelection();
           if (selection) {
@@ -1745,15 +2830,18 @@ class WebsiteSnippetInjector {
     deleteCount: number,
     cursorOffset?: number,
   ) {
+    const { cleanedText, resolvedOffset } = resolveCursorMarker(text, cursorOffset);
     const start = Math.max(0, selectionStart - deleteCount);
     const before = element.value.slice(0, start);
     const after = element.value.slice(selectionStart);
-    const nextValue = `${before}${text}${after}`;
+    const nextValue = `${before}${cleanedText}${after}`;
     element.value = nextValue;
 
-    const cursor = cursorOffset !== undefined ? before.length + cursorOffset : before.length + text.length;
-    element.setSelectionRange(cursor, cursor);
     dispatchInputEvents(element);
+
+    const offset =
+      resolvedOffset !== undefined ? Math.max(0, Math.min(resolvedOffset, cleanedText.length)) : cleanedText.length;
+    setStandardInputCaret(element, before.length + offset);
   }
 
   private insertIntoSheets(
@@ -1772,27 +2860,194 @@ class WebsiteSnippetInjector {
     }
   }
 
+  private insertIntoGoogleSheetsGrid(text: string, deleteCount: number) {
+    const { cleanedText } = resolveCursorMarker(text);
+    const target = document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
+
+    target.focus();
+
+    for (let i = 0; i < deleteCount; i++) {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Backspace',
+          code: 'Backspace',
+          keyCode: 8,
+          which: 8,
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+      target.dispatchEvent(
+        new KeyboardEvent('keyup', {
+          key: 'Backspace',
+          code: 'Backspace',
+          keyCode: 8,
+          which: 8,
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+    }
+
+    try {
+      if (document.execCommand('insertText', false, cleanedText)) return;
+    } catch { }
+
+    target.dispatchEvent(
+      new InputEvent('input', {
+        data: cleanedText,
+        inputType: 'insertText',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }
+
+  private insertIntoCodeEditor(
+    element: HTMLInputElement | HTMLTextAreaElement,
+    selectionStart: number,
+    text: string,
+    deleteCount: number,
+    cursorOffset?: number,
+  ) {
+    const { cleanedText } = resolveCursorMarker(text, cursorOffset);
+    const currentSelectionStart =
+      typeof element.selectionStart === 'number' && element.selectionStart >= 0 ? element.selectionStart : selectionStart;
+    const valueBefore = element.value.slice(0, currentSelectionStart);
+    const triggerIndex = findLastSnippetPopupTrigger(valueBefore);
+    const safeSelectionStart =
+      triggerIndex !== -1 && currentSelectionStart - triggerIndex <= Math.max(deleteCount, 2) + 100
+        ? currentSelectionStart
+        : selectionStart;
+    const start = Math.max(0, safeSelectionStart - deleteCount);
+
+    try {
+      element.focus({ preventScroll: true });
+    } catch {
+      element.focus();
+    }
+
+    element.setSelectionRange(start, safeSelectionStart);
+
+    const deletedSelection = document.execCommand('delete');
+    const insertedText = document.execCommand('insertText', false, cleanedText);
+
+    if (!deletedSelection || !insertedText) {
+      this.insertIntoStandardInput(element, safeSelectionStart, cleanedText, deleteCount);
+    }
+  }
+
+  private insertIntoCodeEditorSurface(editor: HTMLElement, text: string, deleteCount: number, cursorOffset?: number) {
+    const { cleanedText } = resolveCursorMarker(text, cursorOffset);
+
+    try {
+      editor.focus({ preventScroll: true });
+    } catch {
+      editor.focus();
+    }
+
+    for (let i = 0; i < deleteCount; i += 1) {
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Backspace',
+          code: 'Backspace',
+          keyCode: 8,
+          which: 8,
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+      editor.dispatchEvent(
+        new KeyboardEvent('keyup', {
+          key: 'Backspace',
+          code: 'Backspace',
+          keyCode: 8,
+          which: 8,
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+    }
+
+    try {
+      if (document.execCommand('insertText', false, cleanedText)) {
+        return;
+      }
+    } catch { }
+
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
   private insertIntoContentEditable(element: HTMLElement, slashRange: Range, text: string, html: string = text) {
-    element.focus();
+    const { cleanedText } = resolveCursorMarker(text);
+    const { cleanedText: cleanedHtml } = resolveCursorMarker(html);
+    const isWhatsAppEditor = window.location.hostname.includes('web.whatsapp.com');
+    const isCkEditor = Boolean(
+      element.closest('.ck-editor__editable, .ck-content, [data-cke-editable], .ck-editor'),
+    );
+
+    try {
+      element.focus({ preventScroll: true });
+    } catch {
+      element.focus();
+    }
     const selection = window.getSelection();
     if (!selection) return;
 
-    try {
-      // Method 1: Use execCommand('insertHTML') which handles formatting correctly
-      // First, select the range we want to replace
+    const notifyEditor = () => {
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    const dispatchSyntheticPaste = () => {
+      try {
+        const clipboardData = new DataTransfer();
+        clipboardData.setData('text/plain', cleanedText);
+        clipboardData.setData('text/html', cleanedHtml || cleanedText.replace(/\n/g, '<br>'));
+
+        const pasteEvent = new ClipboardEvent('paste', {
+          bubbles: true,
+          cancelable: true,
+          clipboardData,
+        });
+
+        const allowedDefault = element.dispatchEvent(pasteEvent);
+        return !allowedDefault || pasteEvent.defaultPrevented;
+      } catch (e) {
+        console.warn('[SlashNotes] Synthetic paste failed, falling back to direct insertion', e);
+        return false;
+      }
+    };
+
+    if (isCkEditor && !isWhatsAppEditor) {
       selection.removeAllRanges();
       selection.addRange(slashRange);
 
-      // Attempt to use execCommand which simulates user typing/pasting
-      // This is deprecated but still the most reliable way to interact with complex editors like Gmail/Docs
-      const success =
-        document.execCommand('insertHTML', false, html) || document.execCommand('insertText', false, text);
-
-      if (success) {
+      if (dispatchSyntheticPaste()) {
         return;
       }
-    } catch (e) {
-      console.warn('[SlashNotes] execCommand failed, falling back to manual insertion', e);
+    }
+
+    if (!isWhatsAppEditor && !isCkEditor) {
+      try {
+        selection.removeAllRanges();
+        selection.addRange(slashRange);
+
+        const success =
+          document.execCommand('insertHTML', false, cleanedHtml) ||
+          document.execCommand('insertText', false, cleanedText);
+
+        if (success) {
+          notifyEditor();
+          return;
+        }
+      } catch (e) {
+        console.warn('[SlashNotes] execCommand failed, falling back to manual insertion', e);
+      }
     }
 
     // Fallback: Manual insertion if execCommand fails
@@ -1802,16 +3057,21 @@ class WebsiteSnippetInjector {
     slashRange.deleteContents();
 
     // Check if text has newlines
-    if (text.includes('\n')) {
+    if (cleanedText.includes('\n')) {
       const fragment = document.createDocumentFragment();
-      const lines = text.split('\n');
+      const lines = cleanedText.split('\n');
+      let lastInsertedNode: Node | null = null;
 
       lines.forEach((line, index) => {
         if (index > 0) {
-          fragment.appendChild(document.createElement('br'));
+          const br = document.createElement('br');
+          fragment.appendChild(br);
+          lastInsertedNode = br;
         }
         if (line) {
-          fragment.appendChild(document.createTextNode(line));
+          const textNode = document.createTextNode(line);
+          fragment.appendChild(textNode);
+          lastInsertedNode = textNode;
         }
       });
 
@@ -1821,11 +3081,17 @@ class WebsiteSnippetInjector {
       // Update cursor position
       selection.removeAllRanges();
       const collapseRange = document.createRange();
-      collapseRange.setStartAfter(fragment.lastChild || fragment);
+      const targetNode = lastInsertedNode as Node | null;
+      if (targetNode?.parentNode) {
+        collapseRange.setStartAfter(targetNode);
+      } else {
+        collapseRange.selectNodeContents(element);
+        collapseRange.collapse(false);
+      }
       collapseRange.collapse(true);
       selection.addRange(collapseRange);
     } else {
-      const textNode = document.createTextNode(text);
+      const textNode = document.createTextNode(cleanedText);
       const insertRange = slashRange.cloneRange();
       insertRange.insertNode(textNode);
 
@@ -1836,8 +3102,7 @@ class WebsiteSnippetInjector {
       selection.addRange(collapseRange);
     }
 
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
+    notifyEditor();
   }
 
   private async insertIntoGoogleDocs(
@@ -1850,22 +3115,77 @@ class WebsiteSnippetInjector {
     try {
       const win = iframe.contentWindow;
       const doc = iframe.contentDocument;
-      if (!win || !doc) return;
-
-      if (!this.injectedDocsIframes.has(iframe)) {
-        const script = doc.createElement('script');
-        script.src = chrome.runtime.getURL('content/injected.js');
-        script.onload = () => {
-          script.remove();
-        };
-        (doc.head || doc.documentElement).appendChild(script);
-        this.injectedDocsIframes.add(iframe);
+      if (!win || !doc) {
+        logGoogleDocsDebug('Insert aborted: iframe window/document is missing', {
+          hasWindow: Boolean(win),
+          hasDocument: Boolean(doc),
+        });
+        return;
       }
 
+      logGoogleDocsDebug('Preparing insert into Google Docs', {
+        textLength: text.length,
+        htmlLength: html.length,
+        deleteCount,
+        iframeReadyState: doc.readyState,
+        alreadyInjected: this.injectedDocsIframes.has(iframe),
+      });
+
+      if (!this.injectedDocsIframes.has(iframe)) {
+        let loader = this.injectedDocsIframeLoaders.get(iframe);
+
+        if (!loader) {
+          logGoogleDocsDebug('Injecting Google Docs insertion script');
+          loader = new Promise<void>((resolve, reject) => {
+            const script = doc.createElement('script');
+            const timeout = window.setTimeout(() => {
+              script.remove();
+              this.injectedDocsIframeLoaders.delete(iframe);
+              logGoogleDocsDebug('Insertion script load timed out');
+              reject(new Error('Timed out loading Google Docs insertion script'));
+            }, 3000);
+
+            script.src = chrome.runtime.getURL('content/injected.js');
+            script.onload = () => {
+              window.clearTimeout(timeout);
+              script.remove();
+              this.injectedDocsIframes.add(iframe);
+              logGoogleDocsDebug('Insertion script loaded');
+              resolve();
+            };
+            script.onerror = () => {
+              window.clearTimeout(timeout);
+              script.remove();
+              this.injectedDocsIframeLoaders.delete(iframe);
+              logGoogleDocsDebug('Insertion script failed to load');
+              reject(new Error('Failed to load Google Docs insertion script'));
+            };
+            (doc.head || doc.documentElement).appendChild(script);
+          });
+
+          this.injectedDocsIframeLoaders.set(iframe, loader);
+        }
+
+        await loader;
+      }
+
+      const { cleanedText } = resolveCursorMarker(text);
+
       // Send message to the iframe's window to trigger the insertion
-      win.postMessage({ type: 'TASKLABS_INSERT_TEXT', text, html, deleteCount }, '*');
+      logGoogleDocsDebug('Posting insert message to iframe', {
+        textPreview: cleanedText.slice(0, 40),
+        deleteCount,
+      });
+      win.dispatchEvent(
+        new CustomEvent('TASKLABS_INSERT_TEXT', {
+          detail: { type: 'TASKLABS_INSERT_TEXT', text: cleanedText, html: cleanedText, deleteCount },
+        }),
+      );
     } catch (error) {
       console.warn('[SlashNotes] Failed to insert into Google Docs:', error);
+      logGoogleDocsDebug('Insert failed with exception', {
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -2080,5 +3400,4 @@ class WebsiteSnippetInjector {
 // Enables hotkeys to work on any website, not just the new tab page.
 // Listens for key combinations and sends messages to background script to open links.
 
-new WebsiteSnippetInjector();
 export { WebsiteSnippetInjector };

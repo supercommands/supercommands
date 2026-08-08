@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAppearance } from '@extension/ui';
 import { FaTimes, FaPlus, FaCheck, FaFolder, FaUsers, FaGlobe, FaLock, FaChevronDown } from 'react-icons/fa';
 import { LuSave } from 'react-icons/lu';

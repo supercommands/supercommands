@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FaCheck, FaEdit, FaTimes } from 'react-icons/fa';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';

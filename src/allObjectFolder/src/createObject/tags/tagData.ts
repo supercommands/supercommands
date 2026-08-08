@@ -19,10 +19,20 @@ export const createTag = async (
   workspaceId: string
 ): Promise<TagRecord> => {
   try {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Tag name cannot be empty');
+
+    // Prevent duplicate tags in same workspace or globally
+    const allTags = await db.tags.toArray();
+    const existing = allTags.find(t => t.name.trim().toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      return existing;
+    }
+
     const now = Date.now();
     const newTag: TagRecord = {
       id: generateEntityId('tag'),
-      name,
+      name: trimmed,
       workspaceId,
       createdAt: now,
       updatedAt: now

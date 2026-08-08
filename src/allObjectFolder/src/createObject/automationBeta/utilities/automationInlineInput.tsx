@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { FaChevronDown, FaCode, FaHistory, FaBookmark, FaPlus } from 'react-icons/fa';
 

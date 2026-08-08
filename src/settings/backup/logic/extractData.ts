@@ -26,6 +26,8 @@ export const extractDatabaseToJSON = async (versionNumber: number = 1): Promise<
     'tags',
     'userHotkeys',
     'userShortcuts',
+    'triggerDailySummary',
+    'triggerDailyBreakdown',
     'favorites',
     'commands',
   ] as const;

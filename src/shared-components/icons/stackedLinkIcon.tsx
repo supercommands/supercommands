@@ -1,6 +1,8 @@
-import React from 'react';
-import { FaLink, FaLayerGroup } from 'react-icons/fa';
+import * as React from 'react';
+import { FaLink } from 'react-icons/fa';
 import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
+import { SessionGridIcon } from './sessionGridIcon';
+
 
 export interface StackedLinkIconProps {
   urls?: string[];
@@ -23,7 +25,7 @@ export const StackedLinkIcon: React.FC<StackedLinkIconProps> = ({
 }) => {
   if (!urls || urls.length === 0) {
     if (fallback === 'tabgroup' || fallback === 'session') {
-      return <FaLayerGroup size={size} className={`text-[var(--color-iconDefault)] ${className}`} />;
+      return <SessionGridIcon size={size} className={`text-[var(--color-iconDefault)] ${className}`} />;
     }
     return <FaLink size={size} className={`text-[var(--color-iconDefault)] ${className}`} />;
   }

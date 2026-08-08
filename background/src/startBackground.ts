@@ -38,8 +38,9 @@ import {
 } from '@chatAgents/runtimeExecutionEngine';
 import type { PendingAiSession } from '@chatAgents/runtimeExecutionEngine';
 import { handleBrowserWindowMessage } from '@browserWindows/index';
+import { setupWindowManager } from './all_PreBuilt_Commands/system/windowManager';
 import { handleSearchMessage } from '@browserData/index';
-import { handleHotkeyMessage } from '@hotkeys/hotkeys';
+import { handleHotkeyMessage, invalidateHotkeysCache } from '@hotkeys/hotkeys';
 import { handleExtractorMessage } from '@preBuiltCommands/extraction/index';
 import { handleElementPickerMessage } from '@automation/domSelector/visualPicker';
 import { handleAuthMessage } from '@_authentication/auth';
@@ -50,6 +51,9 @@ let hasStarted = false;
 export function startBackground() {
   if (hasStarted) return;
   hasStarted = true;
+
+  setupWindowManager();
+
 /**
  * @file index.ts
  * @description Main entry point for the extension service worker / background script.
@@ -188,7 +192,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.action === 'db_update_link') {
     (async () => {
       try {
-        const { updateLink } = await import('../../src/allObjectFolder/src/createObject/links/linkData');
         const link = await updateLink(message.linkId, message.input);
         sendResponse({ success: true, link });
         chrome.tabs.query({}, (tabs) => {
@@ -492,6 +495,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.action === 'save_user_hotkey') {
     saveUserHotkey(message.payload.hotkeyValue, message.payload.referenceId, message.payload.referenceType, message.userId || 'local_user')
       .then(() => {
+        invalidateHotkeysCache();
         sendResponse({ success: true });
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach(tab => {
@@ -504,7 +508,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message && message.action === 'delete_user_hotkey') {
-    deleteUserHotkeyByReference(message.payload.referenceId, message.userId || 'local_user').then(() => sendResponse({ success: true })).catch((e) => sendResponse({ success: false, error: e.message }));
+    deleteUserHotkeyByReference(message.payload.referenceId, message.userId || 'local_user')
+      .then(() => {
+        invalidateHotkeysCache();
+        sendResponse({ success: true });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
     return true;
   }
 
@@ -637,64 +646,7 @@ chrome.commands?.onCommand?.addListener(command => {
       }
     }
 
-    if (command === 'open_create') {
-      if (!chrome.tabs?.query) return;
 
-      const isActualNewTabPage =
-        isNewTabPage ||
-        activeUrl.startsWith('chrome://newtab') ||
-        activeUrl.startsWith('chrome://new-tab-page') ||
-        activeUrl.startsWith('about:blank');
-
-      if (isNewTabPage && typeof activeTabId === 'number') {
-        chrome.tabs.sendMessage(activeTabId, { type: 'tasklabs:open-create-menu' }, () => {
-          const lastError = chrome.runtime.lastError;
-          if (lastError) console.warn('[commands] open_create message error:', lastError.message);
-        });
-      } else if (isActualNewTabPage && typeof activeTabId === 'number') {
-        // Build per-tab storage key
-        const focusKey = `new_tab_focus_${activeTabId}`;
-        chrome.storage.local.get([focusKey, 'new_tab_has_page_focus'], result => {
-          const hasFocus = result?.[focusKey] === true || result?.new_tab_has_page_focus === true;
-          if (hasFocus) {
-            chrome.tabs.sendMessage(activeTabId, { type: 'tasklabs:open-create-menu' }, () => {
-              const lastError = chrome.runtime.lastError;
-              if (lastError) console.warn('[commands] open_create message error:', lastError.message);
-            });
-          } else {
-            // Cursor is stuck in the Omnibox — must replace tab to steal focus back.
-            const extensionUrl = chrome.runtime.getURL('AltS_search_newtab/index.html?open_create=true');
-            chrome.tabs.create({ url: extensionUrl, active: true }, () => {
-              chrome.tabs.remove(activeTabId);
-            });
-          }
-        });
-      } else {
-        // Send message to active tab to open the overlay menu
-        if (typeof activeTabId === 'number') {
-          chrome.tabs.sendMessage(activeTabId, { type: 'tasklabs:open-create-menu' }, () => {
-            const lastError = chrome.runtime.lastError;
-            if (lastError) {
-              console.log('[commands] Injecting content-ui.js into tab:', activeTabId);
-              executeScriptAdapter({
-                target: { tabId: activeTabId },
-                files: ['content-ui.js'],
-              })
-                .then(() => {
-                  setTimeout(() => {
-                    chrome.tabs.sendMessage(activeTabId, { type: 'tasklabs:open-create-menu' }, () => {
-                      if (chrome.runtime.lastError) console.warn('[commands] open_create message error after inject:', chrome.runtime.lastError.message);
-                    });
-                  }, 50);
-                })
-                .catch((err: any) => {
-                  console.warn('[commands] failed to inject content-ui script:', err?.message || err);
-                });
-            }
-          });
-        }
-      }
-    }
   });
 
 
@@ -750,6 +702,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         else if (model.includes('copilot') && url.includes('copilot.microsoft.com/chats/')) isFinal = true;
 
         if (isFinal) {
+          // tabs.onUpdated can fire repeatedly for the same navigation (URL,
+          // loading, complete). Persist and broadcast only an actual URL change.
+          if (session.urls[model] === url) continue;
+
           session.urls[model] = url; // Always update to the latest final URL
           pendingAiSessions.set(sessionId, session);
 

@@ -1,4 +1,7 @@
 import type Clipboard from 'quill/modules/clipboard';
+import { registerLocalImageBlot } from './blots/localImageBlot';
+import { assetStore } from '../../storage/assets/assetStore';
+import { validateImageAsset } from '../../storage/assets/assetPolicy';
 
 interface EditorSetupOptions {
   placeholder?: string;
@@ -12,7 +15,9 @@ interface EditorSetupOptions {
   quillInstanceRef: React.RefObject<any>;
   toolbarSelector?: string;
   onDelete?: () => void;
-} 
+  onImageSaveStart?: () => void;
+  onImageSaveEnd?: () => void;
+}
 
 const resolveToolbarTarget = (selector?: string) => {
   if (!selector) return null;
@@ -37,9 +42,13 @@ export const setupEditor = async (
     quillInstanceRef,
     toolbarSelector,
     onDelete,
+    onImageSaveStart,
+    onImageSaveEnd,
   }: EditorSetupOptions,
 ) => {
   const { default: Quill } = await import('quill');
+
+  registerLocalImageBlot(Quill);
 
   const BaseClipboard = Quill.import('modules/clipboard') as typeof Clipboard;
 
@@ -52,12 +61,6 @@ export const setupEditor = async (
 
       div.querySelectorAll('*').forEach(node => {
         const el = node as HTMLElement;
-
-        // Remove all <img> tags to block image pasting
-        if (el.tagName === 'IMG') {
-          el.remove();
-          return;
-        }
 
         // Strip specific inline styles
         el.style.backgroundColor = '';
@@ -84,7 +87,7 @@ export const setupEditor = async (
 
   Quill.register('modules/clipboard', CleanClipboard, true);
   const Link = Quill.import('formats/link') as {
-    new (): any;
+    new(): any;
     sanitize: (url: string) => string;
   };
 
@@ -192,6 +195,64 @@ export const setupEditor = async (
     },
   });
 
+  const handleImageFile = async (file: File) => {
+    let didStartImageSave = false;
+
+    try {
+      validateImageAsset(file);
+
+      if (onImageSaveStart) {
+        onImageSaveStart();
+        didStartImageSave = true;
+      }
+
+      const asset = await assetStore.saveAsset(file, file.type);
+
+      const range = quill.getSelection(true);
+      quill.insertEmbed(range.index, 'localImage', { assetId: asset.id });
+      quill.setSelection(range.index + 1, 0);
+
+    } catch (error) {
+      console.error('[editorSetup] Failed to save pasted image', error);
+    } finally {
+      if (didStartImageSave && onImageSaveEnd) onImageSaveEnd();
+    }
+  };
+
+  quill.root.addEventListener('paste', (e: ClipboardEvent) => {
+    if (e.clipboardData && e.clipboardData.items) {
+      const items = Array.from(e.clipboardData.items);
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            e.stopPropagation();
+            void handleImageFile(file);
+            return;
+          }
+        }
+      }
+    }
+  });
+
+  quill.root.addEventListener('drop', (e: DragEvent) => {
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      let hasImage = false;
+      const files = Array.from(e.dataTransfer.files);
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          e.preventDefault();
+          e.stopPropagation();
+          hasImage = true;
+          // Note: Quill might change selection on drop before this fires, 
+          // getSelection() above usually works but could be offset.
+          void handleImageFile(file);
+        }
+      }
+      if (hasImage) return;
+    }
+  });
 
 
   // Helper: apply clean styling to a toolbar element
@@ -233,23 +294,9 @@ export const setupEditor = async (
         padding: 0 !important;
         border: none !important;
         cursor: pointer;
-        background: transparent !important;
-        color: #a3a3a3;
-        transition: background 0.12s ease, color 0.12s ease;
+        transition: background-color 0.15s ease, color 0.15s ease;
         flex-shrink: 0;
       `;
-      b.onmouseenter = () => {
-        b.style.setProperty('background', 'rgba(150,150,150,0.15)', 'important');
-        b.style.color = '#e5e5e5';
-      };
-      b.onmouseleave = () => {
-        b.style.setProperty('background', 'transparent', 'important');
-        if (!b.classList.contains('ql-active')) {
-          b.style.color = '#a3a3a3';
-        } else {
-          b.style.color = '#ffffff';
-        }
-      };
     });
 
     toolbar.querySelectorAll('button svg').forEach((svg: any) => {
@@ -310,9 +357,106 @@ export const setupEditor = async (
 
   const cleanupFns: Array<() => void> = [];
 
+  const imageDeleteButton = document.createElement('button');
+  imageDeleteButton.type = 'button';
+  imageDeleteButton.className = 'ql-local-image-delete-button';
+  imageDeleteButton.title = 'Delete image';
+  imageDeleteButton.setAttribute('aria-label', 'Delete image');
+  imageDeleteButton.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 6h18"></path>
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+      <path d="M10 11v6"></path>
+      <path d="M14 11v6"></path>
+    </svg>
+  `;
+  quill.container.appendChild(imageDeleteButton);
+
+  let selectedLocalImage: HTMLImageElement | null = null;
+
+  const hideImageDeleteButton = () => {
+    selectedLocalImage = null;
+    imageDeleteButton.classList.remove('is-visible');
+  };
+
+  const positionImageDeleteButton = () => {
+    if (!selectedLocalImage || !selectedLocalImage.isConnected) {
+      hideImageDeleteButton();
+      return;
+    }
+
+    const imageRect = selectedLocalImage.getBoundingClientRect();
+    const containerRect = quill.container.getBoundingClientRect();
+
+    imageDeleteButton.style.top = `${Math.max(8, imageRect.top - containerRect.top + 8)}px`;
+    imageDeleteButton.style.left = `${Math.max(8, imageRect.right - containerRect.left - 38)}px`;
+    imageDeleteButton.classList.add('is-visible');
+  };
+
+  const selectLocalImage = (image: HTMLImageElement) => {
+    selectedLocalImage = image;
+    positionImageDeleteButton();
+  };
+
+  const handleEditorClickForImages = (event: MouseEvent) => {
+    const target = event.target as HTMLElement | null;
+    const image = target?.closest?.('img[data-local-asset-id]') as HTMLImageElement | null;
+
+    if (image) {
+      selectLocalImage(image);
+      return;
+    }
+
+    if (!target?.closest?.('.ql-local-image-delete-button')) {
+      hideImageDeleteButton();
+    }
+  };
+
+  const handleImageDeleteMouseDown = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleImageDeleteClick = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!selectedLocalImage || !selectedLocalImage.isConnected) {
+      hideImageDeleteButton();
+      return;
+    }
+
+    const blot = Quill.find(selectedLocalImage);
+    if (!blot) {
+      hideImageDeleteButton();
+      return;
+    }
+
+    const index = quill.getIndex(blot as any);
+    quill.deleteText(index, 1, 'user');
+    quill.setSelection(Math.max(0, index - 1), 0, 'silent');
+    hideImageDeleteButton();
+  };
+
+  quill.root.addEventListener('click', handleEditorClickForImages);
+  imageDeleteButton.addEventListener('mousedown', handleImageDeleteMouseDown);
+  imageDeleteButton.addEventListener('click', handleImageDeleteClick);
+  quill.root.addEventListener('scroll', positionImageDeleteButton);
+  window.addEventListener('resize', positionImageDeleteButton);
+  cleanupFns.push(() => {
+    quill.root.removeEventListener('click', handleEditorClickForImages);
+    imageDeleteButton.removeEventListener('mousedown', handleImageDeleteMouseDown);
+    imageDeleteButton.removeEventListener('click', handleImageDeleteClick);
+    quill.root.removeEventListener('scroll', positionImageDeleteButton);
+    window.removeEventListener('resize', positionImageDeleteButton);
+    imageDeleteButton.remove();
+  });
+
   const handleTextChange = () => {
     const html = quill.root.innerHTML;
     onChange(html);
+    positionImageDeleteButton();
 
     const text = quill.getText().trim();
     if (text && onKeyUpdate) {
@@ -437,7 +581,7 @@ export const setupEditor = async (
       const updateActiveStates = () => {
         // Prevent getFormat() from stealing focus back when Quill loses focus
         if (!quill.hasFocus()) return;
-        
+
         const format = quill.getFormat();
         setActive(boldBtn, Boolean(format.bold));
         setActive(italicBtn, Boolean(format.italic));

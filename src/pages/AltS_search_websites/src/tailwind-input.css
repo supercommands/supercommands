@@ -75,10 +75,10 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
-/* Custom scrollbar for BoardView (always visible, thin, matching cmdOS dark theme) */
+/* Custom scrollbar for BoardView (always visible, thin, theme-aware) */
 .board-scrollbar {
   scrollbar-width: thin !important;
-  scrollbar-color: rgba(255, 255, 255, 0.45) rgba(255, 255, 255, 0.08) !important;
+  scrollbar-color: var(--color-iconDefault, rgba(255, 255, 255, 0.45)) var(--color-borderDefault, rgba(255, 255, 255, 0.08)) !important;
 }
 
 .board-scrollbar::-webkit-scrollbar {
@@ -88,17 +88,17 @@
 }
 
 .board-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: var(--color-borderDefault, rgba(255, 255, 255, 0.08)) !important;
   border-radius: 10px !important;
 }
 
 .board-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.45) !important;
+  background-color: var(--color-iconDefault, rgba(255, 255, 255, 0.45)) !important;
   border-radius: 10px !important;
 }
 
 .board-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: var(--color-textPrimary, rgba(255, 255, 255, 0.6)) !important;
 }
 
 /* Hide scrollbar utility */

@@ -21,6 +21,7 @@ import {
   deleteAutomation,
 } from '../../../allObjectFolder/src/createObject/automationBeta/automationData';
 import { deleteChatAgent } from '../../../allObjectFolder/src/createObject/ChatAgent/chatAgentData';
+import { deleteAiPrompt } from '../../../allObjectFolder/src/createObject/aiPrompt/aiPromptData';
 import {
   createSession,
   updateSession,
@@ -183,6 +184,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
     { type: 'section', title: 'Tab Sessions' },
     { type: 'section', title: 'Notes' },
     { type: 'section', title: 'Snippets' },
+    { type: 'section', title: 'Todos' },
     { type: 'section', title: 'Saved Automations' },
     { type: 'section', title: 'Chat Agents' },
     { type: 'section', title: 'System Commands' },
@@ -500,10 +502,26 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
                   } else {
                     await deleteSnippetCompat(finalRow.folder_id || undefined, finalRow.id);
                   }
-                } else if (finalRow.section === 'Saved Automations') {
-                  await deleteAutomation(finalRow.id);
-                } else if (finalRow.section === 'Chat Agents') {
-                  await deleteChatAgent(finalRow.id);
+                } else if (
+                  finalRow.section === 'Saved Automations' ||
+                  finalRow.section === 'Chat Agents' ||
+                  finalRow.section === 'AI Prompts' ||
+                  (finalRow as any).category === 'agent' ||
+                  (finalRow as any).category === 'aiPrompt' ||
+                  (finalRow as any).category === 'automation' ||
+                  (finalRow as any).itemType === 'agent' ||
+                  (finalRow as any).itemType === 'aiPrompt' ||
+                  (finalRow as any).itemType === 'automation'
+                ) {
+                  try {
+                    await deleteChatAgent(finalRow.id);
+                  } catch (e) {}
+                  try {
+                    await deleteAiPrompt(finalRow.id);
+                  } catch (e) {}
+                  try {
+                    await deleteAutomation(finalRow.id);
+                  } catch (e) {}
                 } else if (finalRow.section === 'Bookmarks' || (finalRow as any).category === 'bookmark') {
                   const bookmarkId = finalRow.id.replace('bm-', '');
                   const chromeAny = (window as any)?.chrome;
@@ -1717,6 +1735,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
           urls: linkUrls,
           updated_at: item.updatedAt,
           tagIds: item.tagIds || [],
+          originalItem: item,
         };
       };
 
@@ -1724,6 +1743,56 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
       const realLinks = links.map((l: any) => mapToRowData(l, 'link', true, false));
       const realSnippets = snippets.map((s: any) => mapToRowData(s, 'snippet', false, true));
       const realSessions = (useDbStore.getState().sessions || []).map((s: any) => mapToRowData(s, 'session' as any, true, false));
+      const realTodos = (useDbStore.getState().todos || []).map((t: any) => {
+        const itemLongId = t.id;
+        const loc = locationLookup[t.folderId || t.workspaceId] || {
+          name: 'User level',
+          path: 'User level',
+          plainPath: 'User level',
+          visibilityType: 'personal',
+        };
+        const compoundId = getItemCompoundId({
+          ...t,
+          workspace_id: t.workspaceId,
+          folder_id: t.folderId,
+        });
+
+        const hotkey = (hotkeysMap ? hotkeysMap[compoundId] || hotkeysMap[itemLongId] : '') || (t.hotkeys as string) || '';
+        const shortcut =
+          (shortcutsMap ? shortcutsMap[compoundId] || shortcutsMap[itemLongId] : '') ||
+          normalizeShortcutTrigger((t.shortcuts as string) || '') ||
+          '';
+        const existingRow = state.tableData.find((r: any) => r.type === 'data' && r.id === itemLongId) as any;
+
+        return {
+          type: 'data',
+          id: itemLongId,
+          name: t.name || t.title || 'Untitled Todo',
+          url: stripHtml(t.description || t.value || ''),
+          value: t.description || t.value || '',
+          workspace_id: t.workspaceId || t.workspace_id || null,
+          folder_id: t.folderId || t.folder_id || null,
+          folder: loc.name,
+          path: loc.path,
+          plainPath: loc.plainPath,
+          visibilityType: loc.visibilityType,
+          fav: isFavorite(itemLongId, compoundId),
+          key: hotkey,
+          command: shortcut,
+          section: 'Todos',
+          isReal: true,
+          syncStatus: existingRow?.syncStatus || 'idle',
+          favAction: existingRow?.favAction,
+          editAction: existingRow?.editAction,
+          itemType: 'todo',
+          category: 'todo',
+          urls: [],
+          updated_at: t.updatedAt || 0,
+          tagIds: t.tags || t.tagIds || [],
+          isDone: t.isDone || t.is_done || false,
+          originalItem: t,
+        };
+      });
 
 
       const realAutomations: any[] = [];
@@ -1927,6 +1996,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
       realNotes.sort((a, b) => b.updated_at - a.updated_at);
       realLinks.sort((a, b) => b.updated_at - a.updated_at);
       realSnippets.sort((a, b) => b.updated_at - a.updated_at);
+      realTodos.sort((a, b) => b.updated_at - a.updated_at);
 
       realAutomations.sort((a, b) => b.updated_at - a.updated_at);
       realChatAgents.sort((a, b) => b.updated_at - a.updated_at);
@@ -1942,6 +2012,8 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
         ...realNotes,
         { type: 'section', title: 'Snippets' },
         ...realSnippets,
+        { type: 'section', title: 'Todos' },
+        ...realTodos,
 
         { type: 'section', title: 'Saved Automations' },
         ...realAutomations,

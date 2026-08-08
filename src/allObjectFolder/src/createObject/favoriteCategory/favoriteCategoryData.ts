@@ -62,6 +62,10 @@ export const deleteFavoriteCategory = async (favoriteCategoryId: string): Promis
   try {
     if (!favoriteCategoryId) return;
     await db.favoriteCategories.delete(favoriteCategoryId);
+    await db.favorites
+      .where('favoriteCategoryId')
+      .equals(favoriteCategoryId)
+      .modify({ favoriteCategoryId: null, updatedAt: Date.now() });
   } catch (e) {
     console.error('Failed to delete favorite category in Dexie', e);
     throw e;

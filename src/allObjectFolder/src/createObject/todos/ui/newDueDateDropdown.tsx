@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { FaRegCalendarAlt } from 'react-icons/fa';
 import { FiSearch } from 'react-icons/fi';
 import {
@@ -134,8 +135,8 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
         {
           id: 'parsed',
           type: 'parsed',
-          label: parsed.value.time ? `${parsed.displayDate} · ${parsed.displayTime}` : parsed.displayDate,
-          secondary: parsed.value.time ? 'Specific time' : 'Any time',
+          label: parsed.label,
+          secondary: parsed.secondaryLabel || undefined,
           value: parsed.value,
         },
       ];
@@ -233,11 +234,11 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`${positionClassName} w-[240px] rounded-xl shadow-2xl z-[99999] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] overflow-hidden p-1 flex flex-col gap-1 text-white font-sans`}
+      className={`${positionClassName} w-[240px] rounded-xl shadow-2xl z-[99999] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] overflow-hidden p-1 flex flex-col gap-1 text-[var(--color-textPrimary)] font-sans`}
       onClick={e => e.stopPropagation()}>
       {/* Search Input */}
-      <div className="relative flex items-center px-2 py-1.5 border-b border-white/10">
-        <FiSearch size={14} className="text-neutral-400 mr-2 shrink-0" />
+      <div className="relative flex items-center px-2 py-1.5 border-b border-[var(--color-borderDefault)]">
+        <FiSearch size={14} className="text-[var(--color-iconDefault)] mr-2 shrink-0" />
         <input
           ref={searchInputRef}
           type="text"
@@ -254,7 +255,7 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
             setActiveIndex(-1);
             setShowCustomPanel(false);
           }}
-          className="w-full bg-transparent text-xs text-white placeholder-neutral-500 outline-none border-none focus:ring-0 p-0"
+          className="w-full bg-transparent text-xs text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] outline-none border-none focus:ring-0 p-0"
         />
       </div>
 
@@ -271,7 +272,7 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
                   id={`due-option-${opt.id}`}
                   role="option"
                   aria-disabled="true"
-                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-[12.5px] opacity-40 text-neutral-400 cursor-not-allowed">
+                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-[12.5px] opacity-40 text-[var(--color-textMuted)] cursor-not-allowed">
                   <span>{opt.label}</span>
                 </div>
               );
@@ -290,74 +291,16 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
                   handleSelectOption(opt);
                 }}
                 className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-[12.5px] font-medium transition-colors cursor-pointer ${
-                  isHighlighted ? 'bg-white/15 text-white' : 'text-neutral-300 hover:bg-white/5'
+                  isHighlighted ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)]' : 'text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                 }`}>
                 <div className="flex items-center gap-2">
-                  <FaRegCalendarAlt size={12} className="text-neutral-400 shrink-0" />
+                  <FaRegCalendarAlt size={12} className="text-[var(--color-iconDefault)] shrink-0" />
                   <span className="truncate max-w-[130px]">{opt.label}</span>
                 </div>
-                {opt.secondary && <span className="text-[11px] text-neutral-400 font-normal">{opt.secondary}</span>}
+                {opt.secondary && <span className="text-[11px] text-[var(--color-textSecondary)] font-normal">{opt.secondary}</span>}
               </button>
             );
           })}
-        </div>
-      )}
-
-      {/* Custom Date/Time Panel Fallback */}
-      {showCustomPanel && (
-        <div className="p-2 flex flex-col gap-2 bg-black/20 rounded-lg text-xs">
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-neutral-400">Date</label>
-            <input
-              type="date"
-              value={customDateVal}
-              onChange={e => setCustomDateVal(e.target.value)}
-              className="bg-white/10 border border-white/10 rounded px-2 py-1 text-white outline-none text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1 cursor-pointer text-[11.5px]">
-              <input
-                type="checkbox"
-                checked={isCustomAnytime}
-                onChange={e => setIsCustomAnytime(e.target.checked)}
-                className="rounded text-blue-500"
-              />
-              Any time
-            </label>
-          </div>
-          {!isCustomAnytime && (
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] text-neutral-400">Time</label>
-              <input
-                type="time"
-                value={customTimeVal}
-                onChange={e => setCustomTimeVal(e.target.value)}
-                className="bg-white/10 border border-white/10 rounded px-2 py-1 text-white outline-none text-xs"
-              />
-            </div>
-          )}
-          <div className="flex justify-end gap-1 mt-1">
-            <button
-              type="button"
-              onClick={() => setShowCustomPanel(false)}
-              className="px-2 py-1 rounded bg-white/5 text-neutral-300 hover:bg-white/10 text-[11px]">
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onSelect({
-                  date: customDateVal,
-                  time: isCustomAnytime ? null : customTimeVal,
-                  isAnytime: isCustomAnytime,
-                });
-                onClose();
-              }}
-              className="px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-500 font-medium text-[11px]">
-              Apply
-            </button>
-          </div>
         </div>
       )}
     </div>

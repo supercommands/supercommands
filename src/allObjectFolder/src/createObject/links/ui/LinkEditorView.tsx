@@ -1,18 +1,19 @@
 import { createTodo } from '../../todos/todoData';
 import { AutoSaveIndicator } from '../../../../../shared-components/autoSaveEngine/autoSave';
 import { EditorContainer } from '../../../../../shared-components/editorContainer/EditorContainer';
+import { EditorHeader } from '../../../../../shared-components/editorContainer/EditorHeader';
 import { ExistingItemsTable } from '../../../../../shared-components/editorContainer/ExistingItemsTable';
+import { RightSideItemsPanel } from '../../../../../shared-components/editorContainer/RightSideItemsPanel';
 import { WorkspaceEditorLayout } from '../../../../../shared-components/editorContainer/WorkspaceEditorLayout';
 import { EditorTitleShortcutInput } from '../../../../../shared-components/editorContainer/EditorTitleShortcutInput';
 import { StorageManager } from '../../../../../storage/localStorage/storageManager';
 import { SharedPropertiesToolbar } from '../../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
 import { useShortcutValidation } from '../../../../../shared-components/shortcuts/hooks/useShortcutValidation';
-import type React from 'react';
+import type * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reorder } from 'framer-motion';
-import {
-  FaPlus,
+import { FaPlus,
   FaTrash,
   FaChevronDown,
   FaChevronRight,
@@ -39,9 +40,7 @@ import {
   FaRobot,
   FaList,
   FaCopy,
-  FaDirections,
-  FaLayerGroup,
-} from 'react-icons/fa';
+  FaDirections } from 'react-icons/fa';
 import { FiStar, FiChevronLeft, FiChevronRight, FiTag, FiCopy } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { formatDistanceToNow } from 'date-fns';
@@ -59,6 +58,7 @@ import { saveShortcut } from '../../../../../shared-components/shortcuts';
 import { deleteUserShortcutByReference, normalizeShortcutTrigger } from '../../../../../shared-components/shortcuts/core/shortcutDbData';
 import type { BrowserTab, SelectedLink, ContentTab } from '../linkTypes';
 import { useChromeTabs } from './hooks/useChromeTabs';
+import DeleteConfirmation from '../../../../../shared-components/modals/deleteDialog';
 import { HighlightedInput } from './components/HighlightedInput';
 import { useLinkEditor } from '../useLinkEditor';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
@@ -66,6 +66,8 @@ import type { SnippetRecord } from '../../../../../allObjectFolder/src/createObj
 import { nowUtc } from '../../../../../shared-components/utils';
 import { deleteLink, updateLink } from '../linkData';
 import { createTag } from '../../tags/tagData';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 interface LinkEditorViewProps {
   isOpen: boolean;
@@ -113,6 +115,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const [shortcutsMap, setShortcutsMap] = useState<Record<string, string>>({});
   const [hotkeysMap, setHotkeysMap] = useState<Record<string, string>>({});
   const [tableSearchQuery, setTableSearchQuery] = useState('');
+  const [linkToDeleteId, setLinkToDeleteId] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -131,14 +135,17 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       if (!initialLinkProp) {
 
       }
-      setTimeout(() => {
+      const focusInput = () => {
         const input = titleInputRef.current;
         if (input) {
           input.focus();
           const length = input.value.length;
           input.setSelectionRange(length, length);
         }
-      }, 150);
+      };
+      // Immediate and fallback timeouts to guarantee DOM focus inside modal on open/mount
+      setTimeout(focusInput, 50);
+      setTimeout(focusInput, 150);
     }
   }, [isOpen, initialLinkProp, localLinkOverride]);
 
@@ -154,6 +161,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const workspaces = useDbStore(state => state.workspaces);
   const folders = useDbStore(state => state.folders);
   const tags = useDbStore(state => state.tags);
+
+  const [isRightPanelExpanded, setIsRightPanelExpanded] = useState(false);
+  const rightSideSearchInputRef = useRef<HTMLInputElement>(null);
 
   // Legacy Redux team state removed - now using Dexie directly
 
@@ -220,9 +230,17 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     resetEditor,
     isInitialized,
     isShortcutInitialized,
+    versionHistoryItems,
+    selectedVersionId,
+    setSelectedVersionId,
+    isViewingHistory,
   } = useLinkEditor({ linkId, initialDraftKey: prefill?.key, initialDraftUrls: EMPTY_INITIAL_URLS });
 
   const tagIdsKey = useMemo(() => [...tagIds].sort().join('|'), [tagIds]);
+
+  // Note: useLinkEditor already returns displayTitle/displayUrls/displayShortcut as
+  // linkTitle/linkUrls/linkShortcut, which automatically switch to the historical
+  // snapshot values when selectedVersionId is set. No extra sync effects needed.
   const initialProperties = useMemo(() => {
     return {
       id: activeLinkId,
@@ -352,9 +370,6 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     };
   } | null>(null);
 
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [linkToDeleteId, setLinkToDeleteId] = useState<string | null>(null);
-
   useEffect(() => {
     if (initialLink && initialLink.updated_at) {
       lastSyncTimeRef.current = initialLink.updated_at;
@@ -403,7 +418,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   // Handle prefill data (e.g. from history/bookmarks/session)
   useEffect(() => {
-    if (isOpen && !isEditMode && prefill && !hasInitializedPrefill.current) {
+    if (isOpen && !isEditMode && prefill && !hasInitializedPrefill.current && !isForceCreateNew) {
       setTitle(prefill.key || '');
       const prefillId = prefill.id || (prefill as any).snippet_id;
       if (prefillId && !prefill.searchtags) {
@@ -435,7 +450,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     } else if (!isOpen) {
       hasInitializedPrefill.current = false;
     }
-  }, [isOpen, isEditMode, prefill]);
+  }, [isOpen, isEditMode, prefill, isForceCreateNew]);
 
   const [footerStatus, setFooterStatus] = useState<{ type: 'idle' | 'saving' | 'success' | 'error'; message: string }>({
     type: 'idle',
@@ -540,7 +555,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     protocol: string;
     domain: string;
     paths: string[];
-    search: string;
+    queryParams: Array<{ key: string; value: string }>;
   } | null>(null);
 
   // Local state for the URL input to allow editing
@@ -558,18 +573,36 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         normalized = `https://${normalized}`;
       }
       const u = new URL(normalized);
-      const paths = u.pathname.split('/').filter(Boolean);
+      const paths = u.pathname
+        .split('/')
+        .filter(Boolean)
+        .map(path => path.replace(/%7Bquery%7D/gi, '{query}').replace(/%5Bquery%5D/gi, '[query]'));
       const cleanDomain = u.host.replace(/^www\./i, '');
-      return { protocol: u.protocol.replace(':', ''), domain: cleanDomain, paths, search: u.search };
+      const queryParams = Array.from(u.searchParams.entries()).map(([key, value]) => ({ key, value }));
+      return { protocol: u.protocol.replace(':', ''), domain: cleanDomain, paths, queryParams };
     } catch {
       return null;
     }
   }, []);
 
-  const assembleUrl = useCallback((parts: { protocol: string; domain: string; paths: string[]; search: string }) => {
+  const assembleUrl = useCallback((parts: {
+    protocol: string;
+    domain: string;
+    paths: string[];
+    queryParams: Array<{ key: string; value: string }>;
+  }) => {
     const pathStr = parts.paths.length > 0 ? '/' + parts.paths.join('/') : '';
     const protocol = parts.protocol || 'https';
-    return `${protocol}://${parts.domain}${pathStr}${parts.search}`;
+    const searchParams = new URLSearchParams();
+    parts.queryParams.forEach(({ key, value }) => {
+      if (key.trim()) searchParams.append(key, value);
+    });
+    const serializedSearch = searchParams
+      .toString()
+      .replace(/%7Bquery%7D/gi, '{query}')
+      .replace(/%5Bquery%5D/gi, '[query]');
+    const search = serializedSearch ? `?${serializedSearch}` : '';
+    return `${protocol}://${parts.domain}${pathStr}${search}`;
   }, []);
 
   const duplicateLink = useCallback((link: SelectedLink) => {
@@ -625,7 +658,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const dropdownButtonRef = useRef<HTMLButtonElement>(null);
   const lastFocusedInputRef = useRef<HTMLInputElement | null>(null);
   const [focusedPathIndex, setFocusedPathIndex] = useState<number | null>(null);
-  const [focusedField, setFocusedField] = useState<'domain' | 'path' | null>(null);
+  const [focusedQueryIndex, setFocusedQueryIndex] = useState<number | null>(null);
+  const [focusedField, setFocusedField] = useState<'domain' | 'path' | 'queryValue' | null>(null);
   const [showPathQueryDropdown, setShowPathQueryDropdown] = useState(false);
 
   // Sync editingUrlParts to localUrlValue when parts change (if not editing manualy)
@@ -842,9 +876,17 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     try {
       await deleteLink(id);
       if (id === activeLinkId) {
+        useUIStore.getState().openEditor({ type: 'link', id: 'new' });
+        setIsForceCreateNew(true);
         resetEditor();
         setLocalLinkOverride(null);
-        setIsForceCreateNew(true);
+        hasInitializedPrefill.current = true;
+        hasSyncedInitialDataRef.current = false;
+        
+        setCustomLinkUrl('');
+        setCustomLinkName('');
+        setIsCustomLinkFormOpen(false);
+        setIsLeftCustomLinkFormOpen(false);
       }
     } catch (error) {
       console.error('[LinkEditorView] Failed to delete link item:', error);
@@ -927,13 +969,24 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const insertCustomVariable = useCallback(() => {
     if (!editingUrlParts) return;
 
-    if (focusedField === 'domain') {
+    if (focusedField === 'queryValue' && focusedQueryIndex !== null) {
+      const newQueryParams = editingUrlParts.queryParams.map((param, index) =>
+        index === focusedQueryIndex ? { ...param, value: `${param.value}{query}` } : param,
+      );
+      setEditingUrlParts(prev => (prev ? { ...prev, queryParams: newQueryParams } : prev));
+    } else if (focusedField === 'domain') {
       setEditingUrlParts(prev => (prev ? { ...prev, domain: prev.domain + '/{query}' } : prev));
     } else if (focusedField === 'path' && focusedPathIndex !== null) {
       const newPaths = [...editingUrlParts.paths];
       // Append /{query} to the selected path component
       newPaths[focusedPathIndex] = (newPaths[focusedPathIndex] || '') + '/{query}';
       setEditingUrlParts(prev => (prev ? { ...prev, paths: newPaths } : prev));
+    } else if (editingUrlParts.queryParams.length > 0) {
+      const lastQueryIndex = editingUrlParts.queryParams.length - 1;
+      const newQueryParams = editingUrlParts.queryParams.map((param, index) =>
+        index === lastQueryIndex ? { ...param, value: `${param.value}{query}` } : param,
+      );
+      setEditingUrlParts(prev => (prev ? { ...prev, queryParams: newQueryParams } : prev));
     } else if (editingUrlParts.paths.length > 0) {
       // Default: append to last path
       const newPaths = [...editingUrlParts.paths];
@@ -943,7 +996,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       // No paths, add to domain
       setEditingUrlParts(prev => (prev ? { ...prev, domain: prev.domain + '/{query}' } : prev));
     }
-  }, [editingUrlParts, focusedField, focusedPathIndex]);
+  }, [editingUrlParts, focusedField, focusedPathIndex, focusedQueryIndex]);
 
   const teamId = '';
 
@@ -1374,7 +1427,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       const addedLinks = selectedLinks;
       const notAddedCurrentTabs = availableItems.filter(item => {
         if (item.source !== 'tab') return false;
-        return !selectedLinks.some(selected => {
+        return !selectedLinks.some((selected: any) => {
           if (selected.source === 'tab' && selected.originalData?.id === item.originalData?.id) return true;
           return selected.url === item.url;
         });
@@ -1389,7 +1442,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   }, [availableItems, activeContentTab, contentSearchQuery, selectedLinks]);
 
   const checkIsAdded = useCallback((item: SelectedLink) => {
-    return selectedLinks.some(selected => {
+    return selectedLinks.some((selected: any) => {
       if (item.source === selected.source && item.originalData && selected.originalData) {
         const id1 = selected.originalData?.id || selected.originalData?.snippet_id;
         const id2 = item.originalData?.id || item.originalData?.snippet_id;
@@ -1400,14 +1453,14 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   }, [selectedLinks]);
 
   const allRenderedItems = useMemo(() => {
-    const renderedSelected = selectedLinks.map(item => ({
+    const renderedSelected = selectedLinks.map((item: any) => ({
       item,
       isAdded: true,
     }));
 
     const renderedActive = (activeContentTab === 'Selected tabs')
       ? []
-      : filteredItems.filter(item => !checkIsAdded(item)).map(item => ({
+      : filteredItems.filter((item: any) => !checkIsAdded(item)).map((item: any) => ({
         item,
         isAdded: false,
       }));
@@ -1726,22 +1779,37 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   ]);
 
   const handleCreateNew = useCallback(async () => {
-    // Save current link list before creating new
-    await executeSave(false);
+    // 1. Save current link in background without blocking instant UI reset
+    void executeSave(false);
 
+    const currentProps = useUIStore.getState().activeEditor?.props || {};
+    const cleanProps = { ...currentProps, category: 'link', snippet: null, prefill: null, item: null, link: null };
+    useUIStore.getState().openEditor({ type: 'link', id: 'new', props: cleanProps });
+
+    // 3. Synchronously transition state to Create mode
     setIsForceCreateNew(true);
     resetEditor();
+    setTitle('');
+    setSelectedLinks([]);
+    setLinkShortcut('');
+    hasUserModifiedRef.current = false;
     setLocalLinkOverride(null);
-    hasInitializedPrefill.current = false;
+    hasInitializedPrefill.current = true;
     hasSyncedInitialDataRef.current = false;
 
     setCustomLinkUrl('');
     setCustomLinkName('');
     setIsCustomLinkFormOpen(false);
     setIsLeftCustomLinkFormOpen(false);
-    if (titleInputRef.current) {
-      titleInputRef.current.focus();
-    }
+
+    // 4. Immediately focus title input for single-press shortcut readiness
+    setTimeout(() => {
+      if (titleInputRef.current) {
+        titleInputRef.current.focus();
+        const length = titleInputRef.current.value.length;
+        titleInputRef.current.setSelectionRange(length, length);
+      }
+    }, 0);
   }, [executeSave, resetEditor]);
 
   const handleCloseAttempt = useCallback(async () => {
@@ -1758,22 +1826,45 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     const handler = () => {
-      if (isLeftCustomLinkFormOpen || isCustomLinkFormOpen || document.getElementById('hotkey-assignment-popup')) {
+      if (document.getElementById('hotkey-assignment-popup')) {
         return true; // we just let those handle it or block it
+      }
+      if (isCustomLinkFormOpen) {
+        setIsCustomLinkFormOpen(false);
+        setCustomLinkUrl('');
+        setCustomLinkName('');
+        if (titleInputRef.current) {
+          titleInputRef.current.focus();
+        }
+        return true;
+      }
+      if (isLeftCustomLinkFormOpen) {
+        const hasInputText = customLinkUrl.trim().length > 0;
+        setIsLeftCustomLinkFormOpen(false);
+        setCustomLinkUrl('');
+        setCustomLinkName('');
+        if (titleInputRef.current) {
+          titleInputRef.current.focus();
+        }
+        if (!hasInputText) {
+          handleCloseAttempt();
+        }
+        return true;
       }
       handleCloseAttempt();
       return true; // We intercepted the escape, don't let uiStateManager forcefully close
     };
     useUIStore.getState().setEditorEscapeHandler(handler);
     return () => useUIStore.getState().setEditorEscapeHandler(null);
-  }, [isOpen, isLeftCustomLinkFormOpen, isCustomLinkFormOpen, handleCloseAttempt]);
+  }, [isOpen, isLeftCustomLinkFormOpen, isCustomLinkFormOpen, customLinkUrl, handleCloseAttempt]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!isOpen) return;
-      // Create New Shortcut strictly on Ctrl+Shift+Enter
-      else if (event.ctrlKey && event.shiftKey && event.key === 'Enter') {
+      const isCtrlShiftEnter = (event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'Enter';
+      if (isCtrlShiftEnter) {
         event.preventDefault();
+        event.stopPropagation();
         handleCreateNew();
       }
       // Location Picker Shortcut: Alt+Enter (Win) -> Option+Enter (Mac)
@@ -1795,8 +1886,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       }
     };
 
-    window.addEventListener('keydown', handleShortcut);
-    return () => window.removeEventListener('keydown', handleShortcut);
+    window.addEventListener('keydown', handleShortcut, true);
+    return () => window.removeEventListener('keydown', handleShortcut, true);
   }, [
     handleSave,
     saveStatus,
@@ -1865,7 +1956,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         e.preventDefault();
         e.stopPropagation();
         setFocusedTabIndex(prev => (prev <= 0 ? totalNavigable - 1 : prev - 1));
-      } else if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+      } else if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.metaKey) {
         // Stop global Enter trigger if typing in any input/textarea (like Title input, Search Tags input, etc.)
         if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA')) {
           return;
@@ -1929,132 +2020,87 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   return (
     <>
-      <WorkspaceEditorLayout
-        title={isForceCreateNew ? 'Create a link' : activeLinkId ? 'Edit link' : 'Create a link'}
-        isDirty={hasUnsavedChanges}
-        saveStatus={saveStatus === 'error' && saveError ? 'error' : saveStatus}
-        lastSavedAt={lastSavedAt}
-        activeId={activeLinkId}
-        hideRightColumnBorder={true}
-        onSave={async () => {
-          const saved = await handleSave(false);
-          return typeof saved === 'boolean' ? saved : !!saved;
-        }}
-        onDiscard={() => {
-          onClose();
-        }}
-        onCloseCallback={onClose}
-        searchQuery={tableSearchQuery}
-        setSearchQuery={setTableSearchQuery}
-        searchPlaceholder="Search links..."
-        deleteModalProps={{
-          isOpen: isDeleteDialogOpen,
-          onClose: () => {
-            setIsDeleteDialogOpen(false);
-            setLinkToDeleteId(null);
-          },
-          onConfirm: async () => {
-            if (linkToDeleteId) {
-              try {
-                const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
-                const fldObj = folderId ? { folder_id: folderId } : null;
-                const compoundId = getItemCompoundId({ snippet: { id: linkToDeleteId, category: 'link' }, workspace: wsObj, folder: fldObj });
-                await apiClearShortcut(linkToDeleteId, compoundId, 'link');
-                await handleDeleteLinkItem(linkToDeleteId);
-              } catch (err) {
-                console.error('Delete failed:', err);
-              }
-            }
-            setIsDeleteDialogOpen(false);
-            setLinkToDeleteId(null);
-          },
-          title: linkToDeleteId && links.find(s => s.id === linkToDeleteId)?.title ? `Delete "${links.find(s => s.id === linkToDeleteId)?.title}"?` : 'Delete this link list?',
-          description: "Are you sure you want to delete this link list? This action cannot be undone."
-        }}
-        headerActions={
-          <SharedPropertiesToolbar
-            key={activeLinkId || 'new-link'}
-            initialSnippet={initialProperties}
-            compoundId={compoundId}
-            defaultName={title || 'New Link List'}
-            onChange={handlePropertiesChange}
-            showTodo={true}
-            onCreateTodo={async (deadlineVal, isRecurring, recurringCycle) => {
-              if (!activeLinkId) return;
-              const scheduleTime = deadlineVal ? new Date(deadlineVal).getTime() : Date.now();
-              try {
-                const newTodo = await createTodo(
-                  title || 'New Link List',
-                  [{ type: 'link', id: activeLinkId }],
-                  isRecurring ? 'recurring' : 'one-time',
-                  scheduleTime,
-                  isRecurring ? recurringCycle as any : undefined
-                );
-
-                const chromeAny = (window as any).chrome;
-                if (chromeAny?.runtime?.sendMessage) {
-                  chromeAny.runtime.sendMessage({
-                    action: 'schedule_newtodo_alarm',
-                    todoId: newTodo.id,
-                    scheduleTime: scheduleTime
-                  });
-                }
-              } catch (err) {
-                console.error('Failed to create and schedule link todo', err);
-              }
-            }}
-            saveStatus={saveStatus}
-            openPopupsToBottom={true}
-            showShortcut={false}
-            layout="horizontal"
-          />
-        }
-        bottomListContent={
-          <ExistingItemsTable<any>
-            items={sortedLinks}
-            activeItemId={activeLinkId ?? null}
-            onLoadItem={handleLoadLinkItem}
-            onUpdateItemField={handleUpdateItemField}
-            getItemTitle={(item) => item.title || 'Untitled Link'}
-            getItemPreview={(item) =>
-              (item.urls || [])
-                .map((link: any) => {
-                  const text = link.name || link.title || link.url || '';
-                  return text.length > 45 ? text.substring(0, 45) + '...' : text;
-                })
-                .filter(Boolean)
-                .join(', ')
-            }
-            getItemCompoundId={(item) =>
-              getItemCompoundId({
-                id: item.id,
-                workspace_id: item.workspaceId || null,
-                folder_id: item.folderId || null,
-                snippet: { id: item.id, category: 'link' },
-              })
-            }
-            getItemType={() => 'link'}
-            shortcutsMap={shortcutsMap}
-            hotkeysMap={hotkeysMap}
-            isFavorite={isFavorite}
-            toggleFavorite={toggleFavorite}
-            onDeleteClick={(id) => {
-              setLinkToDeleteId(id);
-              setIsDeleteDialogOpen(true);
-            }}
-            onFavoriteToggled={fetchTableMaps}
-            folderNamesMap={folderNamesMap}
-            workspaceNamesMap={workspaceNamesMap}
-            tagNamesMap={tagNamesMap}
-            emptyStateMessage="No links found. Create your first link above!"
-            title=""
-          />
-        }
-        headerRightPaddingClass="pr-6"
-        containerMaxWidthClass="max-w-[940px]"
+      <EditorContainer
+        className="w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4"
+        innerClassName="flex flex-col relative bg-[var(--color-editorBg)] mx-auto rounded-xl min-h-[450px] h-auto max-h-[860px] max-h-[90vh] overflow-hidden border border-black/5 dark:border-white/10 w-[calc(100%-20px)] max-w-[1800px]"
       >
-        <div className="flex-1 flex flex-col min-h-0 relative">
-          <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2 overflow-hidden">
+        <div className="flex-1 flex flex-row items-stretch min-h-0 relative w-full overflow-hidden">
+          {/* Left Column Workspace */}
+          <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+            <EditorHeader
+              title={isForceCreateNew ? 'Create a link' : activeLinkId ? 'Edit link' : 'Create a link'}
+              isDirty={hasUnsavedChanges}
+              saveStatus={saveStatus === 'error' && saveError ? 'error' : saveStatus}
+              lastSavedAt={lastSavedAt}
+              activeId={activeLinkId}
+              onCloseClick={onClose}
+              showCloseButton={false}
+              headerActions={
+                <SharedPropertiesToolbar
+                  key={activeLinkId || 'new-link'}
+                  initialSnippet={initialProperties}
+                  currentSnapshot={{
+                    title,
+                    urls: (selectedLinks || []).map((item: any) => ({ ...item })),
+                    workspaceId,
+                    folderId,
+                    tagIds: [...(tagIds || [])],
+                    shortcut: linkShortcut || '',
+                  }}
+                  compoundId={compoundId}
+                  defaultName={title || 'New Link List'}
+                  onChange={handlePropertiesChange}
+                  versionHistoryItems={versionHistoryItems}
+                  versionHistory={links.find(l => l.id === activeLinkId)?.versionHistory || initialLink?.versionHistory}
+                  selectedVersionId={selectedVersionId}
+                  onSelectVersion={setSelectedVersionId}
+                  entityType="link"
+                  showTodo={true}
+                  onCreateTodo={async (deadlineVal, isRecurring, recurringCycle) => {
+                    console.log('[LinkEditorView:onCreateTodo] Called with:', { deadlineVal, isRecurring, recurringCycle, activeLinkId, title, selectedLinksCount: selectedLinks?.length });
+                    const linkId = activeLinkId || 'link_' + Date.now();
+                    const scheduleTime = deadlineVal ? new Date(deadlineVal).getTime() : Date.now();
+                    const todoTitle = title || 'New Link List';
+                    const optionalDescription = selectedLinks?.length
+                      ? selectedLinks.map((l: any) => (l.title && l.title !== l.url ? `• ${l.title}: ${l.url}` : `• ${l.url}`)).join('\n')
+                      : undefined;
+                    try {
+                      const newTodo = await createTodo(
+                        todoTitle,
+                        [{ type: 'link', id: linkId, name: todoTitle }],
+                        isRecurring ? 'recurring' : 'one-time',
+                        scheduleTime,
+                        isRecurring ? recurringCycle as any : undefined,
+                        optionalDescription
+                      );
+                      console.log('[LinkEditorView:onCreateTodo] Successfully created To-Do in Dexie:', newTodo);
+
+                      const chromeAny = (window as any).chrome;
+                      if (chromeAny?.runtime?.sendMessage) {
+                        chromeAny.runtime.sendMessage({
+                          action: 'schedule_newtodo_alarm',
+                          todoId: newTodo.id,
+                          scheduleTime: scheduleTime
+                        });
+                        console.log('[LinkEditorView:onCreateTodo] Dispatched schedule_newtodo_alarm for todoId:', newTodo.id);
+                      }
+                    } catch (err) {
+                      console.error('[LinkEditorView:onCreateTodo] Failed to create and schedule link todo', err);
+                    }
+                  }}
+                  saveStatus={saveStatus}
+                  openPopupsToBottom={true}
+                  showShortcut={false}
+                  layout="horizontal"
+                />
+              }
+            />
+
+            <div className="flex-1 flex flex-col min-h-0 relative">
+              <div className={clsx(
+                "w-full flex-1 flex flex-col min-h-0 px-6 pt-1 pb-4",
+                (isLeftCustomLinkFormOpen && linkSuggestions.length > 0) ? "overflow-visible" : "overflow-hidden"
+              )}>
 
             {/* Title & Shortcut Fields */}
             <EditorTitleShortcutInput
@@ -2095,12 +2141,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 isShortcutManuallyEditedRef.current = true;
                 hasUserModifiedRef.current = true;
               } : undefined}
-              onTitleEnter={async (shiftKey) => {
-                if (shiftKey) {
-                  const val = title.toLowerCase().replace(/[^a-z0-9]/g, '');
-                  setLinkShortcut(val);
-                  isShortcutManuallyEditedRef.current = true;
-                  hasUserModifiedRef.current = true;
+              onTitleEnter={async (shiftKey, e) => {
+                if (e?.ctrlKey || e?.metaKey) {
+                  handleCreateNew();
                 } else {
                   if (!title.trim()) {
                     setTitleError('Enter the title');
@@ -2171,7 +2214,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
             )}
 
             {/* Loading Overlay */}
-            {activeLinkId && !liveLink && !isLinkDeleted && (
+            {activeLinkId && liveLink === undefined && !isLinkDeleted && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/50 dark:bg-black/50 backdrop-blur-sm">
                 <div className="flex flex-col items-center gap-3">
                   <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
@@ -2186,20 +2229,20 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
             )}>
 
               {/* Links section label */}
-              <h4 className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5 px-3.5">
-                Links ({allRenderedItems.length})
+              <h4 className="text-xs font-semibold text-[var(--color-textSecondary)] mb-1.5 px-3.5">
+                Active links ({allRenderedItems.length})
               </h4>
               {/* List */}
               <div
                 ref={listContainerRef}
                 className={clsx(
                   "flex-1 min-h-0 w-full relative",
-                  "rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden",
+                  "rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm",
                   (isLeftCustomLinkFormOpen && linkSuggestions.length > 0)
                     ? "overflow-visible"
                     : "overflow-y-auto custom-scrollbar"
                 )}>
-                <div className="flex flex-col w-full divide-y divide-black/5 dark:divide-white/5 pb-2">
+                <div className="flex flex-col w-full divide-y divide-[var(--color-borderDefault)] pb-2">
                   {(() => {
                     const renderItem = (item: any, isAdded: boolean, idx: number, globalIdx: number) => {
                       const handleToggle = (e?: React.MouseEvent) => {
@@ -2469,151 +2512,165 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
                         {/* Custom link form appended inside the card wrapper when input form is open */}
                         {isLeftCustomLinkFormOpen ? (
-                          <div
-                            ref={el => {
-                              tabItemRefs.current[allRenderedItems.length] = el as any;
-                            }}
-                            className="flex items-center gap-3 py-2 px-3 transition-all focus:outline-none bg-transparent relative z-50 last:rounded-b-xl">
+                          <>
+                            <div
+                              ref={el => {
+                                tabItemRefs.current[allRenderedItems.length] = el as any;
+                              }}
+                              className="flex items-center gap-3 py-2 px-3 transition-all focus:outline-none bg-transparent relative z-50 last:rounded-b-xl">
 
-                            {/* Inline Text Input */}
-                            <div className="flex-1 min-w-0 flex items-center gap-1.5 justify-start">
-                              {(allRenderedItems.length === 0 && !customLinkUrl) && (
-                                <span className="text-red-500/50 text-[13.5px] font-bold select-none shrink-0">*</span>
-                              )}
-                              <input
-                                ref={customLinkUrlRef}
-                                value={customLinkUrl}
-                                onChange={event => setCustomLinkUrl(event.target.value)}
-                                onKeyDown={event => {
-                                  if (
-                                    linkSuggestions.length > 0 &&
-                                    (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-                                  ) {
-                                    event.preventDefault();
-                                    if (event.key === 'ArrowDown') {
-                                      setFocusedSuggestionIndex(prev =>
-                                        Math.min(prev + 1, linkSuggestions.length - 1),
-                                      );
-                                    } else {
-                                      setFocusedSuggestionIndex(prev => Math.max(prev - 1, -1));
-                                    }
-                                    return;
-                                  }
-
-                                  if (event.key === 'Enter') {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-
-                                    if (focusedSuggestionIndex >= 0 && linkSuggestions[focusedSuggestionIndex]) {
-                                      const item = linkSuggestions[focusedSuggestionIndex];
-                                      setSelectedLinks(prev => [
-                                        ...prev,
-                                        {
-                                          id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-                                          url: item.url,
-                                          name: item.title || getHostname(item.url),
-                                          source: 'custom',
-                                          favIconUrl: getFaviconUrl(getHostname(item.url)),
-                                        },
-                                      ]);
-                                      setCustomLinkUrl('');
-                                      setCustomLinkName('');
-                                      setLinkSuggestions([]);
-                                      setTimeout(() => {
-                                        customLinkUrlRef.current?.focus();
-                                      }, 50);
+                              {/* Inline Text Input */}
+                              <div className="flex-1 min-w-0 flex items-center gap-1.5 justify-start">
+                                {(allRenderedItems.length === 0 && !customLinkUrl) && (
+                                  <span className="text-red-500/50 text-[13.5px] font-bold select-none shrink-0">*</span>
+                                )}
+                                <input
+                                  ref={customLinkUrlRef}
+                                  value={customLinkUrl}
+                                  onChange={event => setCustomLinkUrl(event.target.value)}
+                                  onKeyDown={event => {
+                                    if (
+                                      linkSuggestions.length > 0 &&
+                                      (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+                                    ) {
+                                      event.preventDefault();
+                                      if (event.key === 'ArrowDown') {
+                                        setFocusedSuggestionIndex(prev =>
+                                          Math.min(prev + 1, linkSuggestions.length - 1),
+                                        );
+                                      } else {
+                                        setFocusedSuggestionIndex(prev => Math.max(prev - 1, -1));
+                                      }
                                       return;
                                     }
 
-                                    handleAddCustomLink();
-                                  } else if (event.key === 'Escape') {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    setIsLeftCustomLinkFormOpen(false);
-                                    setCustomLinkUrl('');
-                                    setCustomLinkName('');
-                                  }
-                                }}
-                                placeholder="Add a link URL..."
-                                autoFocus
-                                className="w-full bg-transparent border-none text-[13.5px] font-normal text-neutral-800 dark:text-neutral-100 placeholder-[var(--color-textPlaceholder)]/50 focus:outline-none h-6"
-                                style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}
-                              />
-                              {linkSuggestions.length > 0 && (
-                                <div className="absolute top-full left-0 mt-2 w-full bg-white dark:bg-[#1C1C1E] border border-black/5 dark:border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[99] overflow-hidden max-h-[250px] flex flex-col">
-                                  <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 dark:text-neutral-500  tracking-wider bg-white/50 dark:bg-black/20 border-b border-black/5 dark:border-white/5">
-                                    Suggestions
-                                  </div>
-                                  <div className="overflow-y-auto custom-scrollbar">
-                                    {linkSuggestions.map((suggestion, idx) => (
-                                      <div
-                                        key={idx}
-                                        className={`px-3 py-2 cursor-pointer flex items-center gap-3 transition-colors ${focusedSuggestionIndex === idx
-                                          ? 'bg-[#3B66AE] text-white'
-                                          : 'hover:bg-white dark:hover:bg-white/5 text-neutral-800 dark:text-neutral-200'
-                                          }`}
-                                        onClick={() => {
-                                          const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-                                          setSelectedLinks(prev => [
-                                            ...prev,
-                                            {
-                                              id,
-                                              url: suggestion.url,
-                                              name: suggestion.title || getHostname(suggestion.url),
-                                              source: 'custom',
-                                              favIconUrl: getFaviconUrl(getHostname(suggestion.url)),
-                                            },
-                                          ]);
-                                          setCustomLinkUrl('');
-                                          setCustomLinkName('');
-                                          setLinkSuggestions([]);
-                                          setTimeout(() => {
-                                            customLinkUrlRef.current?.focus();
-                                          }, 50);
-                                        }}>
-                                        <div className="flex-shrink-0 relative">
-                                          <img
-                                            src={getFaviconUrl(getHostname(suggestion.url))}
-                                            alt=""
-                                            className="w-3.5 h-3.5 rounded-sm object-cover"
-                                            onError={(e) => {
-                                              e.currentTarget.style.display = 'none';
-                                              e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                                            }}
-                                          />
-                                          <div className="hidden w-3.5 h-3.5 rounded flex items-center justify-center text-neutral-500">
-                                            {suggestion.source === 'bookmark' ? <FaBookmark size={10} /> : <FaHistory size={10} />}
+                                    if (event.key === 'Enter') {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+
+                                      if (focusedSuggestionIndex >= 0 && linkSuggestions[focusedSuggestionIndex]) {
+                                        const item = linkSuggestions[focusedSuggestionIndex];
+                                        setSelectedLinks(prev => [
+                                          ...prev,
+                                          {
+                                            id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                                            url: item.url,
+                                            name: item.title || getHostname(item.url),
+                                            source: 'custom',
+                                            favIconUrl: getFaviconUrl(getHostname(item.url)),
+                                          },
+                                        ]);
+                                        setCustomLinkUrl('');
+                                        setCustomLinkName('');
+                                        setLinkSuggestions([]);
+                                        setTimeout(() => {
+                                          customLinkUrlRef.current?.focus();
+                                        }, 50);
+                                        return;
+                                      }
+
+                                      handleAddCustomLink();
+                                    } else if (event.key === 'Escape') {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      const hasInputText = customLinkUrl.trim().length > 0;
+                                      setIsLeftCustomLinkFormOpen(false);
+                                      setCustomLinkUrl('');
+                                      setCustomLinkName('');
+                                      if (titleInputRef.current) {
+                                        titleInputRef.current.focus();
+                                      }
+                                      if (!hasInputText) {
+                                        handleCloseAttempt();
+                                      }
+                                    }
+                                  }}
+                                  placeholder="Add a link URL..."
+                                  autoFocus
+                                  className="w-full bg-transparent border-none text-[13.5px] font-normal text-neutral-800 dark:text-neutral-100 placeholder-[var(--color-textPlaceholder)]/50 focus:outline-none h-6"
+                                  style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}
+                                />
+                                {linkSuggestions.length > 0 && (
+                                  <div className="absolute top-full left-0 mt-2 w-full bg-white dark:bg-[#1C1C1E] border border-black/5 dark:border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[99] overflow-hidden max-h-[250px] flex flex-col">
+                                    <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 dark:text-neutral-500  tracking-wider bg-white/50 dark:bg-black/20 border-b border-black/5 dark:border-white/5">
+                                      Suggestions
+                                    </div>
+                                    <div className="overflow-y-auto custom-scrollbar">
+                                      {linkSuggestions.map((suggestion, idx) => (
+                                        <div
+                                          key={idx}
+                                          className={`px-3 py-2 cursor-pointer flex items-center gap-3 transition-colors ${focusedSuggestionIndex === idx
+                                            ? 'bg-[#3B66AE] text-white'
+                                            : 'hover:bg-white dark:hover:bg-white/5 text-neutral-800 dark:text-neutral-200'
+                                            }`}
+                                          onClick={() => {
+                                            const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                                            setSelectedLinks(prev => [
+                                              ...prev,
+                                              {
+                                                id,
+                                                url: suggestion.url,
+                                                name: suggestion.title || getHostname(suggestion.url),
+                                                source: 'custom',
+                                                favIconUrl: getFaviconUrl(getHostname(suggestion.url)),
+                                              },
+                                            ]);
+                                            setCustomLinkUrl('');
+                                            setCustomLinkName('');
+                                            setLinkSuggestions([]);
+                                            setTimeout(() => {
+                                              customLinkUrlRef.current?.focus();
+                                            }, 50);
+                                          }}>
+                                          <div className="flex-shrink-0 relative">
+                                            <img
+                                              src={getFaviconUrl(getHostname(suggestion.url))}
+                                              alt=""
+                                              className="w-3.5 h-3.5 rounded-sm object-cover"
+                                              onError={(e) => {
+                                                e.currentTarget.style.display = 'none';
+                                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                              }}
+                                            />
+                                            <div className="hidden w-3.5 h-3.5 rounded flex items-center justify-center text-neutral-500">
+                                              {suggestion.source === 'bookmark' ? <FaBookmark size={10} /> : <FaHistory size={10} />}
+                                            </div>
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div
+                                              className={`font-medium truncate ${focusedSuggestionIndex === idx ? 'text-white' : 'text-neutral-600 dark:text-neutral-200'}`}>
+                                              {suggestion.title}
+                                            </div>
+                                            <div
+                                              className={`truncate opacity-80 text-[10px] ${focusedSuggestionIndex === idx ? 'text-white/70' : 'text-neutral-500'}`}>
+                                              {suggestion.url}
+                                            </div>
                                           </div>
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                          <div
-                                            className={`font-medium truncate ${focusedSuggestionIndex === idx ? 'text-white' : 'text-neutral-600 dark:text-neutral-200'}`}>
-                                            {suggestion.title}
-                                          </div>
-                                          <div
-                                            className={`truncate opacity-80 text-[10px] ${focusedSuggestionIndex === idx ? 'text-white/70' : 'text-neutral-500'}`}>
-                                            {suggestion.url}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    ))}
+                                      ))}
+                                    </div>
                                   </div>
-                                </div>
-                              )}
+                                )}
+                              </div>
                             </div>
-                          </div>
+
+                            <div
+                              aria-hidden="true"
+                              className="h-[2px] w-full shrink-0 bg-[var(--color-borderActive)]"
+                            />
+                          </>
                         ) : (
                           <div
                             onClick={() => {
                               setIsLeftCustomLinkFormOpen(true);
                               setCustomLinkUrl('');
                             }}
-                            className="group flex items-center justify-center gap-2.5 py-3 px-3 transition-all cursor-pointer focus:outline-none hover:bg-white/5 last:rounded-b-xl"
+                            className="group flex items-center justify-center gap-2.5 py-3 px-3 transition-all cursor-pointer focus:outline-none hover:bg-[var(--color-hoverBg)] last:rounded-b-xl"
                           >
-                            <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-200 transition-colors">
+                            <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)] transition-colors">
                               <FaPlus size={11} />
                             </div>
-                            <span className="text-[13.5px] font-semibold text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-200 transition-colors">Add a custom link</span>
+                            <span className="text-[13.5px] font-semibold text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)] transition-colors">Add a custom link</span>
                           </div>
                         )}
 
@@ -2647,7 +2704,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                       setShowTooltip(true);
                     }}
                     onMouseLeave={() => setShowTooltip(false)}
-                    className="absolute bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[10px] font-semibold shadow-sm transition-all active:scale-95 border-black/10 dark:border-white/20 bg-neutral-100 dark:bg-white/10 text-neutral-800 dark:text-white/90 hover:bg-neutral-200 dark:hover:bg-white/20 hover:text-neutral-900 dark:hover:text-white cursor-pointer select-none"
+                    className="absolute bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] cursor-pointer select-none"
                   >
                     <span>Create another</span>
                   </button>
@@ -2656,7 +2713,72 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
             </div>
           </div>
         </div>
-      </WorkspaceEditorLayout>
+      </div>
+
+          {/* Right Column: Full-Height Sibling Column (Top Edge to Bottom Edge) */}
+          <RightSideItemsPanel<any>
+            items={sortedLinks}
+            activeItemId={activeLinkId}
+            searchQuery={tableSearchQuery}
+            onSearchChange={setTableSearchQuery}
+            onCloseClick={onClose}
+            searchPlaceholder="Search links..."
+            getItemTitle={item => item.title || 'Untitled Link'}
+            getItemPreview={item =>
+              (item.urls || [])
+                .map((link: any) => link.name || link.title || link.url || '')
+                .filter(Boolean)
+                .join(', ')
+            }
+            getItemCompoundId={item =>
+              getItemCompoundId({
+                id: item.id,
+                workspace_id: item.workspaceId || null,
+                folder_id: item.folderId || null,
+                snippet: { id: item.id, category: 'link' },
+              })
+            }
+            getItemType={() => 'link'}
+            getItemWorkspaceId={item => item.workspaceId || null}
+            getItemFolderId={item => item.folderId || null}
+            getItemTagIds={item => item.tagIds || []}
+            shortcutPrefix="c"
+            shortcutsMap={shortcutsMap}
+            hotkeysMap={hotkeysMap}
+            workspaceNamesMap={workspaceNamesMap}
+            folderNamesMap={folderNamesMap}
+            tagNamesMap={tagNamesMap}
+            onLoadItem={id => handleLoadLinkItem(id)}
+            onDeleteItem={id => {
+              setLinkToDeleteId(id);
+              setIsDeleteDialogOpen(true);
+            }}
+            onOpenerClick={item => {
+              (item.urls || []).forEach((u: any, idx: number) => {
+                const cleanUrl = typeof u === 'string' ? u : u?.url || '';
+                if (cleanUrl) {
+                  const urlWithProtocol = cleanUrl.startsWith('//') ? `https:${cleanUrl}` : cleanUrl;
+                  const chromeAny = (window as any)?.chrome;
+                  if (chromeAny?.tabs?.create) {
+                    chromeAny.tabs.create({ url: urlWithProtocol, active: idx === 0 });
+                  } else {
+                    window.open(urlWithProtocol, '_blank', 'noopener');
+                  }
+                }
+              });
+            }}
+            onUpdateShortcut={async (id, val) => { await handleUpdateItemField(id, 'shortcut', val); }}
+            onUpdateTitle={async (id, val) => { await handleUpdateItemField(id, 'title', val); }}
+            onUpdateTags={async (id, tagText) => { await handleUpdateItemField(id, 'tags', tagText); }}
+            isFavorite={isFavorite}
+            toggleFavorite={toggleFavorite}
+            isExpanded={isRightPanelExpanded}
+            onExpandChange={setIsRightPanelExpanded}
+            searchInputRef={rightSideSearchInputRef}
+            emptyStateMessage="No links found"
+          />
+        </div>
+      </EditorContainer>
 
       {/* Link Edit Popup */}
       {editingPopupLinkId && (
@@ -2708,6 +2830,12 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                           setEditingUrlParts(parts);
                         }
                       }}
+                      onFocus={() => {
+                        setFocusedField(null);
+                        setFocusedPathIndex(null);
+                        setFocusedQueryIndex(null);
+                        setShowPathQueryDropdown(false);
+                      }}
                       onKeyDown={e => {
                         e.stopPropagation();
                         if (e.key === 'Enter') {
@@ -2719,7 +2847,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                     />
                   </td>
                 </tr>
-                {/* Only show Domain and Path fields if URL is parseable */}
+                {/* Show structured domain, path, and query fields when the URL is parseable. */}
                 {editingUrlParts && (() => {
                   const parts = editingUrlParts;
                   return (
@@ -2736,6 +2864,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                             onFocus={() => {
                               setFocusedField('domain');
                               setFocusedPathIndex(null);
+                              setFocusedQueryIndex(null);
                             }}
                             onBlur={(e: any) => {
                               if (e.relatedTarget === dropdownButtonRef.current) return;
@@ -2796,7 +2925,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                         </td>
                       </tr>
                       {parts.paths.map((path, idx) => (
-                        <tr key={idx} className="border-b border-black/5 dark:border-neutral-700">
+                        <tr key={`path-${idx}`} className="border-b border-black/5 dark:border-neutral-700">
                           <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-400 font-medium">Path {idx + 1}</td>
                           <td className="py-2 relative">
                             <HighlightedInput
@@ -2812,6 +2941,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                               onFocus={() => {
                                 setFocusedField('path');
                                 setFocusedPathIndex(idx);
+                                setFocusedQueryIndex(null);
                               }}
                               onBlur={(e: any) => {
                                 if (e.relatedTarget === dropdownButtonRef.current) return;
@@ -2877,6 +3007,172 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                           </td>
                         </tr>
                       ))}
+                      {parts.queryParams.map((param, idx) => (
+                        <tr key={`query-${idx}`} className="border-b border-black/5 dark:border-neutral-700">
+                          <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-400 font-medium">
+                            Query {idx + 1}
+                          </td>
+                          <td className="py-2">
+                            <div className="flex items-center gap-2">
+                              <input
+                                value={param.key}
+                                placeholder="Parameter"
+                                aria-label={`Query ${idx + 1} parameter`}
+                                onChange={e => {
+                                  const newQueryParams = parts.queryParams.map((item, itemIndex) =>
+                                    itemIndex === idx ? { ...item, key: e.target.value } : item,
+                                  );
+                                  setEditingUrlParts(prev =>
+                                    prev ? { ...prev, queryParams: newQueryParams } : prev,
+                                  );
+                                }}
+                                onFocus={() => {
+                                  setFocusedField(null);
+                                  setFocusedPathIndex(null);
+                                  setFocusedQueryIndex(idx);
+                                }}
+                                onKeyDown={e => e.stopPropagation()}
+                                className="min-w-0 flex-1 bg-black/5 dark:bg-neutral-800 border border-black/5 dark:border-neutral-700 rounded px-2 py-1 text-neutral-800 dark:text-neutral-100 text-xs"
+                              />
+                              <span className="text-xs text-neutral-500 dark:text-neutral-400">=</span>
+                              <div className="relative min-w-0 flex-[1.4]">
+                                <HighlightedInput
+                                  value={param.value}
+                                  placeholder="Value"
+                                  aria-label={`Query ${idx + 1} value`}
+                                  onChange={(e: any) => {
+                                    const newQueryParams = parts.queryParams.map((item, itemIndex) =>
+                                      itemIndex === idx ? { ...item, value: e.target.value } : item,
+                                    );
+                                    setEditingUrlParts(prev =>
+                                      prev ? { ...prev, queryParams: newQueryParams } : prev,
+                                    );
+                                    if (showPathQueryDropdown) setShowPathQueryDropdown(false);
+                                  }}
+                                  onFocus={() => {
+                                    setFocusedField('queryValue');
+                                    setFocusedPathIndex(null);
+                                    setFocusedQueryIndex(idx);
+                                  }}
+                                  onBlur={(e: any) => {
+                                    if (e.relatedTarget === dropdownButtonRef.current) return;
+                                    setTimeout(() => setShowPathQueryDropdown(false), 150);
+                                  }}
+                                  onKeyDown={(e: any) => {
+                                    e.stopPropagation();
+                                    if (e.key === '@') {
+                                      e.preventDefault();
+                                      lastFocusedInputRef.current = e.currentTarget;
+                                      const newQueryParams = parts.queryParams.map((item, itemIndex) =>
+                                        itemIndex === idx ? { ...item, value: `${item.value}@` } : item,
+                                      );
+                                      setEditingUrlParts(prev =>
+                                        prev ? { ...prev, queryParams: newQueryParams } : prev,
+                                      );
+                                      setShowPathQueryDropdown(true);
+                                    } else if (showPathQueryDropdown) {
+                                      setShowPathQueryDropdown(false);
+                                    } else if (e.key === 'Enter' && !/{query}|\[query\]/i.test(param.value)) {
+                                      e.preventDefault();
+                                      const newQueryParams = parts.queryParams.map((item, itemIndex) =>
+                                        itemIndex === idx ? { ...item, value: `${item.value}{query}` } : item,
+                                      );
+                                      setEditingUrlParts(prev =>
+                                        prev ? { ...prev, queryParams: newQueryParams } : prev,
+                                      );
+                                    }
+                                  }}
+                                  className="w-full bg-black/5 dark:bg-neutral-800 border border-black/5 dark:border-neutral-700 rounded px-2 py-1 text-neutral-800 dark:text-neutral-100 text-xs"
+                                />
+                                {showPathQueryDropdown &&
+                                  focusedQueryIndex === idx &&
+                                  focusedField === 'queryValue' && (
+                                    <div className="absolute left-0 top-full mt-1 w-56 bg-white dark:bg-neutral-900 rounded-lg border border-black/5 dark:border-neutral-700 shadow-lg z-[9999]">
+                                      <div className="px-3 py-1.5 text-[10px] text-neutral-500 dark:text-neutral-400 border-b border-black/5 dark:border-neutral-700">
+                                        Add Variable (Click to select)
+                                      </div>
+                                      <button
+                                        ref={dropdownButtonRef}
+                                        type="button"
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            const newQueryParams = parts.queryParams.map((item, itemIndex) =>
+                                              itemIndex === idx
+                                                ? { ...item, value: item.value.replace(/@$/, '{query}') }
+                                                : item,
+                                            );
+                                            setEditingUrlParts(prev =>
+                                              prev ? { ...prev, queryParams: newQueryParams } : prev,
+                                            );
+                                            setShowPathQueryDropdown(false);
+                                            lastFocusedInputRef.current?.focus();
+                                          } else if (e.key === 'Escape') {
+                                            setShowPathQueryDropdown(false);
+                                            lastFocusedInputRef.current?.focus();
+                                          }
+                                        }}
+                                        onMouseDown={e => {
+                                          e.preventDefault();
+                                          const newQueryParams = parts.queryParams.map((item, itemIndex) =>
+                                            itemIndex === idx
+                                              ? { ...item, value: item.value.replace(/@$/, '{query}') }
+                                              : item,
+                                          );
+                                          setEditingUrlParts(prev =>
+                                            prev ? { ...prev, queryParams: newQueryParams } : prev,
+                                          );
+                                          setShowPathQueryDropdown(false);
+                                          lastFocusedInputRef.current?.focus();
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs bg-black/5 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 hover:bg-black/5 dark:hover:bg-neutral-700 transition-colors focus:bg-black/5 dark:focus:bg-neutral-700 focus:outline-none">
+                                        Insert {'{query}'}
+                                      </button>
+                                    </div>
+                                  )}
+                              </div>
+                              <button
+                                type="button"
+                                aria-label={`Remove query ${idx + 1}`}
+                                title="Remove query parameter"
+                                onClick={() => {
+                                  const newQueryParams = parts.queryParams.filter((_, itemIndex) => itemIndex !== idx);
+                                  setEditingUrlParts(prev =>
+                                    prev ? { ...prev, queryParams: newQueryParams } : prev,
+                                  );
+                                  setFocusedField(null);
+                                  setFocusedQueryIndex(null);
+                                  setShowPathQueryDropdown(false);
+                                }}
+                                className="h-6 w-6 shrink-0 rounded text-neutral-500 hover:text-red-500 hover:bg-black/5 dark:hover:bg-neutral-800 transition-colors">
+                                ×
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="border-b border-black/5 dark:border-neutral-700">
+                        <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-400 font-medium">Queries</td>
+                        <td className="py-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingUrlParts(prev =>
+                                prev
+                                  ? { ...prev, queryParams: [...prev.queryParams, { key: '', value: '' }] }
+                                  : prev,
+                              );
+                              setFocusedField(null);
+                              setFocusedPathIndex(null);
+                              setFocusedQueryIndex(parts.queryParams.length);
+                              setShowPathQueryDropdown(false);
+                            }}
+                            className="px-2 py-1 text-xs font-medium text-neutral-600 dark:text-neutral-300 bg-black/5 dark:bg-neutral-800 rounded hover:bg-black/10 dark:hover:bg-neutral-700 transition-colors">
+                            + Add Query Param
+                          </button>
+                        </td>
+                      </tr>
                     </>
                   );
                 })()}
@@ -2948,11 +3244,50 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
           </div>
         </div>
       )}
-      {/* Legacy Session Links Portal Removed */}
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmation
+        isOpen={isDeleteDialogOpen}
+        onClose={() => {
+          setIsDeleteDialogOpen(false);
+          setLinkToDeleteId(null);
+        }}
+        onConfirm={async () => {
+          if (linkToDeleteId) {
+            try {
+              const target = sortedLinks.find((l: any) => l.id === linkToDeleteId);
+              const compoundId = getItemCompoundId({
+                id: linkToDeleteId,
+                workspace_id: target?.workspaceId || null,
+                folder_id: target?.folderId || null,
+                snippet: { id: linkToDeleteId, category: 'link' },
+              });
+              await apiClearShortcut(linkToDeleteId, compoundId, 'link');
+              await deleteLink(linkToDeleteId);
+              const isCurrentItem =
+                linkToDeleteId === activeLinkId ||
+                linkToDeleteId === (initialLink as any)?.id ||
+                String(linkToDeleteId) === String(activeLinkId || '') ||
+                String(linkToDeleteId) === String((initialLink as any)?.id || '');
 
+              if (isCurrentItem) {
+                resetEditor();
+                setTitle('');
+                setSelectedLinks([]);
+                setLinkShortcut('');
+              }
+            } catch (err) {
+              console.error('Delete link failed:', err);
+            }
+          }
+          setIsDeleteDialogOpen(false);
+          setLinkToDeleteId(null);
+        }}
+        title={linkToDeleteId && sortedLinks.find((l: any) => l.id === linkToDeleteId)?.title ? `Delete "${sortedLinks.find((l: any) => l.id === linkToDeleteId)?.title}"?` : 'Delete this link?'}
+        description="Are you sure you want to delete this link? This action cannot be undone."
+        zIndex={100005}
+      />
     </>
   );
 };
 
 export default LinkEditorView;
-

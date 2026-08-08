@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createFieldNode, FieldType, scanAstForFields, evaluateAst, RuntimeContext } from '@extension/shared';
 import { useSnippetBuilder } from '../context/SnippetBuilderContext';
 import { FiSearch, FiType, FiAlignLeft, FiList, FiCalendar, FiToggleRight, FiNavigation, FiArrowLeft, FiSave, FiClipboard, FiActivity, FiStar, FiCommand } from 'react-icons/fi';
@@ -50,7 +51,7 @@ export const SnippetFormattingToolbar: React.FC<SnippetFormattingToolbarProps> =
 }) => {
   const { editor, astPreview, openTextConfigModal } = useSnippetBuilder();
 
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [previewOutput, setPreviewOutput] = useState<string>('');
 
@@ -187,142 +188,148 @@ export const SnippetFormattingToolbar: React.FC<SnippetFormattingToolbarProps> =
 
   return (
     <div className="flex flex-col gap-3 w-full h-full min-h-0">
-      {mode === 'edit' ? (
-        <div className="flex flex-col gap-2.5 flex-1 min-h-0">
-          
-
-          <div className="flex flex-col gap-2 pt-0.5 overflow-y-auto custom-scrollbar flex-1 pr-1.5 -mr-1.5 relative z-10">
-
-            {sections.map((section, idx) => (
-              <div key={idx} className="flex flex-col gap-1.5 flex-shrink-0">
-                {section.title && <h4 className="text-[13px] font-semibold text-neutral-500">{section.title}</h4>}
-                <div className="flex flex-col">
-                  {section.items.map(item => (
-                    <button
-                      key={item.id}
-                      onClick={() => item.action(editor)}
-                      className="flex items-start gap-3 w-full text-left p-1.5 -mx-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-white/5 transition-colors group"
-                    >
-                      <div className="mt-0.5 text-neutral-500 group-hover:text-neutral-700 dark:text-neutral-400 dark:group-hover:text-neutral-200 transition-colors">
-                        {item.icon}
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium text-neutral-900 dark:text-neutral-200 leading-tight">
-                          {item.title}
-                        </span>
-                        <span className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 leading-tight">
-                          {item.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-
-
-          </div>
-
-          {/* Test Button at bottom */}
-          {previewFields.length > 0 && (
-            <button
-              onClick={() => setMode('preview')}
-              className="w-full py-2 bg-neutral-900 dark:bg-white text-white dark:text-black rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity mt-2 flex-shrink-0 shadow-sm"
-            >
-              Test
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-6 flex-1 min-h-0">
-          <div className="flex items-center gap-3 border-b border-neutral-200 dark:border-white/10 pb-4 flex-shrink-0">
-            <button
-              onClick={() => setMode('edit')}
-              className="p-1.5 -ml-1.5 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white rounded-lg hover:bg-neutral-100 dark:hover:bg-white/5 transition-colors"
-            >
-              <FiArrowLeft size={16} />
-            </button>
-            <h3 className="text-sm font-semibold text-[var(--color-textPrimary)]">Test Snippet</h3>
-          </div>
-
-          <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-2 -mr-2 pb-4">
-            {previewFields.length === 0 ? (
-              <div className="text-sm text-neutral-500 italic py-2">No dynamic fields found.</div>
-            ) : (
-              previewFields.map((field) => (
-                <div key={field.id} className="flex flex-col gap-1.5 text-left">
-                  <label className="text-[13px] font-medium text-neutral-600 dark:text-neutral-400 flex items-center justify-between">
-                    <span>{field.config?.label || field.alias || (field.fieldType === 'dropdown' ? 'Dropdown' : field.fieldType === 'toggle' ? 'Toggle' : field.fieldType === 'date' ? 'Date' : 'Ask Input')}</span>
-                  </label>
-                  {field.fieldType === 'dropdown' ? (
-                    <select
-                      className="w-full px-3 py-1.5 bg-transparent border border-neutral-200 dark:border-white/10 rounded-lg text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-500 transition-colors"
-                      value={previewValues[field.id] || field.config?.defaultValue || ''}
-                      onChange={(e) => setPreviewValues({ ...previewValues, [field.id]: e.target.value })}
-                    >
-                      <option value="" disabled hidden className="text-neutral-900 bg-[var(--color-containerBg)] dark:text-white">Select an option...</option>
-                      {/* @ts-ignore */}
-                      {(field.config?.options || []).map((opt: string, idx: number) => (
-                        <option key={idx} value={opt} className="text-neutral-900 bg-[var(--color-containerBg)] dark:text-white">{opt}</option>
-                      ))}
-                    </select>
-                  ) : field.fieldType === 'toggle' ? (
-                    <div className="flex gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={previewValues[field.id] === 'true' || (previewValues[field.id] === undefined && field.config?.defaultValue === true)}
-                          onChange={(e) => setPreviewValues({ ...previewValues, [field.id]: e.target.checked ? 'true' : 'false' })}
-                          className="w-4 h-4 rounded text-neutral-900 dark:text-white focus:ring-neutral-900 dark:focus:ring-white bg-[var(--color-containerBg)] border-[var(--color-borderDefault)]"
-                        />
-                        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                          {previewValues[field.id] === 'true' || (previewValues[field.id] === undefined && field.config?.defaultValue === true) ? (field.config?.trueLabel || 'Yes') : (field.config?.falseLabel || 'No')}
-                        </span>
-                      </label>
+      <div className="flex flex-col gap-2.5 flex-1 min-h-0">
+        <div className="flex flex-col gap-2 pt-0.5 overflow-y-auto custom-scrollbar flex-1 pr-1.5 -mr-1.5 relative z-10">
+          {sections.map((section, idx) => (
+            <div key={idx} className="flex flex-col gap-2 flex-shrink-0">
+              {section.title && <h4 className="text-[12px] font-normal text-neutral-500 dark:text-neutral-400 opacity-90 px-0.5">{section.title}</h4>}
+              <div className="flex flex-col gap-2">
+                {section.items.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => item.action(editor)}
+                    className="flex items-start gap-3.5 w-full text-left p-2 -mx-1.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-white/5 transition-all group cursor-pointer"
+                  >
+                    <div className="mt-0.5 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-200 transition-colors opacity-90">
+                      {item.icon}
                     </div>
-                  ) : field.fieldType === 'date' ? (
-                    <input
-                      type={field.config?.format === 'time' ? 'time' : field.config?.format === 'datetime' ? 'datetime-local' : 'date'}
-                      className="w-full px-3 py-1.5 bg-transparent border border-neutral-200 dark:border-white/10 rounded-lg text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-500 transition-colors"
-                      value={previewValues[field.id] !== undefined ? previewValues[field.id] : (
-                        field.config?.defaultValue === 'today'
-                          ? new Date().toISOString().split('T')[0]
-                          : field.config?.defaultValue === 'tomorrow'
-                            ? new Date(Date.now() + 86400000).toISOString().split('T')[0]
-                            : ''
-                      )}
-                      onChange={(e) => setPreviewValues({ ...previewValues, [field.id]: e.target.value })}
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      placeholder={`Enter value...`}
-                      className="w-full px-3 py-1.5 bg-transparent border border-neutral-200 dark:border-white/10 rounded-lg text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-500 transition-colors placeholder:text-neutral-500"
-                      value={previewValues[field.id] || ''}
-                      onChange={(e) => setPreviewValues({ ...previewValues, [field.id]: e.target.value })}
-                    />
-                  )}
-                </div>
-              ))
-            )}
-
-            <button
-              onClick={handleGenerate}
-              className="w-full py-2 bg-neutral-900 dark:bg-white text-white dark:text-black rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex-shrink-0"
-            >
-              Generate Result
-            </button>
-
-            {previewOutput && (
-              <div className="flex flex-col gap-2 flex-1 min-h-0 pb-4">
-                <h3 className="text-sm font-semibold text-[var(--color-textPrimary)]">Final Output</h3>
-                <div className="flex-1 overflow-y-auto custom-scrollbar border border-neutral-200 dark:border-white/10 rounded-lg bg-neutral-900 p-4">
-                  <pre className="text-neutral-100 text-[13px] whitespace-pre-wrap font-mono">
-                    {previewOutput}
-                  </pre>
-                </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs font-normal text-neutral-700 dark:text-neutral-300 opacity-100 leading-tight">
+                        {item.title}
+                      </span>
+                      <span className="text-[11px] font-normal text-neutral-400 dark:text-neutral-500 opacity-85 leading-normal">
+                        {item.description}
+                      </span>
+                    </div>
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+          ))}
+        </div>
+
+        {/* Test Button at bottom */}
+        {previewFields.length > 0 && (
+          <button
+            onClick={() => setIsTestModalOpen(true)}
+            className="w-full py-2 bg-neutral-900 dark:bg-white text-white dark:text-black rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity mt-2 flex-shrink-0 shadow-sm"
+          >
+            Test
+          </button>
+        )}
+      </div>
+
+      {/* Test Snippet Modal Popup */}
+      {isTestModalOpen && (
+        <div
+          className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50 backdrop-blur-[2px] animate-in fade-in duration-200"
+          onClick={() => setIsTestModalOpen(false)}
+        >
+          <div
+            className="bg-[#171821] border border-neutral-200 dark:border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-200 text-left"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-neutral-200 dark:border-white/10 pb-4 flex-shrink-0">
+              <h3 className="text-sm font-semibold text-white">Test Snippet</h3>
+              <button
+                onClick={() => setIsTestModalOpen(false)}
+                className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-4 overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 flex-1">
+              {previewFields.length === 0 ? (
+                <div className="text-sm text-neutral-500 italic py-2">No dynamic fields found.</div>
+              ) : (
+                previewFields.map((field) => (
+                  <div key={field.id} className="flex flex-col gap-1.5 text-left">
+                    <label className="text-[13px] font-medium text-neutral-300 flex items-center justify-between">
+                      <span>{field.config?.label || field.alias || (field.fieldType === 'dropdown' ? 'Dropdown' : field.fieldType === 'toggle' ? 'Toggle' : field.fieldType === 'date' ? 'Date' : 'Ask Input')}</span>
+                    </label>
+                    {field.fieldType === 'dropdown' ? (
+                      <select
+                        className="w-full px-3 py-1.5 bg-neutral-900 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-neutral-500 transition-colors"
+                        value={previewValues[field.id] || field.config?.defaultValue || ''}
+                        onChange={(e) => setPreviewValues({ ...previewValues, [field.id]: e.target.value })}
+                      >
+                        <option value="" disabled hidden className="text-white bg-neutral-900">Select an option...</option>
+                        {/* @ts-ignore */}
+                        {(field.config?.options || []).map((opt: string, idx: number) => (
+                          <option key={idx} value={opt} className="text-white bg-neutral-900">{opt}</option>
+                        ))}
+                      </select>
+                    ) : field.fieldType === 'toggle' ? (
+                      <div className="flex gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={previewValues[field.id] === 'true' || (previewValues[field.id] === undefined && field.config?.defaultValue === true)}
+                            onChange={(e) => setPreviewValues({ ...previewValues, [field.id]: e.target.checked ? 'true' : 'false' })}
+                            className="w-4 h-4 rounded text-white focus:ring-white bg-neutral-900 border-white/20"
+                          />
+                          <span className="text-sm font-medium text-neutral-300">
+                            {previewValues[field.id] === 'true' || (previewValues[field.id] === undefined && field.config?.defaultValue === true) ? (field.config?.trueLabel || 'Yes') : (field.config?.falseLabel || 'No')}
+                          </span>
+                        </label>
+                      </div>
+                    ) : field.fieldType === 'date' ? (
+                      <input
+                        type={field.config?.format === 'time' ? 'time' : field.config?.format === 'datetime' ? 'datetime-local' : 'date'}
+                        className="w-full px-3 py-1.5 bg-neutral-900 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-neutral-500 transition-colors"
+                        value={previewValues[field.id] !== undefined ? previewValues[field.id] : (
+                          field.config?.defaultValue === 'today'
+                            ? new Date().toISOString().split('T')[0]
+                            : field.config?.defaultValue === 'tomorrow'
+                              ? new Date(Date.now() + 86400000).toISOString().split('T')[0]
+                              : ''
+                        )}
+                        onChange={(e) => setPreviewValues({ ...previewValues, [field.id]: e.target.value })}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        placeholder={`Enter value...`}
+                        className="w-full px-3 py-1.5 bg-neutral-900 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-neutral-500 transition-colors placeholder:text-neutral-500"
+                        value={previewValues[field.id] || ''}
+                        onChange={(e) => setPreviewValues({ ...previewValues, [field.id]: e.target.value })}
+                      />
+                    )}
+                  </div>
+                ))
+              )}
+
+              <button
+                onClick={handleGenerate}
+                className="w-full py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-neutral-200 transition-colors flex-shrink-0 mt-2"
+              >
+                Generate Result
+              </button>
+
+              {previewOutput && (
+                <div className="flex flex-col gap-2 flex-1 min-h-0 pt-2">
+                  <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Final Output</h3>
+                  <div className="max-h-40 overflow-y-auto custom-scrollbar border border-white/10 rounded-lg bg-neutral-950 p-3">
+                    <pre className="text-neutral-100 text-[13px] whitespace-pre-wrap font-mono">
+                      {previewOutput}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

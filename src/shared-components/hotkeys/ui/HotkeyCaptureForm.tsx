@@ -1,4 +1,5 @@
-import React, { useRef, useEffect } from 'react';
+import * as React from 'react';
+import { useRef, useEffect } from 'react';
 import { FiLoader, FiCheck, FiZap, FiZapOff } from 'react-icons/fi';
 import { VisualKeyDisplay } from './VisualKeyDisplay';
 
@@ -80,6 +81,7 @@ export const HotkeyCaptureForm: React.FC<HotkeyCaptureFormProps> = ({
             <input
               ref={inputRef}
               type="text"
+              data-is-hotkey-input="true"
               value={hotkeyInput.value}
               readOnly
               onKeyDown={hotkeyInput.onChange}
@@ -120,7 +122,7 @@ export const HotkeyCaptureForm: React.FC<HotkeyCaptureFormProps> = ({
                       let typeDisplay = typeRaw;
                       if (typeRaw === 'note') typeDisplay = 'Note';
                       else if (typeRaw === 'link') typeDisplay = 'Link';
-                      else if (typeRaw === 'snippet') typeDisplay = 'Snippet';
+                      else if (typeRaw === 'snippet') typeDisplay = 'Text Expander';
                       else if (false) typeDisplay = 'Tab Session';
                      
                       else if (typeRaw === 'command') typeDisplay = 'Command';
@@ -173,7 +175,7 @@ export const HotkeyCaptureForm: React.FC<HotkeyCaptureFormProps> = ({
             title="Cancel">
             Cancel
           </button>
-          {error && hotkeyInput.onOverwrite && conflictId !== 'extension-reserved' ? (
+          {error && hotkeyInput.onOverwrite && !conflictId?.endsWith('-reserved') ? (
             <button
               onClick={e => {
                 e.stopPropagation();

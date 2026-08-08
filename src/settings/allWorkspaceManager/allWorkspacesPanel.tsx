@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useUIStore } from '../../shared-components/uiStateManager';
 import { useDbStore } from '../../storage/store/useDbStore';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -19,15 +20,23 @@ import {
   FiLogOut,
   FiLink,
   FiTerminal,
+  FiTrash2,
 } from 'react-icons/fi';
-import { FaUser, FaPalette, FaGithub } from 'react-icons/fa';
+import { FaUser, FaPalette, FaGithub, FaLink, FaRobot } from 'react-icons/fa';
+import { BsCalendarCheck } from 'react-icons/bs';
 import { FiCreditCard, FiSearch, FiPlus } from 'react-icons/fi';
 import CreateWorkspacePanel from './workspaces/ui/CreateWorkspacePanel';
 import type { WorkspaceData } from './workspaces/workspaceTypes';
+import { deleteWorkspace } from './workspaces/workspaceData';
+import DeleteConfirmation from '../../shared-components/modals/deleteDialog';
+import NotesIcon from '../../shared-components/icons/notesIcon';
+import { CUnderscoreIcon } from '../../shared-components/icons/cUnderscoreIcon';
 
 import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 import { FEATURE_FLAGS } from '../../pages/AltS_search_newtab/src/utils/featureFlags';
 import { CMDOS_SIGN_UP_URL } from '../../storage/API/core/api';
+import { SessionGridIcon } from '../../shared-components/icons/sessionGridIcon';
+
 
 interface AllWorkspacesPanelProps {
   onClose: () => void;
@@ -44,6 +53,8 @@ interface WorkspaceRowData {
   notesCount: number;
   linksCount: number;
   snippetsCount: number;
+  sessionsCount: number;
+  chatAgentsCount: number;
   sizeEstimate: string;
   lastSync: string;
   lastBackup: string;
@@ -92,11 +103,40 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
   const dbNotes = useDbStore(state => state.notes);
   const dbLinks = useDbStore(state => state.links);
   const dbSnippets = useDbStore(state => state.snippets);
+  const dbTodos = useDbStore(state => state.todos);
+  const dbAutomations = useDbStore(state => state.automations);
+  const dbChatAgents = useDbStore(state => state.chatAgents);
+  const dbSessions = useDbStore(state => state.sessions);
 
   // Expanded row state tracking (workspace ID -> boolean)
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [userInitials, setUserInitials] = useState<string>('ME');
   const [userInfo, setUserInfo] = useState<{ email: string; name: string; image_url?: string } | null>(null);
+
+  const [wsToDelete, setWsToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+  const handleDeleteWorkspaceClick = useCallback((e: React.MouseEvent, ws: { id: string; name: string }, totalWorkspaces: number) => {
+    e.stopPropagation();
+    if (totalWorkspaces <= 1) {
+      alert("At least one workspace must remain. You cannot delete the last workspace.");
+      return;
+    }
+    setWsToDelete(ws);
+    setIsDeleteModalOpen(true);
+  }, []);
+
+  const handleConfirmDeleteWorkspace = useCallback(async () => {
+    if (!wsToDelete) return;
+    try {
+      await deleteWorkspace(wsToDelete.id);
+    } catch (err) {
+      console.error('[AllWorkspacesPanel] Failed to delete workspace:', err);
+    } finally {
+      setIsDeleteModalOpen(false);
+      setWsToDelete(null);
+    }
+  }, [wsToDelete]);
 
   const [backupTimestamps, setBackupTimestamps] = useState<Record<string, number>>({});
   const [syncTimestamps, setSyncTimestamps] = useState<Record<string, number>>({});
@@ -219,17 +259,24 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
   const workspacesList = useMemo<WorkspaceRowData[]>(() => {
     const list: WorkspaceRowData[] = [];
 
-    dbWorkspaces.forEach((workspace) => {
+    dbWorkspaces.forEach((workspace, index) => {
       const wsId = String(workspace.id);
+      const isFirstWs = index === 0;
 
-      const notesCount = dbNotes.filter(n => String(n.workspaceId) === wsId).length;
-      const linksCount = dbLinks.filter(l => String(l.workspaceId) === wsId).length;
-      const snippetsCount = dbSnippets.filter(s => String(s.workspaceId) === wsId).length;
-      // Todos and automations are global (no workspaceId) so they cannot be filtered per-workspace
-      const todosCount = 0;
-      const automationsCount = 0;
+      const matchesWs = (itemWsId: string | null | undefined) => {
+        if (!itemWsId) return isFirstWs;
+        return String(itemWsId) === wsId;
+      };
 
-      const totalItems = notesCount + linksCount + snippetsCount;
+      const notesCount = dbNotes.filter(n => matchesWs(n.workspaceId)).length;
+      const linksCount = dbLinks.filter(l => matchesWs(l.workspaceId)).length;
+      const snippetsCount = dbSnippets.filter(s => matchesWs(s.workspaceId)).length;
+      const todosCount = dbTodos.filter(t => matchesWs((t as any).workspaceId)).length;
+      const automationsCount = dbAutomations.filter(a => matchesWs(a.workspaceId)).length;
+      const sessionsCount = dbSessions.filter(s => matchesWs(s.workspaceId)).length;
+      const chatAgentsCount = dbChatAgents.filter(c => matchesWs((c as any).workspaceId)).length;
+
+      const totalItems = notesCount + linksCount + snippetsCount + todosCount + automationsCount + sessionsCount + chatAgentsCount;
       const sizeKB = Math.max(10, totalItems * 8.5);
       const sizeEstimate = sizeKB > 1024
         ? `${(sizeKB / 1024).toFixed(1)} MB`
@@ -254,6 +301,8 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
         notesCount,
         linksCount,
         snippetsCount,
+        sessionsCount,
+        chatAgentsCount,
         sizeEstimate,
         lastSync,
         lastBackup,
@@ -262,7 +311,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
     });
 
     return list;
-  }, [dbWorkspaces, dbFolders, dbNotes, dbLinks, dbSnippets, backupTimestamps, syncTimestamps]);
+  }, [dbWorkspaces, dbFolders, dbNotes, dbLinks, dbSnippets, dbTodos, dbAutomations, dbSessions, dbChatAgents, backupTimestamps, syncTimestamps]);
 
   const handleLogout = async () => {
     const chromeAny = (window as any)?.chrome;
@@ -359,7 +408,8 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
 
   if (hideSidebar) {
     return (
-      <div className="flex-1 flex flex-col min-w-0 h-full min-h-0 overflow-hidden bg-[var(--color-editorBg)]/20 relative">
+      <>
+        <div className="flex-1 flex flex-col min-w-0 h-full min-h-0 overflow-hidden bg-[var(--color-editorBg)]/20 relative">
         {globalPopups}
         {/* Header bar */}
         <div className="flex items-center justify-between p-6 pb-4 shrink-0">
@@ -399,7 +449,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                       {/* Collapsible Row Header */}
                       <div
                         onClick={() => toggleRow(ws.id)}
-                        className="grid grid-cols-[1.4fr_1.8fr] py-4 px-4 text-xs items-center cursor-pointer select-none"
+                        className="relative grid grid-cols-[1.4fr_1.8fr] py-4 pl-4 pr-14 text-xs items-center cursor-pointer select-none"
                       >
                         {/* Workspace Name & Chevron */}
                         <div className="flex items-center gap-2 pr-2">
@@ -414,14 +464,29 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                         <div className="flex items-center gap-1.5 pr-2 min-w-0">
                           {ws.storageMode === 'cloud' ? <FiCloud className="w-4 h-4 text-blue-400 shrink-0" /> : <LocalFolderIcon />}
                           <div className="flex flex-col min-w-0">
-                            <span className="font-medium text-neutral-200 truncate">
+                            <span className="font-medium text-[var(--color-textPrimary)] truncate">
                               {ws.storageMode === 'cloud' ? 'Cloud' : 'Local Drive'}
                             </span>
-                            <span className="text-[10px] text-neutral-500 truncate font-mono mt-0.5">
+                            <span className="text-[10px] text-[var(--color-textMuted)] truncate font-mono mt-0.5">
                               {ws.path}
                             </span>
                           </div>
                         </div>
+
+                        {/* Delete Icon (Positioned Absolutely on Far Right) */}
+                        <button
+                          type="button"
+                          onClick={e => handleDeleteWorkspaceClick(e, ws, workspacesList.length)}
+                          disabled={workspacesList.length <= 1}
+                          className={`absolute right-3.5 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-lg transition-all ${
+                            workspacesList.length <= 1
+                              ? 'text-[var(--color-textDisabled)] opacity-50 cursor-not-allowed'
+                              : 'text-[var(--color-iconDefault)] hover:text-red-400 hover:bg-red-500/10 active:scale-95 cursor-pointer'
+                          }`}
+                          title={workspacesList.length <= 1 ? 'Cannot delete the only remaining workspace' : 'Delete Workspace'}
+                        >
+                          <FiTrash2 size={16} />
+                        </button>
                       </div>
 
                       {/* Collapsible Details Panel */}
@@ -438,61 +503,75 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                               {/* Top Content Row */}
                               <div className="grid grid-cols-2 gap-6">
                                 {/* 1. Included Items */}
-                                <div className="space-y-4 border-r border-white/5 pr-4">
-                                  <h4 className="font-bold text-neutral-400 uppercase tracking-wider text-[10px]">
+                                <div className="space-y-4 border-r border-[var(--color-borderDefault)] pr-4">
+                                  <h4 className="font-bold text-[var(--color-textMuted)] uppercase tracking-wider text-[10px]">
                                     Included Items
                                   </h4>
                                   <div className="space-y-2.5">
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiCheck size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Todos</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.todosCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.todosCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiFileText size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <NotesIcon size={14} className="shrink-0 text-[var(--color-iconDefault)]" />
                                         <span>Notes</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.notesCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.notesCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiLink size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FaLink size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Links</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.linksCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.linksCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiTerminal size={14} className="text-neutral-500 shrink-0" />
-                                        <span>Snippets</span>
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <CUnderscoreIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <span>Text Expander</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.snippetsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.snippetsCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiZap size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FiZap size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Automations</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.automationsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.automationsCount}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <SessionGridIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <span>Tab Sessions</span>
+                                      </div>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.sessionsCount}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <span>Chat Agents</span>
+                                      </div>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.chatAgentsCount}</span>
                                     </div>
                                   </div>
                                 </div>
 
                                 {/* 2. Location / Source */}
-                                <div className="space-y-4 border-r border-white/5 pr-4">
-                                  <h4 className="font-bold text-neutral-400 uppercase tracking-wider text-[10px]">
+                                <div className="space-y-4 border-r border-[var(--color-borderDefault)] pr-4">
+                                  <h4 className="font-bold text-[var(--color-textMuted)] uppercase tracking-wider text-[10px]">
                                     Location / Source
                                   </h4>
-                                  <div className="space-y-3 text-neutral-300">
+                                  <div className="space-y-3 text-[var(--color-textPrimary)]">
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Folder</span>
+                                      <span className="text-[10px] text-[var(--color-textMuted)] uppercase tracking-wider font-semibold">Folder</span>
                                       <span className="font-mono break-all">{ws.path}</span>
                                     </div>
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Type</span>
+                                      <span className="text-[10px] text-[var(--color-textMuted)] uppercase tracking-wider font-semibold">Type</span>
                                       <span>{ws.storageMode === 'cloud' ? 'Cloud' : 'Local Drive'}</span>
                                     </div>
                                   </div>
@@ -516,17 +595,27 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
           <div className="w-full flex justify-center pt-2">
             <button
               onClick={() => setShowCreateOrg(true)}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-200 hover:text-white transition-all shadow-sm active:scale-95 cursor-pointer"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] transition-all shadow-sm active:scale-95 cursor-pointer"
             >
-              <FiPlus size={14} className="text-indigo-400" />
-              <span>Create Organization</span>
+              <FiPlus size={14} className="text-[var(--color-accent)]" />
+              <span className="text-[var(--color-textPrimary)]">Create Organization</span>
             </button>
           </div>
 
         </div>
       </div>
-    );
-  }
+
+      <DeleteConfirmation
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={handleConfirmDeleteWorkspace}
+        title={`Delete Workspace "${wsToDelete?.name || ''}"`}
+        description="Are you sure you want to delete this workspace? All associated notes, links, snippets, automations, and folders will be deleted permanently. This action cannot be undone."
+        zIndex={100005}
+      />
+    </>
+  );
+}
 
   return (
     <div className={hideSidebar ? "flex-1 flex flex-col min-w-0 h-full min-h-0 relative" : "flex h-full w-full max-w-[1300px] mx-auto bg-[var(--color-modalBg)] border border-[var(--color-borderDefault)] shadow-2xl rounded-2xl overflow-hidden font-sans select-none backdrop-blur-xl animate-in fade-in duration-200 relative"}>
@@ -713,7 +802,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                       {/* Collapsible Row Header */}
                       <div
                         onClick={() => toggleRow(ws.id)}
-                        className="grid grid-cols-[1.4fr_1.8fr] py-4 px-4 text-xs items-center cursor-pointer select-none"
+                        className="relative grid grid-cols-[1.4fr_1.8fr] py-4 pl-4 pr-14 text-xs items-center cursor-pointer select-none"
                       >
                         {/* Workspace Name & Chevron */}
                         <div className="flex items-center gap-2 pr-2">
@@ -728,14 +817,29 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                         <div className="flex items-center gap-1.5 pr-2 min-w-0">
                           {ws.storageMode === 'cloud' ? <FiCloud className="w-4 h-4 text-blue-400 shrink-0" /> : <LocalFolderIcon />}
                           <div className="flex flex-col min-w-0">
-                            <span className="font-medium text-neutral-200 truncate">
+                            <span className="font-medium text-[var(--color-textPrimary)] truncate">
                               {ws.storageMode === 'cloud' ? 'Cloud' : 'Local Drive'}
                             </span>
-                            <span className="text-[10px] text-neutral-500 truncate font-mono mt-0.5">
+                            <span className="text-[10px] text-[var(--color-textMuted)] truncate font-mono mt-0.5">
                               {ws.path}
                             </span>
                           </div>
                         </div>
+
+                        {/* Delete Icon (Positioned Absolutely on Far Right) */}
+                        <button
+                          type="button"
+                          onClick={e => handleDeleteWorkspaceClick(e, ws, workspacesList.length)}
+                          disabled={workspacesList.length <= 1}
+                          className={`absolute right-3.5 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-lg transition-all ${
+                            workspacesList.length <= 1
+                              ? 'text-[var(--color-textDisabled)] opacity-50 cursor-not-allowed'
+                              : 'text-[var(--color-iconDefault)] hover:text-red-400 hover:bg-red-500/10 active:scale-95 cursor-pointer'
+                          }`}
+                          title={workspacesList.length <= 1 ? 'Cannot delete the only remaining workspace' : 'Delete Workspace'}
+                        >
+                          <FiTrash2 size={16} />
+                        </button>
                       </div>
 
                       {/* Collapsible Details Panel */}
@@ -752,61 +856,75 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                               {/* Top Content Row */}
                               <div className="grid grid-cols-2 gap-6">
                                 {/* 1. Included Items */}
-                                <div className="space-y-4 border-r border-white/5 pr-4">
-                                  <h4 className="font-bold text-neutral-400 uppercase tracking-wider text-[10px]">
+                                <div className="space-y-4 border-r border-[var(--color-borderDefault)] pr-4">
+                                  <h4 className="font-bold text-[var(--color-textMuted)] uppercase tracking-wider text-[10px]">
                                     Included Items
                                   </h4>
                                   <div className="space-y-2.5">
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiCheck size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Todos</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.todosCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.todosCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiFileText size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <NotesIcon size={14} className="shrink-0 text-[var(--color-iconDefault)]" />
                                         <span>Notes</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.notesCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.notesCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiLink size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FaLink size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Links</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.linksCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.linksCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiTerminal size={14} className="text-neutral-500 shrink-0" />
-                                        <span>Snippets</span>
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <CUnderscoreIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <span>Text Expander</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.snippetsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.snippetsCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiZap size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FiZap size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Automations</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.automationsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.automationsCount}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <SessionGridIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <span>Tab Sessions</span>
+                                      </div>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.sessionsCount}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <span>Chat Agents</span>
+                                      </div>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.chatAgentsCount}</span>
                                     </div>
                                   </div>
                                 </div>
 
                                 {/* 2. Location / Source */}
-                                <div className="space-y-4 border-r border-white/5 pr-4">
-                                  <h4 className="font-bold text-neutral-400 uppercase tracking-wider text-[10px]">
+                                <div className="space-y-4 border-r border-[var(--color-borderDefault)] pr-4">
+                                  <h4 className="font-bold text-[var(--color-textMuted)] uppercase tracking-wider text-[10px]">
                                     Location / Source
                                   </h4>
-                                  <div className="space-y-3 text-neutral-300">
+                                  <div className="space-y-3 text-[var(--color-textPrimary)]">
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Folder</span>
+                                      <span className="text-[10px] text-[var(--color-textMuted)] uppercase tracking-wider font-semibold">Folder</span>
                                       <span className="font-mono break-all">{ws.path}</span>
                                     </div>
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Type</span>
+                                      <span className="text-[10px] text-[var(--color-textMuted)] uppercase tracking-wider font-semibold">Type</span>
                                       <span>{ws.storageMode === 'cloud' ? 'Cloud' : 'Local Drive'}</span>
                                     </div>
                                   </div>
@@ -830,16 +948,24 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
           <div className="w-full flex justify-center pt-2">
             <button
               onClick={() => setShowCreateOrg(true)}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-200 hover:text-white transition-all shadow-sm active:scale-95 cursor-pointer"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] transition-all shadow-sm active:scale-95 cursor-pointer"
             >
-              <FiPlus size={14} className="text-indigo-400" />
-              <span>Create Organization</span>
+              <FiPlus size={14} className="text-[var(--color-accent)]" />
+              <span className="text-[var(--color-textPrimary)]">Create Organization</span>
             </button>
           </div>
 
         </div>
       </div>
 
+      <DeleteConfirmation
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={handleConfirmDeleteWorkspace}
+        title={`Delete Workspace "${wsToDelete?.name || ''}"`}
+        description="Are you sure you want to delete this workspace? All associated notes, links, snippets, automations, and folders will be deleted permanently. This action cannot be undone."
+        zIndex={100005}
+      />
     </div>
   );
 };

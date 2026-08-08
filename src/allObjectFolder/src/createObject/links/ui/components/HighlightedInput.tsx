@@ -1,4 +1,5 @@
-import React, { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
+import * as React from 'react';
+import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 
 interface HighlightedInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   // Pass any specific props if needed

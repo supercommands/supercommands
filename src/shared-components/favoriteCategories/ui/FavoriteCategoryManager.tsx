@@ -1,4 +1,6 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import * as React from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAppearance } from '@extension/ui';
 import { FiFolder, FiTrash2, FiEdit2, FiCheck, FiX } from 'react-icons/fi';
 import { FaStar } from 'react-icons/fa';
@@ -19,7 +21,7 @@ type FavoriteCategoryManagerProps = {
   showTrigger?: boolean;
   isFavorite?: boolean;
   onRemoveFavorite?: () => void;
-  onSelectCategory?: (categoryId: string) => void;
+  onSelectCategory?: (categoryId: string | null) => void;
   selectedCategoryId?: string | null;
 };
 
@@ -40,9 +42,11 @@ const FavoriteCategoryManager = ({
   const categories = useFavoriteCategories(userId);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
+  const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const [query, setQuery] = useState('');
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -58,6 +62,15 @@ const FavoriteCategoryManager = ({
       setInternalOpen(next);
     }
   };
+
+  useEffect(() => {
+    if (open && rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect();
+      const x = Math.max(12, rect.right - 240);
+      const y = rect.bottom + 4;
+      setPopoverPos({ x, y });
+    }
+  }, [open]);
 
   const normalizedQuery = query.trim();
 
@@ -174,7 +187,11 @@ const FavoriteCategoryManager = ({
     if (!open) return;
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+      const path = event.composedPath();
+      if (
+        rootRef.current && !path.includes(rootRef.current) &&
+        popoverRef.current && !path.includes(popoverRef.current)
+      ) {
         closePopover();
       }
     };
@@ -213,9 +230,16 @@ const FavoriteCategoryManager = ({
         </button>
       )}
 
-      {open && (
+      {open && popoverPos && createPortal(
         <div
-          className={`${popoverClassName} pointer-events-auto w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] rounded-lg shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200 z-[9999] flex flex-col`}>
+          ref={popoverRef}
+          style={{
+            position: 'fixed',
+            left: `${popoverPos.x}px`,
+            top: `${popoverPos.y}px`,
+            zIndex: 2147483647,
+          }}
+          className="pointer-events-auto w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col">
           {isFavorite && onRemoveFavorite && (
             <button
               type="button"
@@ -249,7 +273,7 @@ const FavoriteCategoryManager = ({
                   }
                 }}
                 placeholder="Search or create a category"
-                className="w-full bg-transparent px-3 py-2 text-xs outline-none text-neutral-900 dark:text-white placeholder-[var(--color-textPlaceholder)]"
+                className="w-full bg-transparent px-3 py-2 text-xs outline-none text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)]"
               />
             </form>
           </div>
@@ -270,7 +294,7 @@ const FavoriteCategoryManager = ({
 
           <div className="p-2 flex flex-col gap-1 max-h-[140px] overflow-y-auto no-scrollbar">
             {!normalizedQuery && filteredCategories.length === 0 && (
-              <div className="px-2 py-2 rounded-lg text-[12px] text-neutral-500 dark:text-neutral-400">
+              <div className="px-2 py-2 rounded-lg text-[12px] text-[var(--color-textSecondary)]">
                 No favorite categories yet
               </div>
             )}
@@ -320,7 +344,7 @@ const FavoriteCategoryManager = ({
                   onBlur={() => {
                     void handleSaveEdit();
                   }}
-                  className="w-full bg-transparent outline-none text-[12px] text-neutral-900 dark:text-white"
+                  className="w-full bg-transparent outline-none text-[12px] text-[var(--color-textPrimary)]"
                 />
                 <button
                   type="button"
@@ -346,15 +370,16 @@ const FavoriteCategoryManager = ({
                 <div
                   className={`group flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs transition-colors cursor-pointer ${
                     isHighlighted || isSelected
-                      ? 'bg-black/5 dark:bg-white/10 text-neutral-900 dark:text-white font-medium'
-                      : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white'
+                      ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-medium'
+                      : 'text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                   }`}
                   role="button"
                   tabIndex={0}
                   onMouseEnter={() => setHoveredIndex(index)}
                   onClick={() => {
                     if (onSelectCategory) {
-                      onSelectCategory(category.id);
+                      const nextCategory = selectedCategoryId === category.id ? null : category.id;
+                      onSelectCategory(nextCategory);
                       closePopover();
                       return;
                     }
@@ -364,7 +389,8 @@ const FavoriteCategoryManager = ({
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       if (onSelectCategory) {
-                        onSelectCategory(category.id);
+                        const nextCategory = selectedCategoryId === category.id ? null : category.id;
+                        onSelectCategory(nextCategory);
                         closePopover();
                       } else {
                         startEdit(category.id, category.name);
@@ -416,7 +442,8 @@ const FavoriteCategoryManager = ({
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

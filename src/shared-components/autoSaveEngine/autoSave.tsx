@@ -5,7 +5,7 @@
  * It shows dynamic relative time updates based on when the document/object was last saved.
  */
 
-import React from 'react';
+import * as React from 'react';
 import { FaCheckCircle, FaTimes } from 'react-icons/fa';
 import { FiLoader } from 'react-icons/fi';
 import { useRelativeSavedTime } from '../utils';

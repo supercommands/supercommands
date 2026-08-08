@@ -5,7 +5,9 @@
  * open INSTANTLY (0 transitions, 0 animations, 0 slide/fade) outside to the right of the active row.
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { format } from 'date-fns';
 import { useAppearance } from '@extension/ui';
 import { FaStar, FaFolder } from 'react-icons/fa';
@@ -284,7 +286,14 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
         id: 'hotkey',
         label: 'Assign Hotkey',
         icon: <FiZap size={15} className="shrink-0 text-neutral-400" />,
-        badge: localHotkey ? (
+        badge: isRecordingHotkey ? (
+          <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+            {localHotkey && <VisualKeyDisplay hotkey={localHotkey} size="sm" />}
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse">
+              Press keys... (Enter to save)
+            </span>
+          </div>
+        ) : localHotkey ? (
           <div className="flex items-center gap-1.5">
             <VisualKeyDisplay hotkey={localHotkey} size="sm" />
             <button
@@ -308,13 +317,9 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
               e.stopPropagation();
               setIsRecordingHotkey(true);
             }}
-            className={`text-[11px] font-medium flex items-center gap-1 px-2 py-0.5 rounded border ${
-              isRecordingHotkey
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                : 'bg-black/10 dark:bg-white/5 text-neutral-400 hover:text-white border-black/10 dark:border-white/10'
-            }`}
+            className="text-[11px] font-medium flex items-center gap-1 px-2 py-0.5 rounded border bg-black/10 dark:bg-white/5 text-neutral-400 hover:text-white border-black/10 dark:border-white/10"
           >
-            <FiZap size={11} /> {isRecordingHotkey ? 'Press keys...' : 'Record Key'}
+            <FiZap size={11} /> Record Key
           </button>
         ),
         action: () => {
@@ -566,30 +571,32 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
 
       // 2. Hotkey recording mode
       if (isRecordingHotkey) {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' || e.key === 'Enter') {
           setIsRecordingHotkey(false);
           return;
         }
         if (e.key === 'Backspace' || e.key === 'Delete') {
           setLocalHotkey('');
           onHotkeyChange?.('');
-          setIsRecordingHotkey(false);
           return;
         }
-        const modifiers: string[] = [];
-        if (e.altKey) modifiers.push('Alt');
-        if (e.ctrlKey) modifiers.push('Ctrl');
-        if (e.shiftKey) modifiers.push('Shift');
-        if (e.metaKey) modifiers.push('Meta');
+        if (['ArrowDown', 'ArrowUp', 'Tab', 'PageUp', 'PageDown'].includes(e.key)) {
+          setIsRecordingHotkey(false);
+        } else {
+          const modifiers: string[] = [];
+          if (e.altKey) modifiers.push('Alt');
+          if (e.ctrlKey) modifiers.push('Ctrl');
+          if (e.shiftKey) modifiers.push('Shift');
+          if (e.metaKey) modifiers.push('Meta');
 
-        const key = e.key.toUpperCase();
-        if (['ALT', 'CONTROL', 'SHIFT', 'META'].includes(key)) return;
+          const key = e.key.toUpperCase();
+          if (['ALT', 'CONTROL', 'SHIFT', 'META'].includes(key)) return;
 
-        const formatted = [...modifiers, key].join('+');
-        setLocalHotkey(formatted);
-        onHotkeyChange?.(formatted);
-        setIsRecordingHotkey(false);
-        return;
+          const formatted = [...modifiers, key].join('+');
+          setLocalHotkey(formatted);
+          onHotkeyChange?.(formatted);
+          return;
+        }
       }
 
       // 3. Escape key handling — 1st Esc closes active floating sub-popover layer ONLY
@@ -687,7 +694,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/30 backdrop-blur-[2px] pointer-events-auto"
       onClick={e => {
@@ -1007,7 +1014,8 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

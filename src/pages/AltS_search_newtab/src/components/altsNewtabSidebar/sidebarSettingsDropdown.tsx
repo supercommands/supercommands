@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppearance } from '@extension/ui';
 import { Reorder, useDragControls } from 'framer-motion';
 import {
@@ -6,7 +7,7 @@ import {
   setSidebarStorageData,
 } from '../../../../../storage/localStorage/sidebarCustomizationStorage';
 import { FaCheck, FaRobot } from 'react-icons/fa';
-import { FiMoreVertical, FiFileText, FiLink, FiCode, FiLayers, FiZap } from 'react-icons/fi';
+import { FiMoreVertical, FiFileText, FiLink, FiCode, FiLayers, FiZap, FiPlus } from 'react-icons/fi';
 import { HiArrowsUpDown } from 'react-icons/hi2';
 
 import ReactDOM from 'react-dom';
@@ -14,6 +15,8 @@ import { useFavorites, useUser } from '../../../../../shared-components/favorite
 import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import { createFavoriteCategory } from '../../../../../allObjectFolder/src/createObject/favoriteCategory';
+import { loadWidgetDashboardStateAsync } from '../../../../../storage/localStorage/widgetDashboardStorage';
+import type { WidgetDashboardState } from '../widgets/widgetDashboard.types';
 
 // ─── Drag Handle ────────────────────────────────────────────────────────────
 
@@ -82,10 +85,10 @@ const DropdownReorderItem: React.FC<DropdownReorderItemProps> = ({
       dragListener={false}
       dragControls={dragControls}
       className={`${paddingClass} list-none`}>
-      <div className="flex items-center justify-between px-2 py-0.5 rounded-md text-[12px] transition-colors duration-150 select-none hover:bg-white/5 text-neutral-300 hover:text-white">
+      <div className="flex items-center justify-between px-2 py-0.5 rounded-md text-[12px] transition-colors duration-150 select-none hover:bg-[var(--color-hoverBg)] text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] font-medium">
         <div className="flex items-center gap-1.5 flex-1">
           <div
-            className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300 dark:hover:text-neutral-200"
+            className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]"
             onPointerDown={e => dragControls.start(e)}>
             <DragHandleIcon />
           </div>
@@ -114,10 +117,10 @@ const FavoriteReorderItem: React.FC<FavoriteReorderItemProps> = ({ option, isInd
       dragListener={false}
       dragControls={dragControls}
       className={`${paddingClass} list-none`}>
-      <div className="flex items-center justify-between px-2 py-0.5 rounded-md text-[12px] transition-colors duration-150 select-none hover:bg-white/5 text-neutral-300 hover:text-white">
+      <div className="flex items-center justify-between px-2 py-0.5 rounded-md text-[12px] transition-colors duration-150 select-none hover:bg-[var(--color-hoverBg)] text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] font-medium">
         <div className="flex items-center gap-1.5 flex-grow min-w-0">
           <div
-            className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300 dark:hover:text-neutral-200 shrink-0"
+            className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] shrink-0"
             onPointerDown={e => dragControls.start(e)}>
             <DragHandleIcon />
           </div>
@@ -156,19 +159,25 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   autoFocusEdit,
   onCancelEdit,
 }) => {
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  const [isEditing, setIsEditing] = React.useState(autoFocusEdit || false);
-  const [editValue, setEditValue] = React.useState(label);
-  const [menuCoords, setMenuCoords] = React.useState({ top: 0, left: 0 });
-  const dotsRef = React.useRef<HTMLDivElement>(null);
-  const hasAppliedAutoFocusRef = React.useRef(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(autoFocusEdit || false);
+  const [editValue, setEditValue] = useState(label);
+  const [menuCoords, setMenuCoords] = useState({ top: 0, left: 0 });
+  const dotsRef = useRef<HTMLDivElement>(null);
+  const hasAppliedAutoFocusRef = useRef(false);
+  const isSubmittingRef = useRef(false);
 
   const handleRenameSubmit = () => {
-    if (editValue.trim() && onRename) {
-      onRename(editValue.trim());
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    const trimmed = editValue.trim();
+    if (trimmed && onRename) {
+      onRename(trimmed);
     } else {
       if (onCancelEdit) {
         onCancelEdit();
+      } else if (onDelete) {
+        onDelete();
       }
     }
     setIsEditing(false);
@@ -187,17 +196,17 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     setMenuOpen(!menuOpen);
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!menuOpen) return;
     const handleClose = () => setMenuOpen(false);
     window.addEventListener('click', handleClose);
     return () => window.removeEventListener('click', handleClose);
   }, [menuOpen]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (autoFocusEdit && !hasAppliedAutoFocusRef.current) {
       setIsEditing(true);
-      setEditValue(label);
+      setEditValue(''); // Start empty so user compulsorily types a name
       hasAppliedAutoFocusRef.current = true;
     }
 
@@ -206,11 +215,25 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     }
   }, [autoFocusEdit, label]);
 
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditing) {
+      isSubmittingRef.current = false;
+      // Force focus to ensure search bar doesn't steal it
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 50);
+    }
+  }, [isEditing]);
+
   return (
-    <div className="flex items-center justify-between px-2 py-1 mb-1.5 relative group rounded border bg-white/[0.04] border-white/5">
+    <div className="flex items-center justify-between px-1 py-1 mb-1 relative group rounded-md hover:bg-[var(--color-hoverBg)] transition-colors select-none">
       <div className="flex items-center gap-1 flex-1 min-w-0">
         <div
-          className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300 shrink-0"
+          className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] shrink-0"
           onPointerDown={e => {
             if (dragControls) dragControls.start(e);
             else e.stopPropagation();
@@ -219,22 +242,29 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         </div>
         {isEditing ? (
           <input
+            ref={inputRef}
             autoFocus
             value={editValue}
+            placeholder="Enter Group Name..."
             onChange={e => setEditValue(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
                 handleRenameSubmit();
               } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
                 setIsEditing(false);
                 if (onCancelEdit) onCancelEdit();
+                else if (onDelete) onDelete();
               }
             }}
             onBlur={handleRenameSubmit}
-            className="flex-1 bg-transparent border-b border-[#268bd2] outline-none text-[10px] font-bold tracking-wider uppercase text-neutral-300 px-1 w-full"
+            className="flex-1 bg-transparent border-b border-[var(--color-accent)] outline-none text-xs font-semibold text-[var(--color-textPrimary)] px-1 w-full"
           />
         ) : (
-          <span className="text-[10px] font-bold tracking-wider uppercase truncate text-neutral-400">{label}</span>
+          <span className="text-[10px] font-bold tracking-wider uppercase truncate text-[var(--color-textMuted)]">{label}</span>
         )}
       </div>
 
@@ -243,7 +273,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
           <ToggleSwitch isOn={isOn} onToggle={onToggle} />
         ) : (
           <div
-            className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all duration-150 shrink-0 cursor-pointer ${isOn ? 'bg-[#268bd2] border-[#268bd2] text-white' : 'border-neutral-600'}`}
+            className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all duration-150 shrink-0 cursor-pointer ${isOn ? 'bg-[var(--color-accent)] border-[var(--color-accent)] text-white' : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)]'}`}
             onClick={e => {
               e.stopPropagation();
               onToggle();
@@ -255,7 +285,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         {onRename && (
           <div
             ref={dotsRef}
-            className="relative group/dots cursor-pointer text-neutral-500 hover:text-neutral-300"
+            className="relative group/dots cursor-pointer text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]"
             onClick={handleDotsClick}>
             <FiMoreVertical size={12} />
             {menuOpen &&
@@ -382,9 +412,6 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
     ai: true,
     createsnippet: true,
     agent: true,
-    'header-others': false,
-    createfolder: false,
-    createworkspace: false,
     'header-workflows': false,
     'header-shortcuts': false,
   });
@@ -396,9 +423,6 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
     'ai',
     'createsnippet',
     'agent',
-    'header-others',
-    'createfolder',
-    'createworkspace',
     'header-workflows',
     'header-shortcuts',
   ]);
@@ -581,6 +605,7 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
 
   // ── Shared group naming for create/view sections ──
   const [customGroupNames, setCustomGroupNames] = useState<Record<string, string>>({});
+  const [dashboardState, setDashboardState] = useState<WidgetDashboardState | null>(null);
 
   useEffect(() => {
     const loadState = async () => {
@@ -604,7 +629,10 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
         'favorites_create_items_order',
         'sidebar_view_visible_items',
         'sidebar_view_items_order',
+        'customGroupNames',
       ]);
+
+      const namesMap: Record<string, string> = result.customGroupNames || customGroupNames || {};
 
       let initialCreateOrder = result.favorites_create_items_order;
       if (!initialCreateOrder) {
@@ -659,15 +687,7 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
             initialCreateOrder.push('header-workflows');
           }
         }
-        if (!initialCreateOrder.includes('header-workspace')) {
-          const folderIdx = initialCreateOrder.indexOf('createfolder');
-          if (folderIdx >= 0) {
-            initialCreateOrder.splice(folderIdx, 0, 'header-workspace');
-          } else {
-            initialCreateOrder.push('header-workspace');
-          }
-        }
-        initialCreateOrder = initialCreateOrder.filter((id: string) => id !== 'header-others' && id !== 'header-shortcuts' && id !== 'agent');
+        initialCreateOrder = initialCreateOrder.filter((id: string) => id !== 'header-others' && id !== 'header-shortcuts' && id !== 'agent' && id !== 'header-workspace' && id !== 'createfolder' && id !== 'createworkspace');
 
         const defaultAllIds = [
           'header-knowledge',
@@ -679,9 +699,6 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
           'ai',
           'header-automations',
           'createsnippet',
-          'header-workspace',
-          'createfolder',
-          'createworkspace',
         ];
         const missing = defaultAllIds.filter(id => !initialCreateOrder.includes(id));
         if (missing.length > 0) {
@@ -704,9 +721,11 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
           'header-knowledge': stored['header-knowledge'] ?? true,
           'header-workflows': stored['header-workflows'] ?? true,
           'header-automations': stored['header-automations'] ?? true,
-          'header-workspace': stored['header-workspace'] ?? true,
           ...stored,
         };
+        delete merged['header-workspace'];
+        delete merged['createfolder'];
+        delete merged['createworkspace'];
         setVisibleCreateItems(merged);
       } else {
         const defaultVisible = {
@@ -716,71 +735,45 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
           createtodo: true,
           ai: true,
           createsnippet: true,
-          createfolder: false,
-          createworkspace: false,
           'header-knowledge': true,
           'header-workflows': true,
           'header-automations': true,
-          'header-workspace': true,
         };
         setVisibleCreateItems(defaultVisible);
         setSidebarStorageData({ favorites_create_visible_items: defaultVisible });
       }
 
-      const hasFolders = result.sidebar_view_items_order?.includes('folders');
-      const hasAllShortcuts = result.sidebar_view_items_order?.includes('all_shortcuts');
-      const isOldDefault = result.sidebar_view_items_order?.[1] === 'notes';
-      if (!result.sidebar_view_items_order || result.sidebar_view_items_order.length < 9 || !hasAllShortcuts || isOldDefault || !hasFolders) {
-        const newOrder = [
-          'sessions',
-          'todos',
-          'links',
-          'notes',
-          'chat_agents',
-          'snippets',
-          'automations',
-          'folders',
-          'organizations',
-          'all',
-          'all_shortcuts',
-          'header-workflows',
-          'header-shortcuts',
-          'header-others',
-        ];
-        setViewItemsOrder(newOrder);
-        setSidebarStorageData({ sidebar_view_items_order: newOrder });
+      // Load real Dashboard Views state
+      loadWidgetDashboardStateAsync()
+        .then(dState => {
+          setDashboardState(dState);
+          const activeViews = dState?.views || [];
+          const validViewIds = new Set(activeViews.map(v => v.id));
 
-        const newVisible = {
-          ...result.sidebar_view_visible_items,
-          sessions: result.sidebar_view_visible_items?.sessions ?? true,
-          chat_agents: result.sidebar_view_visible_items?.chat_agents ?? true,
-          folders: true,
-          organizations: true,
-          all_shortcuts: true,
-          'header-workflows': result.sidebar_view_visible_items?.['header-workflows'] ?? false,
-          'header-shortcuts': result.sidebar_view_visible_items?.['header-shortcuts'] ?? false,
-          'header-others': result.sidebar_view_visible_items?.['header-others'] ?? false,
-        };
-        setVisibleViewItems(newVisible);
-        setSidebarStorageData({ sidebar_view_visible_items: newVisible });
-      } else {
-        let existingViewOrder = result.sidebar_view_items_order;
-        const hasViewHeaders = existingViewOrder.some((id: string) => id.startsWith('header-'));
-        if (!hasViewHeaders) {
-          existingViewOrder = [...existingViewOrder, 'header-workflows', 'header-shortcuts', 'header-others'];
-          setSidebarStorageData({ sidebar_view_items_order: existingViewOrder });
-        }
-        if (result.sidebar_view_visible_items) {
-          const stored = result.sidebar_view_visible_items;
-          setVisibleViewItems({
-            ...stored,
-            'header-workflows': stored['header-workflows'] ?? false,
-            'header-shortcuts': stored['header-shortcuts'] ?? false,
-            'header-others': stored['header-others'] ?? false,
+          let storedOrder: string[] = result.sidebar_view_items_order || result.dashboard_views_items_order || [];
+          // Filter out legacy filter strings & un-named custom headers
+          let sanitizedViewOrder = storedOrder.filter((id: string) => {
+            if (id.startsWith('header-custom_')) {
+              const groupId = id.replace('header-', '');
+              return Boolean(namesMap[groupId] && namesMap[groupId].trim());
+            }
+            return validViewIds.has(id);
           });
-        }
-        setViewItemsOrder(existingViewOrder);
-      }
+
+          // Ensure all active dashboard views are present in viewItemsOrder
+          activeViews.forEach(v => {
+            if (!sanitizedViewOrder.includes(v.id)) {
+              sanitizedViewOrder.push(v.id);
+            }
+          });
+
+          setViewItemsOrder(sanitizedViewOrder);
+          setSidebarStorageData({
+            sidebar_view_items_order: sanitizedViewOrder,
+            dashboard_views_items_order: sanitizedViewOrder,
+          });
+        })
+        .catch(() => undefined);
     };
     fetchStorage();
   }, []);
@@ -851,10 +844,8 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
       itemsInGroup.push(order[i]);
     }
 
-    if (itemsInGroup.length === 0) return;
-
-    const isAnyChecked = itemsInGroup.some(id => visibleItems[id]);
-    const newVisible = { ...visibleItems };
+    const isAnyChecked = itemsInGroup.length > 0 ? itemsInGroup.some(id => visibleItems[id]) : visibleItems[headerId];
+    const newVisible = { ...visibleItems, [headerId]: !isAnyChecked };
     itemsInGroup.forEach(id => {
       newVisible[id] = !isAnyChecked;
     });
@@ -865,24 +856,24 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
 
   const handleDeleteGroup = (headerId: string) => {
     const groupId = headerId.replace('header-', '');
+    const isViewGroup = viewItemsOrder.includes(headerId);
+    const sourceOrder = isViewGroup ? viewItemsOrder : createItemsOrder;
 
-    const headerIndex = createItemsOrder.indexOf(headerId);
+    const headerIndex = sourceOrder.indexOf(headerId);
     if (headerIndex === -1) return;
 
     const itemsInGroup: string[] = [];
-    for (let i = headerIndex + 1; i < createItemsOrder.length; i++) {
-      if (createItemsOrder[i].startsWith('header-')) break;
-      itemsInGroup.push(createItemsOrder[i]);
+    for (let i = headerIndex + 1; i < sourceOrder.length; i++) {
+      if (sourceOrder[i].startsWith('header-')) break;
+      itemsInGroup.push(sourceOrder[i]);
     }
 
-    const remainingOrder = createItemsOrder.filter(id => id !== headerId);
+    const remainingOrder = sourceOrder.filter(id => id !== headerId);
     const orderWithoutGroupItems = remainingOrder.filter(id => !itemsInGroup.includes(id));
     const newOrder = [...itemsInGroup, ...orderWithoutGroupItems];
-    setCreateItemsOrder(newOrder);
 
-    const newVisible = { ...visibleCreateItems };
+    const newVisible = isViewGroup ? { ...visibleViewItems } : { ...visibleCreateItems };
     delete newVisible[headerId];
-    setVisibleCreateItems(newVisible);
 
     const newNames = { ...customGroupNames };
     delete newNames[groupId];
@@ -892,6 +883,20 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
       setNewlyCreatedGroupId(null);
     }
 
+    if (isViewGroup) {
+      setViewItemsOrder(newOrder);
+      setVisibleViewItems(newVisible);
+      setSidebarStorageData({
+        sidebar_view_items_order: newOrder,
+        dashboard_views_items_order: newOrder,
+        sidebar_view_visible_items: newVisible,
+        customGroupNames: newNames,
+      });
+      return;
+    }
+
+    setCreateItemsOrder(newOrder);
+    setVisibleCreateItems(newVisible);
     setSidebarStorageData({
       favorites_create_items_order: newOrder,
       favorites_create_visible_items: newVisible,
@@ -939,12 +944,9 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
       ai: { id: 'ai', label: 'Chat Agent' },
       createtodo: { id: 'createtodo', label: 'Todo' },
       createsnippet: { id: 'createsnippet', label: 'Text Expander' },
-      createfolder: { id: 'createfolder', label: 'Folder' },
-      createworkspace: { id: 'createworkspace', label: 'Organization' },
       'header-knowledge': { id: 'header-knowledge', label: customGroupNames['knowledge'] || 'Knowledge' },
       'header-workflows': { id: 'header-workflows', label: customGroupNames['workflows'] || 'Workflows' },
       'header-automations': { id: 'header-automations', label: customGroupNames['automations'] || 'Automations' },
-      'header-workspace': { id: 'header-workspace', label: customGroupNames['workspace'] || 'Workspace' },
     };
     createItemsOrder.forEach(id => {
       if (id.startsWith('header-') && !map[id]) {
@@ -956,29 +958,21 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
   }, [createItemsOrder, customGroupNames]);
 
   const viewOptions = useMemo(() => {
-    const map: Record<string, { id: string; label: string }> = {
-      all: { id: 'all', label: 'All' },
-      sessions: { id: 'sessions', label: 'Tab Sessions' },
-      notes: { id: 'notes', label: 'Notes' },
-      todos: { id: 'todos', label: 'Todos' },
-      links: { id: 'links', label: 'Links' },
-      chat_agents: { id: 'chat_agents', label: 'Chat Agents' },
-      snippets: { id: 'snippets', label: 'Text Expanders' },
-      folders: { id: 'folders', label: 'Folders' },
-      organizations: { id: 'organizations', label: 'Organizations' },
-      all_shortcuts: { id: 'all_shortcuts', label: 'All Shortcuts' },
-      'header-workflows': { id: 'header-workflows', label: customGroupNames['workflows'] || 'Workflows' },
-      'header-shortcuts': { id: 'header-shortcuts', label: customGroupNames['shortcuts'] || 'Shortcuts' },
-      'header-others': { id: 'header-others', label: customGroupNames['others'] || 'Others' },
-    };
+    const map: Record<string, { id: string; label: string }> = {};
+    (dashboardState?.views || []).forEach(view => {
+      map[view.id] = { id: view.id, label: view.title };
+    });
     viewItemsOrder.forEach(id => {
       if (id.startsWith('header-') && !map[id]) {
         const groupId = id.replace('header-', '');
-        map[id] = { id, label: customGroupNames[groupId] !== undefined ? customGroupNames[groupId] : groupId };
+        const customTitle = customGroupNames[groupId];
+        if (customTitle && customTitle.trim()) {
+          map[id] = { id, label: customTitle.trim() };
+        }
       }
     });
     return viewItemsOrder.map(id => map[id]).filter(Boolean);
-  }, [viewItemsOrder, customGroupNames]);
+  }, [viewItemsOrder, customGroupNames, dashboardState?.views]);
 
   // ── Ensure all sections always appear in sectionsOrder ──
   const normalizedOrder = useMemo(() => {
@@ -1014,438 +1008,295 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
         ReactDOM.createPortal(
           <div
             data-portal="true"
-            className="fixed z-[9999] w-52 p-2 rounded-lg border shadow-xl flex flex-col select-none overflow-y-auto max-h-[80vh] custom-scrollbar bg-[var(--color-sidebarBg)] backdrop-blur-md border-white/10 text-neutral-400 shadow-black/80"
+            data-prevent-searchbar-capture="true"
+            className="fixed z-[9999] w-52 p-2 rounded-lg border shadow-xl flex flex-col select-none overflow-y-auto max-h-[80vh] custom-scrollbar bg-[var(--color-popupBg)] backdrop-blur-md border-[var(--color-borderDefault)] text-[var(--color-textSecondary)] shadow-xl"
             style={{ top: `${coords.top}px`, left: `${coords.left}px` }}>
-            <Reorder.Group
-              axis="y"
-              values={normalizedOrder}
-              onReorder={onSectionsReorder}
-              className="flex flex-col gap-0">
-              {normalizedOrder.map((sectionId, idx) => {
-                const isFirst = idx === 0;
-                const sectionBorderClass = isFirst ? '' : 'pt-1.5 mt-1 border-t border-black/10 dark:border-white/10';
-
-                if (sectionId === 'create') {
-                  const groups = [
-                    { title: 'Knowledge', items: ['createnotes', 'createlinks'] },
-                    { title: 'Workflows', items: ['createsession', 'createtodo', 'ai'] },
-                    { title: 'Automations', items: ['createsnippet'] },
-                    { title: 'Workspace', items: ['createfolder', 'createworkspace'] },
-                  ];
-                  return (
-                    <Reorder.Item
-                      key="create"
-                      value="create"
-                      dragListener={false}
-                      dragControls={createSectionDrag}
-                      className={`list-none flex flex-col pb-2 ${sectionBorderClass}`}>
-                      <div className="flex items-center justify-between px-2 py-1">
-                        <div className="flex items-center gap-1.5">
-                          <div
-                            className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300"
-                            onPointerDown={e => createSectionDrag.start(e)}>
-                            <DragHandleIcon />
-                          </div>
-                          <span className="text-[10px] font-bold tracking-wider text-neutral-500">Create</span>
-                        </div>
-                        <ToggleSwitch
-                          isOn={showCreateSection}
-                          onToggle={() => onToggleCreateSection(!showCreateSection)}
-                        />
-                      </div>
-                      <Reorder.Group
-                        axis="y"
-                        values={createItemsOrder}
-                        onReorder={reorderCreateItems}
-                        className="flex flex-col gap-0">
-                        {(() => {
-                          let hasSeenHeader = false;
-                          return createOptions.map(option => {
-                            if (option.id.startsWith('header-')) {
-                              hasSeenHeader = true;
-                              const groupId = option.id.replace('header-', '');
-
-                              // Check if any items below it are visible
-                              const headerIndex = createItemsOrder.indexOf(option.id);
-                              let isOn = false;
-                              for (let i = headerIndex + 1; i < createItemsOrder.length; i++) {
-                                if (createItemsOrder[i].startsWith('header-')) break;
-                                if (visibleCreateItems[createItemsOrder[i]]) {
-                                  isOn = true;
-                                  break;
-                                }
-                              }
-
-                              return (
-                                <GroupHeaderItem
-                                  key={option.id}
-                                  id={option.id}
-                                  title={option.label}
-                                  isOn={isOn}
-                                  onToggle={() =>
-                                    toggleGroup(
-                                      option.id,
-                                      createItemsOrder,
-                                      visibleCreateItems,
-                                      setVisibleCreateItems,
-                                      'favorites_create_visible_items',
-                                    )
-                                  }
-                                  onRename={newName => {
-                                    const newNames = { ...customGroupNames, [groupId]: newName };
-                                    setCustomGroupNames(newNames);
-                                    setSidebarStorageData({ customGroupNames: newNames });
-                                    if (newlyCreatedGroupId === option.id) {
-                                      setNewlyCreatedGroupId(null);
-                                    }
-                                  }}
-                                  onDelete={
-                                    option.id.startsWith('header-custom_')
-                                      ? () => handleDeleteGroup(option.id)
-                                      : undefined
-                                  }
-                                  autoFocusEdit={newlyCreatedGroupId === option.id}
-                                  onCancelEdit={() => {
-                                    if (newlyCreatedGroupId === option.id) {
-                                      handleDeleteGroup(option.id);
-                                    }
-                                  }}
-                                />
-                              );
-                            } else {
-                              return (
-                                <DropdownReorderItem
-                                  key={option.id}
-                                  option={option}
-                                  visibleItems={visibleCreateItems}
-                                  toggleItemVisibility={toggleCreateItem}
-                                  isIndented={hasSeenHeader}
-                                />
-                              );
-                            }
-                          });
-                        })()}
-                      </Reorder.Group>
-
-                      {/* Add Custom Group Button */}
-                      <div className="flex justify-center mt-2 px-2">
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            const newId = `header-custom_${Date.now()}`;
-                            const newOrder = [...createItemsOrder, newId];
-                            setCreateItemsOrder(newOrder);
-
-                            const newVisible = { ...visibleCreateItems, [newId]: true };
-                            setVisibleCreateItems(newVisible);
-
-                            const newNames = { ...customGroupNames, [newId.replace('header-', '')]: '' };
-                            setCustomGroupNames(newNames);
-
-                            setNewlyCreatedGroupId(newId);
-
-                            setSidebarStorageData({
-                              favorites_create_items_order: newOrder,
-                              favorites_create_visible_items: newVisible,
-                              customGroupNames: newNames,
-                            });
-                          }}
-                          className="p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-300 transition-colors flex items-center justify-center cursor-pointer outline-none border-none bg-transparent"
-                          title="Add Custom Group">
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round">
-                            <line x1="12" y1="5" x2="12" y2="19"></line>
-                            <line x1="5" y1="12" x2="19" y2="12"></line>
-                          </svg>
-                        </button>
-                      </div>
-                    </Reorder.Item>
-                  );
-                }
-
-                if (sectionId === 'view') {
-                  const groups = [
-                    { title: 'Workflows', items: ['sessions', 'todos'] },
-                    { title: 'Shortcuts', items: ['links', 'notes', 'chat_agents', 'snippets', 'automations'] },
-                    { title: 'Others', items: ['folders', 'organizations', 'all', 'all_shortcuts'] },
-                  ];
-                  return (
-                    <Reorder.Item
-                      key="view"
-                      value="view"
-                      dragListener={false}
-                      dragControls={viewSectionDrag}
-                      className={`list-none flex flex-col pb-2 ${sectionBorderClass}`}>
-                      <div className="flex items-center justify-between px-2 py-1">
-                        <div className="flex items-center gap-1.5">
-                          <div
-                            className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300"
-                            onPointerDown={e => viewSectionDrag.start(e)}>
-                            <DragHandleIcon />
-                          </div>
-                          <span className="text-[10px] font-bold tracking-wider text-neutral-500">My Library</span>
-                        </div>
-                        <ToggleSwitch isOn={showViewSection} onToggle={() => onToggleViewSection(!showViewSection)} />
-                      </div>
-                      <Reorder.Group
-                        axis="y"
-                        values={viewItemsOrder}
-                        onReorder={reorderViewItems}
-                        className="flex flex-col gap-0">
-                        {(() => {
-                          let hasSeenHeader = false;
-                          return viewOptions.map(option => {
-                            if (option.id.startsWith('header-')) {
-                              hasSeenHeader = true;
-                              const groupId = option.id.replace('header-', '');
-
-                              const headerIndex = viewItemsOrder.indexOf(option.id);
-                              let isOn = false;
-                              for (let i = headerIndex + 1; i < viewItemsOrder.length; i++) {
-                                if (viewItemsOrder[i].startsWith('header-')) break;
-                                if (visibleViewItems[viewItemsOrder[i]]) {
-                                  isOn = true;
-                                  break;
-                                }
-                              }
-
-                              return (
-                                <GroupHeaderItem
-                                  key={option.id}
-                                  id={option.id}
-                                  title={option.label}
-                                  isOn={isOn}
-                                  onToggle={() =>
-                                    toggleGroup(
-                                      option.id,
-                                      viewItemsOrder,
-                                      visibleViewItems,
-                                      setVisibleViewItems,
-                                      'sidebar_view_visible_items',
-                                    )
-                                  }
-                                  onRename={newName => {
-                                    const newNames = { ...customGroupNames, [groupId]: newName };
-                                    setCustomGroupNames(newNames);
-                                    setSidebarStorageData({ customGroupNames: newNames });
-                                  }}
-                                  onDelete={() => {}}
-                                />
-                              );
-                            } else {
-                              return (
-                                <DropdownReorderItem
-                                  key={option.id}
-                                  option={option}
-                                  visibleItems={visibleViewItems}
-                                  toggleItemVisibility={toggleViewItem}
-                                  isIndented={hasSeenHeader}
-                                />
-                              );
-                            }
-                          });
-                        })()}
-                      </Reorder.Group>
-                    </Reorder.Item>
-                  );
-                }
-
-                if (sectionId === 'favorites') {
-                  return (
-                    <Reorder.Item
-                      key="favorites"
-                      value="favorites"
-                      dragListener={false}
-                      dragControls={favoritesSectionDrag}
-                      className={`list-none flex flex-col pb-2 ${sectionBorderClass}`}>
-                      <div className="flex items-center justify-between px-2 py-1">
-                        <div className="flex items-center gap-1.5">
-                          <div
-                            className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300"
-                            onPointerDown={e => favoritesSectionDrag.start(e)}>
-                            <DragHandleIcon />
-                          </div>
-                          <span className="text-[10px] font-bold tracking-wider text-neutral-500">Favorites</span>
-                        </div>
-                        <ToggleSwitch
-                          isOn={showFavoritesSection}
-                          onToggle={() => onToggleFavoritesSection(!showFavoritesSection)}
-                        />
-                      </div>
-                      {showFavoritesSection && (
-                        <div className="flex flex-col gap-1 px-2 pb-1">
-                          <Reorder.Group
-                            axis="y"
-                            values={renderedFavoriteGroups.map(group => group.id)}
-                            onReorder={setFavoriteCategoryOrder}
-                            className="flex flex-col gap-1">
-                            {renderedFavoriteGroups.map(group => (
-                              <Reorder.Item
-                                key={group.id}
-                                value={group.id}
-                                dragListener={false}
-                                dragControls={favoritesSectionDrag}
-                                className={`list-none flex flex-col gap-0.5 rounded-md transition-colors ${dragOverCategoryId === group.id ? 'bg-white/5' : ''}`}
-                                onDragEnter={(e: React.DragEvent) => {
-                                  e.preventDefault();
-                                  if (draggedFavoriteId) setDragOverCategoryId(group.id);
-                                }}
-                                onDragOver={(e: React.DragEvent) => {
-                                  e.preventDefault();
-                                  if (draggedFavoriteId) setDragOverCategoryId(group.id);
-                                }}
-                                onDragLeave={(e: React.DragEvent) => {
-                                  const relatedTarget = e.relatedTarget as Node | null;
-                                  if (!e.currentTarget.contains(relatedTarget) && dragOverCategoryId === group.id) {
-                                    setDragOverCategoryId(null);
-                                  }
-                                }}
-                                onDrop={async (e: React.DragEvent) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  if ((group as any).isDraft) return;
-                                  await handleFavoriteDrop(group.id);
-                                }}>
-                                {(group as any).isDraft ? (
-                                  <SectionHeader
-                                    id={group.id}
-                                    label=""
-                                    isOn
-                                    onToggle={() => {}}
-                                    dragControls={favoritesSectionDrag}
-                                    onRename={newName => {
-                                      void handleCreateFavoriteCategory(newName);
-                                    }}
-                                    autoFocusEdit
-                                    onCancelEdit={handleCancelFavoriteCategoryCreate}
-                                  />
-                                ) : (
-                                  <div
-                                    className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded-md transition-colors ${dragOverCategoryId === group.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
-                                    onDragOver={e => {
-                                      e.preventDefault();
-                                      if (draggedFavoriteId) setDragOverCategoryId(group.id);
-                                    }}>
-                                    <div
-                                      className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300 shrink-0"
-                                      onPointerDown={e => favoritesSectionDrag.start(e)}>
-                                      <DragHandleIcon />
-                                    </div>
-                                    <span className="text-[10px] font-bold tracking-wider uppercase text-neutral-500 truncate flex-1 min-w-0">
-                                      {group.name}
-                                    </span>
-                                  </div>
-                                )}
-                                <div className="flex flex-col gap-0.5 pl-4 pr-1">
-                                  {group.items.map(item => (
-                                    <div
-                                      key={item.id}
-                                      draggable
-                                      onDragStart={e => {
-                                        e.stopPropagation();
-                                        e.dataTransfer.effectAllowed = 'move';
-                                        e.dataTransfer.setData('text/plain', item.id);
-                                        setDraggedFavoriteId(item.id);
-                                      }}
-                                      onDragEnd={() => {
-                                        setDraggedFavoriteId(null);
-                                        setDragOverCategoryId(null);
-                                      }}
-                                      className={`flex items-center gap-1.5 px-1 py-0.5 rounded-md text-[12px] text-neutral-300 cursor-grab active:cursor-grabbing ${draggedFavoriteId === item.id ? 'opacity-50' : 'hover:bg-white/5'}`}>
-                                      {getFavoriteIcon(item.originalItem || item)}
-                                      <span className="font-medium flex-1 py-0.5 truncate">{item.label}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </Reorder.Item>
-                            ))}
-                          </Reorder.Group>
-
-                          {ungroupedFavoriteItems.length > 0 && (
-                            <div
-                              className={`flex flex-col gap-0.5 pt-1 rounded-md transition-colors ${dragOverCategoryId === '__root__' ? 'bg-white/5' : ''}`}
-                              onDragEnter={e => {
-                                e.preventDefault();
-                                if (draggedFavoriteId) setDragOverCategoryId('__root__');
-                              }}
-                              onDragOver={e => {
-                                e.preventDefault();
-                                if (draggedFavoriteId) setDragOverCategoryId('__root__');
-                              }}
-                              onDragLeave={e => {
-                                const relatedTarget = e.relatedTarget as Node | null;
-                                if (!e.currentTarget.contains(relatedTarget) && dragOverCategoryId === '__root__') {
-                                  setDragOverCategoryId(null);
-                                }
-                              }}
-                              onDrop={async e => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                await handleFavoriteDrop(null);
-                              }}>
-                              <div className="flex flex-col gap-0.5 pl-1">
-                                {ungroupedFavoriteItems.map(item => (
-                                  <div
-                                    key={item.id}
-                                    draggable
-                                    onDragStart={e => {
-                                      e.stopPropagation();
-                                      e.dataTransfer.effectAllowed = 'move';
-                                      e.dataTransfer.setData('text/plain', item.id);
-                                      setDraggedFavoriteId(item.id);
-                                    }}
-                                    onDragEnd={() => {
-                                      setDraggedFavoriteId(null);
-                                      setDragOverCategoryId(null);
-                                    }}
-                                    className={`flex items-center gap-1.5 px-1 py-0.5 rounded-md text-[12px] text-neutral-300 cursor-grab active:cursor-grabbing ${draggedFavoriteId === item.id ? 'opacity-50' : 'hover:bg-white/5'}`}>
-                                    {getFavoriteIcon(item.originalItem || item)}
-                                    <span className="font-medium flex-1 py-0.5 truncate">{item.label}</span>
-                                  </div>
-                                ))}
-                              </div>
+            <div className="flex flex-col pb-2">
+              <Reorder.Group
+                axis="y"
+                values={normalizedOrder}
+                onReorder={onSectionsReorder}
+                className="flex flex-col gap-1 pb-1">
+                {normalizedOrder.map(sectionId => {
+                  if (sectionId === 'view' && normalizedOrder[0] === 'view') {
+                    return (
+                      <Reorder.Item key="view" value="view" className="list-none mb-1">
+                        <div className="flex items-center justify-between px-1 py-1 select-none">
+                          <div className="flex items-center gap-1.5">
+                            <div className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]">
+                              <DragHandleIcon />
                             </div>
-                          )}
-                          <div className="mt-2 px-2">
-                            {!draftFavoriteCategoryId && (
-                              <div className="flex justify-center">
-                                <button
-                                  type="button"
-                                  onClick={handleStartFavoriteCategoryCreate}
-                                  className="p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-300 transition-colors flex items-center justify-center cursor-pointer outline-none border-none bg-transparent"
-                                  title="Add Favorite Category">
-                                  <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2.5"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round">
-                                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                                  </svg>
-                                </button>
-                              </div>
-                            )}
+                            <span className="text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase">Workspace Views</span>
                           </div>
                         </div>
-                      )}
-                    </Reorder.Item>
-                  );
-                }
+                      </Reorder.Item>
+                    );
+                  }
+                  if (sectionId === 'create') {
+                    return (
+                      <Reorder.Item key="create" value="create" className="list-none">
+                        <div className="flex items-center justify-between px-1 py-1 select-none">
+                          <div className="flex items-center gap-1.5">
+                            <div className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]">
+                              <DragHandleIcon />
+                            </div>
+                            <span className="text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase">Create</span>
+                          </div>
+                        </div>
+                      </Reorder.Item>
+                    );
+                  }
+                  return null;
+                })}
+              </Reorder.Group>
 
-                return null;
-              })}
-            </Reorder.Group>
+              <div className="my-1 border-t border-[var(--color-borderDefault)]" />
+
+              {/* Sub-items list for CREATE section */}
+              <Reorder.Group
+                axis="y"
+                values={createItemsOrder}
+                onReorder={reorderCreateItems}
+                className="flex flex-col gap-0">
+                {(() => {
+                  let hasSeenHeader = false;
+                  const optionsMap = new Map(createOptions.map(opt => [opt.id, opt]));
+
+                  return createItemsOrder.map(id => {
+                    if (id.startsWith('header-')) {
+                      hasSeenHeader = true;
+                      const groupId = id.replace('header-', '');
+                      const defaultTitles: Record<string, string> = {
+                        knowledge: 'Knowledge',
+                        workflows: 'Workflows',
+                        automations: 'Automations',
+                        workspace: 'Workspace',
+                      };
+                      const title = customGroupNames[groupId] || defaultTitles[groupId] || groupId;
+
+                      const headerIndex = createItemsOrder.indexOf(id);
+                      let isOn = visibleCreateItems[id] ?? false;
+                      for (let i = headerIndex + 1; i < createItemsOrder.length; i++) {
+                        if (createItemsOrder[i].startsWith('header-')) break;
+                        if (visibleCreateItems[createItemsOrder[i]]) {
+                          isOn = true;
+                          break;
+                        }
+                      }
+
+                      return (
+                        <GroupHeaderItem
+                          key={id}
+                          id={id}
+                          title={title}
+                          isOn={isOn}
+                          onToggle={() =>
+                            toggleGroup(
+                              id,
+                              createItemsOrder,
+                              visibleCreateItems,
+                              setVisibleCreateItems,
+                              'favorites_create_visible_items',
+                            )
+                          }
+                          onRename={newName => {
+                            const newNames = { ...customGroupNames, [groupId]: newName };
+                            setCustomGroupNames(newNames);
+                            setSidebarStorageData({ customGroupNames: newNames });
+                            if (newlyCreatedGroupId === id) {
+                              setNewlyCreatedGroupId(null);
+                            }
+                          }}
+                          onDelete={
+                            id.startsWith('header-custom_')
+                              ? () => handleDeleteGroup(id)
+                              : undefined
+                          }
+                          autoFocusEdit={newlyCreatedGroupId === id}
+                          onCancelEdit={() => {
+                            if (newlyCreatedGroupId === id) {
+                              handleDeleteGroup(id);
+                            }
+                          }}
+                        />
+                      );
+                    } else {
+                      const option = optionsMap.get(id);
+                      if (!option) return null;
+                      return (
+                        <DropdownReorderItem
+                          key={option.id}
+                          option={option}
+                          visibleItems={visibleCreateItems}
+                          toggleItemVisibility={toggleCreateItem}
+                          isIndented={hasSeenHeader}
+                        />
+                      );
+                    }
+                  });
+                })()}
+              </Reorder.Group>
+
+              {/* Add Custom Group Button for Create Section */}
+              <div className="flex justify-start px-1 mt-1">
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    const newId = `header-custom_${Date.now()}`;
+                    const newOrder = [...createItemsOrder, newId];
+                    setCreateItemsOrder(newOrder);
+
+                    const newVisible = { ...visibleCreateItems, [newId]: true };
+                    setVisibleCreateItems(newVisible);
+
+                    const newNames = { ...customGroupNames, [newId.replace('header-', '')]: '' };
+                    setCustomGroupNames(newNames);
+
+                    setNewlyCreatedGroupId(newId);
+
+                    setSidebarStorageData({
+                      favorites_create_items_order: newOrder,
+                      favorites_create_visible_items: newVisible,
+                      customGroupNames: newNames,
+                    });
+                  }}
+                  className="py-1 px-1 flex items-center justify-center gap-1.5 text-[11px] font-medium text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)] transition-colors cursor-pointer bg-transparent border-none outline-none w-full"
+                  title="Add Create Group">
+                  <FiPlus size={13} />
+                  <span>Add Group</span>
+                </button>
+              </div>
+
+              {/* If DASHBOARD VIEWS is ordered after CREATE, render it at the very bottom after CREATE sub-items */}
+              {normalizedOrder[normalizedOrder.length - 1] === 'view' && (
+                <div className="mt-2.5 pt-2 border-t border-[var(--color-borderDefault)] flex flex-col gap-1.5">
+                  <Reorder.Group
+                    axis="y"
+                    values={normalizedOrder}
+                    onReorder={onSectionsReorder}>
+                    <Reorder.Item key="view" value="view" className="list-none">
+                      <div className="flex items-center justify-between px-1 py-1 select-none">
+                        <div className="flex items-center gap-1.5">
+                          <div className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]">
+                            <DragHandleIcon />
+                          </div>
+                          <span className="text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase">Workspace Views</span>
+                        </div>
+                      </div>
+                    </Reorder.Item>
+                  </Reorder.Group>
+
+                  {/* Sub-items list for DASHBOARD VIEWS section */}
+                  <Reorder.Group
+                    axis="y"
+                    values={viewItemsOrder}
+                    onReorder={reorderViewItems}
+                    className="flex flex-col gap-0">
+                    {(() => {
+                      let hasSeenHeader = false;
+                      const optionsMap = new Map(viewOptions.map(opt => [opt.id, opt]));
+
+                      return viewItemsOrder.map(id => {
+                        if (id.startsWith('header-')) {
+                          if (!id.startsWith('header-custom_')) return null;
+                          hasSeenHeader = true;
+                          const groupId = id.replace('header-', '');
+                          const title = customGroupNames[groupId] || '';
+                          if (!title.trim() && newlyCreatedGroupId !== id) return null;
+
+                          const headerIndex = viewItemsOrder.indexOf(id);
+                          let isOn = visibleViewItems[id] ?? false;
+                          for (let i = headerIndex + 1; i < viewItemsOrder.length; i++) {
+                            if (viewItemsOrder[i].startsWith('header-')) break;
+                            if (visibleViewItems[viewItemsOrder[i]]) {
+                              isOn = true;
+                              break;
+                            }
+                          }
+
+                          return (
+                            <GroupHeaderItem
+                              key={id}
+                              id={id}
+                              title={title}
+                              isOn={isOn}
+                              onToggle={() =>
+                                toggleGroup(
+                                  id,
+                                  viewItemsOrder,
+                                  visibleViewItems,
+                                  setVisibleViewItems,
+                                  'sidebar_view_visible_items',
+                                )
+                              }
+                              onRename={newName => {
+                                const newNames = { ...customGroupNames, [groupId]: newName };
+                                setCustomGroupNames(newNames);
+                                setSidebarStorageData({ customGroupNames: newNames });
+                                if (newlyCreatedGroupId === id) {
+                                  setNewlyCreatedGroupId(null);
+                                }
+                              }}
+                              onDelete={() => handleDeleteGroup(id)}
+                              autoFocusEdit={newlyCreatedGroupId === id}
+                              onCancelEdit={() => {
+                                if (newlyCreatedGroupId === id) {
+                                  handleDeleteGroup(id);
+                                }
+                              }}
+                            />
+                          );
+                        } else {
+                          const option = optionsMap.get(id);
+                          if (!option) return null;
+                          return (
+                            <DropdownReorderItem
+                              key={option.id}
+                              option={option}
+                              visibleItems={visibleViewItems}
+                              toggleItemVisibility={toggleViewItem}
+                              isIndented={hasSeenHeader}
+                            />
+                          );
+                        }
+                      });
+                    })()}
+                  </Reorder.Group>
+
+                  {/* Add Custom Group Button for Dashboard Views */}
+                  <div className="flex justify-start px-1 mt-0.5">
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        const newId = `header-custom_${Date.now()}`;
+                        const newOrder = [...viewItemsOrder, newId];
+                        setViewItemsOrder(newOrder);
+
+                        const newVisible = { ...visibleViewItems, [newId]: true };
+                        setVisibleViewItems(newVisible);
+
+                        const newNames = { ...customGroupNames, [newId.replace('header-', '')]: '' };
+                        setCustomGroupNames(newNames);
+
+                        setNewlyCreatedGroupId(newId);
+
+                        setSidebarStorageData({
+                          sidebar_view_items_order: newOrder,
+                          sidebar_view_visible_items: newVisible,
+                          customGroupNames: newNames,
+                        });
+                      }}
+                      className="py-1 px-1 flex items-center justify-center gap-1.5 text-[11px] font-medium text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)] transition-colors cursor-pointer bg-transparent border-none outline-none w-full"
+                      title="Add View Group">
+                      <FiPlus size={13} />
+                      <span>Add Group</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>,
           document.body,
         )}

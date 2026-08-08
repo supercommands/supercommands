@@ -24,6 +24,7 @@ export type CommandId =
   | 'createprompt'
   | 'createfolder'
   | 'capture_screenshot'
+  | 'capture_clip_screenshot'
   | 'capture_element_screenshot'
   | 'capture_full_screenshot'
   | 'history'

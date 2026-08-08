@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useEffect } from 'react';
 import { useUIStore } from '../../shared-components/uiStateManager';
 import {
   FiList,
@@ -25,7 +26,7 @@ import AllWorkspacesPanel from '../allWorkspaceManager/allWorkspacesPanel';
 import { BackupSettings } from '../backup/ui/BackupSettings';
 import { ImportCloudDataPanel } from '../_private/importCloudData_private/ui/ImportCloudDataPanel';
 
-export const getDefaultSettingsView = (_isLoggedIn: boolean): { type: 'settings'; section?: 'profile' | 'appearance' | 'searchView' | 'todoSettings' | 'allWorkspaces' | 'workspaceSettings' | 'generalSettings' | 'googleDriveBackup' | 'importCloudData' } => {
+export const getDefaultSettingsView = (_isLoggedIn: boolean): { type: 'settings'; section?: 'profile' | 'usage' | 'appearance' | 'searchView' | 'todoSettings' | 'allWorkspaces' | 'workspaceSettings' | 'generalSettings' | 'googleDriveBackup' | 'importCloudData' } => {
   // This helper returns the first item of the first section in the settings sidebar.
   // If the order of sections changes in the future, update this return value to match.
   return { type: 'settings', section: 'allWorkspaces' };
@@ -34,7 +35,7 @@ export const getDefaultSettingsView = (_isLoggedIn: boolean): { type: 'settings'
 interface SettingsLayoutProps {
   view: {
     kind: 'generalSettings' | 'allWorkspaces' | 'workspaceSettings' | 'googleDriveBackup' | 'importCloudData';
-    section?: 'profile' | 'appearance' | 'searchView' | 'todoSettings';
+    section?: 'profile' | 'usage' | 'appearance' | 'searchView' | 'todoSettings';
   };
   onClose: () => void;
   isLoggedIn?: boolean;
@@ -171,6 +172,12 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
         { id: 'searchView', label: 'Settings', icon: FiSearch, active: currentTab === 'generalSettings' && currentSection === 'searchView', onClick: () => useUIStore.getState().setView({ type: 'settings', section: 'searchView' }) },
       ],
     },
+    {
+      title: 'USAGE',
+      items: [
+        { id: 'usage', label: 'Usage', icon: FaUser, active: currentTab === 'generalSettings' && currentSection === 'usage', onClick: () => useUIStore.getState().setView({ type: 'settings', section: 'usage' }) },
+      ],
+    },
     ...(isCloudUser && FEATURE_FLAGS.ENABLE_SHARING
       ? [
         {
@@ -237,7 +244,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
                     className="fixed inset-0 z-40 bg-transparent"
                     onClick={() => setShowLogoutMenu(false)}
                   />
-                  <div className="absolute bottom-full mb-2 left-0 right-0 bg-neutral-900 border border-white/10 rounded-xl p-1 shadow-2xl z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                  <div className="absolute bottom-full mb-2 left-0 right-0 bg-[var(--color-popupBg)] border border-[var(--color-borderDefault)] rounded-xl p-1 shadow-2xl z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
                     <button
                       onClick={() => {
                         setShowLogoutMenu(false);
@@ -253,9 +260,9 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
               )}
               <div
                 onClick={() => setShowLogoutMenu(!showLogoutMenu)}
-                className="flex items-center gap-2 p-2 rounded-xl w-full text-left transition-all cursor-pointer hover:bg-white/5"
+                className="flex items-center gap-2 p-2 rounded-xl w-full text-left transition-all cursor-pointer hover:bg-[var(--color-hoverBg)]"
               >
-                <div className="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center font-bold text-xs text-white shrink-0 overflow-hidden">
+                <div className="w-8 h-8 rounded-lg bg-[var(--color-inputBg)] flex items-center justify-center font-bold text-xs text-[var(--color-textPrimary)] shrink-0 overflow-hidden">
                   {userInfo?.avatar_url || userInfo?.image_url ? (
                     <img src={userInfo.avatar_url || userInfo.image_url} alt={userInfo.name} className="w-full h-full object-cover" />
                   ) : (
@@ -263,11 +270,11 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[11px] font-bold text-white truncate leading-tight">
+                  <div className="text-[11px] font-bold text-[var(--color-textPrimary)] truncate leading-tight">
                     {userInfo?.name || 'Me'}
                   </div>
                 </div>
-                <FiChevronDown size={14} className="text-neutral-400 shrink-0" />
+                <FiChevronDown size={14} className="text-[var(--color-textMuted)] shrink-0" />
               </div>
             </div>
           ) : (
@@ -374,4 +381,3 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
 };
 
 export default SettingsLayout;
-

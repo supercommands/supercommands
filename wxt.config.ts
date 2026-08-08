@@ -5,6 +5,40 @@ import { defineConfig } from 'wxt';
 
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  hooks: {
+    'build:manifestGenerated': (_wxt, manifest) => {
+      const isSnippetInjectorScript = (path: string) =>
+        path === 'content-scripts/content.js' ||
+        path === 'content/index.iife.js' ||
+        path.endsWith('/content-scripts/content.js') ||
+        path.endsWith('/content/index.iife.js');
+
+      manifest.content_scripts ??= [];
+
+      let hasSnippetInjector = false;
+      manifest.content_scripts.forEach(script => {
+        const scripts = script.js || [];
+        const includesSnippetInjector = scripts.some(isSnippetInjectorScript);
+
+        if (includesSnippetInjector) {
+          hasSnippetInjector = true;
+          script.all_frames = true;
+          script.match_about_blank = true;
+          (script as any).match_origin_as_fallback = true;
+        }
+      });
+
+      if (!hasSnippetInjector) {
+        manifest.content_scripts.push({
+          matches: ['<all_urls>'],
+          js: ['content-scripts/content.js'],
+          all_frames: true,
+          match_about_blank: true,
+          match_origin_as_fallback: true,
+        });
+      }
+    },
+  },
 
   alias: {
     '@extension/shared/lib': resolve('packages/shared/lib'),
@@ -35,9 +69,12 @@ export default defineConfig({
     name: '__MSG_extensionName__',
     description: '__MSG_extensionDescription__',
     default_locale: 'en',
-    version: '0.3.58',
+    version: '0.3.60',
     icons: {
-      '128': 'icon.png'
+      '16': 'icons/icon-16.png',
+      '32': 'icons/icon-32.png',
+      '48': 'icons/icon-48.png',
+      '128': 'icons/icon-128.png',
     },
     browser_specific_settings: {
       gecko: {
@@ -130,21 +167,33 @@ export default defineConfig({
           }
         : {};
     })()),
+    action: {
+      default_icon: {
+        '16': 'icons/icon-16.png',
+        '32': 'icons/icon-32.png',
+        '48': 'icons/icon-48.png',
+        '128': 'icons/icon-128.png',
+      },
+    },
     web_accessible_resources: [
       {
         resources: [
           'icon.png',
+          'icons/icon-16.png',
+          'icons/icon-32.png',
+          'icons/icon-48.png',
+          'icons/icon-128.png',
           'icon-34.png',
           'pin_new_tab.png',
           'content/injected.js',
-          'content/tasklabs_logo.png',
-          'popup/tasklabs_logo.png',
+          'content/cmdOS_logo.png',
+          'popup/cmdOS_logo.png',
           'popup/icon.png',
           'popup/start_writing.png',
           'AltS_search_newtab/index.html',
           'assets/alt-s-website.css',
-          'assets/content-ui.css',
-          'AltS_search_newtab/images/wallappear/*'
+          'AltS_search_newtab/images/wallappear/*',
+          'AltS_search_newtab/images/Gif/*'
         ],
         matches: ['*://*/*']
       }
@@ -162,19 +211,12 @@ export default defineConfig({
       keyword: 'c',
     },
     commands: {
-      open_create: {
-        suggested_key: {
-          default: 'Alt+C',
-          mac: 'Alt+C',
-        },
-        description: 'Open Create Menu',
-      },
       open_alt_q: {
         suggested_key: {
           default: 'Alt+S',
           mac: 'Alt+S',
         },
-        description: 'On Any Website: Command search',
+        description: 'Main Search works on website & newtab',
       },
     },
     externally_connectable: {
@@ -182,6 +224,12 @@ export default defineConfig({
     },
   },
   vite: () => ({
+    build: {
+      // Chrome warns when eagerly preloaded chunks are not evaluated shortly
+      // after the new-tab page loads. Let normal ESM imports fetch the chunks
+      // when they are needed instead of emitting <link rel="modulepreload">.
+      modulePreload: false,
+    },
     esbuild: {
       charset: 'ascii',
     },

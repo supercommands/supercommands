@@ -1,4 +1,5 @@
-import React, { forwardRef } from 'react';
+import * as React from 'react';
+import { forwardRef } from 'react';
 
 export interface EditorContainerProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;

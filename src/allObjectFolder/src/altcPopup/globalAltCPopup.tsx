@@ -17,15 +17,18 @@
  * ```
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 
 import { useAppearance } from '@extension/ui';
 import { FaBuilding, FaLink, FaRegFolder } from 'react-icons/fa';
 import { FiZap, FiCode, FiCheckSquare } from 'react-icons/fi';
-import { FaLayerGroup } from 'react-icons/fa';
+
 import { LuSparkles } from 'react-icons/lu';
 import NotesIcon from '../../../shared-components/icons/notesIcon';
 import { useUIStore } from '../../../shared-components/uiStateManager';
+import { SessionGridIcon } from '../../../shared-components/icons/sessionGridIcon';
+
 
 interface GlobalAltCPopupProps {
   isOpen: boolean;
@@ -63,7 +66,7 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
       id: 'createsession',
       label: 'Tab Session',
       category: 'Data',
-      icon: <FaLayerGroup size={15} />,
+      icon: <SessionGridIcon size={15} />,
       action: () => onCommandSelect('createsession'),
       shortcut: 'TS',
     },

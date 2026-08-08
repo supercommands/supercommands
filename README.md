@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/cmdOS-App/cmdOS/main/src/shared-components/assets/tasklabs_logo.png" alt="cmdOS" width="80" height="80" />
+<img src="https://raw.githubusercontent.com/cmdOS-App/cmdOS/main/src/shared-components/assets/cmdOS_logo.png" alt="cmdOS" width="80" height="80" />
 
 # cmdOS
 
@@ -14,7 +14,7 @@ Access search, browser commands, and web shortcuts — all from one command bar.
 [![pnpm](https://img.shields.io/badge/pnpm-9.15.1-orange)](https://pnpm.io)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[**Getting Started**](#getting-started) · [**Features**](#features) · [**Contributing**](#contributing) · [**Wiki**](https://github.com/cmdOS-app/cmdOS/wiki) · [**Community**](https://github.com/cmdOS-app/cmdOS/community) · [**Security**](https://github.com/cmdOS-app/cmdOS/security) · [**License**](#license)
+[**Getting Started**](#getting-started) · [**Features**](#features) · [**Contributing**](#contributing) · [**Wiki**](https://github.com/cmdOS-app/cmdOS/wiki) · [**Community**](https://github.com/cmdOS-app/cmdOS/community) · [**Security**](https://github.com/cmdOS-app/cmdOS/security) · [**Code of Conduct**](CODE_OF_CONDUCT.md) · [**License**](#license)
 
 </div>
 
@@ -204,7 +204,7 @@ pnpm prettier
 
 ## Contributing
 
-We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
 
 ---
 

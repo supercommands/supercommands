@@ -347,7 +347,7 @@ export class ImageDownloader {
     if (this.selectedImages.size === 0) return;
 
     const hostname = window.location.hostname.replace(/[^a-zA-Z0-9]/g, '_');
-    const folder = `TaskLabs_Exports/${hostname}_`;
+    const folder = `cmdOS_Exports/${hostname}_`;
     const indices = Array.from(this.selectedImages).sort((a, b) => a - b);
 
     const CHUNK_SIZE = 5;

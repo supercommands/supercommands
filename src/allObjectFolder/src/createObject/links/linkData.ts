@@ -12,11 +12,27 @@
 
 import Dexie from 'dexie';
 
-import type { LinkRecord, CreateLinkInput, UpdateLinkInput } from './linkTypes';
+import type { LinkRecord, CreateLinkInput, UpdateLinkInput, LinkSnapshot } from './linkTypes';
 
 import { generateEntityId } from '../../../../shared-components/utils';
 import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
+import {
+  createInitialHistory,
+  normalizeHistory,
+  upsertVersionForChange,
+} from '../../../../shared-components/versionHistory/structuredVersionHistory';
+
+function extractLinkSnapshot(link: LinkRecord): LinkSnapshot {
+  return {
+    title: link.title,
+    urls: (link.urls || []).map(u => ({ ...u })),
+    workspaceId: link.workspaceId,
+    folderId: link.folderId,
+    tagIds: link.tagIds || [],
+    shortcut: link.shortcut || '',
+  };
+}
 
 /**
  * Creates a new link record.
@@ -43,11 +59,17 @@ export async function createLink(input: CreateLinkInput): Promise<LinkRecord> {
     title: input.title.trim() || 'Untitled Link',
     urls: input.urls ?? [],
     tagIds: input.tagIds ?? [],
+    shortcut: input.shortcut || '',
 
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
+    // Placeholder - will be replaced with full initial snapshot below
+    versionHistory: undefined as any,
   };
+
+  // Initialize Version 1 with the actual created link state, not an empty object.
+  link.versionHistory = createInitialHistory<LinkSnapshot>(extractLinkSnapshot(link), now);
 
   try {
     await db.links.add(link);
@@ -73,8 +95,9 @@ export class ConflictError extends Error {
  * Updates an existing link record.
  */
 export async function updateLink(linkId: string, input: UpdateLinkInput): Promise<LinkRecord> {
+  const now = Date.now();
   const changes: Partial<LinkRecord> = {
-    updatedAt: Date.now(),
+    updatedAt: now,
   };
 
   if (input.title !== undefined) {
@@ -88,6 +111,7 @@ export async function updateLink(linkId: string, input: UpdateLinkInput): Promis
   if (input.workspaceId !== undefined) changes.workspaceId = input.workspaceId;
   if (input.folderId !== undefined) changes.folderId = input.folderId;
   if (input.tagIds !== undefined) changes.tagIds = input.tagIds;
+  if (input.shortcut !== undefined) changes.shortcut = input.shortcut;
 
   try {
     return await db.transaction('rw', db.links, async () => {
@@ -100,8 +124,25 @@ export async function updateLink(linkId: string, input: UpdateLinkInput): Promis
         throw new ConflictError('Link was modified in another tab.', existing);
       }
 
-      await db.links.update(linkId, changes);
-      return { ...existing, ...changes } as LinkRecord;
+      const nextRecord: LinkRecord = {
+        ...existing,
+        ...changes,
+        updatedAt: now,
+      };
+
+      const prevSnapshot = extractLinkSnapshot(existing);
+      const nextSnapshot = extractLinkSnapshot(nextRecord);
+
+      const { history: nextHistory } = upsertVersionForChange<LinkSnapshot>(
+        existing.versionHistory,
+        prevSnapshot,
+        nextSnapshot,
+        now
+      );
+
+      nextRecord.versionHistory = nextHistory;
+      await db.links.put(nextRecord);
+      return nextRecord;
     });
   } catch (error: unknown) {
     if (error instanceof ConflictError) throw error;

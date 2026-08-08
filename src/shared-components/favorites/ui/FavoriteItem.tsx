@@ -37,7 +37,8 @@ import { TbNotes } from 'react-icons/tb';
 import { StorageManager } from '../../../storage/localStorage/storageManager';
 import CmdIcon from '../../icons/cmdIcon';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useUIStore } from '../../uiStateManager';
 import { createPortal } from 'react-dom';
 import { FaCaretRight, FaCaretDown, FaRegClone, FaCaretUp } from 'react-icons/fa';
@@ -868,12 +869,12 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
         : categoryStr === 'prompt'
           ? 'AI Prompt'
           : categoryStr === 'snippet'
-            ? 'Snippet'
+            ? 'Text Expander'
             : categoryStr === 'automation' || categoryStr === 'agent'
               ? 'Automation'
               : 'Note';
   const isTabGroupCategory = categoryStr === 'session';
-  const isLinkCategory = categoryStr === 'link' || categoryStr === 'bulk_link';
+  const isLinkCategory = categoryStr === 'link';
   const normalizedCategory = String(categoryStr).toLowerCase();
   const displayName = snippet.key || snippet.label || snippet.title || snippet.name || 'Untitled Item';
 

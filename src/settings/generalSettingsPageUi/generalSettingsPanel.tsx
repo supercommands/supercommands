@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiX, FiCheck, FiUpload, FiSearch, FiLayout, FiList, FiGrid, FiCreditCard, FiSettings, FiLogOut, FiChevronDown } from 'react-icons/fi';
@@ -17,6 +18,7 @@ import { getUserId, getUserInfo, CMDOS_SIGN_UP_URL } from '../../storage/API/cor
 import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 import { FEATURE_FLAGS } from '../../pages/AltS_search_newtab/src/utils/featureFlags';
 import ThemeSettings from '../uiPersonalization/ThemeSettings';
+import ShortcutAnalyticsCard from '../../shared-components/triggerAnalytics/ShortcutAnalyticsCard';
 
 interface GeneralSettingsPanelProps {
   onClose: () => void;
@@ -48,9 +50,10 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
   const [userInfo, setUserInfo] = useState<{ email: string; name: string; image_url?: string; avatar_url?: string } | null>(null);
   const [userInitials, setUserInitials] = useState<string>('ME');
   // Tab Selection State
-  const [activeTab, setActiveTab] = useState<'profile' | 'searchView' | 'appearance'>(() => {
+  const [activeTab, setActiveTab] = useState<'profile' | 'usage' | 'searchView' | 'appearance'>(() => {
     if (initialTab === 'appearance') return 'appearance';
     if (initialTab === 'profile') return 'profile';
+    if (initialTab === 'usage') return 'usage';
     return 'searchView';
   });
   const [isCloudUser, setIsCloudUser] = useState<boolean>(isLoggedIn ?? false);
@@ -91,6 +94,8 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
       setActiveTab('appearance');
     } else if (initialTab === 'profile') {
       setActiveTab('profile');
+    } else if (initialTab === 'usage') {
+      setActiveTab('usage');
 
     } else if (initialTab === 'todoSettings') {
       setActiveTab('searchView');
@@ -211,6 +216,12 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
         },
       ]
       : []),
+    {
+      title: 'USAGE',
+      items: [
+        { id: 'usage', label: 'Usage', icon: FaUser, active: activeTab === 'usage', onClick: () => setActiveTab('usage') },
+      ],
+    },
     {
       title: 'WORKSPACE',
       items: [
@@ -501,10 +512,10 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
                   Search Preferences
                 </h3>
 
-                <div className="glass-card border border-white/10 rounded-xl p-4 flex flex-col gap-3 text-left max-w-[480px]">
+                <div className="glass-card border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)] rounded-xl p-4 flex flex-col gap-3 text-left max-w-[480px]">
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col">
-                      <span className="text-xs font-bold text-white">Command-first search</span>
+                      <span className="text-xs font-bold text-[var(--color-textPrimary)]">Command-first search</span>
                       <p className="text-[10.5px] text-[var(--color-textSecondary)] mt-1">
                         Clicking search opens command-first results so you can narrow choices faster.
                       </p>
@@ -512,7 +523,7 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
                     <button
                       type="button"
                       onClick={() => setAutoTriggerDropdown(!autoTriggerDropdown)}
-                      className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-200 focus:outline-none cursor-pointer flex items-center ${autoTriggerDropdown ? 'bg-emerald-500' : 'bg-neutral-600'
+                      className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-200 focus:outline-none cursor-pointer flex items-center ${autoTriggerDropdown ? 'bg-emerald-500' : 'bg-[var(--color-borderActive)]'
                         }`}
                     >
                       <div
@@ -521,7 +532,7 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
                       />
                     </button>
                   </div>
-                  <div className="text-[10px] text-neutral-400 mt-1 flex items-center gap-1.5">
+                  <div className="text-[10px] text-[var(--color-textMuted)] mt-1 flex items-center gap-1.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                     <span>Turn off to use normal search results instead.</span>
                   </div>
@@ -559,19 +570,19 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
                         whileTap={{ scale: 0.99 }}
                         onClick={() => setTodoDisplayMode(option.id as any)}
                         className={`cursor-pointer border rounded-xl p-4 transition-all relative flex items-center justify-between text-left ${isActive
-                          ? 'border-emerald-500 bg-emerald-500/5 shadow-[0_0_15px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500'
-                          : 'border-[var(--color-borderDefault)] bg-neutral-900/30 hover:border-[var(--color-borderActive)] hover:bg-neutral-900/40'
+                          ? 'border-emerald-500 bg-emerald-500/10 shadow-sm ring-1 ring-emerald-500'
+                          : 'border-[var(--color-borderDefault)] bg-[var(--color-cardBg)] hover:border-[var(--color-borderActive)] hover:bg-[var(--color-hoverBg)]'
                           }`}
                       >
                         <div className="flex flex-col pr-8">
-                          <span className={`text-sm font-bold ${isActive ? 'text-emerald-400' : 'text-white'}`}>
+                          <span className={`text-sm font-bold ${isActive ? 'text-emerald-500 font-bold' : 'text-[var(--color-textPrimary)]'}`}>
                             {option.title}
                           </span>
                           <span className="text-xs text-[var(--color-textSecondary)] mt-1.5 leading-relaxed">
                             {option.description}
                           </span>
                         </div>
-                        <div className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${isActive ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-neutral-600 bg-transparent'
+                        <div className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${isActive ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-[var(--color-borderDefault)] bg-transparent text-[var(--color-iconDefault)]'
                           }`}>
                           {isActive && <FiCheck size={11} className="stroke-[3]" />}
                         </div>
@@ -587,6 +598,10 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
             <ThemeSettings />
           )}
 
+          {activeTab === 'usage' && (
+            <ShortcutAnalyticsCard />
+          )}
+
         </div>
       </div>
     </div>
@@ -594,4 +609,3 @@ const GeneralSettingsPanel: React.FC<GeneralSettingsPanelProps> = ({ onClose, in
 };
 
 export default GeneralSettingsPanel;
-

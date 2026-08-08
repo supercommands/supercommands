@@ -78,21 +78,13 @@ const manifest = {
   chrome_url_overrides: {
     newtab: 'AltS_search_newtab/index.html',
   },
-
   commands: {
-    open_create: {
-      suggested_key: {
-        default: 'Alt+C',
-        mac: 'Alt+C',
-      },
-      description: 'Open Create Menu',
-    },
     open_alt_q: {
       suggested_key: {
         default: 'Alt+S',
         mac: 'Alt+S',
       },
-      description: 'On Any Website: Command search',
+      description: 'Main Search works on website & newtab',
     },
   },
   icons: {
@@ -102,10 +94,9 @@ const manifest = {
     {
       matches: ['http://*/*', 'https://*/*', '<all_urls>'],
       js: ['content/index.iife.js'],
-    },
-    {
-      matches: ['http://*/*', 'https://*/*', '<all_urls>'],
-      js: ['content-ui/index.iife.js'],
+      all_frames: true,
+      match_about_blank: true,
+      match_origin_as_fallback: true,
     },
   ],
 

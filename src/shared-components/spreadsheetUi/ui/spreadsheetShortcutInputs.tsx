@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useAppearance } from '@extension/ui';
 import { useEffect, useState, useRef } from 'react';
 import { useKeystrokeRecording } from '../../../shared-components/hotkeys';
@@ -53,6 +53,7 @@ export const GridHotkeyInput: React.FC<GridInputProps> = ({ itemId, initialValue
     if (e.key === 'Enter') {
       e.preventDefault();
       if (conflictId) {
+        if (conflictId.endsWith('-reserved')) return;
         onOverwrite(hotkey, conflictId);
       } else {
         onSave(hotkey);
@@ -76,6 +77,7 @@ export const GridHotkeyInput: React.FC<GridInputProps> = ({ itemId, initialValue
       <input
         ref={inputRef}
         type="text"
+        data-is-hotkey-input="true"
         readOnly
         onKeyDown={handleKeyDown}
         onKeyUp={e => {
@@ -178,6 +180,7 @@ export const GridCommandInput: React.FC<GridInputProps> = ({ itemId, initialValu
     const finalVal = normalizeShortcutTrigger(value || '');
     if (error && !conflictId) return;
     if (conflictId) {
+      if (conflictId.endsWith('-reserved')) return;
       onOverwrite(finalVal, conflictId);
     } else {
       onSave(finalVal);

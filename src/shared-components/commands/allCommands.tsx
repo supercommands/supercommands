@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import type { CommandModule } from './types';
 import { AiPromptEditorView } from '../../allObjectFolder/src/createObject/aiPrompt';
 import { useUIStore } from '../uiStateManager';
@@ -246,6 +246,19 @@ export const CaptureScreenshotCommand: CommandModule = {
   },
 };
 
+export const CaptureClipScreenshotCommand: CommandModule = {
+  id: 'capture_clip_screenshot',
+  label: 'Clip & Download Screenshot',
+  prefix: 'clipscreenshot',
+  keywords: ['clip', 'copy', 'screenshot', 'capture', 'shot', 'image', 'clipboard', 'png'],
+  behavior: 'instant',
+  surface: 'website',
+  category: 'page_action',
+  execute: () => {
+    chrome.runtime.sendMessage({ action: 'CAPTURE_AND_CLIP_VISIBLE_TAB' });
+  },
+};
+
 export const CaptureElementCommand: CommandModule = {
   id: 'capture_element_screenshot',
   label: 'Capture Element',
@@ -254,6 +267,7 @@ export const CaptureElementCommand: CommandModule = {
   behavior: 'instant',
   surface: 'website',
   category: 'page_action',
+  showInDashboard: false,
   execute: () => {
     chrome.runtime.sendMessage({ action: 'INIT_ELEMENT_SELECTION' });
   },
@@ -289,6 +303,7 @@ export const INSTANT_COMMANDS: CommandModule[] = [
   GeminiCommand,
   PerplexityCommand,
   CaptureScreenshotCommand,
+  CaptureClipScreenshotCommand,
   CaptureElementCommand,
   CaptureFullPageCommand,
 ];

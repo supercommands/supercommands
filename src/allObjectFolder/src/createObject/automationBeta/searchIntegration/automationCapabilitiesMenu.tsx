@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import * as React from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useAppearance } from '@extension/ui';
 import {
   FaCloudDownloadAlt,

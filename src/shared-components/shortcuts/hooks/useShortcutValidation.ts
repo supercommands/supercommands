@@ -3,7 +3,10 @@ import { readAllShortcuts, extractSnippetIdFromCompoundId } from '../../hotkeys/
 import { checkReservedShortcut } from '../core/reservedShortcuts';
 import { getReservedShortcutReason, getShortcutTriggerFormatError, normalizeShortcutTrigger } from '../core/shortcutDbData';
 import { useConflictResolver } from '../../utils/useConflictResolver';
+import { useDbStore } from '../../../storage/store/useDbStore';
+import { findCommandByAnyId } from '../../commands';
 import type { ValidationResult } from '../../hotkeys';
+import { CustomSearchPrefixesForOmniboxStorage } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
 
 export const useShortcutValidation = () => {
   const { findConflictingItemName } = useConflictResolver();
@@ -36,12 +39,29 @@ export const useShortcutValidation = () => {
         };
       }
 
+      // Fetch dynamic omni prefixes from Chrome local storage
+      const omniboxPrefixes = await CustomSearchPrefixesForOmniboxStorage.getPrefixes().catch(() => ({}));
+
+      const activePrefixes = Object.values(omniboxPrefixes)
+        .filter((prefix): prefix is string => typeof prefix === 'string' && prefix.trim().length > 0)
+        .map(prefix => prefix.trim().toLowerCase());
+
+      // Block single characters that are exact matches for the main omni prefixes
+      if (activePrefixes.includes(normalized)) {
+        return {
+          isValid: false,
+          conflictId: 'omni-reserved',
+          isOverrideable: false,
+          errorMessage: `The shortcut "${normalized}" is reserved for the omni prefix`,
+        };
+      }
+
       // Check Omnibox Prefixes (these are system reserved and CANNOT be overridden)
       const reservedOmniboxReason = await getReservedShortcutReason(shortcutValue);
       if (reservedOmniboxReason) {
         return {
           isValid: false,
-          conflictId: 'reserved',
+          conflictId: 'omni-reserved',
           isOverrideable: false,
           errorMessage: reservedOmniboxReason,
         };

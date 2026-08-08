@@ -1,5 +1,6 @@
 import { useUIStore } from '../../uiStateManager';
-import React, { useCallback, useEffect, useMemo, useState, useRef, memo } from 'react';
+import * as React from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef, memo } from 'react';
 
 import { useAppearance } from '@extension/ui';
 
@@ -9,7 +10,7 @@ import { updateSnippet } from '../../../allObjectFolder/src/createObject/snippet
 import { updateLink } from '../../../allObjectFolder/src/createObject/links/linkData';
 import FavoriteItem from './FavoriteItem';
 import { CreateMenuPanel } from '../../../pages/AltS_search_newtab/src/components/altsNewtabSidebar/createMenuPanel';
-import { ViewMenuPanel } from '../../../pages/AltS_search_newtab/src/components/altsNewtabSidebar/viewMenuPanel';
+import { SidebarDashboardViewsSection } from '../../../pages/AltS_search_newtab/src/components/altsNewtabSidebar/sidebarDashboardViewsSection';
 import { SidebarSettingsDropdown } from '../../../pages/AltS_search_newtab/src/components/altsNewtabSidebar/sidebarSettingsDropdown';
 import { EditorItemsPanel } from '../../../pages/AltS_search_newtab/src/landingPage/AppSidebar/EditorItemsPanel';
 
@@ -124,6 +125,7 @@ export interface FavoritesPanelProps {
   isSidebar?: boolean;
   forceMode?: 'favorites' | 'notes' | 'links' | 'snippets';
   openSpreadsheetView?: (section?: string) => void;
+  hideCreatePanelItems?: boolean;
 }
 
 const FavoritesPanel = ({
@@ -138,6 +140,7 @@ const FavoritesPanel = ({
   isSidebar = false,
   forceMode = 'favorites',
   openSpreadsheetView,
+  hideCreatePanelItems = false,
 }: FavoritesPanelProps) => {
   const { theme } = useAppearance();
   const isDark = theme.isDark;
@@ -1012,93 +1015,93 @@ const FavoritesPanel = ({
             ${isSidebar ? 'h-full border-0 rounded-none bg-transparent overflow-visible' : 'h-auto min-h-[160px] max-h-[55vh] border rounded-r-xl rounded-br-none ml-0 mr-auto overflow-visible'}
             ${showFavoritesTutorial ? 'z-[9999] border-[#22c55e] ring-1 ring-[#22c55e]/20 bg-black/60 rounded-r-2xl pointer-events-none' : !isSidebar && isDark ? 'bg-frostedwhite border-white/10 shadow-sm pointer-events-auto' : 'pointer-events-auto'}`}
           style={{
-            background: !showFavoritesTutorial && !isDark && !isSidebar ? '#fdf6e3' : '',
-            ...(!showFavoritesTutorial && !isDark && !isSidebar ? { borderColor: '#eee8d5' } : {}),
+            background: !showFavoritesTutorial && !isDark && !isSidebar ? 'var(--color-cardBg)' : '',
+            ...(!showFavoritesTutorial && !isDark && !isSidebar ? { borderColor: 'var(--color-borderDefault)' } : {}),
             ...(showFavoritesTutorial ? { borderColor: '#22c55e' } : {}),
           }}>
           {/* Settings — rendered ONCE at top-right of the entire panel, never inside sections, to prevent unmounting */}
-          <div className="absolute top-[14px] right-4 z-50 flex items-center gap-0.5">
-            <SidebarSettingsDropdown
-              showFavoritesSection={showFavoritesSection}
-              onToggleFavoritesSection={handleToggleFavoritesSection}
-              showCreateSection={showCreateSection}
-              onToggleCreateSection={handleToggleCreateSection}
-              showViewSection={showViewSection}
-              onToggleViewSection={handleToggleViewSection}
-              sectionsOrder={sectionsOrder}
-              onSectionsReorder={handleSectionsReorder}
-              isHovered={isHovered}
-            />
-          </div>
+          {!hideCreatePanelItems && (
+            <div className="absolute top-[14px] right-4 z-50 flex items-center gap-0.5">
+              <SidebarSettingsDropdown
+                showFavoritesSection={showFavoritesSection}
+                onToggleFavoritesSection={handleToggleFavoritesSection}
+                showCreateSection={showCreateSection}
+                onToggleCreateSection={handleToggleCreateSection}
+                showViewSection={showViewSection}
+                onToggleViewSection={handleToggleViewSection}
+                sectionsOrder={sectionsOrder}
+                onSectionsReorder={handleSectionsReorder}
+                isHovered={isHovered}
+              />
+            </div>
+          )}
 
-          <Reorder.Group
-            axis="y"
-            values={sectionsOrder}
-            onReorder={handleSectionsReorder}
-            className={`flex flex-col gap-0 w-full ${isSidebar ? 'overflow-y-auto clean-scrollbar h-full pb-12 pr-1' : ''}`}>
-            {sectionsOrder.map(sectionId => {
-              if (sectionId === 'create') {
-                if (!showCreateSection) return null;
-                return (
-                  <Reorder.Item
-                    key="create"
-                    value="create"
-                    className="list-none"
-                    dragListener={false}
-                    dragControls={createDragControls}>
-                    <CreateMenuPanel onCommandSelect={onCommandSelect} />
-                  </Reorder.Item>
-                );
-              }
-              if (sectionId === 'favorites') {
-                // Favorites are now displayed in the Home View grid card — not in the sidebar
-                return null;
-              }
-              if (sectionId === 'view') {
-                if (!showViewSection) return null;
-                return (
-                  <Reorder.Item
-                    key="view"
-                    value="view"
-                    className="list-none"
-                    dragListener={false}
-                    dragControls={viewDragControls}
-                    transition={{ type: 'just', duration: 0 }}>
-                    {(() => {
-                      let effectiveEditor = activeEditor;
-                      if (!effectiveEditor && activeView) {
-                        if (activeView.type === 'createFolder' || activeView.type === 'sharedFolderCreation') {
-                          effectiveEditor = { type: 'folder', id: '' } as any;
-                        } else if (
-                          activeView.type === 'createWorkspace' ||
-                          activeView.type === 'organizationSettings'
-                        ) {
-                          effectiveEditor = { type: 'workspace', id: '' } as any;
+          {!hideCreatePanelItems && (
+            <Reorder.Group
+              axis="y"
+              values={sectionsOrder}
+              onReorder={handleSectionsReorder}
+              className={`flex flex-col gap-0 w-full ${isSidebar ? 'overflow-y-auto clean-scrollbar h-full pb-12 pr-1' : ''}`}>
+              {sectionsOrder.map(sectionId => {
+                if (sectionId === 'create') {
+                  return (
+                    <Reorder.Item
+                      key="create"
+                      value="create"
+                      className="list-none"
+                      dragListener={false}
+                      dragControls={createDragControls}
+                      transition={{ type: 'just', duration: 0 }}>
+                      <CreateMenuPanel onCommandSelect={onCommandSelect} />
+                    </Reorder.Item>
+                  );
+                }
+                if (sectionId === 'favorites') {
+                  // Favorites are now displayed in the Home View grid card — not in the sidebar
+                  return null;
+                }
+                if (sectionId === 'view') {
+                  return (
+                    <Reorder.Item
+                      key="view"
+                      value="view"
+                      className="list-none"
+                      dragListener={false}
+                      dragControls={viewDragControls}
+                      transition={{ type: 'just', duration: 0 }}>
+                      {(() => {
+                        let effectiveEditor = activeEditor;
+                        if (!effectiveEditor && activeView) {
+                          if (activeView.type === 'createFolder' || activeView.type === 'sharedFolderCreation') {
+                            effectiveEditor = { type: 'folder', id: '' } as any;
+                          } else if (
+                            activeView.type === 'createWorkspace' ||
+                            activeView.type === 'organizationSettings'
+                          ) {
+                            effectiveEditor = { type: 'workspace', id: '' } as any;
+                          }
                         }
-                      }
 
-                      return effectiveEditor &&
-                        effectiveEditor.type !== 'note' &&
-                        effectiveEditor.type !== 'aiPrompt' &&
-                        effectiveEditor.type !== 'todo' &&
-                        effectiveEditor.type !== 'agent' ? (
-                        <EditorItemsPanel
-                          activeEditor={effectiveEditor}
-                          onOpenUrls={onOpenUrls}
-                          onRequestEditLink={onRequestEditLink}
-                          onStartExistingSession={handleStartExistingSession as any}
-                          searchbarRef={searchbarRef}
-                          openSpreadsheetView={openSpreadsheetView}
-                        />
-                      ) : null;
-                    })()}
-                    <ViewMenuPanel searchbarRef={searchbarRef} openSpreadsheetView={openSpreadsheetView} />
-                  </Reorder.Item>
-                );
-              }
-              return null;
-            })}
-          </Reorder.Group>
+                        // Render the related items panel for ALL editor types (nodes, links, etc.)
+                        return effectiveEditor ? (
+                          <EditorItemsPanel
+                            activeEditor={effectiveEditor}
+                            onOpenUrls={onOpenUrls}
+                            onRequestEditLink={onRequestEditLink}
+                            onStartExistingSession={handleStartExistingSession as any}
+                            searchbarRef={searchbarRef}
+                            openSpreadsheetView={openSpreadsheetView}
+                          />
+                        ) : null;
+                      })()}
+                      <SidebarDashboardViewsSection />
+                    </Reorder.Item>
+                  );
+                }
+                return null;
+              })}
+            </Reorder.Group>
+          )}
         </div>
       )}
 
@@ -1109,12 +1112,12 @@ const FavoritesPanel = ({
             ${
               isDark
                 ? 'border-white/10 text-neutral-400 shadow-black/80'
-                : 'border-[#eee8d5] text-[#586e75] shadow-neutral-400/20'
+                : 'border-[var(--color-borderDefault)] text-[var(--color-textSecondary)] shadow-neutral-400/20'
             }`}
           style={{
             top: `${hoveredLinkItem.top}px`,
             maxHeight: `${hoveredLinkItem.maxHeight || 280}px`,
-            backgroundColor: isDark ? '#080808' : '#fdf6e3',
+            backgroundColor: isDark ? '#080808' : 'var(--color-popupBg)',
           }}>
           <div className="flex justify-between items-center p-2 sticky top-0 bg-inherit z-10 border-b border-black/5 dark:border-white/5 mb-1">
             <span

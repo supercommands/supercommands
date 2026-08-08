@@ -2,6 +2,75 @@ import { forwardRef, useRef, useLayoutEffect, useEffect, useState } from 'react'
 import 'quill/dist/quill.snow.css';
 import './editorStyles.css';
 import { setupEditor } from './editorSetup';
+import { assetStore } from '../../storage/assets/assetStore';
+
+function useLocalImageRenderer(quillInstance: any, isClient: boolean, htmlContent: string) {
+  const urlRegistry = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (!isClient || !quillInstance) return;
+
+    const renderImages = async () => {
+      const root = quillInstance.root as HTMLElement;
+      if (!root) return;
+
+      const images = root.querySelectorAll('img[data-local-asset-id]');
+      const currentIds = new Set<string>();
+
+      for (const img of Array.from(images)) {
+        const id = img.getAttribute('data-local-asset-id');
+        if (!id) continue;
+        currentIds.add(id);
+
+        if (!urlRegistry.current.has(id)) {
+          try {
+            const asset = await assetStore.getAsset(id);
+            if (asset && asset.blob) {
+              const url = URL.createObjectURL(asset.blob);
+              urlRegistry.current.set(id, url);
+            }
+          } catch (err) {
+            console.error('Failed to load asset', id, err);
+          }
+        }
+
+        const url = urlRegistry.current.get(id);
+        if (url && img.getAttribute('src') !== url) {
+          img.setAttribute('src', url);
+        }
+      }
+
+      // Cleanup unused URLs
+      for (const [id, url] of Array.from(urlRegistry.current.entries())) {
+        if (!currentIds.has(id)) {
+          URL.revokeObjectURL(url);
+          urlRegistry.current.delete(id);
+        }
+      }
+    };
+
+    // Initial render
+    renderImages();
+
+    // Re-render images whenever the editor's contents change (e.g. from dangerouslyPasteHTML)
+    quillInstance.on('editor-change', renderImages);
+
+    return () => {
+      quillInstance.off('editor-change', renderImages);
+    };
+  }, [isClient, quillInstance]);
+
+  // Full cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      urlRegistry.current.forEach((url) => {
+        URL.revokeObjectURL(url);
+      });
+      urlRegistry.current.clear();
+    };
+  }, []);
+}
 
 interface TextEditorProps {
   value: string;
@@ -16,6 +85,8 @@ interface TextEditorProps {
   showToolbar?: boolean;
   isFocusMode?: boolean;
   onDelete?: () => void;
+  onImageSaveStart?: () => void;
+  onImageSaveEnd?: () => void;
   normalizeHtml?: (html: string) => string;
   forceSyncWhileFocused?: boolean;
   syncRevision?: number;
@@ -49,6 +120,8 @@ const TextEditor = forwardRef<any, TextEditorProps>(
       isFocusMode = false,
       onCreateNew,
       onDelete,
+      onImageSaveStart,
+      onImageSaveEnd,
       normalizeHtml,
       forceSyncWhileFocused = false,
       syncRevision = 0,
@@ -61,6 +134,8 @@ const TextEditor = forwardRef<any, TextEditorProps>(
     const [isClient, setIsClient] = useState(false); // Ensure client-only rendering
     const [isEditorReady, setIsEditorReady] = useState(false);
     const lastAppliedSyncRevisionRef = useRef<number>(syncRevision);
+
+    useLocalImageRenderer(quillInstanceRef.current, isClient, value);
 
     useEffect(() => {
       setIsClient(true); // Trigger editor setup only on client side
@@ -84,6 +159,8 @@ const TextEditor = forwardRef<any, TextEditorProps>(
             quillInstanceRef,
             toolbarSelector,
             onDelete,
+            onImageSaveStart,
+            onImageSaveEnd,
           });
           cleanupRef.current = cleanup || null;
           setIsEditorReady(true);

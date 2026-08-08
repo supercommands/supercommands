@@ -15,13 +15,22 @@ import type { AutoSubmitRequest } from '@automation/runtime_Execution_Engine/run
  * @param request The auto-submit configuration detailing the prompt and optional images.
  */
 export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitRequest) {
-  if (!chrome.scripting?.executeScript) return;
+  if (!chrome.scripting?.executeScript) {
+    console.error('[cmdOS][ChatGPTInject][background] scripting API unavailable', { tabId });
+    return;
+  }
 
   // Use calendar prompt if needed
   let promptToUse = request.prompt;
   if (request.kind === 'calendar') {
     promptToUse = `Act as a professional AI personal assistant and calendar manager. Access the Google Calendar. Optimize the schedule for productivity, allow for breaks, and manage conflicts. When scheduling, consider existing appointments. ${request.prompt}`;
   }
+
+  console.info('[cmdOS][ChatGPTInject][background] starting injection', {
+    tabId,
+    promptLength: promptToUse?.length || 0,
+    imageCount: request.images?.length || 0,
+  });
 
   try {
     await chrome.scripting.executeScript({
@@ -34,6 +43,19 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
         imagesFromExtension?: { base64: string; mimeType: string; filename: string }[] | null,
         currentTabId?: number,
       ) => {
+        const debugPrefix = '[cmdOS][ChatGPTInject]';
+        const debug = (event: string, details: Record<string, unknown> = {}) => {
+          console.info(debugPrefix, event, { tabId: currentTabId, ...details });
+        };
+        let lastDebugState = '';
+        const loggedDebugStates = new Set<string>();
+        const debugState = (state: string, details: Record<string, unknown> = {}) => {
+          lastDebugState = state;
+          if (loggedDebugStates.has(state)) return;
+          loggedDebugStates.add(state);
+          debug(state, details);
+        };
+
         const getResolvedPrompt = (): string => {
           if (promptFromExtension && promptFromExtension.trim()) {
             return promptFromExtension.trim();
@@ -51,9 +73,10 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
         const markKey = `tasklabsAutoSubmit-${kind}`;
         const timestampKey = `${markKey}-timestamp`;
 
-        const stopMonitoring = () => {
+        const stopMonitoring = (reason = 'completed') => {
           if ((window as any)[timestampKey + '-stopped']) return;
           (window as any)[timestampKey + '-stopped'] = true;
+          debug('monitoring stopped', { reason });
 
           if ((window as any)[timestampKey + '-interval']) {
             window.clearTimeout((window as any)[timestampKey + '-interval']);
@@ -70,8 +93,14 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
         };
 
         const resolvedPrompt = getResolvedPrompt();
+        debug('script started', {
+          url: window.location.origin + window.location.pathname,
+          promptLength: resolvedPrompt.length,
+          imageCount: imagesFromExtension?.length || 0,
+        });
         if (!resolvedPrompt && (!imagesFromExtension || imagesFromExtension.length === 0)) {
-          stopMonitoring();
+          debug('nothing to inject');
+          stopMonitoring('empty payload');
           return;
         }
 
@@ -181,11 +210,13 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
 
           let node: HTMLTextAreaElement | HTMLInputElement | HTMLElement | null = null;
           let isContentEditable = false;
+          let matchedEditorSelector = '';
 
           for (const selector of textareaSelectors) {
             const found = document.querySelector(selector) as HTMLElement | null;
             if (found) {
               node = found;
+              matchedEditorSelector = selector;
               isContentEditable =
                 (found as HTMLElement).isContentEditable || found.getAttribute('contenteditable') === 'true';
               break;
@@ -195,8 +226,11 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
           const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
 
           if (!node) {
+            debugState('editor not found', { attemptCount });
             return false;
           }
+
+          debugState('editor found', { selector: matchedEditorSelector, isContentEditable });
 
           if (imagesFromExtension && imagesFromExtension.length > 0 && !imageUploadAttempted) {
             if (fileInput) {
@@ -211,6 +245,7 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
                 fileInput.dispatchEvent(new Event('input', { bubbles: true }));
                 imageUploadAttempted = true;
                 lastImageUpload = Date.now();
+                debug('images injected', { imageCount: imagesFromExtension.length });
                 return false;
               } catch (e) {
                 console.error('[auto-submit][chatgpt] ERROR: Image injection failed', e);
@@ -247,6 +282,17 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
             return (node as HTMLTextAreaElement).value || '';
           };
 
+          // Rich-text editors represent visible line breaks differently (for example,
+          // adjacent <p> tags can add extra newlines to innerText). Compare the
+          // visible text rather than requiring the DOM's raw whitespace to match.
+          const normalizeEditorText = (value: string): string =>
+            String(value || '')
+              .replace(/\u00a0/g, ' ')
+              .replace(/\r\n?/g, '\n')
+              .replace(/[ \t]+/g, ' ')
+              .replace(/\n+/g, '\n')
+              .trim();
+
           const setCurrentValue = (value: string) => {
             node?.focus();
             const el = node as HTMLElement;
@@ -263,22 +309,6 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
               } else {
                 (el as HTMLInputElement).value = '';
               }
-            }
-
-            try {
-              const dataTransfer = new DataTransfer();
-              dataTransfer.setData('text/plain', value);
-              const pasteEvent = new ClipboardEvent('paste', {
-                bubbles: true,
-                cancelable: true,
-                clipboardData: dataTransfer,
-              });
-              el.dispatchEvent(pasteEvent);
-            } catch (e) {}
-
-            if (getCurrentValue().trim() === value.trim()) {
-              dispatchStandardEvents();
-              return;
             }
 
             if (isContentEditable) {
@@ -304,9 +334,15 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
               el.dispatchEvent(new Event('keyup', { bubbles: true }));
               el.dispatchEvent(new Event('compositionend', { bubbles: true }));
 
-              if (!success || el.innerText !== value) {
+              if (!success || normalizeEditorText(getCurrentValue()) !== normalizeEditorText(value)) {
                 el.innerText = value;
                 dispatchStandardEvents();
+                debug('text fallback applied', {
+                  execCommandSucceeded: success,
+                  resultingLength: normalizeEditorText(getCurrentValue()).length,
+                });
+              } else {
+                debug('text inserted', { method: 'execCommand', resultingLength: normalizeEditorText(getCurrentValue()).length });
               }
             } else {
               const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
@@ -319,15 +355,24 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
                 (el as HTMLTextAreaElement).value = value;
               }
               dispatchStandardEvents();
+              debug('text inserted', { method: 'native textarea setter', resultingLength: getCurrentValue().length });
             }
           };
 
           const currentValue = getCurrentValue();
-          if (currentValue.trim() !== resolvedPrompt.trim()) {
+          const normalizedCurrentValue = normalizeEditorText(currentValue);
+          const normalizedResolvedPrompt = normalizeEditorText(resolvedPrompt);
+          if (normalizedCurrentValue !== normalizedResolvedPrompt) {
+            debugState('text mismatch', {
+              currentLength: normalizedCurrentValue.length,
+              expectedLength: normalizedResolvedPrompt.length,
+            });
             setCurrentValue(resolvedPrompt);
             lastTextUpdate = Date.now();
             return false;
           }
+
+          debugState('text ready', { length: normalizedCurrentValue.length });
 
           const timeSinceTextUpdate = now - lastTextUpdate;
           if (timeSinceTextUpdate < 1000) return false;
@@ -335,14 +380,21 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
           const buttonSelectors = [
             'button[data-testid="send-button"]',
             'button[data-testid="fruitjuice-send-button"]',
+            '[data-testid="send-button"]',
+            '[data-testid="composer-submit-button"]',
+            '#composer-submit-button',
             'button[aria-label="Send prompt"]',
             'button[aria-label="Send message"]',
+            'button[aria-label="Send"]',
+            '[role="button"][aria-label*="send" i]',
+            '[role="button"][data-testid*="send" i]',
             'button[type="submit"]',
           ];
 
-          let foundButton: HTMLButtonElement | null = null;
+          const composerScope = node.closest('form') || node.parentElement?.closest('form') || document;
+          let foundButton: HTMLElement | null = null;
           for (const selector of buttonSelectors) {
-            const btn = document.querySelector(selector) as HTMLButtonElement | null;
+            const btn = composerScope.querySelector(selector) as HTMLElement | null;
             if (btn) {
               foundButton = btn;
               break;
@@ -350,13 +402,26 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
           }
 
           if (foundButton) {
-            if (!foundButton.disabled) {
+            const buttonDisabled =
+              (foundButton as HTMLButtonElement).disabled === true ||
+              foundButton.getAttribute('aria-disabled') === 'true';
+            if (!buttonDisabled) {
               if (Date.now() - lastSubmitClick < 1500) return false;
+              debug('clicking send button', {
+                tagName: foundButton.tagName,
+                id: foundButton.id || undefined,
+                testId: foundButton.getAttribute('data-testid') || undefined,
+                ariaLabel: foundButton.getAttribute('aria-label') || undefined,
+              });
               foundButton.click();
               lastSubmitClick = Date.now();
-              if (stopMonitoring) stopMonitoring();
+              if (stopMonitoring) stopMonitoring('send button clicked');
               return true;
             } else {
+              debugState('send button disabled', {
+                testId: foundButton.getAttribute('data-testid') || undefined,
+                ariaLabel: foundButton.getAttribute('aria-label') || undefined,
+              });
               const timeoutThreshold = imagesFromExtension && imagesFromExtension.length > 0 ? 12000 : 4000;
               if (imagesFromExtension && imagesFromExtension.length > 0 && now - lastImageUpload < timeoutThreshold)
                 return false;
@@ -364,17 +429,37 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
               if (now - lastTextUpdate < timeoutThreshold) return false;
             }
           } else {
-            const enterEvent = new KeyboardEvent('keydown', {
-              key: 'Enter',
-              code: 'Enter',
-              keyCode: 13,
-              which: 13,
-              bubbles: true,
-              cancelable: true,
-            });
-            node?.dispatchEvent(enterEvent);
-            if (stopMonitoring) stopMonitoring();
-            return true;
+            const nearbyControls = Array.from(composerScope.querySelectorAll('button, [role="button"]'))
+              .slice(-10)
+              .map(control => ({
+                tagName: control.tagName,
+                id: (control as HTMLElement).id || undefined,
+                testId: control.getAttribute('data-testid') || undefined,
+                ariaLabel: control.getAttribute('aria-label') || undefined,
+                type: control.getAttribute('type') || undefined,
+                ariaDisabled: control.getAttribute('aria-disabled') || undefined,
+              }));
+            debugState('send button not found', { nearbyControls });
+
+            if (Date.now() - lastSubmitClick < 1500) return false;
+            lastSubmitClick = Date.now();
+            debug('dispatching Enter fallback');
+            for (const eventType of ['keydown', 'keypress', 'keyup']) {
+              const enterEvent = new KeyboardEvent(eventType, {
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13,
+                which: 13,
+                shiftKey: false,
+                bubbles: true,
+                cancelable: true,
+              });
+              node.dispatchEvent(enterEvent);
+            }
+            // Do not report success merely because synthetic Enter events were
+            // dispatched. Keep monitoring until the editor clears or a real
+            // send control is found and clicked.
+            return false;
           }
 
           return false;
@@ -425,34 +510,33 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
 
           if (attemptCount - lastAttemptCountLog >= 50) {
             lastAttemptCountLog = attemptCount;
+            debug('still retrying', { attemptCount, elapsedMs: Date.now() - start, lastState: lastDebugState });
           }
 
           (window as any)[timestampKey + '-interval'] = window.setTimeout(() => {
             if (textWasEverSet && !hasContent()) {
+              stopMonitoring('editor content disappeared after injection');
+              return;
+            }
+
+            const result = attemptSubmission(stopMonitoring);
+
+            if (!textWasEverSet && hasContent()) {
+              textWasEverSet = true;
+            }
+
+            if (result) {
               stopMonitoring();
               return;
             }
 
-            const requestIdle = window.requestIdleCallback || ((cb: Function) => window.setTimeout(cb, 1));
-            requestIdle(() => {
-              const result = attemptSubmission(stopMonitoring);
+            if (Date.now() - start > maxDuration) {
+              debug('timed out', { attemptCount, elapsedMs: Date.now() - start, lastState: lastDebugState });
+              stopMonitoring('timeout');
+              return;
+            }
 
-              if (!textWasEverSet && hasContent()) {
-                textWasEverSet = true;
-              }
-
-              if (result) {
-                stopMonitoring();
-                return;
-              }
-
-              if (Date.now() - start > maxDuration) {
-                stopMonitoring();
-                return;
-              }
-
-              scheduleNextAttempt();
-            });
+            scheduleNextAttempt();
           }, delay);
         };
 
@@ -465,7 +549,8 @@ export async function executeChatGPTSubmit(tabId: number, request: AutoSubmitReq
         }, 50);
       },
     });
+    console.info('[cmdOS][ChatGPTInject][background] injection script installed', { tabId });
   } catch (error) {
-    console.error('[auto-submit] failed to execute script for ChatGPT', error);
+    console.error('[cmdOS][ChatGPTInject][background] failed to execute injection script', { tabId, error });
   }
 }

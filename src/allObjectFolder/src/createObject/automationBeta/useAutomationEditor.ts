@@ -19,6 +19,8 @@ import type { AutomationStep } from './utilities/automation';
 import { useAutomation } from './automationHooks';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
+import { getItemCompoundId } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
 
 export interface AutomationEditorProps {
   automationId?: string | null;
@@ -211,6 +213,28 @@ export function useAutomationEditor(props: AutomationEditorProps) {
             tagIds: activeTagIds,
           };
           savedAutomation = await updateAutomation(currentAutomationId, input);
+          
+          const oldWsObj = lastSavedWorkspaceIdRef.current ? { workspace_id: lastSavedWorkspaceIdRef.current } : null;
+          const oldFldObj = lastSavedFolderIdRef.current ? { folder_id: lastSavedFolderIdRef.current } : null;
+          const oldCompoundId = getItemCompoundId({
+            id: currentAutomationId,
+            workspace_id: oldWsObj?.workspace_id || null,
+            folder_id: oldFldObj?.folder_id || null,
+            snippet: { id: currentAutomationId, category: 'automation' }
+          });
+          
+          const newWsObj = savedAutomation.workspaceId ? { workspace_id: savedAutomation.workspaceId } : null;
+          const newFldObj = savedAutomation.folderId ? { folder_id: savedAutomation.folderId } : null;
+          const newCompoundId = getItemCompoundId({
+            id: savedAutomation.id,
+            workspace_id: newWsObj?.workspace_id || null,
+            folder_id: newFldObj?.folder_id || null,
+            snippet: { id: savedAutomation.id, category: 'automation' }
+          });
+          
+          if (oldCompoundId && newCompoundId && oldCompoundId !== newCompoundId) {
+            await migrateItemCompoundId(oldCompoundId, newCompoundId, 'automation');
+          }
         }
 
         if (activeAutomationIdRef.current !== savingAutomationId) return true;

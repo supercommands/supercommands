@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import {
-  FaPlus,
+import * as React from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { FaPlus,
   FaCheckCircle,
   FaExclamationTriangle,
   FaRobot,
@@ -10,7 +10,6 @@ import {
   FaKeyboard,
   FaClock,
   FaLink,
-  FaLayerGroup,
   FaSearch,
   FaEllipsisH,
   FaCog,
@@ -21,8 +20,7 @@ import {
   FaClipboardList,
   FaCookieBite,
   FaChevronDown,
-  FaTrash,
-} from 'react-icons/fa';
+  FaTrash } from 'react-icons/fa';
 import { CiWarning } from 'react-icons/ci';
 import ReactDOM from 'react-dom';
 import { HighlightedInput, formatParamBadgeName } from './automationStepPicker';
@@ -48,6 +46,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { AutomationStep } from '../utilities/automation';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 interface AutomationStepListProps {
   steps: AutomationStep[];
@@ -1731,7 +1731,7 @@ const AutomationStepList: React.FC<AutomationStepListProps> = ({
       case 'link':
         return <FaLink size={10} className="text-sky-500" />;
       case 'sub_automation':
-        return <FaLayerGroup size={10} className="text-indigo-500" />;
+        return <SessionGridIcon size={10} className="text-indigo-500" />;
       default:
         return <FaSearch size={10} className="text-[var(--color-iconDefault)]" />;
     }

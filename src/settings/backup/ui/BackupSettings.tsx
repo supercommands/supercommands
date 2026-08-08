@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FiCloud, 
@@ -384,8 +385,8 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
       </div>
 
       {/* ── COLUMN 3: BACKUP LOCATIONS SELECTOR ── */}
-      <div className="w-[340px] shrink-0 border-r border-[var(--color-borderDefault)] flex flex-col p-6 overflow-y-auto bg-neutral-900/10">
-        <h3 className="text-sm font-bold text-white mb-1 text-left">Backup locations</h3>
+      <div className="w-[340px] shrink-0 border-r border-[var(--color-borderDefault)] flex flex-col p-6 overflow-y-auto bg-[var(--color-panelBg)]/30">
+        <h3 className="text-sm font-bold text-[var(--color-textPrimary)] mb-1 text-left">Backup locations</h3>
         <p className="text-[11px] text-[var(--color-textSecondary)] mb-6 text-left leading-relaxed">
           Choose where to back up or restore your workspace data.
         </p>
@@ -401,19 +402,19 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
             }`}
           >
             {/* Custom Radio dot */}
-            <div className="w-4 h-4 rounded-full border border-neutral-600 flex items-center justify-center shrink-0">
+            <div className="w-4 h-4 rounded-full border border-[var(--color-borderDefault)] flex items-center justify-center shrink-0">
               {backupMode === 'local' && (
                 <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
               )}
             </div>
             {/* Icon Box */}
-            <div className="w-9 h-9 rounded-lg bg-[var(--color-hoverBg)] flex items-center justify-center text-neutral-400 shrink-0 border border-[var(--color-borderDefault)]">
+            <div className="w-9 h-9 rounded-lg bg-[var(--color-hoverBg)] flex items-center justify-center text-[var(--color-iconDefault)] shrink-0 border border-[var(--color-borderDefault)]">
               <FiHardDrive size={18} />
             </div>
             {/* Text */}
             <div className="flex flex-col text-left min-w-0">
-              <span className="text-xs font-bold text-white">Local data</span>
-              <span className="text-[10px] text-neutral-400 mt-0.5 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-[var(--color-textPrimary)]">Local data</span>
+              <span className="text-[10px] text-[var(--color-textMuted)] mt-0.5 flex items-center gap-1.5">
                 {backupMode === 'local' ? (
                   <>
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
@@ -436,13 +437,13 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
             }`}
           >
             {/* Custom Radio dot */}
-            <div className="w-4 h-4 rounded-full border border-neutral-600 flex items-center justify-center shrink-0">
+            <div className="w-4 h-4 rounded-full border border-[var(--color-borderDefault)] flex items-center justify-center shrink-0">
               {backupMode === 'drive' && (
                 <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
               )}
             </div>
             {/* Icon Box */}
-            <div className="w-9 h-9 rounded-lg bg-[var(--color-hoverBg)] flex items-center justify-center text-neutral-400 shrink-0 border border-[var(--color-borderDefault)] overflow-hidden">
+            <div className="w-9 h-9 rounded-lg bg-[var(--color-hoverBg)] flex items-center justify-center text-[var(--color-iconDefault)] shrink-0 border border-[var(--color-borderDefault)] overflow-hidden">
               <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none">
                 <path d="M19.3496 14.6504L13.9996 4.3999L9.99961 4.3999L15.3496 14.6504H19.3496Z" fill="#FFC107" />
                 <path d="M9.99961 4.3999L4.64961 14.6504L6.64961 18.1504L11.9996 7.8999L9.99961 4.3999Z" fill="#00E676" />
@@ -451,8 +452,8 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
             </div>
             {/* Text */}
             <div className="flex flex-col text-left min-w-0">
-              <span className="text-xs font-bold text-white">Google Drive</span>
-              <span className="text-[10px] text-neutral-400 mt-0.5 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-[var(--color-textPrimary)]">Google Drive</span>
+              <span className="text-[10px] text-[var(--color-textMuted)] mt-0.5 flex items-center gap-1.5">
                 {backupMode === 'drive' ? (
                   <>
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
@@ -468,7 +469,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
       </div>
 
       {/* ── COLUMN 4: SELECTED BACKUP DETAILS & ACTIONS ── */}
-      <div className="flex-1 flex flex-col p-6 overflow-y-auto relative bg-neutral-900/5">
+      <div className="flex-1 flex flex-col p-6 overflow-y-auto relative bg-[var(--color-sheetBg)]/40">
         {onClose && (
           <button
             onClick={onClose}
@@ -489,8 +490,8 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                   <FiHardDrive size={22} />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white">Local data</h4>
-                  <p className="text-[10px] text-neutral-400 mt-0.5">On this device</p>
+                  <h4 className="text-sm font-bold text-[var(--color-textPrimary)]">Local data</h4>
+                  <p className="text-[10px] text-[var(--color-textMuted)] mt-0.5">On this device</p>
                 </div>
               </div>
 
@@ -501,21 +502,21 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
 
               {/* Details table */}
               <div className="space-y-3 pt-2 text-left">
-                <h5 className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Details</h5>
+                <h5 className="text-[10px] font-bold text-[var(--color-textMuted)] uppercase tracking-wider">Details</h5>
                 <div className="space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between border-b border-neutral-800/40 pb-2">
-                    <span className="text-neutral-400">Last backup</span>
-                    <span className="text-neutral-200 font-medium">
+                  <div className="flex items-center justify-between border-b border-[var(--color-borderDefault)] pb-2">
+                    <span className="text-[var(--color-textMuted)]">Last backup</span>
+                    <span className="text-[var(--color-textPrimary)] font-medium">
                       {lastSyncedAt ? lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + lastSyncedAt.toLocaleDateString() : 'Never'}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between border-b border-neutral-800/40 pb-2">
-                    <span className="text-neutral-400">Backup location</span>
-                    <span className="text-neutral-200 font-mono text-[10px]">{activeWorkspacePath}</span>
+                  <div className="flex items-center justify-between border-b border-[var(--color-borderDefault)] pb-2">
+                    <span className="text-[var(--color-textMuted)]">Backup location</span>
+                    <span className="text-[var(--color-textPrimary)] font-mono text-[10px]">{activeWorkspacePath}</span>
                   </div>
-                  <div className="flex items-center justify-between border-b border-neutral-800/40 pb-2">
-                    <span className="text-neutral-400">Size</span>
-                    <span className="text-neutral-200 font-medium">{dbSizeStr}</span>
+                  <div className="flex items-center justify-between border-b border-[var(--color-borderDefault)] pb-2">
+                    <span className="text-[var(--color-textMuted)]">Size</span>
+                    <span className="text-[var(--color-textPrimary)] font-medium">{dbSizeStr}</span>
                   </div>
                 </div>
               </div>
@@ -542,7 +543,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isSyncing || isRestoring}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-[var(--color-hoverBg)] text-white font-semibold rounded-xl border border-[var(--color-borderDefault)] transition-all text-xs cursor-pointer disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-semibold rounded-xl border border-[var(--color-borderDefault)] transition-all text-xs cursor-pointer disabled:opacity-50"
                 >
                   <FiRefreshCw size={13} />
                   <span>Restore backup</span>
@@ -550,7 +551,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                 <button
                   onClick={handleDownloadBackup}
                   disabled={isSyncing || isRestoring}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-[var(--color-hoverBg)] text-white font-semibold rounded-xl border border-[var(--color-borderDefault)] transition-all text-xs cursor-pointer disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-semibold rounded-xl border border-[var(--color-borderDefault)] transition-all text-xs cursor-pointer disabled:opacity-50"
                 >
                   <FiDownload size={13} />
                   <span>Export backup</span>
@@ -561,10 +562,10 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
             {/* Privacy Shield Card */}
             <div className="border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/20 rounded-xl p-3.5 flex items-center justify-between gap-3 text-left mt-8">
               <div className="flex items-center gap-3">
-                <FiShield className="text-neutral-400 shrink-0" size={18} />
+                <FiShield className="text-[var(--color-iconDefault)] shrink-0" size={18} />
                 <div className="min-w-0">
-                  <div className="text-[10px] font-bold text-white">Your data is private and secure</div>
-                  <div className="text-[9px] text-neutral-400 mt-0.5 truncate">Backups are encrypted and never shared.</div>
+                  <div className="text-[10px] font-bold text-[var(--color-textPrimary)]">Your data is private and secure</div>
+                  <div className="text-[9px] text-[var(--color-textMuted)] mt-0.5 truncate">Backups are encrypted and never shared.</div>
                 </div>
               </div>
             </div>
@@ -585,8 +586,8 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                   </svg>
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white">Google Drive</h4>
-                  <p className="text-[10px] text-neutral-400 mt-0.5">
+                  <h4 className="text-sm font-bold text-[var(--color-textPrimary)]">Google Drive</h4>
+                  <p className="text-[10px] text-[var(--color-textMuted)] mt-0.5">
                     {isConnected && userEmail ? userEmail : 'Not connected'}
                   </p>
                 </div>
@@ -601,23 +602,23 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                 <>
                   {/* Details table */}
                   <div className="space-y-3 pt-2 text-left">
-                    <h5 className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Details</h5>
+                    <h5 className="text-[10px] font-bold text-[var(--color-textMuted)] uppercase tracking-wider">Details</h5>
                     <div className="space-y-2.5 text-xs">
-                      <div className="flex items-center justify-between border-b border-neutral-800/40 pb-2">
-                        <span className="text-neutral-400">Last backup</span>
-                        <span className="text-neutral-200 font-medium">
+                      <div className="flex items-center justify-between border-b border-[var(--color-borderDefault)] pb-2">
+                        <span className="text-[var(--color-textMuted)]">Last backup</span>
+                        <span className="text-[var(--color-textPrimary)] font-medium">
                           {lastSyncedAt ? lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + lastSyncedAt.toLocaleDateString() : 'Never'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between border-b border-neutral-800/40 pb-2">
-                        <span className="text-neutral-400">Backup folder</span>
-                        <span className="text-neutral-200 font-mono text-[10px]">
+                      <div className="flex items-center justify-between border-b border-[var(--color-borderDefault)] pb-2">
+                        <span className="text-[var(--color-textMuted)]">Backup folder</span>
+                        <span className="text-[var(--color-textPrimary)] font-mono text-[10px]">
                           {backups.length > 0 ? backups[0].name : 'Google Drive (App Data Folder)'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between border-b border-neutral-800/40 pb-2">
-                        <span className="text-neutral-400">Size</span>
-                        <span className="text-neutral-200 font-medium">{dbSizeStr}</span>
+                      <div className="flex items-center justify-between border-b border-[var(--color-borderDefault)] pb-2">
+                        <span className="text-[var(--color-textMuted)]">Size</span>
+                        <span className="text-[var(--color-textPrimary)] font-medium">{dbSizeStr}</span>
                       </div>
                     </div>
                   </div>
@@ -625,7 +626,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                   {/* Auto backup option */}
                   <div className="flex items-center justify-between px-4 mt-4 mb-2 bg-[var(--color-hoverBg)] p-2.5 rounded-lg border border-[var(--color-borderDefault)] text-left">
                     <div className="flex flex-col">
-                      <span className="text-xs font-semibold text-white">Auto-backup</span>
+                      <span className="text-xs font-semibold text-[var(--color-textPrimary)]">Auto-backup</span>
                       <span className="text-[10px] text-[var(--color-textMuted)]">Triggers every 8 hours</span>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -661,7 +662,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                     <button
                       onClick={handleRestoreFromDrive}
                       disabled={isSyncing || isRestoring || backups.length === 0}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-[var(--color-hoverBg)] text-white font-semibold rounded-xl border border-[var(--color-borderDefault)] transition-all text-xs cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-semibold rounded-xl border border-[var(--color-borderDefault)] transition-all text-xs cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
                     >
                       <FiRefreshCw size={13} />
                       <span>Restore backup</span>
@@ -669,7 +670,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                     <button
                       onClick={handleDownloadBackup}
                       disabled={isSyncing || isRestoring}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-[var(--color-hoverBg)] text-white font-semibold rounded-xl border border-[var(--color-borderDefault)] transition-all text-xs cursor-pointer disabled:opacity-50"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-semibold rounded-xl border border-[var(--color-borderDefault)] transition-all text-xs cursor-pointer disabled:opacity-50"
                     >
                       <FiDownload size={13} />
                       <span>Export backup</span>
@@ -699,10 +700,10 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
             {/* Privacy Shield Card */}
             <div className="border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/20 rounded-xl p-3.5 flex items-center justify-between gap-3 text-left mt-8">
               <div className="flex items-center gap-3">
-                <FiShield className="text-neutral-400 shrink-0" size={18} />
+                <FiShield className="text-[var(--color-iconDefault)] shrink-0" size={18} />
                 <div className="min-w-0">
-                  <div className="text-[10px] font-bold text-white">Your data is private and secure</div>
-                  <div className="text-[9px] text-neutral-400 mt-0.5 truncate">Backups are encrypted and never shared.</div>
+                  <div className="text-[10px] font-bold text-[var(--color-textPrimary)]">Your data is private and secure</div>
+                  <div className="text-[9px] text-[var(--color-textMuted)] mt-0.5 truncate">Backups are encrypted and never shared.</div>
                 </div>
               </div>
             </div>

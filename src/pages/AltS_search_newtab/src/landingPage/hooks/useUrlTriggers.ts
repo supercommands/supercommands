@@ -4,6 +4,10 @@ import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { extractSnippetIdFromCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { resolveEntityById } from '../../../../../shared-components/utils/entityResolver';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
+import {
+  hasRunnableAiPrompt,
+  runAiPrompt,
+} from '../../../../../allObjectFolder/src/createObject/aiPrompt/runAiPrompt';
 
 interface UseUrlTriggersProps {
   userId: string;
@@ -79,6 +83,7 @@ export const useUrlTriggers = ({
   handleAltSInitialization,
 }: UseUrlTriggersProps) => {
   const hasHandledUrlTrigger = useRef(false);
+  const isHandlingUrlTrigger = useRef(false);
   const openedSessionFromUrlRef = useRef<string | null>(null);
   const dbNotes = useDbStore(state => state.notes);
   const dbLinks = useDbStore(state => state.links);
@@ -87,13 +92,12 @@ export const useUrlTriggers = ({
   const dbSessions = useDbStore(state => state.sessions);
 
   useEffect(() => {
-    if (hasHandledUrlTrigger.current) return;
+    if (hasHandledUrlTrigger.current || isHandlingUrlTrigger.current) return;
 
     const urlParams = new URLSearchParams(window.location.search);
     const hasTrigger =
       urlParams.get('focus_sheet_ui_first_column') === 'true' ||
       urlParams.get('force_board_view') === 'true' ||
-      urlParams.get('open_create') === 'true' ||
       urlParams.get('open_sheet') !== null ||
       urlParams.get('create_automation') === 'true' ||
       urlParams.get('create_link') === 'true' ||
@@ -126,12 +130,7 @@ export const useUrlTriggers = ({
       return;
     }
 
-    if (urlParams.get('open_create') === 'true') {
-      dismissAllViews('SHORTCUT_CREATE_MENU');
-      setIsGlobalCreateMenuOpen(true);
-      window.history.replaceState({}, '', window.location.pathname);
-      return;
-    }
+
 
     const sheetAction = urlParams.get('open_sheet');
     const isEmbedded = urlParams.get('embed') === 'true';
@@ -323,6 +322,7 @@ export const useUrlTriggers = ({
     if (urlParams.get('omnibox') === 'true' || urlParams.get('alts_action') === 'true') {
       const type = urlParams.get('type');
       const query = normalizeText(urlParams.get('query') || '');
+      const temporaryPrompt = urlParams.get('temporaryPrompt') || '';
       const commandId = urlParams.get('id');
       const editMode = urlParams.get('edit_mode') === 'true';
       let editorProps: any = undefined;
@@ -378,17 +378,41 @@ export const useUrlTriggers = ({
         return;
       }
 
-      let cancelled = false;
+      const invocationKey = `${window.location.pathname}${window.location.search}`;
+      const windowWithInvocationGuard = window as typeof window & {
+        __cmdosOmniboxInvocationsInFlight?: Set<string>;
+      };
+      const inFlightInvocations =
+        windowWithInvocationGuard.__cmdosOmniboxInvocationsInFlight ||
+        new Set<string>();
+      windowWithInvocationGuard.__cmdosOmniboxInvocationsInFlight = inFlightInvocations;
+
+      if (inFlightInvocations.has(invocationKey)) {
+        console.warn('[useUrlTriggers] Duplicate omnibox invocation suppressed:', { invocationKey });
+        return;
+      }
+
+      inFlightInvocations.add(invocationKey);
+      isHandlingUrlTrigger.current = true;
       let attempts = 0;
       const maxAttempts = 80;
       const retryDelayMs = 100;
 
+      const releaseOmniboxInvocation = () => {
+        inFlightInvocations.delete(invocationKey);
+        isHandlingUrlTrigger.current = false;
+      };
+
       const tryHandleOmnibox = async () => {
-        if (cancelled) return;
         const currentIsLoggedIn = userId !== '';
         if (!searchbarRef.current || (!currentIsLoggedIn && attempts < 30)) {
           if (attempts++ < maxAttempts) {
             window.setTimeout(tryHandleOmnibox, retryDelayMs);
+          } else {
+            console.warn('[useUrlTriggers] Omnibox trigger timed out before the UI became ready.', {
+              invocationKey,
+            });
+            releaseOmniboxInvocation();
           }
           return;
         }
@@ -416,7 +440,13 @@ export const useUrlTriggers = ({
             (query ? noteCandidates.find(item => includesQuery(item.title, query)) : null);
           if (foundNote || editorProps) {
             if (editorProps && editorProps.props) {
-              useUIStore.getState().openItemEditor('note', String(foundNote?.id || entityId || 'new'), editorProps);
+              const snipObj = editorProps.props.item || editorProps.props.snippet || foundNote;
+              const mergedProps = {
+                ...editorProps.props,
+                initialDraftKey: editorProps.props.initialDraftKey || snipObj?.title || snipObj?.name || snipObj?.key,
+                initialDraftContent: editorProps.props.initialDraftContent || snipObj?.body || snipObj?.content || snipObj?.value || (typeof snipObj?.config === 'string' ? snipObj.config : JSON.stringify(snipObj?.config || '')),
+              };
+              useUIStore.getState().openItemEditor('note', String(foundNote?.id || entityId || 'new'), { props: mergedProps });
               useUIStore.getState().setView({ type: 'home' });
             } else if (foundNote) {
               openNoteById(String(foundNote.id));
@@ -500,7 +530,21 @@ export const useUrlTriggers = ({
             resolvedEntity?.entity || aiPromptCandidates.find(item => includesQuery(item.title, query));
           if (foundPrompt || editorProps) {
             useUIStore.getState().setView({ type: 'home' });
-            useUIStore.getState().openItemEditor('aiPrompt', String(foundPrompt?.id || entityId || 'new'), editorProps);
+            const shouldRunFromOmnibox =
+              urlParams.get('omnibox') === 'true' &&
+              urlParams.get('runPrompt') === 'true' &&
+              !editMode &&
+              !editorProps &&
+              hasRunnableAiPrompt(foundPrompt, temporaryPrompt);
+            if (shouldRunFromOmnibox) {
+              try {
+                await runAiPrompt(foundPrompt, temporaryPrompt);
+              } catch (error) {
+                console.error('[useUrlTriggers] Failed to run AI prompt from omnibox:', error);
+              }
+            } else {
+              useUIStore.getState().openItemEditor('aiPrompt', String(foundPrompt?.id || entityId || 'new'), editorProps);
+            }
           } else {
             // Check if it's an automation in the DB (for 'agent' overlap)
             const foundAuto = automationCandidates.find(item => includesQuery(item.name, query));
@@ -532,6 +576,7 @@ export const useUrlTriggers = ({
             if (commandId === 'search') {
               openSpreadsheetView();
               hasHandledUrlTrigger.current = true;
+              releaseOmniboxInvocation();
               window.history.replaceState({}, '', window.location.pathname);
               return;
             }
@@ -545,13 +590,15 @@ export const useUrlTriggers = ({
         }
 
         hasHandledUrlTrigger.current = true;
+        releaseOmniboxInvocation();
         window.history.replaceState({}, '', window.location.pathname);
       };
 
-      tryHandleOmnibox();
-      return () => {
-        cancelled = true;
-      };
+      void tryHandleOmnibox().catch(error => {
+        console.error('[useUrlTriggers] Unhandled omnibox trigger failure:', error);
+        releaseOmniboxInvocation();
+      });
+      return;
     }
 
     if (urlParams.get('trigger_hotkey') !== 'true') return;
@@ -570,7 +617,7 @@ export const useUrlTriggers = ({
 
     const findById = (records: any[], id: string) => records.find(record => String(record?.id) === id);
 
-    const tryHandle = () => {
+    const tryHandle = async () => {
       if (cancelled) return;
       const currentIsLoggedIn = userId !== '';
       if (!searchbarRef.current || (!currentIsLoggedIn && attempts < 30)) {
@@ -616,7 +663,15 @@ export const useUrlTriggers = ({
         }
         if (foundPrompt) {
           useUIStore.getState().setView({ type: 'home' });
-          useUIStore.getState().openItemEditor('aiPrompt', String(foundPrompt.id));
+          if (hasRunnableAiPrompt(foundPrompt)) {
+            try {
+              await runAiPrompt(foundPrompt);
+            } catch (error) {
+              console.error('[useUrlTriggers] Failed to run AI prompt from hotkey:', error);
+            }
+          } else {
+            useUIStore.getState().openItemEditor('aiPrompt', String(foundPrompt.id));
+          }
           return;
         }
 

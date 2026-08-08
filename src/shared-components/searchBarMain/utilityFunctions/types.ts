@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import type { CommandId, CommandDefinition, AutoSubmitKind } from '../commandConfigurations/commands';
 import type { LocalCommandId, LocalCommandDefinition } from '../commandConfigurations/localCommands';
 type SavedAutomation = any;
@@ -230,6 +230,9 @@ export interface SuggestionState {
   isCommandLocked?: boolean;
   requiresInlineQuery?: boolean;
   isAtMenuOpen?: boolean;
+  showEmptySlashDropdown?: boolean;
+  onSlashSuggestionSelect?: (actionId: 'ai' | 'collections') => void;
+  onDismissSlashDropdown?: (options?: { clearQuery?: boolean; blur?: boolean }) => void;
   isContextualPopupOpen?: boolean;
   selectedImagesCount: number;
   showAIHistoryPanel?: boolean;
@@ -268,6 +271,10 @@ export interface SuggestionState {
 }
 
 export interface SearchbarProps {
+  isEmbedded?: boolean;
+  contextUrl?: string;
+  containerClassName?: string;
+  inputWrapperClassName?: string;
   onSuggestionStateChange?: (state: SuggestionState | null) => void;
   onCommandExecute?: (
     commandId: CommandId | LocalCommandId | 'ai',
@@ -325,7 +332,7 @@ export interface SearchbarHandle {
   isLocked: boolean;
   openUrls: (urls: string[], title?: string, forceNewTab?: boolean) => void;
   activateAutomation: (automation: SavedAutomation) => void;
-  executeModule: (moduleId: string) => void;
+
   submitAI: (prompt: string) => void;
   triggerFileUpload: () => void;
   selectSavedAgent: (agent: any) => void;

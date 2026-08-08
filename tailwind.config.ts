@@ -14,7 +14,6 @@ export default withUI({
     `${rootDir}/src/pages/AltS_search_newtab/**/*.{html,js,ts,jsx,tsx}`,
     `${rootDir}/src/pages/AltS_search_websites/**/*.{html,js,ts,jsx,tsx}`,
     `${rootDir}/src/pages/popup/**/*.{html,js,ts,jsx,tsx}`,
-    `${rootDir}/src/pages/content-ui/**/*.{html,js,ts,jsx,tsx}`,
     `${rootDir}/src/pages/contentScript/**/*.{html,js,ts,jsx,tsx}`,
     `${rootDir}/src/shared-components/**/*.{html,js,ts,jsx,tsx}`,
     `${rootDir}/src/settings/**/*.{html,js,ts,jsx,tsx}`,

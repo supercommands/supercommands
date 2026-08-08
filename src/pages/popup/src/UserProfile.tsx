@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import type React from 'react';
+import type * as React from 'react';
 import { useEffect, useState, useRef } from 'react';
 import { FaCog, FaSignOutAlt } from 'react-icons/fa';
 import { CMDOS_SIGN_UP_URL } from '../../../storage/API/core/api';
@@ -16,7 +16,7 @@ interface UserProfileProps {
 }
 
 const LoginView: React.FC = () => {
-  const iconUrl = chrome.runtime.getURL('popup/tasklabs_logo.png');
+  const iconUrl = chrome.runtime.getURL('popup/cmdOS_logo.png');
   const startWritingUrl = chrome.runtime.getURL('popup/start_writing.png');
   const websiteUrl = CMDOS_SIGN_UP_URL;
 
@@ -26,7 +26,7 @@ const LoginView: React.FC = () => {
 
   return (
     <div className="flex flex-col items-center justify-center w-[300px] px-4 py-6">
-      <img src={iconUrl} alt="Cmdos Logo" className="h-10 w-10 mb-3" />
+      <img src={iconUrl} alt="Cmdos Logo" className="h-8 w-8 mb-3" />
 
       <div className="mb-4 w-full max-w-[140px]">
         <img src={startWritingUrl} alt="Start Writing" className="w-full h-auto object-contain" />

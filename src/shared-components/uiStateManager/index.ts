@@ -23,6 +23,13 @@ const applyTodoDisplayMode = (mode: TodoDisplayMode) => {
   useUIStore.setState(state => (state.todoDisplayMode === mode ? state : { todoDisplayMode: mode }));
 };
 
+let editorOpenInstanceId = 0;
+
+const nextEditorOpenInstanceId = () => {
+  editorOpenInstanceId += 1;
+  return editorOpenInstanceId;
+};
+
 interface UIStoreState {
   // --- State ---
   activeView: MainView;
@@ -209,7 +216,12 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
   
   openEditor: (editorState) =>
     set(state => {
-      const updates: Partial<UIStoreState> = { activeEditor: editorState };
+      const updates: Partial<UIStoreState> = {
+        activeEditor: {
+          ...editorState,
+          openInstanceId: nextEditorOpenInstanceId(),
+        },
+      };
       if (editorState?.type && editorState.type !== 'todo' && state.todoCreatePrefill !== null) {
         updates.todoCreatePrefill = null;
       }
@@ -260,6 +272,7 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
         activeEditor: {
           type: editorType,
           id,
+          openInstanceId: nextEditorOpenInstanceId(),
           isNew: options?.isNew,
           props: options?.props,
         },
@@ -282,6 +295,7 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
         activeEditor: {
           type: editorType,
           id: options?.id ?? 'new',
+          openInstanceId: nextEditorOpenInstanceId(),
           isNew: options?.isNew,
           props: options?.props,
         },

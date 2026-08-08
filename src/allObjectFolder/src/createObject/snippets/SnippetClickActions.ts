@@ -14,13 +14,23 @@ export type SnippetSuggestion = {
 export type SnippetActionDetail = {
   snippetId: string;
   snippetKey: string;
+  id?: string;
+  key?: string;
   category: string | null | undefined;
   workspaceId: string;
   workspaceName?: string;
   folderId?: string | null;
   folderName?: string | null;
   orgId?: string;
-  commandId: 'delete_snippet' | 'delete_link' | 'delete_folder' | 'delete_todo';
+  commandId:
+    | 'delete_snippet'
+    | 'delete_link'
+    | 'delete_folder'
+    | 'delete_todo'
+    | 'delete_session'
+    | 'delete_prompt'
+    | 'delete_agent'
+    | 'delete_automation';
 };
 
 /**

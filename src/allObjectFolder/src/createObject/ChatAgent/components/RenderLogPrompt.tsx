@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import * as React from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const RenderLogPrompt: React.FC<{ prompt: string; isDark: boolean }> = ({ prompt, isDark }) => {

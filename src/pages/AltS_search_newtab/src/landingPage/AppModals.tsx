@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import AutomationStatusIndicator from '../../../../allObjectFolder/src/createObject/automationBeta/ui/automationStatusIndicator';
 import NotificationContainer from '../../../../shared-components/notifications/NotificationContainer';
 import CreateWorkspacePanel from '../../../../settings/allWorkspaceManager/workspaces/ui/CreateWorkspacePanel';

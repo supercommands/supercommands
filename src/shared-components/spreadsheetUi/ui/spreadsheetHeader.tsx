@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import type { Table, Header } from '@tanstack/react-table';
 import { flexRender } from '@tanstack/react-table';
 import { clsx } from 'clsx';
@@ -97,7 +97,7 @@ const HeaderContent: React.FC<{
           className={clsx(
             'w-full h-full bg-transparent text-[12px] font-medium capitalize outline-none min-w-[120px]',
             isCompactColumn ? "px-6" : "pl-8 pr-6",
-            "text-neutral-300 placeholder:text-neutral-500",
+            "text-[var(--color-textPrimary)] placeholder:text-[var(--color-textPlaceholder)]",
           )}
           onChange={e => {
             const val = e.target.value;
@@ -249,15 +249,15 @@ const SpreadsheetHeader: React.FC<SpreadsheetHeaderProps> = ({ table, tutorialSt
                       (isShortcutsParent
                         ? clsx(
                             'px-2 py-0.5 text-[12px] font-medium capitalize z-[21] border',
-                            'text-white border-white/10 bg-[var(--color-sheetBg)]',
+                            'text-[var(--color-textPrimary)] border-[var(--color-borderDefault)] bg-[var(--color-sheetBg)]',
                           )
                         : 'border-none bg-transparent'),
                     isLeafRow &&
                       clsx(
                         'text-[12px] font-medium capitalize h-[27px] align-bottom pt-0 transition-all duration-200 z-20',
                         isActiveCol 
-                          ? ('text-neutral-300 bg-white/5')
-                          : 'text-neutral-400 bg-[var(--color-sheetBg)] hover:bg-white/5',
+                          ? ('text-[var(--color-textPrimary)] bg-[var(--color-hoverBg)]')
+                          : 'text-[var(--color-textMuted)] bg-[var(--color-sheetBg)] hover:bg-[var(--color-hoverBg)]',
                       ),
                     isLeafRow && header.id !== 'id' && (
                       'border-b border-white/10'

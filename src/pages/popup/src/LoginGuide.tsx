@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useState, useEffect } from 'react';
 
 interface LoginGuideProps {
@@ -6,7 +6,7 @@ interface LoginGuideProps {
 }
 
 const LoginGuide: React.FC<LoginGuideProps> = ({ websiteUrl }) => {
-  const iconUrl = chrome.runtime.getURL('popup/tasklabs_logo.png');
+  const iconUrl = chrome.runtime.getURL('popup/cmdOS_logo.png');
   const startWritingUrl = chrome.runtime.getURL('popup/start_writing.png');
 
   const handleLogin = () => {
@@ -18,7 +18,7 @@ const LoginGuide: React.FC<LoginGuideProps> = ({ websiteUrl }) => {
       <div className="flex flex-col items-center justify-between w-full max-w-md h-[200px] ">
         {/* Logo - smaller in new tab context */}
         <div className="w-full h-[50px] flex items-center">
-          <img src={iconUrl} alt="TaskLabs Logo" className="h-10 w-10 mb-4" />
+          <img src={iconUrl} alt="cmdOS Logo" className="h-10 w-10 mb-4" />
           <h2 className="text-xl font-bold text-white mb-2 text-center">cmdOS</h2>
         </div>
 

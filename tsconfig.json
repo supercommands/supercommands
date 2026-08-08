@@ -12,7 +12,7 @@
       "@extension/ui/*": ["packages/ui/*"],
       "@extension/browser": ["packages/browser/index.ts"],
       "@private-services/*": ["src/storage/API/services/*"],
-      "@src/*": ["src/pages/AltS_search_newtab/src/*", "src/pages/AltS_search_websites/src/*", "src/pages/content-ui/src/*", "src/pages/popup/src/*", "src/pages/contentScript/src/*", "src/*"],
+      "@src/*": ["src/pages/AltS_search_newtab/src/*", "src/pages/AltS_search_websites/src/*", "src/pages/popup/src/*", "src/pages/contentScript/src/*", "src/*"],
       "@private-providers/*": ["src/storage/API/storage/providers/*"]
     }
   },

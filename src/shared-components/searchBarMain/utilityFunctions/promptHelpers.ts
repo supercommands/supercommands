@@ -293,7 +293,7 @@ export const commandSupportsInlineQuery = (info: CommandSelectionInfo | null): i
   return Boolean(info && info.requiresInlineQuery);
 };
 
-export const mapFullNameToShortcut = (text: string): string => {
+export const mapFullNameToShortcut = (text: string, slashFilterMeta?: Record<string, { label: string }>): string => {
   const mapping: Record<string, string> = {
     '/all': '/a',
     '/todos': '/t',
@@ -305,7 +305,18 @@ export const mapFullNameToShortcut = (text: string): string => {
     '/links': '/l',
     '/commands': '/c',
     '/bookmarks': '/bm',
+    '/chat agents': '/g',
+    '/agents': '/g',
   };
+
+  if (slashFilterMeta) {
+    for (const [alias, meta] of Object.entries(slashFilterMeta)) {
+      const fullName = `/${String(meta.label || '').trim().toLowerCase()}`;
+      if (fullName.length <= 1) continue;
+      mapping[fullName] = `/${alias}`;
+    }
+  }
+
   const lower = text.toLowerCase();
   for (const [fullName, shortcut] of Object.entries(mapping)) {
     if (lower.startsWith(fullName)) {
@@ -315,14 +326,47 @@ export const mapFullNameToShortcut = (text: string): string => {
   return text;
 };
 
-export const getHighlightedHtml = (val: string): string => {
-  const match = val.match(/^\/[a-zA-Z]*/);
-  if (match && match[0]) {
-    const prefix = match[0];
+export const getHighlightedHtml = (val: string, slashFilterMeta?: Record<string, { label: string }>): string => {
+  const colonMatch = val.match(/^([a-zA-Z0-9_-]+):/);
+  const slashMatch = val.match(/^\/[^\s\u00A0]*/);
+
+  let prefix = '';
+  let alias = '';
+  let isColon = false;
+
+  if (colonMatch && colonMatch[0]) {
+    prefix = colonMatch[0];
+    alias = colonMatch[1].toLowerCase();
+    isColon = true;
+  } else if (slashMatch && slashMatch[0]) {
+    prefix = slashMatch[0];
+    alias = prefix.slice(1).toLowerCase();
+  }
+
+  if (prefix) {
     const rest = val.slice(prefix.length);
 
-    const lowerPrefix = prefix.toLowerCase();
-    const isFilterShortcut = ['/a', '/n', '/sn', '/s', '/p', '/l', '/c', '/b', '/bm', '/t', '/se', '/au', '/ca', '/sc', '/nm'].includes(lowerPrefix);
+    const staticLabels: Record<string, string> = {
+      'a': 'All',
+      'n': 'Notes',
+      'nm': 'Notes',
+      'sn': 'Text Expanders',
+      's': 'Tab Sessions',
+      'se': 'Tab Sessions',
+      'p': 'Prompts',
+      'l': 'Links',
+      'c': 'Commands',
+      'b': 'Bookmarks',
+      'bm': 'Bookmarks',
+      't': 'Todos',
+      'au': 'Automations',
+      'ca': 'Chat Agents',
+      'g': 'Chat Agents',
+      'sc': 'System Commands',
+    };
+    const dynamicLabel = slashFilterMeta?.[alias]?.label;
+    const label = dynamicLabel || staticLabels[alias] || prefix;
+    const isFilterShortcut = !!dynamicLabel || !!staticLabels[alias];
 
     const escapedRest = rest
       .replace(/&/g, '&amp;')
@@ -334,28 +378,10 @@ export const getHighlightedHtml = (val: string): string => {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    const hasSpaceAfter = rest.startsWith(' ') || rest.startsWith('\u00A0');
+    const hasSpaceAfter = rest.startsWith(' ') || rest.startsWith('\u00A0') || rest === '';
 
-    if (isFilterShortcut && hasSpaceAfter) {
-      const labels: Record<string, string> = {
-        '/a': 'All',
-        '/n': 'Notes',
-        '/nm': 'Notes',
-        '/sn': 'Snippets',
-        '/s': 'Tab Sessions',
-        '/se': 'Tab Sessions',
-        '/p': 'Prompts',
-        '/l': 'Links',
-        '/c': 'Commands',
-        '/b': 'Bookmarks',
-        '/bm': 'Bookmarks',
-        '/t': 'Todos',
-        '/au': 'Automations',
-        '/ca': 'Chat Agents',
-        '/sc': 'System Commands',
-      };
-      const label = labels[lowerPrefix] || prefix;
-      return `<span style="display: inline-flex; align-items: center; justify-content: center; background: rgba(156, 163, 175, 0.15); border: 1.5px solid #9ca3af; color: #9ca3af; border-radius: 6px; padding: 1px 6px; font-weight: 700; margin-right: 4px; font-family: monospace; font-size: 13px;">${label}</span>${escapedRest}`;
+    if (isFilterShortcut && (hasSpaceAfter || isColon)) {
+      return `<span data-slash-filter-chip="true" contenteditable="false" style="display: inline-flex; align-items: center; justify-content: center; background: rgba(156, 163, 175, 0.15); border: 1.5px solid #9ca3af; color: #9ca3af; border-radius: 6px; padding: 1px 6px; font-weight: 700; margin-right: 4px; font-family: monospace; font-size: 13px;">${label}</span>${escapedRest}`;
     }
 
     return `${escapedPrefix}${escapedRest}`;

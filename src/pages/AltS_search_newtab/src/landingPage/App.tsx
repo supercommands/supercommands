@@ -3,12 +3,12 @@ import { AppLeftSidebar } from './AppLeftSidebar';
 import { AppMainContent } from './AppMainContent';
 // import removed
 import { useKeystrokeRecording } from '../../../../shared-components/hotkeys';
-import type React from 'react';
+import type * as React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { FiHelpCircle } from 'react-icons/fi';
 import { CMDOS_DOCS_URL } from '../../../../storage/API/core/apiConfig';
-import { AppTodoSidebar } from './AppTodoSidebar';
+
 import Branding from '../../../../shared-components/Branding';
 import { HeaderControls, getDefaultSettingsView } from '../../../../settings';
 import { isOnboardingCompleted } from '../../../../storage/localStorage/onboardingStorage';
@@ -159,7 +159,7 @@ const App: React.FC = () => {
 
   // Auto-close Sheet UI when navigating to specific views to prevent UI overlaps
   useEffect(() => {
-    if (isSpreadsheetViewOpen && (showTodosView || (activeEditor?.type === 'note' && !activeEditor?.props?.isOverlay) || (activeEditor?.type === 'link' && !activeEditor?.props?.isOverlay))) {
+    if (isSpreadsheetViewOpen && (showTodosView || (activeEditor?.type === 'note' && !activeEditor?.props?.isOverlay) || (activeEditor?.type === 'link' && !activeEditor?.props?.isOverlay) || (activeEditor?.type === 'todo' && !activeEditor?.props?.isOverlay))) {
       setIsSpreadsheetViewOpen(false);
     }
   }, [activeView?.type, isSpreadsheetViewOpen]);
@@ -372,8 +372,7 @@ const App: React.FC = () => {
     !!selectedSnippet ||
     activeView?.type === 'bulk' ||
     false ||
-    activeView?.type === 'store' ||
-    showTodosView;
+    activeView?.type === 'store';
   const isActuallyExpanded = isEditorExpanded || isLinkEditModalOpen;
 
   const isFocusMode = useUIStore((s: any) => s.isFocusMode);
@@ -396,6 +395,21 @@ const App: React.FC = () => {
   // Track if any search sub-menu is open to hide main content
   const [isSearchMenuOpen, setIsSearchMenuOpen] = useState(false);
   const [isBoardViewOpen, setIsBoardViewOpen] = useState(false);
+  const [isWidgetEditMode, setIsWidgetEditMode] = useState(false);
+  const hideCreatePanelItems = isWidgetEditMode;
+
+  useEffect(() => {
+    const isHomeOrDefaultView = !activeView?.type || activeView.type === 'home';
+    const shouldExitWidgetEditMode =
+      !isHomeOrDefaultView ||
+      isFocusMode ||
+      isSpreadsheetViewOpen ||
+      showTutorial ||
+      isEmbedded ||
+      Boolean(activeEditor);
+
+    if (shouldExitWidgetEditMode) setIsWidgetEditMode(false);
+  }, [activeEditor, activeView?.type, isEmbedded, isFocusMode, isSpreadsheetViewOpen, showTutorial]);
 
   // Organization panel state - tracks when org panel is open
   const [orgPanelState, setOrgPanelState] = useState<{
@@ -548,7 +562,7 @@ const App: React.FC = () => {
           searchbarRef.current.executeCommand((value || id) as any, { mode: 'execute' });
           searchbarRef.current.focus();
         } else if (category === 'module') {
-          searchbarRef.current.executeModule(value || id);
+          /* executeModule removed */
           searchbarRef.current.focus();
         } else if (category === 'automation') {
           if (automationObj) {
@@ -577,7 +591,7 @@ const App: React.FC = () => {
         const { cmdType, cmdId } = message;
         if (!searchbarRef.current) return;
         if (cmdType === 'command') searchbarRef.current.executeCommand(cmdId as any, { mode: 'execute' });
-        else if (cmdType === 'module') searchbarRef.current.executeModule(cmdId);
+        /* module removed */
       } else if (message.type === 'EXECUTE_AUTOMATION') {
         // Legacy/Direct support
         if (!searchbarRef.current) return;
@@ -793,10 +807,6 @@ const App: React.FC = () => {
             active.dispatchEvent(
               new KeyboardEvent('keydown', { key: 's', altKey: true, bubbles: true, cancelable: true }),
             );
-          } else if (message && message.type === 'tasklabs:open-create-menu') {
-            active.dispatchEvent(
-              new KeyboardEvent('keydown', { key: 'c', altKey: true, bubbles: true, cancelable: true }),
-            );
           }
         }
         return;
@@ -831,15 +841,6 @@ const App: React.FC = () => {
           // Let SpreadsheetTable's internal logic handle focusing the first data row or search
           useSpreadsheetStore.getState().setSelectedCell({ rowIndex: 0, colIndex: 0 });
         }, 50);
-      } else if (message && message.type === 'tasklabs:open-create-menu') {
-        window.focus(); // Vital to steal focus back from Omnibox
-        dismissAllViews('SHORTCUT_CREATE_MENU');
-        setTimeout(() => {
-          if (searchbarRef.current) {
-            searchbarRef.current.focus();
-          }
-          setIsGlobalCreateMenuOpen(true);
-        }, 100);
       }
     };
 
@@ -852,7 +853,7 @@ const App: React.FC = () => {
 
   // Proactively track focus state and persist it to chrome.storage.local.
   // This is far more reliable than calling document.hasFocus() at keypress time
-  // because the act of pressing Alt+C can itself briefly change focus state.
+  // because the act of pressing shortcuts can itself briefly change focus state.
   useEffect(() => {
     const chromeAny = (window as any)?.chrome;
     if (!chromeAny?.storage?.local) return;
@@ -973,11 +974,8 @@ const App: React.FC = () => {
           setIsSpreadsheetViewOpen(false);
         }
       }
-      if (isUserInitiated && activeView?.type === 'home') {
-        handleAltSInitialization();
-      }
     },
-    [activeLockedCommand, handleAltSInitialization, activeView?.type],
+    [activeLockedCommand],
   );
 
 
@@ -1077,7 +1075,7 @@ const App: React.FC = () => {
     }
     if (isSpreadsheetViewOpen) {
       if (
-        activeEditor?.type === 'todo' ||
+        (activeEditor?.type === 'todo' && !activeEditor?.props?.isOverlay) ||
         activeEditor?.type === 'agent' ||
         activeEditor?.type === 'ai' ||
         (activeEditor?.type === 'link' && !activeEditor?.props?.isOverlay)
@@ -1187,7 +1185,7 @@ const App: React.FC = () => {
   if (!authChecked) {
     return (
       <DndProvider backend={HTML5Backend}>
-        <div className="flex h-screen text-neutral-900 !rounded-none dark:!rounded-none dark:text-white relative overflow-hidden outline-none bg-[var(--color-rootBg)]" />
+        <div className="flex h-screen text-[var(--color-textPrimary)] !rounded-none relative overflow-hidden outline-none bg-[var(--color-rootBg)]" />
       </DndProvider>
     );
   }
@@ -1197,7 +1195,7 @@ const App: React.FC = () => {
       <div
         ref={mainContainerRef}
         tabIndex={-1}
-        className="flex h-screen text-neutral-900 !rounded-none dark:!rounded-none dark:text-white relative overflow-hidden outline-none bg-[var(--color-rootBg)]"
+        className="flex h-screen text-[var(--color-textPrimary)] !rounded-none relative overflow-hidden outline-none bg-[var(--color-rootBg)]"
         style={isEmbedded ? { background: 'transparent' } : undefined}>
         {isEmbedded && (
           <style>{`
@@ -1219,9 +1217,9 @@ const App: React.FC = () => {
         )}
         {!isEmbedded && <WallpaperLayer />}
         <div id="ai-history-anchor" />
-        {/* Global Branding & Controls - Always visible in top left */}
+        {/* Global Branding - Always visible in top left */}
         {!isEmbedded && !showTutorial && !isSpreadsheetViewOpen && (
-          <div className="absolute top-0 left-0 w-[280px] p-2.5 z-[10000] pointer-events-auto flex items-center justify-between">
+          <div className="absolute top-0 left-0 p-2.5 z-[10000] pointer-events-auto flex items-center">
             <Branding
               className="!p-0 !gap-0"
               showAvatar={false}
@@ -1229,35 +1227,24 @@ const App: React.FC = () => {
                 if (isSpreadsheetViewOpen) setIsSpreadsheetViewOpen(false);
               }}
             />
-            {!isFocusMode && (
-              <div className="flex items-center gap-2">
-                <HeaderControls
-                  showFavorites={showFavorites}
-                  onToggleFavorites={handleToggleFavorites}
-                  isFocusMode={isFocusMode}
-                  onToggleFocusMode={handleToggleFocusMode}
-                  isLoggedIn={isLoggedIn && userId !== 'local_user'}
-                  direction="down"
-                  onOpenSubscriptions={handleOpenSubscriptions}
-                  onOpenManageSubscription={handleOpenManageSubscription}
-                  onCommandListCategoryChange={setCommandListCategory}
-                  commandListCategory={commandListCategory}
-                  onOpenGeneralSettings={handleOpenGeneralSettings}
-                  onOpenOrganizationSettings={(orgId: string, orgName: string) => {
-                    organizationHandlers?.onOrganizationSettings(orgId, orgName);
-                  }}
-                />
-              </div>
-            )}
           </div>
         )}
 
+        {/* Floating Right-Center Control Group */}
+        {!isEmbedded && !showTutorial && !isSpreadsheetViewOpen && !isFocusMode && !activeEditor && (
+          <HeaderControls
+            isLoggedIn={isLoggedIn && userId !== 'local_user'}
+            isWidgetEditMode={isWidgetEditMode}
+            onToggleWidgetEditMode={() => setIsWidgetEditMode(prev => !prev)}
+          />
+        )}
+
         {/* Tutorial Button - Top Right */}
-        {!isEmbedded && !showTutorial && showTutorialButton && !isSpreadsheetViewOpen && (
+        {!isEmbedded && !showTutorial && showTutorialButton && !isSpreadsheetViewOpen && !activeEditor && activeView?.type === 'home' && (
           <div className="absolute top-4 right-6 z-[10000] pointer-events-auto">
             <button
               onClick={() => setShowTutorial(true)}
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-neutral-900/50 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-all backdrop-blur-sm border border-white/5 shadow-sm"
+              className="w-8 h-8 flex items-center justify-center rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] border border-[var(--color-borderDefault)] transition-all shadow-sm cursor-pointer backdrop-blur-md"
               title="Show Tutorial">
               <FiHelpCircle size={18} />
             </button>
@@ -1277,6 +1264,7 @@ const App: React.FC = () => {
             savedAgentById={savedAgentById}
             handleNavigateToListView={handleNavigateToListView}
             handleFavoriteLinkEdit={handleFavoriteLinkEdit}
+            hideCreatePanelItems={hideCreatePanelItems}
           />
         </div>
 
@@ -1317,6 +1305,7 @@ const App: React.FC = () => {
           isFocusMode={isFocusMode}
           isEmbedded={isEmbedded}
           isCreatingNewItem={isCreatingNewItem}
+          isWidgetEditMode={isWidgetEditMode}
           selectedSnippet={selectedSnippet}
           showTutorial={showTutorial}
           setShowTutorial={setShowTutorial}
@@ -1336,21 +1325,7 @@ const App: React.FC = () => {
         searchbarRef={searchbarRef}
       />
 
-      {!showTutorial &&
-        activeView?.type === 'home' &&
-        !activeLockedCommand &&
-        !isSpreadsheetViewOpen &&
-        !isBoardViewOpen &&
-        !activeEditor &&
-        !todoCreatePrefill && (
-          <AppTodoSidebar
-            isEmbedded={isEmbedded}
-            isSpreadsheetViewOpen={isSpreadsheetViewOpen}
-            isBoardViewOpen={isBoardViewOpen}
-            isActuallyExpanded={isActuallyExpanded && !showTodosView}
-            isLoggedIn={isLoggedIn}
-          />
-        )}
+
     </DndProvider>
   );
 };

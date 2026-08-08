@@ -3,6 +3,7 @@
  * @description Handles Chrome omnibox API events and interactions.
  */
 import 'webextension-polyfill';
+import { triggerInPlaceCommand } from '../inPlaceCommands/triggerInPlaceCommand';
 import { handleAiTabMessage } from '../../browserWindows/chatRuntimeEngine';
 import {
   getAllUserShortcuts,
@@ -10,6 +11,7 @@ import {
 } from '../../../../src/shared-components/shortcuts/core/shortcutDbData';
 import {
   CustomSearchPrefixesForOmniboxStorage,
+  DEFAULT_OMNIBOX_PREFIXES as STORED_DEFAULT_OMNIBOX_PREFIXES,
   type CustomOmniboxPrefixes,
 } from '../../../../src/storage/localStorage/customSearchPrefixesForOmniboxStorage';
 
@@ -25,65 +27,93 @@ import type { TodoRecord } from '../../../../src/allObjectFolder/src/createObjec
 
 import { db } from '../../../../src/storage/indexDB/dbConfig';
 import { handleSessionMessage } from '../../browserWindows/sessions';
+import { buildShortcutPrefixRegistry, recordAssignedTriggerUsage } from '../../../../src/shared-components/triggers';
+import { injectLinkQueryValues } from './linkQueryInjection';
 
 const SESSION_SUGGESTION_ID_PREFIX = 'id:';
 
-export function formatSuggestionDescription(title: string, category: string, prefix: string): string {
-  return `Open : <match>${title}</match> <dim>- ${category} - (c ${prefix})</dim>`;
+export function escapeXml(unsafe: string): string {
+  if (!unsafe) return '';
+  return String(unsafe).replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '\'': return '&apos;';
+      case '"': return '&quot;';
+      default: return c;
+    }
+  });
 }
 
-const AI_COMMANDS: Record<string, string> = {
-  gpt: 'chatgpt',
-  chatgpt: 'chatgpt',
-  gemini: 'gemini',
-  claude: 'claude',
-  perplexity: 'perplexity',
+export function formatSuggestionDescription(title: string, category: string, prefix: string, isAlreadyEscaped = false): string {
+  let emoji = '🔍'; // fallback
+  switch (category) {
+    case 'Notes': emoji = '📄'; break;
+    case 'Links': emoji = '🔗'; break;
+    case 'System': emoji = '⚙\uFE0E'; break;
+    case 'Sessions': emoji = '⊞'; break; // Looks like the 2x2 grid
+    case 'Prompts': emoji = '💬'; break;
+    case 'Automations': emoji = '⚡'; break;
+    case 'Agents': emoji = '🤖'; break;
+    case 'Todos': emoji = '☑️'; break; // Checkbox
+    case 'Snippets': emoji = '</>'; break; // Text Expander icon
+    case 'Shortcuts': emoji = '⌘'; break; // Command icon
+  }
+  const safeTitle = isAlreadyEscaped ? title : escapeXml(title);
+  return `${emoji}  <match>${safeTitle}</match>  <dim>  ${escapeXml(category)}  (c ${escapeXml(prefix)})</dim>`;
+}
+
+// AI_COMMANDS and URL_COMMANDS are commented out — both branches in executeCommand are unreachable:
+// • AI command IDs (gpt, claude, gemini, perplexity) are blocked by HIDDEN_OMNIBOX_COMMAND_IDS
+//   so they are never surfaced as omnibox suggestions.
+// • URL_COMMANDS entries (google, youtube, etc.) are not stored as CommandRecords in the DB.
+//
+// const AI_COMMANDS: Record<string, string> = {
+//   gpt: 'chatgpt', chatgpt: 'chatgpt', gemini: 'gemini', claude: 'claude', perplexity: 'perplexity',
+// };
+//
+// const URL_COMMANDS: Record<string, string> = {
+//   google: 'https://google.com/search?q={query}',
+//   youtube: 'https://www.youtube.com/results?search_query={query}',
+//   history: 'chrome://history', downloads: 'chrome://downloads',
+//   extensions: 'chrome://extensions', settings: 'chrome://settings',
+// };
+
+const findBestShortcutMatch = (input: string, userShortcuts: any[], referenceType?: string) => {
+  const normalizedInput = normalizeShortcutTrigger(input);
+  if (!normalizedInput) return null;
+
+  const matches = (userShortcuts || [])
+    .filter((s: any) => !referenceType || s.referenceType === referenceType)
+    .map((s: any) => {
+      const trigger = normalizeShortcutTrigger(s.trigger || '');
+      if (!trigger) return null;
+      let rank = 0;
+      if (trigger === normalizedInput) rank = 0;
+      else if (trigger.startsWith(normalizedInput)) rank = 1;
+      else if (normalizedInput.length >= 2 && trigger.includes(normalizedInput)) rank = 2;
+      else return null;
+      return { shortcut: s, trigger, rank };
+    })
+    .filter(Boolean) as Array<{ shortcut: any; trigger: string; rank: number }>;
+
+  matches.sort((a, b) => {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    return a.trigger.length - b.trigger.length;
+  });
+
+  return matches[0]?.shortcut || null;
 };
 
-const URL_COMMANDS: Record<string, string> = {
-  google: 'https://google.com/search?q={query}',
-  youtube: 'https://www.youtube.com/results?search_query={query}',
-  history: 'chrome://history',
-  downloads: 'chrome://downloads',
-  extensions: 'chrome://extensions',
-  settings: 'chrome://settings',
-};
-
-const OMNIBOX_STATE_TTL_MS = 300;
-const DEFAULT_OMNIBOX_PREFIXES: {
-  note: readonly string[];
-  link: readonly string[];
-  command: readonly string[];
-  session: readonly string[];
-  prompt: readonly string[];
-  automation: readonly string[];
-  agent: readonly string[];
-  todo: readonly string[];
-  snippet: readonly string[];
-} = {
-  note: ['n', 'note'],
-  link: ['l', 'link'],
-  command: ['c', 'cmd', 'command'],
-  session: ['s', 'session'],
-  prompt: ['p', 'prompt'],
-  automation: ['a', 'auto', 'automation', 'agent'],
-  agent: ['g', 'chat'],
-  todo: ['t', 'todo'],
-  snippet: ['sn', 'snippet'],
-} as const;
-
-const HIDDEN_OMNIBOX_COMMAND_IDS = new Set(['gpt', 'claude', 'gemini', 'perplexity']);
-
-const isDashboardVisibleCommand = (command: CommandRecord | null | undefined) => command?.showInDashboard !== false;
+const HIDDEN_OMNIBOX_COMMAND_IDS = new Set(['gpt', 'claude', 'gemini', 'perplexity', 'capture_element_screenshot']);
 
 const isOmniboxVisibleCommand = (command: CommandRecord | null | undefined) => {
-  if (!isDashboardVisibleCommand(command) || command?.surface === 'website') return false;
+  if (command?.showInDashboard === false) return false;
   if (HIDDEN_OMNIBOX_COMMAND_IDS.has(String(command?.id || '').toLowerCase())) return false;
-
   if (command?.category === 'browser') {
     return Boolean(command.prefix && command.prefix.trim().length > 0);
   }
-
   return true;
 };
 
@@ -126,7 +156,6 @@ async function getLocalData(): Promise<OmniboxLocalData> {
   return { links, notes, commands, sessions, userShortcuts, aiPrompts, chatAgents, automations, snippets, todos };
 }
 
-/** Best-effort title for a snippet — covers all known field names */
 /** Extracts URLs from a link or tabgroup snippet */
 function extractUrls(snippet: any): string[] {
   try {
@@ -170,72 +199,35 @@ function extractUrls(snippet: any): string[] {
 // ─── Input parser ─────────────────────────────────────────────────────────────
 
 /**
- * Builds the dynamic registry from local commands.
- * Each content type (note, link, command) gets exactly ONE prefix.
- * Priority: commands table > customPrefixes > built-in default.
- * If the user changes the prefix (e.g. note: n → d), 'n' is NOT added.
+ * Builds the dynamic registry from stored custom prefixes.
+ * Default values come from customSearchPrefixesForOmniboxStorage, not local fallback aliases.
  */
 export function buildRegistry(
-  commands: CommandRecord[],
+  _commands: CommandRecord[],
   customPrefixes: CustomOmniboxPrefixes | null,
 ): Record<string, 'note' | 'link' | 'command' | 'session' | 'prompt' | 'automation' | 'agent' | 'todo' | 'snippet'> {
-  // Start from commands table (highest priority — these are user-edited command prefixes)
-  let noteKey: string | null = null;
-  let linkKey: string | null = null;
-  let commandKey: string | null = null;
+  type OmniboxRegistryType = 'note' | 'link' | 'command' | 'session' | 'prompt' | 'automation' | 'agent' | 'todo' | 'snippet';
+  const allowedTypes = new Set<OmniboxRegistryType>([
+    'note',
+    'link',
+    'command',
+    'session',
+    'prompt',
+    'automation',
+    'agent',
+    'todo',
+    'snippet',
+  ]);
 
-  for (const cmd of commands.filter(isOmniboxVisibleCommand)) {
-    if (cmd.id === 'search_notes' && cmd.prefix && cmd.prefix.trim()) {
-      noteKey = cmd.prefix.replace(/^\/+/, '').trim().toLowerCase();
-    } else if (cmd.id === 'search_links' && cmd.prefix && cmd.prefix.trim()) {
-      linkKey = cmd.prefix.replace(/^\/+/, '').trim().toLowerCase();
-    } else if (cmd.id === 'search_commands' && cmd.prefix && cmd.prefix.trim()) {
-      commandKey = cmd.prefix.replace(/^\/+/, '').trim().toLowerCase();
-    }
-  }
-
-  let sessionKey = 's';
-  let promptKey = 'p';
-  let automationKey = 'a';
-  let agentKey = 'g';
-  let todoKey = 't';
-  let snippetKey = 'sn';
-
-  // Then check customPrefixes (user omnibox settings) — overrides commands table
-  if (customPrefixes?.note && customPrefixes.note.trim()) noteKey = customPrefixes.note.trim().toLowerCase();
-  if (customPrefixes?.link && customPrefixes.link.trim()) linkKey = customPrefixes.link.trim().toLowerCase();
-  if (customPrefixes?.command && customPrefixes.command.trim())
-    commandKey = customPrefixes.command.trim().toLowerCase();
-  if (customPrefixes?.session && customPrefixes.session.trim())
-    sessionKey = customPrefixes.session.trim().toLowerCase();
-  if (customPrefixes?.prompt && customPrefixes.prompt.trim()) promptKey = customPrefixes.prompt.trim().toLowerCase();
-  if (customPrefixes?.automation && customPrefixes.automation.trim())
-    automationKey = customPrefixes.automation.trim().toLowerCase();
-  if (customPrefixes?.agent && customPrefixes.agent.trim()) agentKey = customPrefixes.agent.trim().toLowerCase();
-  if (customPrefixes?.todo && customPrefixes.todo.trim()) todoKey = customPrefixes.todo.trim().toLowerCase();
-  if (customPrefixes?.snippet && customPrefixes.snippet.trim())
-    snippetKey = customPrefixes.snippet.trim().toLowerCase();
-
-  // Build registry with exactly one entry per type.
-  // Only fall back to built-in default (n/l/c) if user hasn't configured ANYTHING.
-  const registry: Record<string, string> = {};
-  const usedPrefixes = new Set<string>();
-
-  registry[resolveUniquePrefix('note', [noteKey, 'n', 'note'], usedPrefixes)] = 'note';
-  registry[resolveUniquePrefix('link', [linkKey, 'l', 'link'], usedPrefixes)] = 'link';
-  registry[resolveUniquePrefix('command', [commandKey, 'c', 'cmd', 'command'], usedPrefixes)] = 'command';
-  registry[resolveUniquePrefix('session', [sessionKey, 's', 'session'], usedPrefixes)] = 'session';
-  registry[resolveUniquePrefix('prompt', [promptKey, 'p', 'prompt'], usedPrefixes)] = 'prompt';
-  registry[resolveUniquePrefix('automation', [automationKey, 'a', 'auto', 'automation', 'agent'], usedPrefixes)] =
-    'automation';
-  registry[resolveUniquePrefix('agent', [agentKey, 'g', 'chat'], usedPrefixes)] = 'agent';
-  registry[resolveUniquePrefix('todo', [todoKey, 't', 'todo'], usedPrefixes)] = 'todo';
-  registry[resolveUniquePrefix('snippet', [snippetKey, 'sn', 'snippet'], usedPrefixes)] = 'snippet';
-
-  return registry as Record<
-    string,
-    'note' | 'link' | 'command' | 'session' | 'prompt' | 'automation' | 'agent' | 'todo' | 'snippet'
-  >;
+  return Object.entries(buildShortcutPrefixRegistry(customPrefixes)).reduce<Record<string, OmniboxRegistryType>>(
+    (registry, [prefix, type]) => {
+      if (allowedTypes.has(type as OmniboxRegistryType)) {
+        registry[prefix] = type as OmniboxRegistryType;
+      }
+      return registry;
+    },
+    {},
+  );
 }
 
 type ResolvedOmniboxInput = {
@@ -285,33 +277,6 @@ export function parseInput(text: string, registry: Record<string, string>): Reso
   return { prefix: '', type: null, query: '' };
 }
 
-const findBestShortcutMatch = (input: string, userShortcuts: any[], referenceType?: string) => {
-  const normalizedInput = normalizeShortcutTrigger(input);
-  if (!normalizedInput) return null;
-
-  const matches = (userShortcuts || [])
-    .filter((s: any) => !referenceType || s.referenceType === referenceType)
-    .map((s: any) => {
-      const trigger = normalizeShortcutTrigger(s.trigger || '');
-      if (!trigger) return null;
-
-      let rank = 0;
-      if (trigger === normalizedInput) rank = 0;
-      else if (trigger.startsWith(normalizedInput)) rank = 1;
-      else if (normalizedInput.length >= 2 && trigger.includes(normalizedInput)) rank = 2;
-      else return null;
-
-      return { shortcut: s, trigger, rank };
-    })
-    .filter(Boolean) as Array<{ shortcut: any; trigger: string; rank: number }>;
-
-  matches.sort((a, b) => {
-    if (a.rank !== b.rank) return a.rank - b.rank;
-    return a.trigger.length - b.trigger.length;
-  });
-
-  return matches[0]?.shortcut || null;
-};
 
 // Extract raw snippet UUID from compound ID (e.g. folderId-UUID)
 function extractSnippetId(compoundId: string): string {
@@ -337,8 +302,138 @@ async function fetchAndApplyState(): Promise<ResolvedOmniboxState> {
         console.error('[Omnibox] Failed to load local data:', err);
         return cachedState.localData;
       }),
-      CustomSearchPrefixesForOmniboxStorage.getPrefixes().catch(() => ({ note: 'n', link: 'l', command: 'c' })),
+      CustomSearchPrefixesForOmniboxStorage.getPrefixes().catch(() => STORED_DEFAULT_OMNIBOX_PREFIXES),
     ]);
+
+    const virtualCommands: any[] = [
+      {
+        id: 'save_link',
+        label: 'Save Link',
+        prefix: (customPrefixes as any)?.save_link || 'clc',
+        behavior: 'instant' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'save_chat',
+        label: 'Save Chat Agent',
+        prefix: (customPrefixes as any)?.save_chat || 'csc',
+        behavior: 'instant' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'add_to_existing',
+        label: 'Add to Existing',
+        prefix: (customPrefixes as any)?.add_to_existing || 'cae',
+        behavior: 'instant' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'add_to_existing_session',
+        label: 'Add to Existing Session',
+        prefix: (customPrefixes as any)?.add_to_existing_session || 'caes',
+        behavior: 'instant' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'summarize_page',
+        label: 'Summarize Page',
+        prefix: (customPrefixes as any)?.summarize_page || 'csp',
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'downloadallimages',
+        label: 'Download All Images',
+        prefix: (customPrefixes as any)?.downloadallimages || 'dai',
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'downloadalltables',
+        label: 'Download All Tables',
+        prefix: (customPrefixes as any)?.downloadalltables || 'dat',
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'capture_full_screenshot',
+        label: 'Capture Full Screenshot',
+        prefix: (customPrefixes as any)?.capture_full_screenshot || 'cfp',
+        keywords: ['ca', 'cap', 'capture', 'sc', 'cfp', 'fps', 'fullpage', 'full', 'screenshot'],
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'capture_screenshot',
+        label: 'Capture Visible Screenshot',
+        prefix: (customPrefixes as any)?.capture_screenshot || 'cs',
+        keywords: ['ca', 'cap', 'capture', 'sc', 'cs', 'screenshot', 'visible'],
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'capture_clip_screenshot',
+        label: 'Clip & Download Screenshot',
+        prefix: (customPrefixes as any)?.capture_clip_screenshot || 'ccs',
+        keywords: ['ca', 'cap', 'capture', 'sc', 'ccs', 'cc', 'clip', 'clipboard', 'screenshot'],
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'capture_element_screenshot',
+        label: 'Capture Element',
+        prefix: (customPrefixes as any)?.capture_element_screenshot || 'ces',
+        keywords: ['ca', 'cap', 'capture', 'sc', 'ces', 'element', 'part', 'section', 'select', 'screenshot'],
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: false,
+      },
+      {
+        id: 'merge_windows',
+        label: 'Merge All Windows',
+        prefix: (customPrefixes as any)?.merge_windows || 'mw',
+        keywords: ['merge', 'windows', 'tabs', 'consolidate', 'mw'],
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'close_duplicate_tabs',
+        label: 'Close Duplicate Tabs',
+        prefix: (customPrefixes as any)?.close_duplicate_tabs || 'cdt',
+        keywords: ['close', 'duplicate', 'tabs', 'cdt'],
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'mute_all_tabs',
+        label: 'Mute All Tabs',
+        prefix: (customPrefixes as any)?.mute_all_tabs || 'mat',
+        keywords: ['mute', 'tabs', 'silence', 'mat'],
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+      {
+        id: 'unmute_all_tabs',
+        label: 'Unmute All Tabs',
+        prefix: (customPrefixes as any)?.unmute_all_tabs || 'umat',
+        keywords: ['unmute', 'tabs', 'sound', 'umat'],
+        behavior: 'instant' as const,
+        surface: 'website' as const,
+        showInDashboard: true,
+      },
+    ];
+    const virtualCommandMap = new Map(virtualCommands.map(v => [v.id, v]));
+    const filteredLocalCommands = (localData.commands || []).filter(c => !virtualCommandMap.has(c.id));
+    localData.commands = [...filteredLocalCommands, ...virtualCommands];
 
     cachedState = { localData, customPrefixes };
     isCacheReady = true;
@@ -387,27 +482,6 @@ export function isSameSnippetIdentity(left: any, right: any): boolean {
   return leftSnippetId === rightSnippetId || leftSnippetId === rightId || leftId === rightSnippetId;
 }
 
-function resolveUniquePrefix(
-  type: 'note' | 'link' | 'command' | 'session' | 'prompt' | 'automation' | 'agent' | 'todo' | 'snippet',
-  candidates: Array<string | null | undefined>,
-  usedPrefixes: Set<string>,
-): string {
-  for (const candidate of candidates) {
-    const normalized = normalizeOmniboxKey(candidate);
-    if (!normalized) continue;
-    if (usedPrefixes.has(normalized)) continue;
-
-    usedPrefixes.add(normalized);
-    return normalized;
-  }
-
-  const fallback =
-    DEFAULT_OMNIBOX_PREFIXES[type].find(prefix => !usedPrefixes.has(prefix)) ?? `${type}-${usedPrefixes.size}`;
-  usedPrefixes.add(fallback);
-  console.warn(`[Omnibox] Prefix collision for ${type}; falling back to "${fallback}"`);
-  return fallback;
-}
-
 type LooseMatchKind =
   | 'shortcut'
   | 'note'
@@ -451,9 +525,6 @@ const normalizeSearchText = (value: string) =>
     .trim()
     .toLowerCase();
 
-const pushCandidate = (candidates: LooseMatchCandidate[], candidate: LooseMatchCandidate | null) => {
-  if (candidate) candidates.push(candidate);
-};
 
 const rankByQuery = (value: string, query: string): number | null => {
   const normalizedValue = normalizeSearchText(value);
@@ -483,15 +554,11 @@ const getSessionSearchTitle = (session: SessionRecord | null | undefined) => Str
 const getSessionSuggestionContent = (prefix: string, sessionId: string) =>
   `${prefix} ${SESSION_SUGGESTION_ID_PREFIX}${sessionId}`;
 
-const normalizeIdentityKey = (value: any) =>
-  String(value ?? '')
-    .trim()
-    .toLowerCase();
 
 const collectIdentityKeys = (...values: any[]) => {
   const keys = new Set<string>();
   values.forEach(value => {
-    const normalized = normalizeIdentityKey(value);
+    const normalized = normalizeOmniboxKey(value);
     if (!normalized) return;
     keys.add(normalized);
     keys.add(extractSnippetId(normalized).toLowerCase());
@@ -594,6 +661,9 @@ const findSessionByReferenceId = (referenceId: string, sessions: SessionRecord[]
   );
 };
 
+const findAiPromptByReferenceId = (referenceId: string, prompts: AiPromptRecord[]) =>
+  prompts.find(prompt => isSameSnippetIdentity(prompt.id, referenceId)) || null;
+
 const isSessionReferenceId = (referenceId: string | null | undefined) => {
   const rawReferenceId = String(referenceId || '').trim();
   if (!rawReferenceId) return false;
@@ -626,9 +696,16 @@ export function buildLooseCandidates(query: string, state: OmniboxLocalData): Lo
     if (rank === null) continue;
 
     const effectiveReferenceType = isLegacySessionShortcut(shortcut) ? 'session' : shortcut.referenceType;
+    const normalizedReferenceType = String(effectiveReferenceType || '').toLowerCase();
+    const promptTarget = findAiPromptByReferenceId(String(shortcut.referenceId || ''), state.aiPrompts || []);
+    const isAiPromptShortcut =
+      ['prompt', 'aiprompt', 'ai_prompt'].includes(normalizedReferenceType) ||
+      (normalizedReferenceType === 'automation' && !!promptTarget);
 
     const targetTitle =
-      effectiveReferenceType === 'note'
+      isAiPromptShortcut
+        ? promptTarget?.title || shortcut.targetLabelSnapshot || shortcut.label || trigger
+        : effectiveReferenceType === 'note'
         ? (state.notes || []).find((n: any) => {
             const nid = n.id ?? '';
             return isSameSnippetIdentity(nid, shortcut.referenceId);
@@ -655,8 +732,9 @@ export function buildLooseCandidates(query: string, state: OmniboxLocalData): Lo
     else if (effectiveReferenceType === 'link') { targetCategory = 'Links'; }
     else if (effectiveReferenceType === 'session') { targetCategory = 'Sessions'; }
     else if (effectiveReferenceType === 'command') { targetCategory = 'System'; }
+    else if (isAiPromptShortcut) { targetCategory = 'AI Prompts'; }
 
-    pushCandidate(candidates, {
+    candidates.push({
       kind: 'shortcut',
       rank: rank + (isCommandShortcut ? -30 : 0),
       content: `[Command] ${trigger}`,
@@ -672,7 +750,7 @@ export function buildLooseCandidates(query: string, state: OmniboxLocalData): Lo
     if (rank === null) continue;
     if (shouldHideItemBecauseShortcutExists(note, state.userShortcuts || [], 'note')) continue;
 
-    pushCandidate(candidates, {
+    candidates.push({
       kind: 'note',
       rank: rank + 10,
       content: `[Note] ${title}`,
@@ -688,7 +766,7 @@ export function buildLooseCandidates(query: string, state: OmniboxLocalData): Lo
     if (rank === null) continue;
     if (shouldHideItemBecauseShortcutExists(link, state.userShortcuts || [], 'link')) continue;
 
-    pushCandidate(candidates, {
+    candidates.push({
       kind: 'link',
       rank: rank + 10,
       content: `[Link] ${title}`,
@@ -707,7 +785,7 @@ export function buildLooseCandidates(query: string, state: OmniboxLocalData): Lo
     if (shouldHideItemBecauseShortcutExists(command, state.userShortcuts || [], 'command')) continue;
     const hasAssignedShortcut = assignedCommandIds.has(id);
 
-    pushCandidate(candidates, {
+    candidates.push({
       kind: 'command',
       rank: rank + (hasAssignedShortcut ? 15 : 30),
       content: `[Command] ${label || id}`,
@@ -723,7 +801,7 @@ export function buildLooseCandidates(query: string, state: OmniboxLocalData): Lo
     if (rank === null) continue;
     if (shouldHideItemBecauseShortcutExists(session, state.userShortcuts || [], 'session')) continue;
 
-    pushCandidate(candidates, {
+    candidates.push({
       kind: 'session',
       rank: rank + 10,
       content: `[Session] ${title}`,
@@ -755,7 +833,7 @@ export function buildLooseCandidates(query: string, state: OmniboxLocalData): Lo
       const prefixMap: Record<string, string> = { prompt: 'p', automation: 'a', agent: 'g', todo: 't', snippet: 'sn' };
       const prefix = prefixMap[bucket.kind] || 'x';
 
-      pushCandidate(candidates, {
+      candidates.push({
         kind: bucket.kind,
         rank: rank + 10,
         content: `[${bucket.label}] ${title}`,
@@ -839,19 +917,44 @@ export function runLooseCandidates(candidates: LooseMatchCandidate[], handlers: 
   return false;
 }
 
+/**
+ * Builds the omnibox hint string dynamically from the user's actual registry.
+ * E.g. "like c, n, l, df, sn, p, a, g, t" — uses real user-configured prefixes.
+ */
+function buildDynamicHint(registry: Record<string, string>): string {
+  // Ordered list of types to show in the hint
+  const typeOrder: Array<'note' | 'link' | 'session' | 'snippet' | 'prompt' | 'automation' | 'agent' | 'todo'> = [
+    'note', 'link', 'session', 'snippet', 'prompt', 'automation', 'agent', 'todo',
+  ];
+
+  const prefixParts: string[] = [];
+  for (const type of typeOrder) {
+    const key = Object.keys(registry).find(k => registry[k] === type);
+    if (key) prefixParts.push(key);
+  }
+
+  const examplePrefixes = prefixParts.join(', ');
+  return `cmdOS: <match>Press Space</match> to browse commands, or type a prefix (like ${examplePrefixes})`;
+}
+
 export function setupOmnibox() {
-  // Set the default suggestion globally so Chrome registers it immediately before the user even types
+  // Set a placeholder hint immediately (before cache loads). Updated dynamically once cache is ready.
   chrome.omnibox.setDefaultSuggestion({
-    description: 'cmdOS: <match>Press Space</match> to view your commands, or type a prefix (like p, n, l)',
+    description: 'cmdOS: <match>Press Space</match> to browse, or type a prefix to filter by category',
   });
 
   // Pre-warm cache immediately when the service worker starts (before user even opens omnibox)
   warmCache();
 
-  // Re-warm on each activation to pick up any data changes
+  // Re-warm on each activation to pick up any data changes, then update hint with real prefixes
   chrome.omnibox.onInputStarted.addListener(() => {
     isCacheReady = false;
-    warmCache();
+    warmCache().then(({ localData, customPrefixes }) => {
+      const registry = buildRegistry(localData.commands || [], customPrefixes);
+      chrome.omnibox.setDefaultSuggestion({
+        description: buildDynamicHint(registry),
+      });
+    });
   });
 
   // ── onInputChanged: load from cache with promise fallback ────────────────
@@ -861,15 +964,23 @@ export function setupOmnibox() {
       const registry = buildRegistry(localData.commands || [], customPrefixes);
       const { prefix, type, query } = parseInput(text, registry);
 
-      const notePrefix = Object.keys(registry).find(k => registry[k] === 'note') || 'n';
-      const linkPrefix = Object.keys(registry).find(k => registry[k] === 'link') || 'l';
 
       // No recognised prefix yet — show navigation hint or match prefix-less shortcuts
       if (!type) {
         const trimmedText = text.trim();
         if (trimmedText === '') {
-          // When the user freshly enters extension mode (empty text), immediately show all commands.
+          // Update hint with real user prefixes then show command list
+          chrome.omnibox.setDefaultSuggestion({ description: buildDynamicHint(registry) });
           handleTypedInput('', 'command', '', suggest, localData);
+          return;
+        }
+
+        // Guard: if the text matches a known prefix exactly (user still typing, no space yet),
+        // treat it as entering that mode with empty query — avoids incorrect loose/global matches.
+        const lowerTrimmedText = trimmedText.toLowerCase();
+        const matchedPrefix = Object.keys(registry).find(k => k.toLowerCase() === lowerTrimmedText);
+        if (matchedPrefix) {
+          handleTypedInput(matchedPrefix, registry[matchedPrefix] as any, '', suggest, localData);
           return;
         }
 
@@ -881,8 +992,10 @@ export function setupOmnibox() {
         const looseCandidates = buildLooseCandidates(normalizedText, localData);
 
         if (looseCandidates.length > 0) {
-          const suggestions = looseCandidates.map(candidate => ({
-            content: candidate.content,
+          // Chrome requires every suggest() content to start with what the user typed.
+          // Encode the real content after a delimiter so Chrome never filters these out.
+          const suggestions = looseCandidates.map((candidate, idx) => ({
+            content: `${trimmedText}__loose_${idx}_${encodeURIComponent(candidate.content)}`,
             description: candidate.description,
           }));
           chrome.omnibox.setDefaultSuggestion({ description: suggestions[0].description });
@@ -894,7 +1007,7 @@ export function setupOmnibox() {
         return;
       }
 
-      handleTypedInput(prefix, type, query, suggest, localData);
+      handleTypedInput(prefix, type, query, suggest, localData, text);
     };
 
     void runSuggestions();
@@ -905,9 +1018,9 @@ export function setupOmnibox() {
     prefix: string,
     type: 'note' | 'link' | 'command' | 'session' | 'prompt' | 'automation' | 'agent' | 'todo' | 'snippet',
     query: string,
-
     suggest: (suggestResults: chrome.omnibox.SuggestResult[]) => void,
     localData: OmniboxLocalData,
+    rawText?: string,
   ) {
     // ── Notes / Links ──────────────────────────────────────────────────────
     if (type === 'link' || type === 'note') {
@@ -915,21 +1028,44 @@ export function setupOmnibox() {
 
       if (query.trim() === '') {
         const allItems: any[] = type === 'link' ? localData.links || [] : localData.notes || [];
+        const prefixChar = prefix;
 
-        const prefixChar = prefix || (type === 'link' ? 'l' : 'n');
+        // User-assigned shortcuts for this type — shown first
+        const emptyShortcuts = (localData.userShortcuts || []).filter(
+          (s: any) => s.referenceType === type,
+        );
 
-        const allSuggestions = allItems.slice(0, 50).map(item => ({
-          content: `${prefixChar} ${item.title || ''}`,
-          description: formatSuggestionDescription(item.title || item.id || 'Untitled', type === 'link' ? 'Links' : 'Notes', prefixChar),
-        }));
+        // Items that don't have a shortcut assigned
+        const itemsWithoutShortcut = allItems.filter(
+          (item: any) => !shouldHideItemBecauseShortcutExists(item, emptyShortcuts, type),
+        );
+
+        const allSuggestions: Array<{ content: string; description: string }> = [
+          ...emptyShortcuts.map((s: any) => {
+            const refUuid = extractSnippetId(s.referenceId);
+            let targetTitle = 'Untitled';
+            const foundItem = allItems.find((item: any) => {
+              const itemId = item.id ?? item.snippet_id ?? '';
+              return isSameSnippetIdentity(itemId, s.referenceId) || extractSnippetId(itemId) === refUuid;
+            });
+            if (foundItem) targetTitle = foundItem.title || 'Untitled';
+            const trigger = normalizeShortcutTrigger(s.trigger || '');
+            return {
+              content: `${prefixChar} ${trigger}`,
+              description: formatSuggestionDescription(targetTitle, type === 'link' ? 'Links' : 'Notes', trigger),
+            };
+          }),
+          ...itemsWithoutShortcut.slice(0, 40).map((item: any) => ({
+            content: `${prefixChar} ${item.title || ''}`,
+            description: formatSuggestionDescription(item.title || item.id || 'Untitled', type === 'link' ? 'Links' : 'Notes', prefixChar),
+          })),
+        ];
 
         if (allSuggestions.length > 0) {
           chrome.omnibox.setDefaultSuggestion({ description: allSuggestions[0].description });
           suggest(allSuggestions.slice(1));
         } else {
-          chrome.omnibox.setDefaultSuggestion({
-            description: `No ${type}s saved yet`,
-          });
+          chrome.omnibox.setDefaultSuggestion({ description: `No ${type}s saved yet` });
           suggest([]);
         }
         return;
@@ -959,8 +1095,7 @@ export function setupOmnibox() {
         )
         .map(entry => entry.shortcut);
 
-      // De-duplicate: collect the snippet IDs already covered by a shortcut entry
-      // so each item appears exactly once (as shortcut if it has one, otherwise as title)
+      // De-duplicate: each item appears exactly once (as shortcut if it has one, otherwise as title)
       const titleMatches = rawTitleMatches.filter(
         (item: any) => !shouldHideItemBecauseShortcutExists(item, shortcutMatches, type),
       );
@@ -975,8 +1110,6 @@ export function setupOmnibox() {
 
       const prefixChar = prefix || (type === 'link' ? 'l' : 'n');
 
-      // Suggestions are ranked by shortcut first, then deterministic title matches.
-      // — no fragile title matching needed even when titles are empty or partial
       const allSuggestions: Array<{ content: string; description: string }> = [
         // Shortcuts first (ranked higher)
         ...shortcutMatches.map((s: any) => {
@@ -1014,22 +1147,41 @@ export function setupOmnibox() {
       return;
     }
 
-    // ── Commands ───────────────────────────────────────────────────────────
+    // ── Commands ─────────────────────────────────────────────────────────
     if (type === 'session') {
       if (query.trim() === '') {
         const sessionPrefix = prefix || 's';
-        const allSuggestions = (localData.sessions || []).slice(0, 50).map((session: SessionRecord) => ({
-          content: getSessionSuggestionContent(sessionPrefix, String(session.id || '')),
-          description: formatSuggestionDescription(getSessionSearchTitle(session) || String(session.id || 'Untitled Session'), 'Sessions', sessionPrefix),
-        }));
+        // User-assigned session shortcuts — shown first
+        const emptySessionShortcuts = (localData.userShortcuts || []).filter(
+          (s: any) => isShortcutOfType(s, 'session'),
+        );
+
+        // Sessions without a shortcut assigned
+        const sessionsWithoutShortcut = (localData.sessions || []).filter(
+          (session: SessionRecord) => !shouldHideItemBecauseShortcutExists(session, emptySessionShortcuts, 'session'),
+        );
+
+        const allSuggestions: Array<{ content: string; description: string }> = [
+          ...emptySessionShortcuts.map((shortcut: any) => {
+            const targetSession = findSessionByReferenceId(String(shortcut.referenceId || ''), localData.sessions || []);
+            const sessionTitle = getSessionSearchTitle(targetSession) || 'Untitled Session';
+            const trigger = normalizeShortcutTrigger(shortcut.trigger || '');
+            return {
+              content: `${sessionPrefix} ${trigger}`,
+              description: formatSuggestionDescription(sessionTitle, 'Sessions', trigger),
+            };
+          }),
+          ...sessionsWithoutShortcut.slice(0, 40).map((session: SessionRecord) => ({
+            content: getSessionSuggestionContent(sessionPrefix, String(session.id || '')),
+            description: formatSuggestionDescription(getSessionSearchTitle(session) || String(session.id || 'Untitled Session'), 'Sessions', sessionPrefix),
+          })),
+        ];
 
         if (allSuggestions.length > 0) {
           chrome.omnibox.setDefaultSuggestion({ description: allSuggestions[0].description });
           suggest(allSuggestions.slice(1));
         } else {
-          chrome.omnibox.setDefaultSuggestion({
-            description: 'No sessions saved yet',
-          });
+          chrome.omnibox.setDefaultSuggestion({ description: 'No sessions saved yet' });
           suggest([]);
         }
         return;
@@ -1079,7 +1231,6 @@ export function setupOmnibox() {
         ...shortcutMatches.map((shortcut: any) => {
           const targetSession = findSessionByReferenceId(String(shortcut.referenceId || ''), localData.sessions || []);
           const sessionTitle = getSessionSearchTitle(targetSession) || 'Untitled Session';
-
           return {
             content: `${sessionPrefix} ${normalizeShortcutTrigger(shortcut.trigger || '')}`,
             description: formatSuggestionDescription(sessionTitle, 'Sessions', normalizeShortcutTrigger(shortcut.trigger || '')),
@@ -1092,7 +1243,7 @@ export function setupOmnibox() {
       ];
 
       chrome.omnibox.setDefaultSuggestion({ description: allSuggestions[0].description });
-      suggest(allSuggestions);
+      suggest(allSuggestions.slice(1));
       return;
     }
 
@@ -1133,9 +1284,16 @@ export function setupOmnibox() {
 
       const assignedCommandIds = getAssignedCommandIds(localData.userShortcuts || []);
       const commandMatches = (localData.commands || [])
+        .filter(isOmniboxVisibleCommand)
         .map((command: CommandRecord) => ({
           command,
-          rank: bestRankByQuery(commandKey, command.label || '', command.prefix || '', command.id || ''),
+          rank: bestRankByQuery(
+            commandKey,
+            command.label || '',
+            command.prefix || '',
+            command.id || '',
+            ...((command as any).keywords || []),
+          ),
         }))
         .filter((entry): entry is { command: CommandRecord; rank: number } => entry.rank !== null)
         .sort((a, b) => {
@@ -1174,21 +1332,23 @@ export function setupOmnibox() {
 
       // Commands use c <id> format — ID is already the stable key
       const commandPrefix = prefix || 'c';
+      // Chrome requires every suggest() content to start with what the user typed.
+      // Use rawText as the content prefix so Chrome never filters out our suggestions.
+      const contentBase = rawText ?? `${commandPrefix} ${commandKey}`;
       const allSuggestions: Array<{ content: string; description: string }> = [
         ...commandShortcutMatches.map((s: any) => {
           const trigger = normalizeShortcutTrigger(s.trigger || '');
           const command = localData.commands.find(c => String(c.id || '') === String(s.referenceId || ''));
           const targetTitle = command ? (command.label || command.id) : trigger;
-          
           return {
-            content: `${commandPrefix} ${trigger}`,
+            content: `${contentBase}__shortcut_${trigger}`,
             description: formatSuggestionDescription(targetTitle, 'System', trigger),
           };
         }),
-        ...commandMatches.map((c: CommandRecord) => ({
-          content: `${commandPrefix} ${c.id}${prompt ? ' ' + prompt : ''}`,
+        ...commandMatches.map((c: CommandRecord, idx: number) => ({
+          content: `${contentBase}__cmd_${idx}_${c.id}`,
           description: prompt 
-            ? formatSuggestionDescription((c.label || c.id) + ` <dim>- prompt: <match>${prompt}</match></dim>`, 'System', c.prefix || commandPrefix)
+            ? formatSuggestionDescription(escapeXml(c.label || c.id) + ` <dim>- prompt: <match>${escapeXml(prompt)}</match></dim>`, 'System', c.prefix || commandPrefix, true)
             : formatSuggestionDescription(c.label || c.id, 'System', c.prefix || commandPrefix),
         })),
       ];
@@ -1225,18 +1385,39 @@ export function setupOmnibox() {
       else if (type === 'todo') items = localData.todos || [];
 
       if (query.trim() === '') {
-        const allSuggestions = items.slice(0, 50).map(item => ({
-          content: `${prefix} ${item.title || item.name || item.id || ''}`,
-          description: formatSuggestionDescription(item.title || item.name || item.id || 'Untitled', typeLabel + 's', prefix),
-        }));
+        // User-assigned shortcuts for this type — shown first
+        const emptyTypeShortcuts = (localData.userShortcuts || []).filter(
+          (s: any) => s.referenceType === type,
+        );
+
+        // Items that don't have a shortcut assigned
+        const itemsWithoutShortcut = items.filter(
+          (item: any) => !shouldHideItemBecauseShortcutExists(item, emptyTypeShortcuts, type),
+        );
+
+        const allSuggestions: Array<{ content: string; description: string }> = [
+          ...emptyTypeShortcuts.map((s: any) => {
+            const trigger = normalizeShortcutTrigger(s.trigger || '');
+            const refItem = items.find((item: any) => String(item.id || '') === String(s.referenceId || ''));
+            const targetTitle = refItem
+              ? refItem.title || refItem.name || refItem.id || 'Untitled'
+              : trigger;
+            return {
+              content: `${prefix} ${trigger}`,
+              description: formatSuggestionDescription(targetTitle, typeLabel + 's', trigger),
+            };
+          }),
+          ...itemsWithoutShortcut.slice(0, 40).map((item: any) => ({
+            content: `${prefix} ${item.title || item.name || item.id || ''}`,
+            description: formatSuggestionDescription(item.title || item.name || item.id || 'Untitled', typeLabel + 's', prefix),
+          })),
+        ];
 
         if (allSuggestions.length > 0) {
           chrome.omnibox.setDefaultSuggestion({ description: allSuggestions[0].description });
           suggest(allSuggestions.slice(1));
         } else {
-          chrome.omnibox.setDefaultSuggestion({
-            description: `No ${type}s saved yet`,
-          });
+          chrome.omnibox.setDefaultSuggestion({ description: `No ${type}s saved yet` });
           suggest([]);
         }
         return;
@@ -1252,7 +1433,28 @@ export function setupOmnibox() {
         )
         .map(entry => entry.item);
 
-      if (rawTitleMatches.length === 0) {
+      // Also match user-assigned shortcut triggers for this type
+      const shortcutMatches = (localData.userShortcuts || [])
+        .map((s: any) => ({
+          shortcut: s,
+          rank: rankByQuery(s.trigger || '', query),
+        }))
+        .filter(
+          (entry): entry is { shortcut: any; rank: number } =>
+            entry.shortcut.referenceType === type && entry.rank !== null,
+        )
+        .sort(
+          (a, b) =>
+            a.rank - b.rank || String(a.shortcut.trigger || '').length - String(b.shortcut.trigger || '').length,
+        )
+        .map(entry => entry.shortcut);
+
+      // De-duplicate: if an item already has a shortcut match, don't show it again as a title match
+      const titleMatches = rawTitleMatches.filter(
+        (item: any) => !shouldHideItemBecauseShortcutExists(item, shortcutMatches, type),
+      );
+
+      if (titleMatches.length === 0 && shortcutMatches.length === 0) {
         chrome.omnibox.setDefaultSuggestion({
           description: `No ${type}s found matching <match>${query}</match>`,
         });
@@ -1260,15 +1462,32 @@ export function setupOmnibox() {
         return;
       }
 
-      const allSuggestions = rawTitleMatches.map(item => ({
-        content: `${prefix} ${item.title || item.name || ''}`,
-        description: formatSuggestionDescription(item.title || item.name || item.id || 'Untitled', typeLabel + 's', prefix),
-      }));
+      const allSuggestions: Array<{ content: string; description: string }> = [
+        // Shortcut triggers first
+        ...shortcutMatches.map((s: any) => {
+          const trigger = normalizeShortcutTrigger(s.trigger || '');
+          const refItem = items.find((item: any) => String(item.id || '') === String(s.referenceId || ''));
+          const targetTitle = refItem
+            ? refItem.title || refItem.name || refItem.id || 'Untitled'
+            : trigger;
+          return {
+            content: `${prefix} ${trigger}`,
+            description: formatSuggestionDescription(targetTitle, typeLabel + 's', trigger),
+          };
+        }),
+        // Then title matches (no duplicates)
+        ...titleMatches.map(item => ({
+          content: `${prefix} ${item.title || item.name || ''}`,
+          description: formatSuggestionDescription(item.title || item.name || item.id || 'Untitled', typeLabel + 's', prefix),
+        })),
+      ];
 
       chrome.omnibox.setDefaultSuggestion({ description: allSuggestions[0].description });
       suggest(allSuggestions.slice(1));
       return;
     }
+
+    // Remove In-Place Commands block (now handled dynamically via Commands)
   }
 
   // Execute on Enter — use cache first, re-fetch only if cache is stale
@@ -1294,38 +1513,28 @@ export function setupOmnibox() {
     };
 
     const executeCommand = (command: CommandRecord, prompt = '') => {
-      const aiKind = AI_COMMANDS[command.id];
-      if (aiKind) {
-        let url = 'https://chatgpt.com';
-        if (aiKind === 'gemini') url = 'https://gemini.google.com/app';
-        if (aiKind === 'claude') url = 'https://claude.ai/new';
-        if (aiKind === 'perplexity') url = 'https://www.perplexity.ai/';
+      // NOTE: AI_COMMANDS branch removed — those command IDs are hidden from omnibox.
+      // NOTE: URL_COMMANDS branch removed — those entries don't exist as DB CommandRecords.
 
-        handleAiTabMessage(
-          {
-            action: 'open_tab_with_auto_submit',
-            url,
-            autoSubmit: { kind: aiKind, prompt },
-            forceNewTab: disposition !== 'currentTab',
-          },
-          {} as any,
-          () => {},
-        );
-        return true;
-      }
-
-      const urlTemplate = URL_COMMANDS[command.id];
-      if (urlTemplate) {
-        let finalUrl = urlTemplate;
-        if (prompt && finalUrl.includes('{query}')) {
-          finalUrl = finalUrl.replace('{query}', encodeURIComponent(prompt));
-        }
-
-        if (disposition === 'currentTab') {
-          chrome.tabs.update({ url: finalUrl });
-        } else {
-          chrome.tabs.create({ url: finalUrl, active: disposition !== 'newBackgroundTab' });
-        }
+      // Intercept In-Place Commands
+      if (
+        command.id === 'save_link' ||
+        command.id === 'save_chat' ||
+        command.id === 'add_to_existing' ||
+        command.id === 'add_to_existing_session' ||
+        command.id === 'summarize_page' ||
+        command.id === 'downloadallimages' ||
+        command.id === 'downloadalltables' ||
+        command.id === 'capture_full_screenshot' ||
+        command.id === 'capture_screenshot' ||
+        command.id === 'capture_clip_screenshot' ||
+        command.id === 'capture_element_screenshot' ||
+        command.id === 'merge_windows' ||
+        command.id === 'close_duplicate_tabs' ||
+        command.id === 'mute_all_tabs' ||
+        command.id === 'unmute_all_tabs'
+      ) {
+        triggerInPlaceCommand(command.id);
         return true;
       }
 
@@ -1359,13 +1568,60 @@ export function setupOmnibox() {
       return true;
     };
 
-    const executeShortcut = (shortcut: any) => {
+    const executeAiPrompt = (promptRecord: AiPromptRecord, temporaryPrompt = '', runFromCommandShortcut = false) => {
+      const temporaryParam = temporaryPrompt
+        ? `&temporaryPrompt=${encodeURIComponent(temporaryPrompt)}`
+        : '';
+      const runParam = runFromCommandShortcut ? '&runPrompt=true' : '';
+      const targetUrl = `${extUrl}?omnibox=true&type=prompt&id=${encodeURIComponent(promptRecord.id)}${temporaryParam}${runParam}`;
+      if (disposition === 'currentTab') {
+        chrome.tabs.update({ url: targetUrl });
+      } else {
+        chrome.tabs.create({ url: targetUrl, active: disposition !== 'newBackgroundTab' });
+      }
+      return true;
+    };
+
+    const executeShortcut = (
+      shortcut: any,
+      temporaryPrompt = '',
+      runFromCommandShortcut = false,
+      linkQueryInput?: string,
+    ) => {
       const rawSnippetId = extractSnippetId(shortcut.referenceId);
+      const recordShortcutUse = (success = true, errorCode?: string, targetLabelSnapshot?: string) => {
+        recordAssignedTriggerUsage({
+          triggerKind: 'user_shortcut',
+          triggerValue: shortcut.trigger,
+          triggerSource: 'omnibox',
+          referenceId: shortcut.referenceId,
+          referenceType: shortcut.referenceType,
+          surface: 'omnibox',
+          success,
+          errorCode,
+          targetLabelSnapshot: targetLabelSnapshot || shortcut.referenceId,
+          triggerLabelSnapshot: shortcut.trigger,
+        }).catch(err => console.warn('[Omnibox] Failed to record shortcut usage:', err));
+      };
 
       if (isLegacySessionShortcut(shortcut)) {
         const session = findSessionByReferenceId(String(shortcut.referenceId || ''), localData.sessions || []);
         if (session) {
-          return executeSession(session);
+          const ok = executeSession(session);
+          recordShortcutUse(ok, ok ? undefined : 'execution_failed', getSessionSearchTitle(session));
+          return ok;
+        }
+      }
+
+      const normalizedReferenceType = String(shortcut.referenceType || '').toLowerCase();
+      if (['prompt', 'aiprompt', 'ai_prompt'].includes(normalizedReferenceType) || normalizedReferenceType === 'automation') {
+        const promptRecord = (localData.aiPrompts || []).find((prompt: AiPromptRecord) =>
+          isSameSnippetIdentity(prompt.id, shortcut.referenceId),
+        );
+        if (promptRecord) {
+          const ok = executeAiPrompt(promptRecord, temporaryPrompt, runFromCommandShortcut);
+          recordShortcutUse(ok, ok ? undefined : 'execution_failed', promptRecord.title || promptRecord.id);
+          return ok;
         }
       }
 
@@ -1381,6 +1637,7 @@ export function setupOmnibox() {
           } else {
             chrome.tabs.create({ url: targetUrl, active: disposition !== 'newBackgroundTab' });
           }
+          recordShortcutUse(true, undefined, note.title || note.id);
           return true;
         }
       }
@@ -1393,33 +1650,182 @@ export function setupOmnibox() {
         if (link) {
           const urls = extractUrls(link);
           if (urls && urls.length > 0) {
-            openUrls(urls);
+            const injectionResult = injectLinkQueryValues(urls, linkQueryInput ?? '');
+            if (!injectionResult.ok) {
+              recordShortcutUse(
+                false,
+                injectionResult.errorCode,
+                (link as any).title || (link as any).name || shortcut.referenceId,
+              );
+              return true;
+            }
+
+            openUrls(injectionResult.urls);
+            recordShortcutUse(true, undefined, (link as any).title || (link as any).name || shortcut.referenceId);
             return true;
           }
         }
 
         console.warn('[Omnibox] Link not found or has no URLs for shortcut:', shortcut);
+        recordShortcutUse(false, 'no_urls_found');
       }
       if (shortcut.referenceType === 'command') {
         const command = localData.commands.find(
           (c: CommandRecord) => String(c.id || '') === String(shortcut.referenceId || ''),
         );
         if (command) {
-          return executeCommand(command);
+          const ok = executeCommand(command);
+          recordShortcutUse(ok, ok ? undefined : 'execution_failed', command.label || command.id);
+          return ok;
         }
 
         console.warn('[Omnibox] Command not found for shortcut:', shortcut);
+        recordShortcutUse(false, 'command_not_found');
       }
       if (shortcut.referenceType === 'session') {
         const session = findSessionByReferenceId(String(shortcut.referenceId || ''), localData.sessions || []);
         if (session) {
-          return executeSession(session);
+          const ok = executeSession(session);
+          recordShortcutUse(ok, ok ? undefined : 'execution_failed', getSessionSearchTitle(session));
+          return ok;
         }
 
         console.warn('[Omnibox] Session not found for shortcut:', shortcut);
+        recordShortcutUse(false, 'entity_not_found');
       }
       return false;
     };
+
+    const findAiPromptCommandInvocation = (rawQuery: string) => {
+      const lowerQuery = rawQuery.toLowerCase();
+      return (userShortcuts || [])
+        .map((shortcut: any) => {
+          const referenceType = String(shortcut.referenceType || '').toLowerCase();
+          if (!['prompt', 'aiprompt', 'ai_prompt', 'automation'].includes(referenceType)) return null;
+
+          const trigger = normalizeShortcutTrigger(shortcut.trigger || '');
+          if (!trigger || !lowerQuery.startsWith(trigger)) return null;
+          if (lowerQuery.length > trigger.length && !/\s/.test(rawQuery.charAt(trigger.length))) return null;
+
+          const promptRecord = (localData.aiPrompts || []).find((prompt: AiPromptRecord) =>
+            isSameSnippetIdentity(prompt.id, shortcut.referenceId),
+          );
+          if (!promptRecord) return null;
+
+          return {
+            shortcut,
+            triggerLength: trigger.length,
+            temporaryPrompt: rawQuery.slice(trigger.length).replace(/^\s+/, ''),
+          };
+        })
+        .filter(
+          (
+            match,
+          ): match is { shortcut: any; triggerLength: number; temporaryPrompt: string } => match !== null,
+        )
+        .sort((a, b) => b.triggerLength - a.triggerLength)[0] || null;
+    };
+
+    const findLinkCommandInvocation = (rawQuery: string) => {
+      const lowerQuery = rawQuery.toLowerCase();
+      return (userShortcuts || [])
+        .map((shortcut: any) => {
+          if (String(shortcut.referenceType || '').toLowerCase() !== 'link') return null;
+
+          const trigger = normalizeShortcutTrigger(shortcut.trigger || '');
+          if (!trigger || !lowerQuery.startsWith(trigger)) return null;
+          if (lowerQuery.length > trigger.length && !/\s/.test(rawQuery.charAt(trigger.length))) return null;
+
+          const rawSnippetId = extractSnippetId(shortcut.referenceId);
+          const link = localData.links.find((candidate: any) => {
+            const candidateId = candidate.id ?? candidate.snippet_id ?? '';
+            return (
+              isSameSnippetIdentity(candidateId, shortcut.referenceId) ||
+              extractSnippetId(candidateId) === rawSnippetId
+            );
+          });
+          if (!link) return null;
+
+          return {
+            shortcut,
+            triggerLength: trigger.length,
+            queryInput: rawQuery.slice(trigger.length).replace(/^\s+/, ''),
+          };
+        })
+        .filter(
+          (match): match is { shortcut: any; triggerLength: number; queryInput: string } => match !== null,
+        )
+        .sort((a, b) => b.triggerLength - a.triggerLength)[0] || null;
+    };
+
+    // ─── Decode our encoded suggestion content strings ───────────────────────
+    // Content format: "c cap__cmd_0_capture_full_screenshot" or "c cap__shortcut_mytrigger"
+    const cmdEncode = text.indexOf('__cmd_');
+    if (cmdEncode !== -1) {
+      const afterMarker = text.slice(cmdEncode + '__cmd_'.length);
+      // strip leading index "0_", "1_", etc.
+      const underscoreIdx = afterMarker.indexOf('_');
+      const commandId = underscoreIdx !== -1 ? afterMarker.slice(underscoreIdx + 1) : afterMarker;
+      const command = localData.commands.find((c: CommandRecord) => String(c.id || '') === commandId.trim());
+      if (command) {
+        executeCommand(command);
+        return;
+      }
+    }
+    const shortcutEncode = text.indexOf('__shortcut_');
+    if (shortcutEncode !== -1) {
+      const trigger = text.slice(shortcutEncode + '__shortcut_'.length).trim();
+      const shortcut = userShortcuts.find(
+        (s: any) => normalizeShortcutTrigger(s.trigger || '') === normalizeShortcutTrigger(trigger),
+      );
+      if (shortcut && executeShortcut(shortcut, '', true)) return;
+    }
+
+    // ─── Decode __loose_ encoded suggestion (from buildLooseCandidates) ──────
+    const looseEncode = text.indexOf('__loose_');
+    if (looseEncode !== -1) {
+      const afterMarker = text.slice(looseEncode + '__loose_'.length);
+      // strip leading index "0_", "1_", etc.
+      const underscoreIdx = afterMarker.indexOf('_');
+      const encodedContent = underscoreIdx !== -1 ? afterMarker.slice(underscoreIdx + 1) : afterMarker;
+      const decodedContent = decodeURIComponent(encodedContent);
+      // Re-use the existing [Command]/[Note]/[Link]/[Session] parsing path by
+      // overwriting `text` with the decoded real content and falling through.
+      const reText = decodedContent;
+
+      if (reText.startsWith('[Shortcut] ') || reText.startsWith('[Command] ')) {
+        const prefixLength = reText.startsWith('[Shortcut] ') ? '[Shortcut] '.length : '[Command] '.length;
+        const cmdKey = reText.slice(prefixLength).trim();
+        const shortcut = userShortcuts.find(
+          (s: any) => normalizeShortcutTrigger(s.trigger || '') === normalizeShortcutTrigger(cmdKey),
+        );
+        if (shortcut && executeShortcut(shortcut, '', true)) return;
+        const command = localData.commands.find(
+          (c: CommandRecord) => (c.label || '').trim() === cmdKey || String(c.id) === cmdKey,
+        );
+        if (command) { executeCommand(command); return; }
+      }
+      if (reText.startsWith('[Note] ')) {
+        const title = reText.slice('[Note] '.length);
+        const note = localData.notes.find(
+          (n: any) => (n.title || '').trim() === title.trim() || String(n.id) === title.trim(),
+        );
+        if (note) { openUrls([`${extUrl}?omnibox=true&type=note&id=${encodeURIComponent(note.id)}`]); return; }
+      }
+      if (reText.startsWith('[Link] ')) {
+        const title = reText.slice('[Link] '.length);
+        const link = (localData.links as any[]).find(
+          (l: any) => (l.title || '').trim() === title.trim() || String(l.id ?? l.snippet_id) === title.trim(),
+        );
+        if (link) { const urls = extractUrls(link); if (urls.length > 0) { openUrls(urls); return; } }
+      }
+      if (reText.startsWith('[Session] ')) {
+        const title = reText.slice('[Session] '.length);
+        const session = findSessionByQuery(title, localData.sessions || []);
+        if (session) { executeSession(session); return; }
+      }
+      return;
+    }
 
     // ─── First parse bracketed loose match content ───────────────────────────
     if (text.startsWith('[Shortcut] ') || text.startsWith('[Command] ')) {
@@ -1429,7 +1835,7 @@ export function setupOmnibox() {
       const shortcut = userShortcuts.find(
         s => normalizeShortcutTrigger(s.trigger || '') === normalizeShortcutTrigger(cmdKey),
       );
-      if (shortcut && executeShortcut(shortcut)) return;
+      if (shortcut && executeShortcut(shortcut, '', true)) return;
 
       const command = localData.commands.find(c => (c.label || '').trim() === cmdKey || String(c.id) === cmdKey);
       if (command) {
@@ -1468,6 +1874,20 @@ export function setupOmnibox() {
       const trimmedText = text.trim();
       const normalizedText = normalizeShortcutTrigger(trimmedText);
       if (!normalizedText) {
+        return;
+      }
+      const linkInvocation = findLinkCommandInvocation(trimmedText);
+      if (linkInvocation) {
+        // A recognized link command is always consumed. Invalid query input must
+        // not fall through to title matching, loose matching, or another command.
+        executeShortcut(linkInvocation.shortcut, '', false, linkInvocation.queryInput);
+        return;
+      }
+      const promptInvocation = findAiPromptCommandInvocation(trimmedText);
+      if (
+        promptInvocation &&
+        executeShortcut(promptInvocation.shortcut, promptInvocation.temporaryPrompt, true)
+      ) {
         return;
       }
       const looseCandidates = buildLooseCandidates(normalizedText, localData);
@@ -1570,6 +1990,24 @@ export function setupOmnibox() {
       }
     }
 
+    if (type === 'prompt') {
+      const target =
+        (localData.aiPrompts || []).find(
+          (prompt: AiPromptRecord) => (prompt.title || '').toLowerCase() === normalizedQuery,
+        ) ??
+        (localData.aiPrompts || [])
+          .map((prompt: AiPromptRecord) => ({ prompt, rank: rankByQuery(prompt.title || '', normalizedQuery) }))
+          .filter((entry): entry is { prompt: AiPromptRecord; rank: number } => entry.rank !== null)
+          .sort(
+            (a, b) =>
+              a.rank - b.rank || String(a.prompt.title || '').length - String(b.prompt.title || '').length,
+          )[0]?.prompt;
+      if (target) {
+        executeAiPrompt(target);
+        return;
+      }
+    }
+
     // If no match found at all for link/note, open the extension search page instead of newtab
     if (
       type === 'link' ||
@@ -1597,7 +2035,13 @@ export function setupOmnibox() {
       const matches = (localData.commands || [])
         .map((command: CommandRecord) => ({
           command,
-          rank: bestRankByQuery(commandKey, command.label || '', command.prefix || '', command.id || ''),
+          rank: bestRankByQuery(
+            commandKey,
+            command.label || '',
+            command.prefix || '',
+            command.id || '',
+            ...((command as any).keywords || []),
+          ),
         }))
         .filter((entry): entry is { command: CommandRecord; rank: number } => entry.rank !== null)
         .sort((a, b) => {

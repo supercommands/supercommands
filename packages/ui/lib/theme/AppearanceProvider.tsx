@@ -2,7 +2,7 @@ import type React from 'react';
 import { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { appearanceThemeStorage, appearanceWallpaperStorage } from '@extension/storage';
 import type { ThemeProfile } from './types';
-import { getTheme } from './registry';
+import { getTheme, getRandomValidThemeId, isValidThemeId } from './registry';
 
 interface AppearanceContextType {
   theme: ThemeProfile;
@@ -31,24 +31,74 @@ function applyOpacity(color: string, opacity: number) {
   return color;
 }
 
-export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [themeId, setThemeId] = useState<string>('ocean-blue');
+const getCurrentExtensionVersion = (): string => {
+  try {
+    const chromeAny = (window as any).chrome;
+    return chromeAny?.runtime?.getManifest?.()?.version || '0.0.1';
+  } catch {
+    return '0.0.1';
+  }
+};
+const LAST_KNOWN_VERSION_KEY = 'extension_last_known_version';
 
-  const [wallpaperId, setWallpaperId] = useState<string>('car-race.png');
+const resolveAndMigrateThemeId = (id: string | null | undefined): { resolvedId: string; needsMigration: boolean } => {
+  if (!id || id === 'dark' || id === 'default-dark') {
+    return { resolvedId: 'midnight-stars', needsMigration: true };
+  }
+  if (isValidThemeId(id)) {
+    return { resolvedId: id, needsMigration: false };
+  }
+  return { resolvedId: 'midnight-stars', needsMigration: true };
+};
+
+export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [themeId, setThemeId] = useState<string>('midnight-stars');
+
+  const [wallpaperId, setWallpaperId] = useState<string>('none');
 
   const [customWallpaperBase64, setCustomWallpaperBase64] = useState<string>('');
 
   // Sync state with chrome extension storage reactively without suspending
   useEffect(() => {
-    // Initial fetch from chrome storage to sync up
-    appearanceThemeStorage.get().then(id => {
-      if (id) {
-        setThemeId(id);
+    // Initial fetch from chrome storage to sync up with version-gated migration
+    const chromeLocal = typeof chrome !== 'undefined' && chrome.storage?.local;
+    const currentVersion = getCurrentExtensionVersion();
+
+    const applyAndSaveTheme = (id: string | null | undefined) => {
+      const { resolvedId, needsMigration } = resolveAndMigrateThemeId(id);
+      setThemeId(resolvedId);
+      if (needsMigration || id !== resolvedId) {
+        appearanceThemeStorage.set(resolvedId);
       }
-    });
+    };
+
+    if (chromeLocal) {
+      chromeLocal.get([LAST_KNOWN_VERSION_KEY], result => {
+        const lastKnownVersion = result?.[LAST_KNOWN_VERSION_KEY];
+
+        appearanceThemeStorage.get().then(id => {
+          if (!lastKnownVersion) {
+            // First run or missing version: record current manifest version in local storage
+            chromeLocal.set({ [LAST_KNOWN_VERSION_KEY]: currentVersion });
+            applyAndSaveTheme(id);
+          } else if (lastKnownVersion !== currentVersion) {
+            // Real extension version update detected
+            chromeLocal.set({ [LAST_KNOWN_VERSION_KEY]: currentVersion });
+            applyAndSaveTheme(id);
+          } else {
+            // Same version: load stored theme
+            applyAndSaveTheme(id);
+          }
+        });
+      });
+    } else {
+      appearanceThemeStorage.get().then(id => {
+        applyAndSaveTheme(id);
+      });
+    }
 
     appearanceWallpaperStorage.get().then(id => {
-      const newId = id || 'car-race.png';
+      const newId = id || 'none';
       if (newId) {
         setWallpaperId(newId);
       }
@@ -65,15 +115,13 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // Listen for storage changes from other tabs
     const unsubscribeTheme = appearanceThemeStorage.subscribe(() => {
       appearanceThemeStorage.get().then(id => {
-        if (id) {
-          setThemeId(id);
-        }
+        applyAndSaveTheme(id);
       });
     });
 
     const unsubscribeWallpaper = appearanceWallpaperStorage.subscribe(() => {
       appearanceWallpaperStorage.get().then(id => {
-        const newId = id || 'car-race.png';
+        const newId = id || 'none';
         if (newId) {
           setWallpaperId(newId);
         }
@@ -102,8 +150,8 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   let baseTheme = getTheme(themeId);
   if (!baseTheme) {
-    console.warn(`[AppearanceProvider] Theme "${themeId}" not found in registry. Falling back to ocean-blue.`);
-    baseTheme = getTheme('ocean-blue');
+    console.warn(`[AppearanceProvider] Theme "${themeId}" not found in registry. Falling back to midnight-stars.`);
+    baseTheme = getTheme('midnight-stars');
   }
 
   const theme = useMemo(() => {
@@ -126,6 +174,14 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const isContentScript = typeof chrome !== 'undefined' && chrome.runtime && !location.protocol.startsWith('chrome-extension:');
     const root = (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || (!isContentScript ? document.documentElement : null);
     if (!root) return;
+
+    // Toggle dark class on document element and portal root element so Tailwind dark:* variants accurately reflect theme light/dark state
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.classList.toggle('dark', Boolean(theme.isDark));
+    }
+    if (root && root.classList) {
+      root.classList.toggle('dark', Boolean(theme.isDark));
+    }
     const glassPanels = [
       'appBg',
       'sidebarBg',
@@ -139,6 +195,8 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       'tutorialCardBg',
       'popupBg',
       'contextMenuBg',
+      'widgetBg',
+      'widgetToolbarBg',
     ];
     const textTokens = ['textPrimary', 'textSecondary', 'textMuted', 'textPlaceholder', 'textDisabled', 'iconDefault'];
     const wallpaperTextOverrides: Record<string, string> = {
@@ -151,11 +209,14 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
 
     Object.entries(theme.tokens).forEach(([key, value]) => {
+      if (value === undefined) return;
       // STRICT RULE: If wallpaper is applied, do not trigger appBg (keep it transparent)
       if (theme.wallpaper && key === 'appBg') {
         root.style.setProperty(`--color-${key}`, 'transparent');
-      } else if (theme.wallpaper && textTokens.includes(key)) {
+      } else if (theme.wallpaper && theme.isDark && textTokens.includes(key)) {
         root.style.setProperty(`--color-${key}`, wallpaperTextOverrides[key]);
+      } else if (key === 'backgroundGradient') {
+        root.style.setProperty(`--color-${key}`, value);
       } else if (theme.glassOpacity !== undefined && glassPanels.includes(key)) {
         root.style.setProperty(`--color-${key}`, applyOpacity(value, theme.glassOpacity));
       } else {

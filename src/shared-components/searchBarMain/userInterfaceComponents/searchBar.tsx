@@ -1,13 +1,10 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useAppearance } from '@extension/ui';
 import {
-  extractCloudModuleInputDefinitions,
-  resolveCloudModuleInputValues,
-  runAutomation,
   type SavedAutomation,
   type AutomationInputDefinition,
 } from '../../../allObjectFolder/src/createObject/automationBeta/utilities/automation';
-import { Dispatch } from '@reduxjs/toolkit';
+
 import {
   useCallback,
   useEffect,
@@ -32,33 +29,8 @@ import {
 } from '../commandConfigurations/commands';
 import { SHARED_ALL_COMMANDS, findCommandByAnyId } from '../../../shared-components/commands';
 
-import {
-  FaRobot,
-  FaSearch,
-  FaLayerGroup,
-  FaFileAlt,
-  FaFilePdf,
-  FaFileCode,
-  FaFileArchive,
-  FaFileWord,
-  FaFileExcel,
-  FaFileImage,
-  FaFileAudio,
-  FaFileVideo,
-  FaLink,
-  FaRegFolder,
-  FaTimes,
-  FaBookmark,
-  FaTerminal,
-  FaBuilding,
-  FaHistory,
-  FaGlobe,
-  FaCalculator,
-  FaClock,
-  FaCheck,
-  FaSave,
-} from 'react-icons/fa';
-import NotesIcon from '../../../shared-components/icons/notesIcon';
+import { FaSearch, FaFileImage, FaLink, FaTimes, FaBookmark, FaHistory, FaGlobe, FaCalculator, FaClock } from 'react-icons/fa';
+
 import { LuSparkles, LuPlus, LuX } from 'react-icons/lu';
 import { GoPaperclip } from 'react-icons/go';
 import { SiOpenai, SiPerplexity } from 'react-icons/si';
@@ -66,15 +38,13 @@ import { TbSparkles } from 'react-icons/tb';
 
 import { createEventUrlFromText } from '../utilityFunctions/eventParser';
 import type { WorkspaceItem } from '../../../allObjectFolder/src/createObject/workspaceItemTypes';
+import { hasRunnableAiPrompt, runAiPrompt } from '../../../allObjectFolder/src/createObject/aiPrompt';
 export type Snippet = WorkspaceItem & { category?: string; sessionOpenSettings?: any; };
-type Workspace = any;
-type Folder = any;
-type Tabs = any;
-type Team = any;
+
 
 import { useDbStore } from '../../../storage/store/useDbStore';
 import { getFaviconUrl, saveRecentCommand, appendCmdStatus, stripCmdStatus } from '../utilityFunctions/utils';
-import { searchCommands, createCommandIndex, type CommandSearchResult, type IndexedCommand } from '../searchLogicAndAlgorithms/commandSearch';
+import { createCommandIndex } from '../searchLogicAndAlgorithms/commandSearch';
 import {
   LOCAL_COMMANDS,
   isLocalCommandId,
@@ -83,9 +53,14 @@ import {
 } from '../commandConfigurations/localCommands';
 import { useUserShortcuts } from '../../../shared-components/shortcuts';
 import { useUserHotkeys } from '../../../shared-components/hotkeys/hooks/useUserHotkeys';
-import { FaArrowLeft, FaArrowRight, FaArrowUp, FaChevronDown } from 'react-icons/fa';
-import { buildCommonCommandEntries, type CommonCommandEntry } from '../searchLogicAndAlgorithms/commonResults';
-import { TerminalIcon } from '../../../shared-components/icons/terminalIcon';
+import {
+  getCommandSpacePrefix,
+  matchesShortcutCategory,
+  parseShortcutInvocation,
+  recordAssignedTriggerUsage,
+} from '../../../shared-components/triggers';
+import { FaArrowLeft, FaArrowUp } from 'react-icons/fa';
+import { buildCommonCommandEntries } from '../searchLogicAndAlgorithms/commonResults';
 import CmdIcon from '../../../shared-components/icons/cmdIcon';
 
 const FallbackFavicon = ({
@@ -101,13 +76,10 @@ const FallbackFavicon = ({
   if (error || !url) return <FallbackIcon className={`text-[var(--color-iconDefault)] ${className}`} size={14} />;
   return <img src={getFaviconUrl(url)} alt="" className={className} onError={() => setError(true)} />;
 };
-
-const headingFontStyle: React.CSSProperties = {
-  fontFamily:
-    "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
-  fontWeight: 400,
-};
-
+type Workspace = any;
+type Folder = any;
+type Tabs = any;
+type Team = any;
 import { useCommands } from '../commandConfigurations/useCommands';
 import {
   CustomSearchPrefixesForOmniboxStorage,
@@ -115,25 +87,16 @@ import {
   type CustomOmniboxPrefixes,
 } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
 import useNotification from '../../../shared-components/notifications/useNotification';
-import type { HistoryItem } from '../searchLogicAndAlgorithms/historyAlgo';
-import {
-  searchAll as fuseSearchAll,
-  detectPinnedCommand,
-  preIndexHistory,
-  type UnifiedSearchResult,
-  type SearchOptions as FuseSearchOptions,
-} from '../searchLogicAndAlgorithms/searchEngine';
-import AtCommandPopup, { AT_COMMAND_COUNT, getFilteredAtCommandCount, getFilteredAtCommands } from './atCommandPopup';
+
+import { detectPinnedCommand } from '../searchLogicAndAlgorithms/searchEngine';
+import AtCommandPopup, { getFilteredAtCommands } from './atCommandPopup';
 
 
-import { CMDOS_SIGN_UP_URL } from '../../../storage/API/core/api';
 
-import { htmlToPlainTextWithStructure } from '../keyboardAndUiHooks/pasteUtils';
+
 import ContextualCommandPopup, { ContextualMatch } from './contextualCommandPopup';
-import { findContextualMatches, searchDedicatedPanel, type InstalledModule } from '../searchLogicAndAlgorithms/searchEngine';
-import FieldOptions from './fieldOptionsDropdown';
-import AutomationDataEntry, { AutomationInputField } from '../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/automationDataEntry';
-import AutomationDynamicIcon, { resolveAutomationIconMeta } from '../../../shared-components/icons/automationDynamicIcon';
+import { searchDedicatedPanel, type InstalledModule } from '../searchLogicAndAlgorithms/searchEngine';
+import AutomationDynamicIcon from '../../../shared-components/icons/automationDynamicIcon';
 import { useChromeStorage } from '@extension/shared/lib/hooks';
 import ModelSelector from '../../../allObjectFolder/src/createObject/ChatAgent/ModelSelector';
 import { useAttachmentState } from '../keyboardAndUiHooks/useAttachmentState';
@@ -203,6 +166,7 @@ export type {
 
 import { fileToBase64, formatFileSize } from '../utilityFunctions/fileHelpers';
 
+
 export { fileToBase64, formatFileSize };
 
 import {
@@ -267,68 +231,7 @@ export {
   getHighlightedHtml,
 };
 
-// Helper function to open a note in a new tab
-const openNoteInNewTab = (snippetId: string) => {
-  if (!snippetId) {
-    console.warn('[openNoteInNewTab] No snippetId provided');
-    return;
-  }
-  const chromeAny = (window as any)?.chrome;
 
-  // Get extension URL via runtime.getURL if available
-  let extensionUrl = '';
-  if (chromeAny?.runtime?.getURL) {
-    extensionUrl = chromeAny.runtime.getURL(
-      `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`,
-    );
-  } else if (chromeAny?.runtime?.id) {
-    // Fallback: construct URL with extension ID
-    const extensionId = chromeAny.runtime.id;
-    extensionUrl = `chrome-extension://${extensionId}/AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`;
-  }
-
-  if (!extensionUrl) {
-    console.warn('[openNoteInNewTab] Could not construct extension URL');
-    return;
-  }
-
-  // Try sending message to background script first (preferred method - not blocked by Chrome/ad blockers)
-  if (chromeAny?.runtime?.sendMessage) {
-    chromeAny.runtime.sendMessage({ action: 'open_tab', url: extensionUrl }, (response: any) => {
-      if (chromeAny.runtime.lastError) {
-        console.warn('[openNoteInNewTab] sendMessage failed:', chromeAny.runtime.lastError);
-        // Fallback: try chrome.tabs.create first to avoid ERR_BLOCKED_BY_CLIENT
-        if (chromeAny?.tabs?.create) {
-          chromeAny.tabs.create({ url: extensionUrl });
-        } else {
-          // Last resort fallback
-          window.open(extensionUrl, '_blank');
-        }
-      } else if (response && !response.ok) {
-        // Background script returned an error
-        console.error('[openNoteInNewTab] Background script error:', response.error, response.debugMessages);
-        // Try direct tab creation as fallback
-        if (chromeAny?.tabs?.create) {
-          chromeAny.tabs.create({ url: extensionUrl });
-        } else {
-          window.open(extensionUrl, '_blank');
-        }
-      }
-    });
-    return;
-  }
-
-  // If sendMessage not available, try direct tab creation
-  if (chromeAny?.tabs?.create && chromeAny?.runtime?.getURL) {
-    const url = chromeAny.runtime.getURL(`AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`);
-    chromeAny.tabs.create({ url });
-    return;
-  }
-
-  // Last resort: window.open
-  console.warn('[openNoteInNewTab] chrome.runtime.sendMessage and tabs.create not available, using window.open');
-  window.open(extensionUrl, '_blank');
-};
 
 const DEFAULT_ALL_AI_URLS: Record<string, string> = {
   gemini: 'https://gemini.google.com/app',
@@ -346,6 +249,10 @@ const stripHtml = (html: string) => {
 export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
   (
     {
+      isEmbedded,
+      contextUrl,
+      containerClassName,
+      inputWrapperClassName,
       onSuggestionStateChange,
       onCommandExecute,
       onSnippetSelect,
@@ -459,51 +366,31 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       const nKey = String(prefixes.note || 'n').trim().toLowerCase();
       const snKey = String(prefixes.snippet || 'sn').trim().toLowerCase();
       const sKey = String(prefixes.session || 's').trim().toLowerCase();
+      const lKey = String(prefixes.link || 'l').trim().toLowerCase();
+      const cKey = String(prefixes.command || 'c').trim().toLowerCase();
+      const tKey = String(prefixes.todo || 't').trim().toLowerCase();
+      const pKey = String(prefixes.prompt || 'p').trim().toLowerCase();
+      const auKey = String(prefixes.automation || 'au').trim().toLowerCase();
+      const agentKey = String(prefixes.agent || 'g').trim().toLowerCase();
+      const scKey = String(prefixes.system_command || 'sc').trim().toLowerCase();
 
-      return {
+      const meta = {
         a: { label: 'All' },
-        n: { label: 'Notes' },
-        nm: { label: 'Notes' },
         [nKey]: { label: 'Notes' },
-        sn: { label: 'Snippets' },
-        [snKey]: { label: 'Snippets' },
-        p: { label: 'Prompts' },
-        l: { label: 'Links' },
-        c: { label: 'Commands' },
-        b: { label: 'Bookmarks' },
-        bm: { label: 'Bookmarks' },
+        [snKey]: { label: 'Text Expanders' },
+        [pKey]: { label: 'Prompts' },
+        [lKey]: { label: 'Links' },
+        [cKey]: { label: 'Commands' },
         [bKey]: { label: 'Bookmarks' },
-        t: { label: 'Todos' },
-        s: { label: 'Tab Sessions' },
-        se: { label: 'Tab Sessions' },
+        [tKey]: { label: 'Todos' },
         [sKey]: { label: 'Tab Sessions' },
-        au: { label: 'Automations' },
-        ca: { label: 'Chat Agents' },
-        g: { label: 'Chat Agents' },
-        sc: { label: 'System Commands' },
+        [auKey]: { label: 'Automations' },
+        [agentKey]: { label: 'Chat Agents' },
+        [scKey]: { label: 'System Commands' },
       } as Record<string, { label: string }>;
+
+      return Object.fromEntries(Object.entries(meta).filter(([alias]) => alias.trim().length > 0));
     }, [customOmniboxPrefixes]);
-
-    const parseSlashFilter = useCallback(
-      (input: string): { alias: string; label: string } | null => {
-        const normalized = input.replace(/\u00A0/g, ' ');
-        if (!normalized.startsWith('/')) return null;
-
-        const aliasKeys = Object.keys(slashFilterMeta).sort((a, b) => b.length - a.length);
-        const textAfterSlash = normalized.slice(1).toLowerCase();
-
-        for (const alias of aliasKeys) {
-          if (textAfterSlash === alias || textAfterSlash.startsWith(`${alias} `)) {
-            console.log('[SlashFilter Debug][SearchBar] Matched alias:', alias, 'label:', slashFilterMeta[alias].label, 'for input:', input);
-            return { alias, label: slashFilterMeta[alias].label };
-          }
-        }
-
-        console.log('[SlashFilter Debug][SearchBar] No alias matched for input:', input, 'available aliases:', aliasKeys);
-        return null;
-      },
-      [slashFilterMeta],
-    );
 
     const { commandKey, noteKey, linkKey } = useMemo(() => {
       const customPrefixes = customOmniboxPrefixesRef.current;
@@ -522,6 +409,43 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       });
       return { commandKey: cKey, noteKey: nKey, linkKey: lKey };
     }, [userDbShortcuts, customOmniboxPrefixes]);
+
+    const parseSlashFilter = useCallback(
+      (input: string): { alias: string; label: string; prefixLength: number } | null => {
+        const normalized = input.replace(/\u00A0/g, ' ');
+        const normalizedCommandKey = getCommandSpacePrefix(commandKey || customOmniboxPrefixes);
+        
+        const colonMatch = normalized.match(/^([a-zA-Z0-9_-]+):\s/);
+        if (colonMatch && colonMatch[0]) {
+          const colonAlias = colonMatch[1].toLowerCase();
+          
+          if (slashFilterMeta[colonAlias]) {
+            return {
+              alias: colonAlias,
+              label: slashFilterMeta[colonAlias].label,
+              prefixLength: colonMatch[0].length
+            };
+          }
+        }
+
+        const isSlashFormat = normalized.startsWith('/');
+        const isCommandFormat = normalized.toLowerCase().startsWith(`${normalizedCommandKey} `);
+        if (!isSlashFormat && !isCommandFormat) return null;
+
+        const aliasKeys = Object.keys(slashFilterMeta).sort((a, b) => b.length - a.length);
+        const prefixLength = isSlashFormat ? 1 : normalizedCommandKey.length + 1;
+        const textAfterPrefix = normalized.slice(prefixLength).toLowerCase();
+
+        for (const alias of aliasKeys) {
+          if (textAfterPrefix === alias || textAfterPrefix.startsWith(`${alias} `)) {
+            return { alias, label: slashFilterMeta[alias].label, prefixLength };
+          }
+        }
+
+        return null;
+      },
+      [slashFilterMeta, commandKey, customOmniboxPrefixes],
+    );
 
     useEffect(() => {
       let timer: NodeJS.Timeout;
@@ -564,8 +488,8 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
     // Agent Collection State and Effect
     const [agentCollectionSuggestions, setAgentCollectionSuggestions] = useState<AgentCollectionSuggestionItem[]>([]);
-    const [automationSuggestions, setAutomationSuggestions] = useState<SavedAutomation[]>([]);
-    const [moduleSuggestions, setModuleSuggestions] = useState<InstalledModule[]>([]);
+    const automationSuggestions: SavedAutomation[] = [];
+    const moduleSuggestions: InstalledModule[] = [];
 
     useEffect(() => {
       const INDEX_KEY = 'alts_agent_collections_index';
@@ -617,83 +541,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     }, []); // Run on mount
 
     useEffect(() => {
-      const STORAGE_KEY = 'automations';
-      const chromeAny = (window as any).chrome;
-
-      const loadAutomations = () => {
-        if (chromeAny && chromeAny.storage && chromeAny.storage.local) {
-          chromeAny.storage.local.get([STORAGE_KEY], (result: any) => {
-            const automationsMap = result[STORAGE_KEY] || {};
-            const automations = Object.values(automationsMap) as SavedAutomation[];
-            setAutomationSuggestions(automations);
-          });
-        }
-      };
-
-      const handleChange = (
-        changes: Record<string, chrome.storage.StorageChange>,
-        areaName: 'sync' | 'local' | 'managed' | 'session',
-      ) => {
-        if (areaName === 'local' && changes[STORAGE_KEY]) {
-          loadAutomations();
-        }
-      };
-
-      try {
-        loadAutomations();
-        if (chromeAny && chromeAny.storage && chromeAny.storage.onChanged) {
-          chromeAny.storage.onChanged.addListener(handleChange);
-        }
-      } catch (e) {
-        console.error('[Searchbar] Failed to load automations', e);
-      }
-
-      return () => {
-        if (chromeAny && chromeAny.storage && chromeAny.storage.onChanged) {
-          chromeAny.storage.onChanged.removeListener(handleChange);
-        }
-      };
-    }, []);
-
-    useEffect(() => {
-      const STORAGE_KEY = 'installed_modules';
-      const chromeAny = (window as any).chrome;
-
-      const loadModules = () => {
-        if (chromeAny && chromeAny.storage && chromeAny.storage.local) {
-          chromeAny.storage.local.get([STORAGE_KEY], (result: any) => {
-            const modules = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
-            setModuleSuggestions(modules);
-          });
-        }
-      };
-
-      const handleChange = (
-        changes: Record<string, chrome.storage.StorageChange>,
-        areaName: 'sync' | 'local' | 'managed' | 'session',
-      ) => {
-        if (areaName === 'local' && changes[STORAGE_KEY]) {
-          loadModules();
-        }
-      };
-
-      try {
-        loadModules();
-        if (chromeAny && chromeAny.storage && chromeAny.storage.onChanged) {
-          chromeAny.storage.onChanged.addListener(handleChange);
-        }
-      } catch (e) {
-        console.error('[Searchbar] Failed to load installed modules', e);
-      }
-
-      return () => {
-        if (chromeAny && chromeAny.storage && chromeAny.storage.onChanged) {
-          chromeAny.storage.onChanged.removeListener(handleChange);
-        }
-      };
-    }, []);
-
-    useEffect(() => {
       if (inlineComposerActive) {
         if (inputRef.current && (inputRef.current.innerText || inputRef.current.innerHTML)) {
           inputRef.current.innerText = '';
@@ -708,7 +555,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         if (slashMatch) {
           activeSlashFilterRef.current = slashMatch.alias;
           setActiveSlashFilter(slashMatch.alias);
-          displayValue = normalized.slice(slashMatch.alias.length + 2);
+          displayValue = normalized.slice(slashMatch.prefixLength + slashMatch.alias.length).trimStart();
         } else {
           activeSlashFilterRef.current = null;
           setActiveSlashFilter(null);
@@ -719,7 +566,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         if (inputRef.current) {
           try {
             if (inputRef.current.innerText !== displayValue) {
-              const expectedHtml = getHighlightedHtml(displayValue);
+              const expectedHtml = getHighlightedHtml(displayValue, slashFilterMeta);
               inputRef.current.innerHTML = expectedHtml;
               inputRef.current.focus();
 
@@ -736,11 +583,11 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           }
         }
       }
-    }, [propSearchValue, inlineComposerActive, parseSlashFilter]);
+    }, [propSearchValue, inlineComposerActive, parseSlashFilter, slashFilterMeta]);
 
     const setValue = useCallback(
       (newValue: string) => {
-        const mappedValue = mapFullNameToShortcut(newValue);
+        const mappedValue = mapFullNameToShortcut(newValue, slashFilterMeta);
         const normalized = mappedValue.replace(/\u00A0/g, ' ');
         setValueRaw(normalized);
         if (typeof window !== 'undefined') {
@@ -753,13 +600,15 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
         let fullValue = normalized;
 
-        if (!lockedCommand && !activeSlashFilterRef.current) {
-          console.log('[SearchBar Debug] Keys:', { commandKey, noteKey, linkKey });
-          console.log('[SearchBar Debug] Typed (normalized):', `"${normalized}"`);
-        }
-
         if (activeSlashFilterRef.current) {
-          fullValue = `/${activeSlashFilterRef.current.toUpperCase()} ${normalized}`;
+          const normalizedCommandKey = getCommandSpacePrefix(commandKey || customOmniboxPrefixes);
+          const normalizedFilter = String(activeSlashFilterRef.current || '').trim().toLowerCase();
+          const filterLabel = String(slashFilterMeta[normalizedFilter]?.label || '').trim().toLowerCase();
+          const typedQuery = String(normalized || '').trimStart();
+          fullValue =
+            filterLabel === 'commands'
+              ? `${normalizedCommandKey} ${typedQuery}`.trimEnd() + (typedQuery ? '' : ' ')
+              : `${normalizedCommandKey} ${normalizedFilter}${typedQuery ? ` ${typedQuery}` : ' '}`;
         }
         lastLocalValueRef.current = fullValue; // Track this locally to ignore it from props later
 
@@ -769,7 +618,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
             inputRef.current.innerHTML = '';
           }
         } else if (inputRef.current) {
-          const expectedHtml = getHighlightedHtml(normalized);
+          const expectedHtml = getHighlightedHtml(normalized, slashFilterMeta);
           const currentHtml = inputRef.current.innerHTML;
           const needsUpdate = normalized.startsWith('/') ? (currentHtml !== expectedHtml) : (inputRef.current.innerText.replace(/\u00A0/g, ' ') !== normalized);
           if (needsUpdate) {
@@ -792,7 +641,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
         onQueryChange?.(fullValue);
       },
-      [onQueryChange, inlineComposerActive, activeSlashFilter],
+      [onQueryChange, inlineComposerActive, activeSlashFilter, slashFilterMeta, commandKey, customOmniboxPrefixes],
     );
 
     // Auto-resize on value change (programmatic or typed)
@@ -811,11 +660,13 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     // Start as false — Board View should only open after explicit user interaction (typing/click)
     // NOT auto-render just because isBoardViewEnabled is true
     const [keepBoardViewOpen, setKeepBoardViewOpen] = useState(false);
+    const [showEmptySlashDropdown, setShowEmptySlashDropdown] = useState(false);
 
     useEffect(() => {
       if (value.trim().length > 0) {
         // User typed something while in Board View mode — keep it open
         setKeepBoardViewOpen(true);
+        setShowEmptySlashDropdown(false);
       } else if (value.trim().length === 0) {
         // Search cleared — reset so Board View doesn't persist without interaction
         setKeepBoardViewOpen(false);
@@ -895,8 +746,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       };
     }, []);
 
-
-    const { dynamicLeftOffset, dynamicGap, dynamicFallbackPadding } = useMemo(() => {
+const { dynamicLeftOffset, dynamicGap, dynamicFallbackPadding } = useMemo(() => {
       const { width } = windowDimensions;
       // 12px (default), 14px (1600+), 16px (1800+)
       // Standard icon width w-4 (16px), gap-2 (8px).
@@ -931,7 +781,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       }
     }, [activeCollection]);
 
-    const [inlineCursorPosition, setInlineCursorPosition] = useState(0);
     const [isSuggestionsHidden, setIsSuggestionsHidden] = useState(false);
 
     // Active Ephemeral "All AI" Session
@@ -973,24 +822,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       isInitialMountRef.current = false;
     }, []);
 
-    const updateActiveSessionMetadata = useCallback(
-      (metadata: {
-        name?: string;
-        id?: string | number;
-        customModelDefinitions?: { id: string; name: string; url: string; host: string }[];
-      }) => {
-        setActiveAiSession(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            name: metadata.name ?? prev.name,
-            id: metadata.id ?? prev.id,
-            customModelDefinitions: metadata.customModelDefinitions ?? prev.customModelDefinitions,
-          };
-        });
-      },
-      [],
-    );
+
 
     const onUpdateCustomModels = useCallback((models: { id: string; name: string; url: string; host: string }[]) => {
       setActiveAiSession(prev => {
@@ -1142,6 +974,8 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         syncScroll();
       }
     }, [syncScroll]);
+    const [inlineCursorPosition, setInlineCursorPosition] = useState<number | null>(null);
+
 
     const updateInlineCursorPosition = useCallback(() => {
       if (inlineInputRef.current) {
@@ -1165,7 +999,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       }
     }, [lockedCommand, onLockedCommandChange]);
 
-    const selectedSnippet = useUIStore((s: any) => s.selectedSnippet);
     const isLinkEditModalOpen = useUIStore((s: any) => s.isLinkEditModalOpen);
     const activeEditor = useUIStore(s => s.activeEditor);
     const { theme } = useAppearance();
@@ -1181,169 +1014,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     // AI selection state
     const [currentTabId, setCurrentTabId] = useState<number | null>(null);
 
-    const applyDropdownEditsToSteps = useCallback(
-      (steps: any[], fieldKey: string, optionPairs: { key: string; value: string }[]): any[] => {
-        const optionValues = optionPairs.map(pair => pair.value);
-        return (steps || []).map((step: any) => {
-          const nextConfig = { ...(step?.config || {}) };
 
-          if (nextConfig.paramConfigs && typeof nextConfig.paramConfigs === 'object') {
-            const existingParam = nextConfig.paramConfigs[fieldKey];
-            if (existingParam) {
-              nextConfig.paramConfigs = {
-                ...nextConfig.paramConfigs,
-                [fieldKey]: {
-                  ...existingParam,
-                  type: 'dropdown',
-                  values: optionValues,
-                  optionPairs,
-                },
-              };
-            }
-          }
-
-          if (Array.isArray(nextConfig.variables)) {
-            nextConfig.variables = nextConfig.variables.map((variable: any) => {
-              const variableKey = variable?.key || variable?.name;
-              if (variableKey !== fieldKey) return variable;
-              return {
-                ...variable,
-                type: 'dropdown',
-                values: optionValues,
-              };
-            });
-          }
-
-          if (Array.isArray(nextConfig.steps)) {
-            nextConfig.steps = applyDropdownEditsToSteps(nextConfig.steps, fieldKey, optionPairs);
-          }
-
-          const nextStep: any = {
-            ...step,
-            config: nextConfig,
-          };
-
-          if (Array.isArray(step?.subSteps)) {
-            nextStep.subSteps = applyDropdownEditsToSteps(step.subSteps, fieldKey, optionPairs);
-          }
-
-          return nextStep;
-        });
-      },
-      [],
-    );
-
-    const applyDropdownEditsToAutomation = useCallback(
-      (
-        automation: SavedAutomation,
-        fieldKey: string,
-        optionPairs: { key: string; value: string }[],
-      ): SavedAutomation => {
-        const optionValues = optionPairs.map(pair => pair.value);
-        const nextInputs = Array.isArray(automation.inputs)
-          ? automation.inputs.map((input: any) =>
-            input.id === fieldKey || input.label === fieldKey
-              ? {
-                ...input,
-                type: 'dropdown' as AutomationInputDefinition['type'],
-                dropdownOptions: optionValues.join(','),
-              }
-              : input,
-          )
-          : automation.inputs;
-
-        return {
-          ...automation,
-          inputs: nextInputs,
-          steps: applyDropdownEditsToSteps(automation.steps || [], fieldKey, optionPairs),
-        };
-      },
-      [applyDropdownEditsToSteps],
-    );
-
-
-
-
-
-    // --- Agent Snippet Saving ---
-    const handleSaveAsAgent = useCallback(
-      (session: any) => {
-
-
-        const models = session.models || [];
-        const isSingle = models.length === 1;
-
-        // Define Agent ID and name
-        let agentId = 'all';
-        let agentName = 'All AI Chat Agents';
-
-        const mapping: Record<string, string> = {
-          gpt: 'ChatGPT',
-          claude: 'Claude',
-          gemini: 'Gemini',
-          perplexity: 'Perplexity',
-        };
-
-        const iconHostMapping: Record<string, string> = {
-          gpt: 'chatgpt.com',
-          claude: 'claude.ai',
-          gemini: 'gemini.google.com',
-          perplexity: 'perplexity.ai',
-        };
-
-        if (isSingle) {
-          agentId = models[0];
-          agentName = mapping[agentId] || agentId.charAt(0).toUpperCase() + agentId.slice(1);
-        } else if (models.length > 1) {
-          // For multiple, use names join
-          agentName = models.map((m: string) => mapping[m] || m.toUpperCase()).join(' + ');
-        }
-
-        // Filter URLs to only include selected models
-        const filteredUrls: Record<string, string> = {};
-        if (session.urls) {
-          models.forEach((m: string) => {
-            if (session.urls[m]) filteredUrls[m] = session.urls[m];
-          });
-        }
-
-        const prefilledAutomation = {
-          id: `temp-${Date.now()}`,
-          name: session.prompt
-            ? session.prompt.length > 30
-              ? session.prompt.substring(0, 30)
-              : session.prompt
-            : 'New Agent',
-          steps: [
-            {
-              id: `agent-${Date.now()}`,
-              moduleId: 'agent',
-              config: {
-                agentId: agentId,
-                name: agentName,
-                // Only pass allAiUrls if it's the 'all' agent (multiple or generic)
-                allAiUrls: agentId === 'all' ? filteredUrls : undefined,
-                // If single agent, set specific fields
-                url: isSingle ? session.urls[agentId] : undefined,
-                iconHost: isSingle ? iconHostMapping[agentId] : undefined,
-                prompts: { prompt1: session.prompt },
-                promptLabel: 'prompt1',
-              },
-            },
-          ],
-          timestamp: Date.now(),
-        };
-
-        // Clear searchbar state to exit "locked" AI mode so the AgentPanel can render properly
-        setLockedCommand(null);
-        setValue('');
-        setShowAIHistoryPanel(false);
-
-        useUIStore.getState().openEditor({ type: 'agent', id: 'new', isNew: true, props: { editMode: false, automation: prefilledAutomation } });
-        triggerNotification('Opening in Agent Editor...', 'info');
-      },
-      [triggerNotification, setValue],
-    );
 
     // Footer status for command feedback (moved up to resolve hook declaration dependency)
     const [footerStatus, setFooterStatus] = useState<FooterStatus>(null);
@@ -1382,8 +1053,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       inputRef: inputRef as React.RefObject<HTMLDivElement | null>,
       containerRef,
 
-
-      isLinkEditModalOpen,
+isLinkEditModalOpen,
       setFooterStatus,
     });
 
@@ -1501,9 +1171,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       }
     }, [lockedCommand, commandPrompt, value, savedAiAgents, activeAiSession]);
 
-
-
-    const checkLocalCommandAuth = useCallback(
+const checkLocalCommandAuth = useCallback(
       (commandId: AnyCommandId): boolean => {
         return true;
       },
@@ -2035,9 +1703,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       [value],
     );
 
-
-
-    // Load prompt snippets when prompt menu is opened via Tab key
+// Load prompt snippets when prompt menu is opened via Tab key
     // Uses current search value to filter prompts - popup auto-closes when no match
     const loadPromptSuggestions = useCallback(() => {
       const query = value.trim();
@@ -2061,30 +1727,11 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         };
       });
 
-      const aiAutomations = (automationSuggestions || []).filter(isPureAiAutomation);
-      const automationItems: PromptMenuSuggestion[] = aiAutomations.reduce<PromptMenuSuggestion[]>(
-        (acc, automation) => {
-          const label = String(automation.name || '');
-          const score = query ? getTextMatchScore(label, query) : null;
-          if (query && score === null) return acc;
-
-          acc.push({
-            kind: 'automation',
-            automation,
-            label,
-            matchScore: score ?? undefined,
-          });
-
-          return acc;
-        },
-        [],
-      );
-
       let nextSuggestions: PromptMenuSuggestion[] = [];
       if (!query) {
-        nextSuggestions = [...promptItems, ...automationItems];
+        nextSuggestions = [...promptItems];
       } else {
-        nextSuggestions = [...promptItems, ...automationItems].sort((a, b) => {
+        nextSuggestions = [...promptItems].sort((a, b) => {
           const aScore = a.matchScore ?? 3;
           const bScore = b.matchScore ?? 3;
           if (aScore !== bScore) return aScore - bScore;
@@ -2094,7 +1741,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
       setPromptSuggestions(nextSuggestions);
       setPromptHighlightIndex(0);
-    }, [workspaceItemIndex, value, automationSuggestions]);
+    }, [workspaceItemIndex, value]);
 
     // Reactively update prompt suggestions when value changes while popup is open
     useEffect(() => {
@@ -2216,8 +1863,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         }
         lastAtSelectRef.current = { id: commandId, time: now };
 
-
-        await saveRecentCommand(commandId);
+await saveRecentCommand(commandId);
         suppressAtMenuRef.current = true;
 
         if (commandId === 'tab:all_tabs') {
@@ -2694,14 +2340,14 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       // 4. No @ command is selected
       const isAllowedEmpty = isInitialAltSFocus && !trimmed;
       if (
-        value.trim() === `c` ||
-        value.startsWith(`c `) ||
+        value.trim().toLowerCase() === `c` ||
+        value.toLowerCase().startsWith(`c `) ||
         (!isAllowedEmpty && (!trimmed || trimmed.length < 2 || trimmed.length > 17)) ||
         lockedCommand ||
         selectedAtCommand
       ) {
         bookmarkSearchRef.current++; // Invalidate any pending async responses
-        if (!isInitialAltSFocus || value.trim() === `c`) {
+        if (!isInitialAltSFocus || value.trim().toLowerCase() === `c`) {
           setBookmarkSuggestions([]);
         }
         return;
@@ -2749,8 +2395,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
             chromeAny.storage.local.get([item.title], (result: any) => {
               const items = result[item.title];
 
-
-              if (items && Array.isArray(items)) {
+if (items && Array.isArray(items)) {
                 // 1. Identify unique prompt parameters and remap paste steps
                 const paramRegex = /(?:\{|\[|%7B)([^}\]]+)(?:\}|\]|%7D)/gi;
                 const uniqueParams = new Set<string>();
@@ -2860,8 +2505,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                   return a.localeCompare(b);
                 });
 
-
-                // Build fields array
+// Build fields array
                 const fields: SearchbarAutomationField[] = sortedParams.map(p => {
                   const isDigit = /^\d+$/.test(p);
                   const key = isDigit ? `prompt${p}` : p;
@@ -3082,540 +2726,8 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
     const handleAutomationSelect = useCallback(
       (automation: any) => {
-
-
-        let typedText = value || queryValue || inputRef.current?.value || '';
-
-        // Extract query by removing the automation name/shortcut keywords that triggered it
-        const words = typedText.trim().split(/\s+/);
-        const triggerWords = [
-          automation.name,
-          automation.label,
-          (automation.shortcuts || '').replace('/', '')
-        ].filter(Boolean);
-
-        const filteredWords = words.filter(word => {
-          const normalizedWord = word.toLowerCase();
-          return !triggerWords.some(trigger =>
-            trigger.toLowerCase().startsWith(normalizedWord) ||
-            normalizedWord.startsWith(trigger.toLowerCase())
-          );
-        });
-        typedText = filteredWords.join(' ').trim();
-        try {
-          // Normalize structure â€” convert automation_steps to steps if needed
-          const normalizeStep = (step: any, index: number): any => {
-            const rawSubSteps = Array.isArray(step?.subSteps) ? step.subSteps : step?.sub_steps || [];
-            return {
-              ...step,
-              id: step?.id ? String(step.id) : `step-${index + 1}`,
-              moduleId: String(
-                step?.moduleId || step?.module_id || step?.module || step?.module_key || step?.type || '',
-              ),
-              config: step?.config || step?.params || step?.parameters || {},
-              subSteps: Array.isArray(rawSubSteps)
-                ? rawSubSteps.map((subStep: any, subIndex: number) => normalizeStep(subStep, subIndex))
-                : [],
-            };
-          };
-
-          const rawSteps = Array.isArray(automation?.steps)
-            ? automation.steps
-            : Array.isArray(automation?.automation_steps)
-              ? automation.automation_steps
-              : [];
-
-          const newItem = {
-            ...automation,
-            id: String(automation?.id || automation?.automation_id || automation?.name || 'automation'),
-            type: 'automation' as const,
-            steps: rawSteps.map((step: any, index: number) => normalizeStep(step, index)),
-            inputs: automation?.inputs || automation?.automation_inputs || [],
-          };
-
-          const inputTypeHints = buildInputTypeHints(Array.isArray(newItem.steps) ? newItem.steps : []);
-          const constantInputs = collectConstantInputsFromSteps(Array.isArray(newItem.steps) ? newItem.steps : []);
-
-          // Clear the search bar text so the results disappear when showing inputs
-          setValue('');
-          setQueryValue('');
-          if (inputRef.current) inputRef.current.value = '';
-
-          let fields: SearchbarAutomationField[] = [];
-          const cloudInputDefinitions = Array.isArray(newItem.steps)
-            ? newItem.steps.flatMap((step: any, index: number) => extractCloudModuleInputDefinitions(step, index))
-            : [];
-
-          // STRATEGY 1: Use pre-saved inputs array if it exists (most reliable)
-          if (newItem.inputs && Array.isArray(newItem.inputs) && newItem.inputs.length > 0) {
-
-
-            // Build a map: paramKey â†’ urlTemplate (only for open_tab / agent steps)
-            const paramUrlTemplateMap = new Map<string, string>();
-            if (Array.isArray(newItem.steps)) {
-              const paramRegexS1 = /\{input_name="([^"]+)"\}|\{([^}\s"=)]+)\}/g;
-              newItem.steps.forEach((step: any) => {
-                const isUrlStep = step.moduleId === 'open_tab' || step.moduleId === 'agent';
-                if (!isUrlStep) return;
-                const urlTmpl: string = step.config?.url || '';
-                if (!urlTmpl) return;
-                // Extract every {variable} from the URL template
-                let m: RegExpExecArray | null;
-                const re = new RegExp(paramRegexS1.source, 'g');
-                while ((m = re.exec(urlTmpl)) !== null) {
-                  const varName = m[1] || m[2];
-                  if (varName && !paramUrlTemplateMap.has(varName)) {
-                    paramUrlTemplateMap.set(varName, urlTmpl);
-                  }
-                }
-              });
-            }
-
-            const mergedInputDefinitions = mergeAutomationInputDefinitions(cloudInputDefinitions, newItem.inputs);
-            fields = mapAutomationInputDefinitionsToFields(mergedInputDefinitions, paramUrlTemplateMap, inputTypeHints);
-          }
-
-          // STRATEGY 2: Fallback â€” scan step configs for {variable} patterns
-          // Also scans agent promptLabel and sub_automation inputs recursively
-          if (fields.length === 0) {
-
-            const paramRegex = /(?:\{|\[|%7B)([^\}\]]+)(?:\}|\]|%7D)/gi;
-            const uniqueParams = new Set<string>();
-            const paramSourceMap = new Map<
-              string,
-              {
-                item: any;
-                localId: string;
-                config?: any;
-                variableDef?: any;
-                inputDef?: Partial<AutomationInputDefinition>;
-              }
-            >();
-            // Map from param key â†’ url template of its source step (only for url-based steps)
-            const paramUrlTemplateMapS2 = new Map<string, string>();
-            let hasQuery = false;
-            let queryStepConfig: any = null;
-            let queryStepUrl: string | undefined = undefined;
-            // Track paste steps that use query/content/prompt so we can create unique fields
-            const pasteQuerySteps: { stepIndex: number; varName: string; config: any; elementName?: string }[] = [];
-            const scopedInputIds = new Set<string>();
-
-            // Helper: extract clean param name from {input_name="xxx"} â†’ "xxx", or return as-is
-            const cleanParamName = (raw: string): string => {
-              const m = raw.match(/^input_name="([^"]+)"$/);
-              return m ? m[1] : raw;
-            };
-            const isLikelySelectorToken = (raw: string): boolean => /[="'\s]/.test(raw);
-
-            // Recursive step scanner that handles sub_automations and agents
-            const scanSteps = (steps: any[]) => {
-              steps.forEach((step: any, stepIndex: number) => {
-                // Handle cloud modules FIRST â€” they define their own variables explicitly
-                // and we must NOT let the generic regex scanner parse their execution_steps
-                if (step.config?.isCloudModule && Array.isArray(step.config.variables)) {
-                  extractCloudModuleInputDefinitions(step, stepIndex).forEach((inputDef: AutomationInputDefinition) => {
-                    const varName = inputDef.id || inputDef.label;
-                    if (!varName || uniqueParams.has(varName)) return;
-
-                    uniqueParams.add(varName);
-                    paramSourceMap.set(varName, {
-                      item: newItem,
-                      localId: varName,
-                      config: step.config,
-                      variableDef: step.config.variables.find((v: any) => (v.key || v.name) === varName),
-                      inputDef,
-                    });
-
-                    if (inputDef.urlTemplate && !paramUrlTemplateMapS2.has(varName)) {
-                      paramUrlTemplateMapS2.set(varName, inputDef.urlTemplate);
-                    }
-                  });
-                  return; // Skip generic scanning for cloud modules
-                }
-
-                const isUrlStep = step.moduleId === 'open_tab' || step.moduleId === 'agent';
-                const isPasteStep = step.type === 'paste' || step.moduleId === 'paste';
-
-                // Handle paste and open_tab variable patterns
-                if (
-                  step.type === 'paste' ||
-                  step.moduleId === 'paste' ||
-                  step.type === 'open_tab' ||
-                  step.moduleId === 'open_tab'
-                ) {
-                  const config = step.config || {};
-                  // For URL steps, capture the url template string for later use
-                  const stepUrlTmpl: string = isUrlStep ? config.url || '' : '';
-
-                  Object.values(config).forEach((val: any) => {
-                    if (typeof val === 'string') {
-                      const matches = val.matchAll(paramRegex);
-                      for (const match of matches) {
-                        const varName = cleanParamName(match[1]);
-                        if (isLikelySelectorToken(varName)) {
-                          return;
-                        }
-                        const lowerVar = varName.toLowerCase();
-
-                        if (lowerVar === 'query' || lowerVar === 'content' || lowerVar === 'prompt') {
-                          hasQuery = true;
-                          if (!queryStepConfig) queryStepConfig = config;
-                          if (!queryStepUrl && isUrlStep) queryStepUrl = stepUrlTmpl;
-                          // Track paste steps individually so we can create per-step fields
-                          if (isPasteStep) {
-                            const scopedId = `${varName}__paste_step_${stepIndex}`;
-                            if (scopedInputIds.has(scopedId)) {
-                              return;
-                            }
-                            scopedInputIds.add(scopedId);
-                            pasteQuerySteps.push({
-                              stepIndex,
-                              varName,
-                              config,
-                              elementName: config.selectorElementName || config.name || '',
-                            });
-                          }
-                        } else {
-                          uniqueParams.add(varName);
-                          paramSourceMap.set(varName, { item: newItem, localId: varName, config });
-                          // Only record url template for url-based steps (not paste)
-                          if (isUrlStep && stepUrlTmpl && !paramUrlTemplateMapS2.has(varName)) {
-                            paramUrlTemplateMapS2.set(varName, stepUrlTmpl);
-                          }
-                        }
-                      }
-                    }
-                  });
-
-                  // Extract ALL parameters from paramConfigs for ALL step types
-                  // This ensures that all defined parameters are shown, even if not referenced in content
-                  if (config.paramConfigs && typeof config.paramConfigs === 'object') {
-                    Object.keys(config.paramConfigs).forEach((paramKey: string) => {
-                      if (paramKey) {
-                        // Use scoped key per step so multiple steps can have the same param name (e.g., input1)
-                        const scopedParamKey = `${paramKey}__paste_step_${stepIndex}`;
-                        if (!uniqueParams.has(scopedParamKey)) {
-                          uniqueParams.add(scopedParamKey);
-                          // Mark this param with step index so we can group it later
-                          const paramSourceEntry: any = { item: newItem, localId: paramKey, config };
-                          paramSourceEntry._pasteStepIndex = stepIndex; // Track which step this came from
-                          paramSourceMap.set(scopedParamKey, paramSourceEntry);
-                        }
-                      }
-                    });
-                  }
-                }
-
-                // Handle agent steps â€” extract promptLabel as an input
-                if (step.moduleId === 'agent') {
-                  const promptLabel = step.config?.promptLabel;
-                  const agentUrl: string = step.config?.url || '';
-                  if (promptLabel && !uniqueParams.has(promptLabel)) {
-                    uniqueParams.add(promptLabel);
-                    paramSourceMap.set(promptLabel, { item: newItem, localId: promptLabel });
-                    if (agentUrl && !paramUrlTemplateMapS2.has(promptLabel)) {
-                      paramUrlTemplateMapS2.set(promptLabel, agentUrl);
-                    }
-                  }
-                }
-
-                // Handle sub_automation steps â€” recurse into their steps
-                if (step.moduleId === 'sub_automation' && step.config) {
-                  // Collect from sub_automation's saved inputs
-                  if (step.config.inputs && Array.isArray(step.config.inputs)) {
-                    step.config.inputs.forEach((inputDef: any) => {
-                      const inputId = inputDef.id || inputDef.label;
-                      if (inputId && !uniqueParams.has(inputId)) {
-                        uniqueParams.add(inputId);
-                        paramSourceMap.set(inputId, { item: newItem, localId: inputId });
-                      }
-                    });
-                  }
-                  // Recurse into sub_automation steps
-                  if (Array.isArray(step.config.steps)) {
-                    scanSteps(step.config.steps);
-                  }
-                }
-              });
-            };
-
-            if (Array.isArray(newItem.steps)) {
-              scanSteps(newItem.steps);
-            }
-
-            const sortedParams = Array.from(uniqueParams).sort((a, b) => {
-              const numA = parseInt(a.replace(/\D/g, ''));
-              const numB = parseInt(b.replace(/\D/g, ''));
-              if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-              return a.localeCompare(b);
-            });
-
-            fields = sortedParams.map(p => {
-              const source = paramSourceMap.get(p);
-              const vDef = (source as any)?.variableDef;
-              const groupedInputDef = source?.inputDef;
-              // For scoped keys, localId contains the original parameter name
-              const originalParamKey = (source as any)?.localId || p;
-
-              let initialValue = '';
-              let dropdownOptions: string[] | undefined = undefined;
-              let dropdownOptionPairs: { key: string; value: string }[] | undefined = undefined;
-              let label = groupedInputDef?.label || p;
-              let description: string | undefined = groupedInputDef?.description;
-
-              // Use cloud module variable definition if available
-              if (vDef) {
-                label = groupedInputDef?.label || vDef.label || vDef.key || vDef.name;
-                initialValue = source?.config?.[originalParamKey] || vDef.fixedValue || '';
-                if (vDef.description && !description) description = String(vDef.description);
-                if (vDef.type === 'dropdown' && Array.isArray(vDef.values)) {
-                  dropdownOptions = vDef.values;
-                }
-              }
-
-              let paramType: string | undefined;
-              if (source?.config?.paramConfigs?.[originalParamKey]) {
-                const paramCfg = source.config.paramConfigs[originalParamKey];
-                paramType = paramCfg.type;
-                if (paramCfg.displayName) {
-                  label = String(paramCfg.displayName);
-                }
-                if (paramCfg.description) {
-                  description = String(paramCfg.description);
-                }
-                if (paramCfg.type === 'dropdown') {
-                  dropdownOptions = Array.isArray(paramCfg.values) ? paramCfg.values : [];
-                  dropdownOptionPairs = Array.isArray(paramCfg.optionPairs)
-                    ? paramCfg.optionPairs
-                      .map((pair: any, idx: number) => ({
-                        key: String(pair?.key || '').trim() || `Option ${idx + 1}`,
-                        value: String(pair?.value || '').trim(),
-                      }))
-                      .filter((pair: { key: string; value: string }) => !!pair.value)
-                    : undefined;
-                } else if (Array.isArray(paramCfg.values) && paramCfg.values[0]) {
-                  initialValue = paramCfg.values[0];
-                }
-              }
-              if (label === p && source?.config?.selectorElementName) {
-                const selectorLabel = String(source.config.selectorElementName || '').trim();
-                const lowerSelectorLabel = selectorLabel.toLowerCase();
-                if (selectorLabel && !['div', 'span', 'input', 'textarea', 'button'].includes(lowerSelectorLabel)) {
-                  label = selectorLabel;
-                }
-              }
-
-              if (dropdownOptions && dropdownOptions.length > 0 && !initialValue) {
-                initialValue = dropdownOptions[0];
-              }
-
-              const rawType = String(
-                groupedInputDef?.type || paramType || vDef?.type || inputTypeHints.get(originalParamKey) || '',
-              );
-              let fieldType = normalizeAutomationFieldType(rawType);
-              if (fieldType === 'text' && dropdownOptions) {
-                fieldType = 'dropdown';
-              }
-              const inputStyle = getInputStyleFromType(rawType);
-
-              // Determine grouping for paste step parameters
-              let fieldGroupId = groupedInputDef?.groupId || p;
-              let fieldGroupLabel = groupedInputDef?.groupLabel;
-
-              // If this parameter came from a paste step's paramConfigs, group it with that step
-              const pasteStepIndex = (source as any)?._pasteStepIndex;
-              if (pasteStepIndex !== undefined) {
-                fieldGroupId = `paste_step_${pasteStepIndex}`;
-                fieldGroupLabel = `Step ${pasteStepIndex + 1} - Paste Input`;
-              }
-
-              // For scoped keys like "input1__paste_step_0", extract the original param name for display
-              const displayLabel = p.includes('__paste_step_') ? p.split('__paste_step_')[0] : label;
-
-              // Extract the source variable name and step index from scoped keys
-              let sourceVarName: string | undefined = undefined;
-              let sourceStepIdx: number | undefined = undefined;
-              if (p.includes('__paste_step_')) {
-                const scopedMatch = p.match(/^(.+?)__paste_step_(\d+)$/);
-                if (scopedMatch) {
-                  sourceVarName = scopedMatch[1];
-                  sourceStepIdx = parseInt(scopedMatch[2], 10);
-                }
-              }
-
-              return {
-                key: p,
-                label: formatAutomationFieldLabel(displayLabel),
-                value: initialValue,
-                type: fieldType as any,
-                sourceType: normalizeAutomationSourceType(rawType),
-                description,
-                inputStyle,
-                extraValues: [],
-                dropdownOptions: dropdownOptions,
-                dropdownOptionPairs,
-                urlTemplate: groupedInputDef?.urlTemplate || paramUrlTemplateMapS2.get(p),
-                groupId: fieldGroupId,
-                groupLabel: fieldGroupLabel,
-                groupSelector: groupedInputDef?.groupSelector,
-                groupAction: groupedInputDef?.groupAction,
-                order: groupedInputDef?.order,
-                sourceVariable: sourceVarName,
-                sourceStepIndex: sourceStepIdx,
-              };
-            });
-
-            if (hasQuery && !fields.some(f => f.key === 'query')) {
-              // If multiple paste steps, only show their scoped parameters and suppress all other generic fields
-              if (pasteQuerySteps.length > 1) {
-                // Keep ONLY the scoped paste step fields we're about to add
-                // Remove everything else (including "search", "news", etc.)
-                fields = fields.filter(field => field.key.includes('__paste_step_'));
-
-                pasteQuerySteps.forEach((pStep, pIdx) => {
-                  const uniqueKey = `${pStep.varName}__paste_step_${pStep.stepIndex}`;
-                  const label = pStep.elementName ? formatAutomationFieldLabel(pStep.elementName) : `Input ${pIdx + 1}`;
-                  const queryInputStyle: 'short_text' | 'long_text' | undefined =
-                    inputTypeHints.get(pStep.varName) || inputTypeHints.get('query');
-                  let initialValue = '';
-                  let dropdownOptions: string[] | undefined;
-                  let dropdownOptionPairs: { key: string; value: string }[] | undefined;
-                  if (pStep.config?.paramConfigs?.[pStep.varName]) {
-                    const paramCfg = pStep.config.paramConfigs[pStep.varName];
-                    if (paramCfg.type === 'dropdown') {
-                      dropdownOptions = Array.isArray(paramCfg.values) ? paramCfg.values : [];
-                      dropdownOptionPairs = Array.isArray(paramCfg.optionPairs) ? paramCfg.optionPairs : undefined;
-                    } else if (Array.isArray(paramCfg.values) && paramCfg.values[0]) {
-                      initialValue = paramCfg.values[0];
-                    }
-                  }
-                  if (dropdownOptions && dropdownOptions.length > 0 && !initialValue) {
-                    initialValue = dropdownOptions[0];
-                  }
-                  fields.push({
-                    key: uniqueKey,
-                    label,
-                    value: initialValue,
-                    type: dropdownOptions ? 'dropdown' : 'text',
-                    sourceType: 'text',
-                    description: undefined,
-                    inputStyle: queryInputStyle,
-                    extraValues: [],
-                    dropdownOptions,
-                    dropdownOptionPairs,
-                    sourceVariable: pStep.varName,
-                    sourceStepIndex: pStep.stepIndex,
-                    groupId: `paste_step_${pStep.stepIndex}`,
-                    groupLabel: `Step ${pStep.stepIndex + 1} - Paste Input`,
-                  });
-                });
-              } else {
-                // Single or no paste step â€” use the original single 'query' field logic
-                let queryValue = '';
-                let queryDropdown: string[] | undefined = undefined;
-                let queryDropdownPairs: { key: string; value: string }[] | undefined = undefined;
-                let queryInputStyle: 'short_text' | 'long_text' | undefined = inputTypeHints.get('query');
-
-                if (queryStepConfig) {
-                  if (queryStepConfig.paramConfigs?.['query']) {
-                    const paramCfg = queryStepConfig.paramConfigs['query'];
-                    queryInputStyle = (getInputStyleFromType(paramCfg.type) as any) || queryInputStyle;
-                    if (paramCfg.type === 'dropdown') {
-                      queryDropdown = Array.isArray(paramCfg.values) ? paramCfg.values : [];
-                      queryDropdownPairs = Array.isArray(paramCfg.optionPairs) ? paramCfg.optionPairs : undefined;
-                    } else if (Array.isArray(paramCfg.values) && paramCfg.values[0]) {
-                      queryValue = paramCfg.values[0];
-                    }
-                  } else {
-                    if (queryStepConfig.fixedValue) queryValue = queryStepConfig.fixedValue;
-                    if (queryStepConfig.dropdownOptions) {
-                      queryDropdown = queryStepConfig.dropdownOptions
-                        .split(',')
-                        .map((s: string) => s.trim())
-                        .filter(Boolean);
-                    }
-                  }
-                }
-                if (queryDropdown && queryDropdown.length > 0 && !queryValue) {
-                  queryValue = queryDropdown[0];
-                }
-                fields.push({
-                  key: 'query',
-                  label: 'Query',
-                  value: queryValue,
-                  type: queryDropdown ? 'dropdown' : 'text',
-                  sourceType: 'text',
-                  description: undefined,
-                  inputStyle: queryInputStyle,
-                  extraValues: [],
-                  dropdownOptions: queryDropdown,
-                  dropdownOptionPairs: queryDropdownPairs,
-                  // For 'query' field, use the URL template of the step that sourced it
-                  urlTemplate: queryStepUrl,
-                });
-              }
-            }
-          }
-
-          fields = [...fields].sort((a, b) => {
-            const orderDiff = (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER);
-            if (orderDiff !== 0) return orderDiff;
-
-            // Extract step index from scoped keys like "input1__paste_step_0"
-            const aStepMatch = a.key.match(/__paste_step_(\d+)$/);
-            const bStepMatch = b.key.match(/__paste_step_(\d+)$/);
-            const aStepIndex = aStepMatch ? parseInt(aStepMatch[1], 10) : Number.MAX_SAFE_INTEGER;
-            const bStepIndex = bStepMatch ? parseInt(bStepMatch[1], 10) : Number.MAX_SAFE_INTEGER;
-
-            // Sort by step index first (so all Step 1 fields group together, then Step 2, etc.)
-            if (aStepIndex !== bStepIndex) {
-              return aStepIndex - bStepIndex;
-            }
-
-            // Within same step, sort by param name
-            return a.key.localeCompare(b.key);
-          });
-
-          // If we have paramConfigs-based fields (scoped paste step fields), remove all generic extracted fields
-          const hasPasteStepFields = fields.some(f => f.key.includes('__paste_step_'));
-          if (hasPasteStepFields) {
-            // Keep only paste step fields and explicitly defined paramConfigs fields
-            fields = fields.filter(field => field.key.includes('__paste_step_'));
-          }
-
-          const constantFields = fields.filter(field => field.sourceType === 'constant');
-          const runtimeFields = fields.filter(field => field.sourceType !== 'constant');
-
-
-
-          if (runtimeFields.length === 0) {
-            // No inputs needed, run immediately
-            const finalInputs = { ...constantInputs };
-            if (!finalInputs['content'] && typedText) finalInputs['content'] = typedText;
-            if (!finalInputs['query'] && typedText) finalInputs['query'] = typedText;
-
-            runAutomation(newItem as any, finalInputs);
-            resetAfterCommandExecution();
-            return;
-          }
-
-          setActiveCollection({
-            item: { _kind: 'agent_collection', title: automation.name, itemCount: 1, automation: newItem },
-            agents: [],
-            links: [],
-            automations: [newItem],
-            fields: fields,
-            constantInputs,
-            constantFields,
-            focusedFieldIndex: 0,
-          });
-
-          setLockedCommand(null);
-          setCommandPrompt('');
-        } catch (e) {
-          console.error('[Searchbar] handleAutomationSelect failed', e);
-        }
-      },
+            // Removed for cleanup
+        },
       [resetAfterCommandExecution],
     );
 
@@ -3635,28 +2747,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     );
 
     const buildAutomationFromModule = useCallback((module: InstalledModule): SavedAutomation => {
-      const moduleId = String(module.module_id);
-      return {
-        id: `module-${moduleId}`,
-        type: 'automation',
-        name: module.name || module.module_key || 'Module',
-        iconHost: (module as any).icon_host || (module as any).iconHost || (module as any).icon_url || '',
-        steps: [
-          {
-            id: `module-step-${moduleId}`,
-            moduleId,
-            config: {
-              isCloudModule: true,
-              name: module.name || module.module_key,
-              version: module.version || 1,
-              variables: Array.isArray(module.variables) ? module.variables : [],
-              execution_steps: Array.isArray(module.execution_steps) ? module.execution_steps : [],
-              iconHost: (module as any).icon_host || (module as any).iconHost || (module as any).icon_url || '',
-            },
-          },
-        ],
-        timestamp: Date.now(),
-      };
+        return {} as SavedAutomation;
     }, []);
 
     const handleContextualSelect = useCallback(
@@ -3965,23 +3056,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
             clearCommandPreview();
           }
         },
-        executeModule: (moduleId: string) => {
-          const rawId = String(moduleId);
-          const normalizedId = rawId.includes(':') ? rawId.split(':')[1] : rawId.replace(/^module-/, '');
-          const moduleFromState = moduleSuggestions.find(m => String(m.module_id) === normalizedId);
-          if (moduleFromState) {
-            handleAutomationSelect(buildAutomationFromModule(moduleFromState));
-            return;
-          }
-          if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-          chrome.storage.local.get(['installed_modules'], result => {
-            const modules = Array.isArray(result.installed_modules) ? result.installed_modules : [];
-            const match = modules.find((m: any) => String(m?.module_id) === normalizedId);
-            if (match) {
-              handleAutomationSelect(buildAutomationFromModule(match));
-            }
-          });
-        },
+
         submitAI: (prompt: string) => {
           const hist = stagedHistorySessionRef.current;
           const historyUrls = hist ? (Object.values(hist.urls).filter(Boolean) as string[]) : undefined;
@@ -4307,6 +3382,41 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       [onSnippetSelect, value, lockedCommand],
     );
 
+    const recordSelectedShortcutUsage = useCallback(
+      (selection: any, success = true, errorCode?: string) => {
+        const shortcut = selection?._userShortcutRecord || selection?.item?._userShortcutRecord || selection?.proxyEntity?._userShortcutRecord;
+        if (!shortcut?.trigger || !shortcut?.referenceId) return;
+
+        const currentValue = valueRef.current?.trim() || value.trim();
+        const parsedShortcut = parseShortcutInvocation(
+          currentValue,
+          customOmniboxPrefixesRef.current || customOmniboxPrefixes,
+        );
+        const item = selection?.item || selection?.proxyEntity || selection;
+        const targetLabel =
+          item?.title ||
+          item?.name ||
+          item?.label ||
+          item?.key ||
+          selection?.label ||
+          shortcut.referenceId;
+
+        recordAssignedTriggerUsage({
+          triggerKind: 'user_shortcut',
+          triggerValue: shortcut.trigger,
+          triggerSource: parsedShortcut.triggerSource,
+          referenceId: shortcut.referenceId,
+          referenceType: shortcut.referenceType,
+          surface: 'main_search',
+          success,
+          errorCode,
+          targetLabelSnapshot: targetLabel,
+          triggerLabelSnapshot: shortcut.trigger,
+        }).catch((err: any) => console.warn('[Searchbar] Failed to record selected shortcut usage:', err));
+      },
+      [customOmniboxPrefixes, value],
+    );
+
     const handleSnippetDelete = useCallback(
       (selection: WorkspaceItemSuggestion | null | undefined) => {
         if (!selection || !activeSnippetCommandId) return;
@@ -4327,6 +3437,22 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       [activeSnippetCommandId],
     );
 
+    const searchbarSuggestionValue = (() => {
+      if (showEmptySlashDropdown && !value) return '/';
+      if (!activeSlashFilter) return value;
+
+      const normalizedCommandKey = getCommandSpacePrefix(commandKey || customOmniboxPrefixes);
+      const normalizedFilter = String(activeSlashFilter || '').trim().toLowerCase();
+      const filterLabel = String(slashFilterMeta[normalizedFilter]?.label || '').trim().toLowerCase();
+      const typedQuery = String(value || '').trimStart();
+
+      if (filterLabel === 'commands') {
+        return `${normalizedCommandKey} ${typedQuery}`.trimEnd() + (typedQuery ? '' : ' ');
+      }
+
+      return `${normalizedCommandKey} ${normalizedFilter}${typedQuery ? ` ${typedQuery}` : ' '}`;
+    })();
+
     const {
       allSuggestions,
       debouncedFuseResults,
@@ -4334,7 +3460,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       commonCommandSuggestions,
       openUrlSuggestion,
     } = useSearchbarSuggestions({
-      value,
+      value: searchbarSuggestionValue,
       lockedCommand,
       lockedLocalDef,
       selectedTeam,
@@ -4363,17 +3489,18 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       userDbShortcuts,
       userDbHotkeys,
       customPrefixes: customOmniboxPrefixesRef.current,
+      isEmbedded,
+      contextUrl,
     });
 
     useEffect(() => {
-      // Only adjust highlightIndex when allSuggestions changes, not when highlightIndex changes
-      setHighlightIndex(prevIdx => {
-        if (allSuggestions.length > 0) {
-          return Math.min(prevIdx, allSuggestions.length - 1);
-        }
-        return 0;
-      });
-    }, [allSuggestions]);
+      const maxIndex = allSuggestions.length - 1;
+      if (allSuggestions.length > 0 && highlightIndex > maxIndex) {
+        setHighlightIndex(maxIndex);
+      } else if (allSuggestions.length === 0 && highlightIndex !== 0) {
+        setHighlightIndex(0);
+      }
+    }, [allSuggestions.length, highlightIndex]);
 
     const handleRequestOpenUrls = useCallback(
       (urls: string[], title?: string) => {
@@ -4583,8 +3710,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
         const normalized = finalPrompt; // Tags are already replaced or preserved as fallback
 
-
-        // Convert any File objects to base64 for background submission (DO THIS FIRST)
+// Convert any File objects to base64 for background submission (DO THIS FIRST)
         const imagesWithBase64 = images
           ? await Promise.all(
             images.map(async img => {
@@ -4598,9 +3724,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           )
           : null;
 
-
-
-        // If historyUrls are provided, use them for context injection as TOP PRIORITY
+// If historyUrls are provided, use them for context injection as TOP PRIORITY
         if (historyUrls && historyUrls.length > 0) {
           try {
             const linksToOpen = historyUrls.map((url, index) => {
@@ -4635,8 +3759,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
               };
             });
 
-
-            // Save the prompt to logs so it appears in the chat history
+// Save the prompt to logs so it appears in the chat history
             if (stagedHistorySessionRef.current?.sessionKey) {
               saveAiLog(stagedHistorySessionRef.current.sessionKey, normalized);
             }
@@ -4724,8 +3847,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
             const openedTabIds = await openLinksWithAutoSubmit(linksToOpen);
 
-
-            const updatedModels: string[] = [];
+const updatedModels: string[] = [];
             const updatedTabIds: number[] = [];
             const updatedUrls: string[] = [];
 
@@ -5170,7 +4292,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                     autoSubmit: typeof baseLink === 'string' ? undefined : baseLink.autoSubmit,
                     modelId: id,
                     targetTabId: existingTabId || undefined,
-                    forceNewTab: !existingTabId,
+                    forceNewTab: false,
                   });
                 }
               });
@@ -5210,7 +4332,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                   },
                   modelId: custom.id,
                   targetTabId: existingTabId || undefined,
-                  forceNewTab: !existingTabId,
+                  forceNewTab: false,
                 });
               });
 
@@ -5222,8 +4344,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
               // First one should be active
               linksToOpen[0].active = true;
 
-
-              // Input clearing handled by the queue wrapper
+// Input clearing handled by the queue wrapper
 
               // Set a preliminary session IMMEDIATELY (before tabs open) so follow-ups don't fall through
               const placeholderSession = {
@@ -5517,9 +4638,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           return;
         }
 
-
-
-        // Convert images to base64 for background submission
+// Convert images to base64 for background submission
         const imagesWithBase64 = images
           ? await Promise.all(
             images.map(async img => ({
@@ -5644,6 +4763,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     const activateWorkspaceItemSuggestion = useCallback(
       (selection: WorkspaceItemSuggestion | null | undefined) => {
         if (!selection) return;
+        recordSelectedShortcutUsage(selection);
         const snippet = selection.item as any;
         const category = (snippet.category || '').toLowerCase();
         let urls: string[] = [];
@@ -5687,7 +4807,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
         handleSnippetSelect(selection);
       },
-      [handleRequestOpenUrls, handleSnippetSelect],
+      [handleRequestOpenUrls, handleSnippetSelect, recordSelectedShortcutUsage],
     );
 
     const executeCommonCommand = useCallback(
@@ -5695,9 +4815,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         const promptRaw = item.query.trim();
         const prompt = expandPrompts(promptRaw);
 
-
-
-        // Convert images to base64 if needed
+// Convert images to base64 if needed
         const imagesWithBase64 = await Promise.all(
           selectedImages.map(async img => ({
             base64: await fileToBase64(img.file),
@@ -5760,9 +4878,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           return;
         }
 
-
-
-        // Pass imagesWithBase64 to buildCommandLink
+// Pass imagesWithBase64 to buildCommandLink
         const link = buildCommandLink(item.command, prompt, imagesWithBase64);
 
         if (typeof link !== 'string' && link.autoSubmit) {
@@ -5791,8 +4907,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
         const currentQuery = valueRef.current?.trim() || '';
 
-
-        if (activeSlashFilter) {
+if (activeSlashFilter) {
           activeSlashFilterRef.current = null;
           setActiveSlashFilter(null);
           setValue('');
@@ -5809,8 +4924,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         if (isLocalCommandId(commandId as string)) {
           const def = LOCAL_COMMANDS.find(c => c.id === (commandId as LocalCommandId));
 
-
-          if (def?.behavior === 'instant') {
+if (def?.behavior === 'instant') {
             const execId = def.executeId || def.id;
             handleLocalCommandExecute(execId as any);
             return;
@@ -5842,8 +4956,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           let extractedQuery = filteredWords.join(' ').trim();
           extractedQuery = extractedQuery.replace(/^\/([aAnsSplLcCbBtT])\s*/i, '');
 
-
-          // Lock the command and pre-fill the search input with the remaining text
+// Lock the command and pre-fill the search input with the remaining text
           activateCommandById(commandId, extractedQuery);
           return;
         }
@@ -5868,466 +4981,8 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       setHighlightIndex(index);
     }, []);
 
-    const handleCollectionSubmit = useCallback(async () => {
-      if (!activeCollection) return;
 
-      // 0. Collect all images from fields (pre-convert to base64)
-      const fieldImagesBase64: { base64: string; mimeType: string; filename: string }[] = [];
-      for (const f of activeCollection.fields) {
-        if (f.type === 'image' && f.images) {
-          for (const img of f.images) {
-            try {
-              const base64 = await fileToBase64(img.file);
-              fieldImagesBase64.push({ base64, mimeType: img.mimeType, filename: img.filename });
-            } catch (err) {
-              console.error('[Searchbar] Image conversion failed:', err);
-            }
-          }
-        }
-      }
-
-
-
-      const fieldsForExecution = activeCollection.fields.map(field => {
-        if (field.type === 'image') return field;
-        // Combine all values (main value + extraValues) with spaces for display
-        const parts = [field.value, ...(field.extraValues || [])]
-          .map(val => (typeof val === 'string' ? val.trim() : ''))
-          .filter(Boolean);
-        const combinedValue = parts.join(' ');
-        return { ...field, value: combinedValue };
-      });
-
-
-
-      const collectionFields = fieldsForExecution;
-
-      // 1. Process Agents
-      const finalAgents = activeCollection.agents
-        .map((a: any) => {
-          let newUrl = a.url || '';
-          let specificPromptValue = '';
-
-          collectionFields.forEach(f => {
-            let replaced = false;
-            const isDirectMatch = a.promptLabel === f.key;
-
-            const anyRegex = new RegExp(`(?:\\{|%7B|\\[)${f.key}(?:\\}|%7D|\\])`, 'gi');
-            if (anyRegex.test(newUrl)) {
-              newUrl = newUrl.replace(anyRegex, (match: string) => {
-                return match.startsWith('%') ? encodeURIComponent(f.value) : f.value;
-              });
-              replaced = true;
-            }
-
-            if (f.key === 'query') {
-              if (newUrl.includes('{query}') || newUrl.includes('[query]')) {
-                newUrl = newUrl.replace(/\{query\}/gi, encodeURIComponent(f.value));
-                newUrl = newUrl.replace(/\[query\]/gi, encodeURIComponent(f.value));
-                replaced = true;
-              }
-            } else if (f.key.startsWith('prompt')) {
-              const num = f.key.replace('prompt', '');
-              const hasExplicitQueryField = collectionFields.some(field => field.key === 'query');
-              if (num === '1' && !hasExplicitQueryField && (newUrl.includes('{query}') || newUrl.includes('[query]'))) {
-                newUrl = newUrl.replace(/\{query\}/gi, encodeURIComponent(f.value));
-                newUrl = newUrl.replace(/\[query\]/gi, encodeURIComponent(f.value));
-                replaced = true;
-              }
-            }
-
-            if ((replaced || isDirectMatch) && f.value.trim()) {
-              if (!specificPromptValue.includes(f.value.trim())) {
-                specificPromptValue += (specificPromptValue ? ' ' : '') + f.value.trim();
-              }
-            }
-          });
-
-          let kind: 'chatgpt' | 'claude' | 'perplexity' | 'gemini' | null = null;
-          if (newUrl.includes('chatgpt.com')) kind = 'chatgpt';
-          else if (newUrl.includes('claude.ai')) kind = 'claude';
-          else if (newUrl.includes('perplexity.ai')) kind = 'perplexity';
-          else if (newUrl.includes('gemini.google.com')) kind = 'gemini';
-
-          if (kind) {
-            let promptForAutoSubmit = specificPromptValue;
-            if (!promptForAutoSubmit) {
-              try {
-                const urlObj = new URL(newUrl);
-                promptForAutoSubmit = urlObj.searchParams.get('q') || '';
-              } catch (e) {
-                const queryField = collectionFields.find(f => f.key === 'query');
-                promptForAutoSubmit = queryField ? queryField.value : '';
-              }
-            }
-            if (!promptForAutoSubmit) {
-              const queryField = collectionFields.find(f => f.key === 'query');
-              promptForAutoSubmit = queryField ? queryField.value : '';
-            }
-            if (!promptForAutoSubmit) {
-              const allPopulatedValues = collectionFields
-                .filter(f => f.value && f.value.trim().length > 0)
-                .map(f => f.value.trim());
-              if (allPopulatedValues.length > 0) {
-                promptForAutoSubmit = allPopulatedValues.join(' ');
-              }
-            }
-
-            let standardUrl = newUrl;
-            const isSpecificChat =
-              (kind === 'chatgpt' && (newUrl.includes('/c/') || newUrl.includes('/g/'))) ||
-              (kind === 'claude' && newUrl.includes('/chat/')) ||
-              (kind === 'perplexity' && newUrl.includes('/search/') && !newUrl.includes('?q='));
-
-            if (promptForAutoSubmit || (selectedImages && selectedImages.length > 0) || fieldImagesBase64.length > 0) {
-              if (!isSpecificChat) {
-                if (kind === 'chatgpt')
-                  standardUrl = `https://chatgpt.com/?q=${encodeURIComponent(promptForAutoSubmit)}`;
-                else if (kind === 'claude')
-                  standardUrl = `https://claude.ai/new?q=${encodeURIComponent(promptForAutoSubmit)}`;
-                else if (kind === 'perplexity')
-                  standardUrl = `https://www.perplexity.ai/search?q=${encodeURIComponent(promptForAutoSubmit)}`;
-                else if (kind === 'gemini') standardUrl = 'https://gemini.google.com/app';
-              }
-              // Merge field images with globally selected images if any
-              const finalImages = [...(selectedImages || []), ...fieldImagesBase64];
-              return { url: standardUrl, autoSubmit: { kind, prompt: promptForAutoSubmit, images: finalImages } };
-            }
-          }
-          return newUrl;
-        })
-        .filter(Boolean);
-
-      // 2. Process Links
-      const finalLinks = (activeCollection.links || [])
-        .map((link: any) => {
-          let url = link.url || '';
-          const hasExplicitQueryField = collectionFields.some((field: any) => field.key === 'query');
-          collectionFields.forEach(f => {
-            const regex = new RegExp(`(?:\\\\{|\\\\[|%7B)${f.key}(?:\\\\}|\\\\]|%7D)`, 'gi');
-            url = url.replace(regex, encodeURIComponent(f.value));
-            if (f.key === 'query' || (!hasExplicitQueryField && f.key === 'prompt1')) {
-              url = url.replace(/\{query\}/gi, encodeURIComponent(f.value));
-              url = url.replace(/\[query\]/gi, encodeURIComponent(f.value));
-            }
-          });
-          return url;
-        })
-        .filter(Boolean);
-
-      // 3. Process Automations
-      (activeCollection.automations || []).forEach((auto: any) => {
-        const inputs: Record<string, string> = {};
-        const scopedInputsByStep = new Map<number, Record<string, string>>();
-        const constantInputs = activeCollection.constantInputs || {};
-
-        Object.entries(constantInputs).forEach(([key, value]) => {
-          if (typeof value === 'string' && value.trim() !== '') {
-            inputs[key] = value;
-          }
-        });
-
-        if (typeof window !== 'undefined' && (window as any).__LAST_TYPED_SEARCH_QUERY__) {
-          const typedText = (window as any).__LAST_TYPED_SEARCH_QUERY__;
-          if (!inputs['content']) inputs['content'] = typedText;
-          if (!inputs['query']) inputs['query'] = typedText;
-        }
-
-        // Populate inputs: combine multiple values within same (step, sourceVariable) pair with spaces
-        const fieldsByStepAndVar = new Map<string, SearchbarAutomationField[]>();
-
-        collectionFields.forEach((f, idx) => {
-
-        });
-
-        collectionFields.forEach(f => {
-          if (typeof f.sourceStepIndex === 'number' && f.sourceVariable) {
-            const key = `${f.sourceStepIndex}:${f.sourceVariable}`;
-            if (!fieldsByStepAndVar.has(key)) {
-              fieldsByStepAndVar.set(key, []);
-            }
-            fieldsByStepAndVar.get(key)!.push(f);
-            return;
-          }
-          if (f.value && typeof f.value === 'string' && f.value.trim() !== '') {
-            inputs[f.key] = f.value;
-          }
-        });
-
-
-        fieldsByStepAndVar.forEach((fields, key) => {
-
-        });
-
-        // Combine fields that share the same step and sourceVariable
-        fieldsByStepAndVar.forEach((fieldsWithSameVar, compositeKey) => {
-          const [stepIndex, sourceVariable] = compositeKey.split(':');
-          const step = parseInt(stepIndex, 10);
-
-
-          const combinedValue = fieldsWithSameVar
-            .map((f, i) => {
-
-              return f.value;
-            })
-            .filter(v => v && String(v).trim() !== '')
-            .join(' ');
-
-
-
-          if (combinedValue) {
-            const scoped = scopedInputsByStep.get(step) || {};
-            scoped[sourceVariable] = combinedValue;
-            scopedInputsByStep.set(step, scoped);
-          }
-        });
-
-        // Add fallbacks
-        const hasQuery = inputs['query'] !== undefined;
-        const hasPrompt1 = inputs['prompt1'] !== undefined;
-
-        if (hasQuery) {
-          if (!inputs['content']) inputs['content'] = inputs['query'];
-          if (!inputs['prompt']) inputs['prompt'] = inputs['query'];
-        } else if (hasPrompt1) {
-          if (!inputs['content']) inputs['content'] = inputs['prompt1'];
-          if (!inputs['query']) inputs['query'] = inputs['prompt1'];
-          if (!inputs['prompt']) inputs['prompt'] = inputs['prompt1'];
-        }
-
-        collectionFields.forEach(f => {
-          if (f.key.startsWith('prompt') && !inputs[f.key.replace('prompt', 'paste')]) {
-            inputs[f.key.replace('prompt', 'paste')] = f.value;
-          } else if (f.key.startsWith('paste') && !inputs[f.key.replace('paste', 'prompt')]) {
-            inputs[f.key.replace('paste', 'prompt')] = f.value;
-          }
-        });
-
-        // Don't build pasteStepInputMap - use scopedInputsByStep instead which has ALL fields per step
-        // (pasteStepInputMap was incomplete and only stored one field per step)
-
-        // Recursive step processor that handles sub_automations, agents, and normal steps
-        const processSteps = (steps: any[]): any[] => {
-          return steps.map((step: any, stepIndex: number) => {
-            const newConfig = { ...step.config };
-
-            // For agent steps: inject the resolved prompt value and collected images
-            if (step.moduleId === 'agent') {
-              if (newConfig.prompts && newConfig.prompts.length > 0) {
-                const promptValues = newConfig.prompts
-                  .map((p: any) => (inputs[p.key] !== undefined ? inputs[p.key] : ''))
-                  .filter((v: string) => v.trim() !== '');
-                if (promptValues.length > 0) {
-                  newConfig.promptValue = promptValues.join('\n\n');
-                }
-              } else {
-                const promptLabel = newConfig.promptLabel || '';
-                if (promptLabel && inputs[promptLabel] !== undefined) {
-                  newConfig.promptValue = inputs[promptLabel];
-                }
-              }
-              // If the agent supports images, pass the collected images
-              if (newConfig.supportImage) {
-                newConfig.images = fieldImagesBase64;
-              }
-            }
-
-            // For paste steps: map scoped inputs directly to content
-            if (step.moduleId === 'paste') {
-              const scopedInputs = scopedInputsByStep.get(stepIndex) || {};
-              const paramKey = newConfig.paramKey || 'content';
-              if (scopedInputs[paramKey] !== undefined) {
-                newConfig.content = scopedInputs[paramKey];
-              } else if (inputs[paramKey] !== undefined) {
-                newConfig.content = inputs[paramKey];
-              } else if (inputs['content'] !== undefined) {
-                newConfig.content = inputs['content'];
-              } else if (inputs['query'] !== undefined) {
-                newConfig.content = inputs['query'];
-              } else {
-                // Fallback 1: Check if there is ANY scoped input for this specific step
-                const scopedValues = Object.values(scopedInputs).filter(v => typeof v === 'string' && v.trim() !== '');
-                if (scopedValues.length > 0) {
-                  newConfig.content = scopedValues[0];
-                } else {
-                  // Fallback 2: If only one text input was provided across all fields, use it as paste content
-                  const providedValues = Object.values(inputs).filter(v => typeof v === 'string' && v.trim() !== '');
-                  if (providedValues.length === 1) {
-                    newConfig.content = providedValues[0];
-                  }
-                }
-              }
-            }
-
-            // For sub_automation steps: recursively process their child steps
-            if (step.moduleId === 'sub_automation' && Array.isArray(newConfig.steps)) {
-              newConfig.steps = processSteps(newConfig.steps);
-            }
-
-            // For cloud modules: ensure input values are placed into config root for the executor
-            if (newConfig.isCloudModule) {
-              // Inject images if any were collected from fields
-              if (fieldImagesBase64.length > 0) {
-                newConfig.images = fieldImagesBase64;
-              }
-
-              // Also ensure direct values are mapped if they exists in inputs
-              if (Array.isArray(newConfig.variables)) {
-                newConfig.variables.forEach((v: any) => {
-                  const vk = v.key || v.name;
-                  if (vk && inputs[vk] !== undefined) {
-                    newConfig[vk] = inputs[vk];
-                  }
-                });
-              }
-
-              const resolvedCloudInputs = resolveCloudModuleInputValues(
-                {
-                  ...step,
-                  config: newConfig,
-                },
-                inputs,
-                stepIndex,
-              );
-
-              Object.assign(newConfig, resolvedCloudInputs);
-            }
-
-            // Substitute {variable} patterns in all string config values
-            Object.keys(newConfig).forEach(key => {
-              let val = newConfig[key];
-              if (typeof val === 'string') {
-                const scopedInputs = scopedInputsByStep.get(stepIndex) || {};
-
-
-
-                // Handle both simple {variable}, encoded %7Bvariable%7D, and typed {type:paramName} formats
-                val = val.replace(/(?:\{|%7B)([^}%]+)(?:\}|%7D)/gi, (match: string, content: string) => {
-                  // Check if it's a typed format like "text:input1" or "text%3Ainput1"
-                  let colonIndex = content.indexOf(':');
-                  let paramName = content;
-                  if (colonIndex !== -1) {
-                    paramName = content.substring(colonIndex + 1);
-                  } else {
-                    const pctColonIndex = content.indexOf('%3A');
-                    if (pctColonIndex !== -1) {
-                      paramName = content.substring(pctColonIndex + 3);
-                    } else {
-                      const lowerPctColonIndex = content.indexOf('%3a');
-                      if (lowerPctColonIndex !== -1) {
-                        paramName = content.substring(lowerPctColonIndex + 3);
-                      }
-                    }
-                  }
-
-                  let resolvedValue = '';
-                  if (scopedInputs[paramName] !== undefined) {
-                    resolvedValue = scopedInputs[paramName];
-                  } else if (inputs[paramName] !== undefined) {
-                    resolvedValue = inputs[paramName];
-                  } else {
-                    // Fallback 1: If the variable name in the template doesn't match any input key,
-                    // but there's exactly ONE scoped input provided for this step, use it!
-                    const scopedValues = Object.values(scopedInputs).filter(
-                      v => typeof v === 'string' && v.trim() !== '',
-                    );
-                    if (scopedValues.length === 1) {
-                      resolvedValue = scopedValues[0];
-                    } else {
-                      // Fallback 2: Check global inputs for a single value
-                      const globalValues = Object.values(inputs).filter(v => typeof v === 'string' && v.trim() !== '');
-                      if (globalValues.length === 1) {
-                        resolvedValue = globalValues[0];
-                      } else {
-                        return match; // Keep the original token if no value found
-                      }
-                    }
-                  }
-
-                  // If matched using %7B / %7D, URL encode the resolved value
-                  if (match.startsWith('%') || match.startsWith('%7b') || match.startsWith('%7B')) {
-                    return encodeURIComponent(resolvedValue);
-                  }
-                  return resolvedValue;
-                });
-
-                // Fix: Add spaces between consecutive values that were pasted back-to-back
-                // This handles templates like {input1}{input2} with multiple defined inputs
-                // If all scopedInputs values exist and their concatenation matches val, add spaces
-                const definedInputValues = Object.entries(scopedInputs)
-                  .map(([_, v]) => v)
-                  .filter(v => v && typeof v === 'string');
-                if (definedInputValues.length > 1 && val === definedInputValues.join('')) {
-                  val = definedInputValues.join(' ');
-
-                }
-
-
-                newConfig[key] = val;
-              }
-            });
-
-            return { ...step, config: newConfig };
-          });
-        };
-
-        const processedSteps = processSteps(auto.steps);
-
-        chrome.runtime.sendMessage({
-          action: 'run_automation',
-          automation: { ...auto, steps: processedSteps },
-        });
-      });
-
-      openUrls(
-        [...finalAgents, ...finalLinks],
-        activeCollection.item.title || activeCollection.item.name || 'Collection',
-      );
-      resetAfterCommandExecution();
-    }, [activeCollection, openUrls, selectedImages, resetAfterCommandExecution]);
-
-    const renderMentionedTabs = () => {
-      if (!mentionedTabs || mentionedTabs.length === 0) return null;
-
-      return mentionedTabs.map((tab, idx) => {
-        return (
-          <div
-            key={`tab-prefix-${tab.tabId}`}
-            className={`flex items-center gap-1.5 mr-1 ${''
-              } border rounded-lg px-2 py-0.5 shadow-sm`}>
-            <div className="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0">
-              {tab.favIconUrl ? (
-                <img
-                  src={tab.favIconUrl}
-                  alt=""
-                  className="w-3.5 h-3.5 object-contain rounded-sm"
-                  onError={e => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
-              ) : (
-                <FaGlobe size={11} className="text-blue-500" />
-              )}
-            </div>
-            <span
-              className={`text-xs ${''
-                } font-medium max-w-[100px] truncate`}>
-              {tab.title}
-            </span>
-            <button
-              type="button"
-              onClick={e => {
-                e.preventDefault();
-                e.stopPropagation();
-                setMentionedTabs(prev => prev.filter(t => t.tabId !== tab.tabId));
-              }}
-              className="text-red-300 hover:text-red-400 ml-0.5 cursor-pointer">
-              <FaTimes size={8} />
-            </button>
-          </div>
-        );
-      });
-    };
+    const FILTER_CHIP_RESERVED_WIDTH = 96;
 
     const renderPrimaryPrefix = () => {
       if (hideDynamicIcon) return null;
@@ -6338,8 +4993,9 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           <div
             ref={prefixRef}
             className={`flex items-center gap-1.5 mr-2 border-[1.5px] rounded-lg px-2 py-0.5 shadow-sm ${''
-              }`}>
-            <span className={`text-xs  font-medium`}>
+              }`}
+            style={{ width: `${FILTER_CHIP_RESERVED_WIDTH}px` }}>
+            <span className={`text-xs font-medium truncate min-w-0 flex-1 text-center`}>
               {label}
             </span>
             <button
@@ -6359,8 +5015,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         );
       }
 
-
-      if (pendingQueryUrls && pendingQueryUrls.length > 0) {
+if (pendingQueryUrls && pendingQueryUrls.length > 0) {
         const firstUrl = pendingQueryUrls[0];
         return (
           <div
@@ -6416,56 +5071,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         );
       }
 
-      // Integrated Automation Identity Layer (Tier 1)
-      if (activeCollection) {
-        const item = activeCollection.item;
-        const automationName = item?.name || item?.title || 'Automation';
-        const ariaLabel = item?.title || item?.name || 'Automation';
-        const focusedIndex = activeCollection.focusedFieldIndex !== -1 ? activeCollection.focusedFieldIndex : 0;
-        const focusedField = activeCollection.fields[focusedIndex] as any;
-        const focusedFieldLabel = focusedField?.label || '';
 
-        return (
-          <div
-            ref={prefixRef}
-            className={`flex flex-col gap-1 px-3 py-1.5 border rounded-lg pointer-events-auto transform transition-all duration-200 min-w-[120px] ${''
-              }`}>
-            {/* Row 1: Identity (Icon + Name + X) */}
-            <div className="flex items-center justify-between w-full gap-3 min-w-max">
-              <div className="flex items-center gap-2">
-                <div className="w-4.5 h-4.5 flex items-center justify-center shrink-0">
-                  <AutomationDynamicIcon automation={item.automation || item} size={16} />
-                </div>
-                <span
-                  className={`text-[12px]  font-bold whitespace-nowrap`}>
-                  {automationName}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={e => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setActiveCollection(null);
-                }}
-                className={`cursor-pointer p-0.5 rounded-md transition-all ${''
-                  }`}
-                title="Exit Automation">
-                <FaTimes size={10} />
-              </button>
-            </div>
-            {/* Row 2: Focus Label */}
-            {focusedFieldLabel && (
-              <div className="flex items-center w-full">
-                <span
-                  className={`text-[11px]  font-semibold truncate`}>
-                  {focusedFieldLabel}
-                </span>
-              </div>
-            )}
-          </div>
-        );
-      }
 
       // Show @ command chip when a command is selected via @
       if (selectedAtCommand) {
@@ -6720,6 +5326,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                           isMac={typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0}
                           savedAgents={savedAiAgents}
                           onSaveAgent={onSaveAgent || (() => { })}
+                          compact={!theme.isDark}
                         />
                       </div>
                     </div>
@@ -6733,7 +5340,13 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                   e.stopPropagation();
                   exitCommandMode();
                 }}
-                className={`text-red-300 hover:text-red-400 ml-1 cursor-pointer transition-opacity ${id === 'ai' ? 'opacity-0 group-hover:opacity-100' : ''}`}>
+                className={
+                  !theme.isDark
+                    ? 'ml-1 flex h-5 w-5 items-center justify-center rounded-full opacity-100 text-[var(--color-accent)] hover:text-[var(--color-accentHover)] hover:bg-[var(--color-hoverBg)] transition-colors cursor-pointer'
+                    : `text-red-300 hover:text-red-400 ml-1 cursor-pointer transition-opacity ${id === 'ai' ? 'opacity-0 group-hover:opacity-100' : ''}`
+                }
+                aria-label="Exit AI models mode"
+                title="Exit AI models mode">
                 <LuX size={12} strokeWidth={2.5} />
               </button>
             </div>
@@ -6768,40 +5381,20 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                   e.stopPropagation();
                   exitCommandMode();
                 }}
-                className={`text-red-400 hover:text-red-500 ml-1 cursor-pointer transition-opacity opacity-0 group-hover:opacity-100 flex items-center justify-center w-4 h-4 rounded-full hover:bg-red-500/10`}>
+                className={
+                  !theme.isDark
+                    ? 'ml-1 flex h-5 w-5 items-center justify-center rounded-full opacity-100 text-[var(--color-accent)] hover:text-[var(--color-accentHover)] hover:bg-[var(--color-hoverBg)] transition-colors cursor-pointer'
+                    : `text-red-400 hover:text-red-500 ml-1 cursor-pointer transition-opacity opacity-0 group-hover:opacity-100 flex items-center justify-center w-4 h-4 rounded-full hover:bg-red-500/10`
+                }
+                aria-label="Exit AI models mode"
+                title="Exit AI models mode">
                 <LuX size={12} strokeWidth={2.5} />
               </button>
             </div>
           );
         }
 
-        if (id === 'store') {
-          return (
-            <div
-              ref={prefixRef}
-              className={`flex items-center gap-1.5 mr-2 ${''
-                } border rounded-lg px-2 py-0.5`}>
-              <div className="w-4 h-4 flex items-center justify-start">
-                <FaRobot size={12} className="text-[var(--color-iconDefault)]" />
-              </div>
-              <span className={`text-xs  font-medium`}>
-                Automation Store
-              </span>
-              <button
-                type="button"
-                onClick={e => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  exitCommandMode();
-                }}
-                className="text-red-300 hover:text-red-400 ml-0.5 cursor-pointer">
-                <FaTimes size={10} />
-              </button>
-            </div>
-          );
-        }
-
-        if (isLocalCommandId(id as string)) {
+if (isLocalCommandId(id as string)) {
           const localDef = LOCAL_COMMANDS.find(c => c.id === (id as LocalCommandId));
           const customIcon = localDef?.icon;
           return (
@@ -6880,9 +5473,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         }
       }
 
-
-
-      // When typing an @ command and the menu is open, show highlighted command's icon
+// When typing an @ command and the menu is open, show highlighted command's icon
       if (showAtCommandMenu) {
         const highlightedCmd = filteredAtCommands[atCommandHighlightIndex];
         if (highlightedCmd) {
@@ -6970,7 +5561,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
             if (cmdId === 'google') {
               return (
                 <div ref={prefixRef} className="w-5 h-5 flex items-center justify-start">
-                  <FaSearch size={14} className="text-black dark:text-white" />
+                  <FaSearch size={14} className="text-[var(--color-iconDefault)]" />
                 </div>
               );
             }
@@ -7076,13 +5667,9 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
       return (
         <div ref={prefixRef} className="w-5 h-5 flex items-center justify-start">
-          <FaSearch size={14} className="text-black dark:text-white" />
+          <FaSearch size={14} className="text-[var(--color-iconDefault)]" />
         </div>
       );
-    };
-
-    const renderPrefix = () => {
-      return <>{renderPrimaryPrefix()}</>;
     };
 
     type SearchbarAutomationField = {
@@ -7105,23 +5692,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       order?: number;
       sourceVariable?: string;
       sourceStepIndex?: number;
-    };
-
-    const formatAutomationFieldLabel = (value: string) => {
-      // Detect CSS selector patterns (e.g., data-qa="texty_input", #myId, .myClass, [attr="val"])
-      const looksLikeSelector = /[=\[\]#"]/.test(value) || /^\.[\w-]/.test(value) || /^data-/.test(value);
-
-      if (looksLikeSelector) {
-        return 'Input';
-      }
-
-      return (
-        value.charAt(0).toUpperCase() +
-        value
-          .slice(1)
-          .replace(/([A-Z0-9])/g, ' $1')
-          .trim()
-      );
     };
 
     const mergeAutomationInputDefinitions = (
@@ -7188,12 +5758,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       });
     };
 
-    const getInputStyleFromType = (rawType?: string | null): 'short_text' | 'long_text' | undefined => {
-      if (!rawType) return undefined;
-      if (rawType === 'short_text' || rawType === 'long_text') return rawType;
-      return undefined;
-    };
-
     const normalizeAutomationFieldType = (rawType?: string | null): 'text' | 'image' | 'dropdown' => {
       if (rawType === 'image') return 'image';
       if (rawType === 'dropdown') return 'dropdown';
@@ -7245,6 +5809,29 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
       if (Array.isArray(steps)) scanSteps(steps);
       return constants;
+    };
+
+    const formatAutomationFieldLabel = (value: string) => {
+      // Detect CSS selector patterns (e.g., data-qa="texty_input", #myId, .myClass, [attr="val"])
+      const looksLikeSelector = /[=\[\]#"]/.test(value) || /^\.[\w-]/.test(value) || /^data-/.test(value);
+
+      if (looksLikeSelector) {
+        return 'Input';
+      }
+
+      return (
+        value.charAt(0).toUpperCase() +
+        value
+          .slice(1)
+          .replace(/([A-Z0-9])/g, ' $1')
+          .trim()
+      );
+    };
+
+    const getInputStyleFromType = (rawType?: string | null): 'short_text' | 'long_text' | undefined => {
+      if (!rawType) return undefined;
+      if (rawType === 'short_text' || rawType === 'long_text') return rawType;
+      return undefined;
     };
 
     const buildInputTypeHints = (steps: any[]): Map<string, 'short_text' | 'long_text'> => {
@@ -7400,8 +5987,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       // Changed: Image preview moved to right side. This function now returns null for image preview.
       if (selectedImages.length > 0) return null;
 
-
-      if (pendingQueryUrls && pendingQueryUrls.length > 0) {
+if (pendingQueryUrls && pendingQueryUrls.length > 0) {
         const firstUrl = pendingQueryUrls[0];
         return (
           <div className="flex items-center gap-1.5 pl-3">
@@ -7428,8 +6014,9 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           return displayAIs.length > 0 ? 18 + (displayAIs.length - 1) * 14 : 0;
         }
       }
+      if (activeSlashFilter) return FILTER_CHIP_RESERVED_WIDTH;
       return prefixWidth;
-    }, [allSuggestions, lockedCommand, value, highlightIndex, selectedAIs, prefixWidth]);
+    }, [allSuggestions, lockedCommand, value, highlightIndex, selectedAIs, activeSlashFilter, prefixWidth]);
 
     const hasFilterChip = value.match(/^\/(a|n|s|p|l|c|b|t|se|au|ca|sc)(\s|\u00A0)/i);
     const inputLeftPaddingPx =
@@ -7440,9 +6027,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           : dynamicFallbackPadding) +
       (mentionedTabs && mentionedTabs.length > 0 && mentionedTabsWidth > 0 ? mentionedTabsWidth + 12 : 0);
 
-
-
-    const selectedLocalLabel = useMemo(() => {
+const selectedLocalLabel = useMemo(() => {
       if (!lockedCommand && selectedCommand?.commandType === 'local') {
         if (selectedCommand.id === 'createnotes' || selectedCommand.id === 'createlinks' || selectedCommand.id === 'createsession') {
           return null;
@@ -7497,7 +6082,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       const hasOpenUrl = openUrlSuggestion !== null;
 
       if (lockedCommand) {
-        console.log('[searchBar.renderMode] lockedCommand is set, returning null');
         return null;
       }
 
@@ -7505,18 +6089,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
       const hasMultipleTypes =
         [hasCommands, hasWorkspaceItems, hasHistory, hasBookmarks, hasCommon, hasOpenUrl].filter(Boolean).length > 1;
-
-      console.log('[searchBar.renderMode] DEBUG:', {
-        hasCommands,
-        hasWorkspaceItems,
-        hasHistory,
-        hasBookmarks,
-        hasCommon,
-        hasOpenUrl,
-        hasMultipleTypes,
-        commandSuggestionsLength: commandSuggestions.length,
-        commandSuggestionsKinds: commandSuggestions.map((c: any) => c._kind)
-      });
 
       if (hasMultipleTypes) return 'mixed';
 
@@ -7537,26 +6109,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       commonCommandSuggestions,
       openUrlSuggestion,
     ]);
-
-    useEffect(() => {
-      const raw = `${activeSlashFilter ? `/${activeSlashFilter} ` : ''}${value}`.trim();
-      if (!/^(?:c\s+sc|\/sc)/i.test(raw)) return;
-
-      console.log('[SystemCommandsDebug][NewTab] search state', JSON.stringify({
-        visibleInput: value,
-        activeSlashFilter,
-        reconstructedQuery: raw,
-        commandSuggestionsCount: commandSuggestions.length,
-        commandSuggestions: commandSuggestions.slice(0, 30).map((item: any) => ({
-          id: item.id || item.command?.id,
-          label: item.label || item.command?.label,
-          prefix: item.prefix || item.command?.prefix,
-          kind: item._kind,
-        })),
-        allSuggestionsCount: allSuggestions.length,
-        suggestionMode,
-      }));
-    }, [activeSlashFilter, allSuggestions, commandSuggestions, suggestionMode, value]);
 
     const hasFocus = isFocused || isInlineFocused;
     const isSuggestionVisible = useMemo(() => {
@@ -7597,7 +6149,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       // showAIHistoryPanel is now rendered as a popup internal to Searchbar to ensure visibility
       // return showAIHistoryPanel ? true : ...
 
-      return (value.trim().length > 0 || selectedImages.length > 0 || isInitialAltSFocus || keepBoardViewOpen) && !inlineComposerActive;
+      return (value.trim().length > 0 || selectedImages.length > 0 || isInitialAltSFocus || keepBoardViewOpen || showEmptySlashDropdown) && !inlineComposerActive;
     }, [
       value,
       isFocused,
@@ -7611,6 +6163,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       activeCollection,
       showAIHistoryPanel,
       isInitialAltSFocus,
+      showEmptySlashDropdown,
     ]);
 
     useEffect(() => {
@@ -7620,9 +6173,9 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           selectionSourceRef.current = null;
           setSelectedCommand(null);
         }
-        setContextualMatches([]);
-        setIsContextualPopupOpen(false);
-        setContextualPopupIndex(-1);
+        setContextualMatches(prev => (prev.length > 0 ? [] : prev));
+        setIsContextualPopupOpen(prev => (prev ? false : prev));
+        setContextualPopupIndex(prev => (prev !== -1 ? -1 : prev));
         return;
       }
 
@@ -7672,7 +6225,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       const nextPopupOpen = allMatches.length > 0;
       setIsContextualPopupOpen(prev => (prev === nextPopupOpen ? prev : nextPopupOpen));
       if (!nextPopupOpen) {
-        setContextualPopupIndex(-1);
+        setContextualPopupIndex(prev => (prev !== -1 ? -1 : prev));
       }
     }, [
       value,
@@ -7694,33 +6247,118 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         const selected =
           allSuggestions.length > 0 ? allSuggestions[Math.min(highlightIndex, allSuggestions.length - 1)] : null;
 
-        // Check database-defined custom shortcuts first
-        if (trimmedValue.startsWith('/')) {
-          const firstSpaceIndex = trimmedValue.indexOf(' ');
-          const typedShortcut = firstSpaceIndex !== -1 ? trimmedValue.substring(0, firstSpaceIndex).toLowerCase() : trimmedValue.toLowerCase();
-          const remainingPrompt = firstSpaceIndex !== -1 ? trimmedValue.substring(firstSpaceIndex + 1).trim() : '';
-
+        // Check database-defined custom shortcuts first. This intentionally treats
+        // `recording`, `/recording`, and `c recording` as the same assigned trigger.
+        const parsedShortcut = parseShortcutInvocation(
+          trimmedValue,
+          customOmniboxPrefixesRef.current || customOmniboxPrefixes,
+        );
+        if (parsedShortcut.trigger) {
           const matchedDbShortcut = userDbShortcuts?.find(
-            (s: any) => s.trigger.toLowerCase() === typedShortcut
+            (s: any) =>
+              String(s.trigger || '').toLowerCase() === parsedShortcut.trigger &&
+              matchesShortcutCategory(String(s.referenceType || ''), parsedShortcut.categoryFilter),
           );
 
           if (matchedDbShortcut) {
 
             const { referenceId, referenceType } = matchedDbShortcut;
+            const resolveShortcutTargetLabel = () => {
+              const refId = String(referenceId);
+              const shortcutAny = matchedDbShortcut as any;
+              const shortcutLabel =
+                shortcutAny.targetLabelSnapshot ||
+                shortcutAny.targetLabel ||
+                shortcutAny.referenceLabel ||
+                shortcutAny.label ||
+                shortcutAny.title ||
+                shortcutAny.name;
+              if (shortcutLabel && String(shortcutLabel) !== refId) return String(shortcutLabel);
+
+              if (referenceType === 'command') {
+                const command = getCommandById(refId) as any;
+                return command?.label || command?.title || command?.name || refId;
+              }
+
+              if (referenceType === 'automation') {
+                const automation: any = automationSuggestions.find((a: any) => String(a.id) === refId);
+                return automation?.title || automation?.name || automation?.label || refId;
+              }
+
+              if (referenceType === 'module') {
+                const rawId = refId;
+                const normalizedId = rawId.includes(':') ? rawId.split(':')[1] : rawId.replace(/^module-/, '');
+                const moduleFromState: any = moduleSuggestions.find(m => String(m.module_id) === normalizedId);
+                return moduleFromState?.title || moduleFromState?.name || moduleFromState?.displayName || moduleFromState?.module_id || refId;
+              }
+
+              const suggestion: any = allSuggestions.find((item: any) => {
+                const itemId = item?.id || item?.item?.id || item?.item?.snippet_id || item?.snippet_id;
+                return String(itemId || '') === refId;
+              });
+              const suggestionItem = suggestion?.item || suggestion;
+              return suggestionItem?.title || suggestionItem?.name || suggestionItem?.label || suggestionItem?.key || refId;
+            };
+            const recordShortcutUse = (success = true, errorCode?: string) => {
+              recordAssignedTriggerUsage({
+                triggerKind: 'user_shortcut',
+                triggerValue: matchedDbShortcut.trigger,
+                triggerSource: parsedShortcut.triggerSource,
+                referenceId,
+                referenceType,
+                surface: 'main_search',
+                success,
+                errorCode,
+                targetLabelSnapshot: resolveShortcutTargetLabel(),
+                triggerLabelSnapshot: matchedDbShortcut.trigger,
+              }).catch((err: any) => console.warn('[Searchbar] Failed to record shortcut usage:', err));
+            };
+            const runOrEditMatchedAiPrompt = async (promptRecord: any) => {
+              resetAfterCommandExecution();
+              if (!hasRunnableAiPrompt(promptRecord)) {
+                useUIStore.getState().openEditor({ type: 'aiPrompt', id: String(promptRecord.id) });
+                recordShortcutUse();
+                return;
+              }
+
+              try {
+                await runAiPrompt(promptRecord);
+                recordShortcutUse();
+              } catch (error) {
+                console.error('[Searchbar] Failed to run AI prompt shortcut:', error);
+                recordShortcutUse(false, 'execution_failed');
+              }
+            };
+            const normalizedShortcutReferenceType = String(referenceType || '').toLowerCase();
 
             if (referenceType === 'command') {
               resetAfterCommandExecution();
               if (referenceId === 'create') {
                 handleLocalCommandExecute('create' as any);
+                recordShortcutUse();
                 return;
               }
-              activateCommandById(referenceId as AnyCommandId, remainingPrompt);
+              activateCommandById(referenceId as AnyCommandId, parsedShortcut.remainingInput);
+              recordShortcutUse();
               return;
             }
 
             if (referenceType === 'note' || referenceType === 'snippet' || referenceType === 'link') {
               resetAfterCommandExecution();
               useUIStore.getState().openEditor({ type: referenceType as any, id: referenceId });
+              recordShortcutUse();
+              return;
+            }
+
+            if (['aiprompt', 'ai_prompt', 'prompt'].includes(normalizedShortcutReferenceType)) {
+              const promptRecord = useDbStore
+                .getState()
+                .aiPrompts.find((prompt: any) => String(prompt.id) === String(referenceId));
+              if (promptRecord) {
+                await runOrEditMatchedAiPrompt(promptRecord);
+              } else {
+                recordShortcutUse(false, 'entity_not_found');
+              }
               return;
             }
 
@@ -7729,8 +6367,20 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
               if (automation) {
                 resetAfterCommandExecution();
                 handleAutomationSelect(automation);
+                recordShortcutUse();
                 return;
               }
+
+              // Older Board-created AI Prompt shortcuts were stored as "automation".
+              const legacyPromptRecord = useDbStore
+                .getState()
+                .aiPrompts.find((prompt: any) => String(prompt.id) === String(referenceId));
+              if (legacyPromptRecord) {
+                await runOrEditMatchedAiPrompt(legacyPromptRecord);
+                return;
+              }
+              recordShortcutUse(false, 'entity_not_found');
+              return;
             }
 
             if (referenceType === 'module') {
@@ -7740,6 +6390,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
               const moduleFromState = moduleSuggestions.find(m => String(m.module_id) === normalizedId);
               if (moduleFromState) {
                 handleAutomationSelect(buildAutomationFromModule(moduleFromState));
+                recordShortcutUse();
                 return;
               }
               const chromeAny = (window as any)?.chrome;
@@ -7749,6 +6400,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                   const match = modules.find((m: any) => String(m?.module_id) === normalizedId);
                   if (match) {
                     handleAutomationSelect(buildAutomationFromModule(match));
+                    recordShortcutUse();
                   }
                 });
               }
@@ -7839,9 +6491,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
             )
             : undefined;
 
-
-
-        if (trimmedValue || trimmedPrompt || lockedCommand || selected || selectedCommand) {
+if (trimmedValue || trimmedPrompt || lockedCommand || selected || selectedCommand) {
 
         }
 
@@ -8085,7 +6735,13 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
             return;
           }
 
+          if (selected._kind === 'command' && (selected as any).commandType === 'proxy' && (selected as any).proxyEntity) {
+            activateWorkspaceItemSuggestion((selected as any).proxyEntity);
+            return;
+          }
+
           if (selected._kind === 'command' && selected.commandType === 'local') {
+            recordSelectedShortcutUsage(selected);
             const def = selected.command;
             if (def.behavior === 'instant') {
               // Special case: Calendar command requires input
@@ -8106,6 +6762,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
             selected._kind === 'command' &&
             (selected.commandType === 'remote' || selected.commandType === 'aggregate')
           ) {
+            recordSelectedShortcutUsage(selected);
             // Check for instant browser commands
             if (selected.commandType === 'remote' && selected.command) {
               const isBrowserInstant =
@@ -8343,8 +7000,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         const fallbackRemaining =
           fallbackSpaceIndex !== -1 ? trimmedValue.substring(fallbackSpaceIndex + 1).trim() : '';
 
-
-        if (!cmdToken) {
+if (!cmdToken) {
           const pattern = new RegExp(`^\\/?(${tokenSet.map(escapeRegExp).join('|')})(?=$|\\s|:)`, 'i');
           const match = trimmedValue.match(pattern);
           if (match) {
@@ -8461,15 +7117,22 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         value,
         commandPrompt,
         allSuggestions,
+        automationSuggestions,
+        customOmniboxPrefixes,
+        getCommandById,
         highlightIndex,
+        handleAutomationSelect,
         selectedCommand,
         lockedCommand,
+        moduleSuggestions,
+        userDbShortcuts,
         selectedAtCommand,
         commands,
         expandPrompts,
         runRemoteCommand,
         runAggregateCommand,
         resetAfterCommandExecution,
+        recordSelectedShortcutUsage,
         bookmarkSuggestions,
         lockedLocalDef,
         inlineComposerActive,
@@ -8654,6 +7317,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       fileInputRef,
       activeSlashFilter,
       setActiveSlashFilter,
+      slashFilterMeta,
       onQueryChange,
       activeCollection,
       lockedCommand,
@@ -8732,6 +7396,46 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       });
       return unregister;
     }, [showAtCommandMenu]);
+
+    const dismissSlashDropdown = useCallback(
+      (options?: { clearQuery?: boolean; blur?: boolean }) => {
+        setShowEmptySlashDropdown(false);
+        setKeepBoardViewOpen(false);
+
+        if (options?.clearQuery) {
+          setValueRaw('');
+          setActiveSlashFilter(null);
+          if (inputRef.current) {
+            try {
+              inputRef.current.innerHTML = '';
+              inputRef.current.innerText = '';
+            } catch (e) {
+              console.error('[SearchBar] Error clearing contentEditable in dismissSlashDropdown:', e);
+            }
+          }
+          onQueryChange?.('');
+        }
+
+        if (options?.blur) {
+          inputRef.current?.blur();
+        }
+      },
+      [onQueryChange],
+    );
+
+    useEffect(() => {
+      const isSlashActive = Boolean(showEmptySlashDropdown || (value && value.startsWith('/')));
+      if (!isSlashActive) return;
+
+      const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
+        if (isInitialAltSFocus && onInitialAltSFocusChange) {
+          onInitialAltSFocusChange(false);
+        }
+        dismissSlashDropdown({ clearQuery: true, blur: false });
+        return true;
+      });
+      return unregister;
+    }, [showEmptySlashDropdown, value, isInitialAltSFocus, onInitialAltSFocusChange, dismissSlashDropdown]);
 
     useEffect(() => {
       if (!lockedCommand && !isInitialAltSFocus) return;
@@ -8834,10 +7538,25 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
 
       const newState: SuggestionState = {
         isVisible: isSuggestionVisible,
+        showEmptySlashDropdown: Boolean(showEmptySlashDropdown && !value.trim()),
+        onDismissSlashDropdown: dismissSlashDropdown,
+        onSlashSuggestionSelect: (actionId: 'ai' | 'collections') => {
+          dismissSlashDropdown({ clearQuery: true, blur: false });
+          setValue('');
+          setHighlightIndex(-1);
+          if (actionId === 'ai') {
+            setLockedCommand('ai');
+            requestAnimationFrame(() => {
+              inputRef.current?.focus();
+            });
+          } else if (actionId === 'collections') {
+            onCommandExecute?.('collections' as any);
+          }
+        },
         suggestions: allSuggestions,
         highlightIndex,
         mode: suggestionMode,
-        value: inlineComposerActive && lockedCommand !== 'ai' ? commandPrompt : value,
+        value: inlineComposerActive && lockedCommand !== 'ai' ? commandPrompt : (showEmptySlashDropdown ? value : searchbarSuggestionValue),
         lockedCommand,
         onCommandMouseDown: handleCommandMouseDown,
         onHighlightIndexChange: handleHighlightIndexChange,
@@ -8901,20 +7620,15 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         isBackspacing: lastActionRef.current === 'backspace',
         isAtMenuOpen: showAtCommandMenu,
         onAgentCollectionSelect: handleAgentCollectionSelect,
-        onAutomationSelect: handleAutomationSelect,
-        onModuleSelect: (module: InstalledModule) => handleAutomationSelect(buildAutomationFromModule(module)),
         onAIHistorySelect: () => { },
         onAIHistoryPanelToggle: (show: boolean) => setShowAIHistoryPanel(show),
-        onAutomationEdit: onAutomationEdit || onRequestAutomationEdit,
         selectedImagesCount: selectedImages.length,
         isContextualPopupOpen,
         showAIHistoryPanel,
         aiHistory: [],
-        isAutomationActive: !!activeCollection,
         selectedAIs,
         onToggleAI: handleToggleAI,
         activeAiSession,
-        selectedAutomation,
         updateActiveSessionMetadata: (metadata: { name?: string; id?: string | number }) => {
           setActiveAiSession(prev => {
             if (!prev) return metadata.id ? ({ id: metadata.id, ...metadata } as any) : null;
@@ -8949,6 +7663,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       onSuggestionStateChange,
       suggestionMode,
       value,
+      searchbarSuggestionValue,
       commandPrompt,
       inlineComposerActive,
       showPromo,
@@ -8962,12 +7677,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       inlineAutocomplete,
       showAtCommandMenu,
       handleAgentCollectionSelect,
-      handleAutomationSelect,
-      buildAutomationFromModule,
       handleAIHistorySelect,
-      onAutomationSelect,
-      onAutomationEdit,
-      onRequestAutomationEdit,
       selectedImages,
       isContextualPopupOpen,
       showAIHistoryPanel,
@@ -8975,7 +7685,6 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       selectedAIs,
       handleToggleAI,
       activeAiSession,
-      selectedAutomation,
       onUpdateModelUrl,
       isAIHistoryOpen,
       onToggleAIHistory,
@@ -8984,8 +7693,9 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     useEffect(() => {
       // Notify parent of the full query state (either the main value or the command prompt if locked)
       // This ensures the parent's searchValue is always in sync, especially for clearing.
-      onQueryChange?.(inlineComposerActive ? commandPrompt : value);
-    }, [value, commandPrompt, lockedCommand, inlineComposerActive, onQueryChange]);
+      const queryToEmit = inlineComposerActive ? commandPrompt : (showEmptySlashDropdown ? value : searchbarSuggestionValue);
+      onQueryChange?.(queryToEmit);
+    }, [searchbarSuggestionValue, value, showEmptySlashDropdown, commandPrompt, lockedCommand, inlineComposerActive, onQueryChange]);
 
     useEffect(() => {
       return () => {
@@ -9058,40 +7768,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           <div
             className={`flex flex-col justify-end w-full relative ${activeCollection ? 'min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px]' : 'min-h-[48px]'}`}>
             {/* Layer 2: Action (Injected Inputs) */}
-            {activeCollection && (
-              <div className="relative w-full">
-                {/* Automation Title Heading (Above Border) */}
-                <div className="absolute bottom-full left-[12px] min-[1350px]:left-[12px] min-[1600px]:left-[14px] min-[1800px]:left-[16px] pb-2 z-20 flex items-center gap-2 pointer-events-auto">
-                  {renderPrefix()}
-                </div>
-
-                {/* Main Automation Area (Bordered Box) */}
-                <div
-                  className={`w-full py-3 rounded-t-xl bg-[var(--color-inputBg)] border border-[#aeaeae] dark:border-white/10 backdrop-blur-xl shadow-none min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px]`}
-                  style={{ paddingLeft: `${dynamicLeftOffset}px` }}>
-                  <AutomationDataEntry
-                    headless
-                    isSingleField={activeCollection.fields.length === 1}
-                    dynamicLeftOffset={0} // Padding is now handled by the parent container for perfect alignment
-                    title={activeCollection.item?.name || activeCollection.item?.title || 'Automation'}
-                    automation={activeCollection.item?.automation || activeCollection.item}
-                    fields={activeCollection.fields as any} // Cast as any if TS mismatch exists
-                    focusedFieldIndex={activeCollection.focusedFieldIndex}
-                    onFieldChange={(idx, val) => {
-                      const nextFields = [...activeCollection.fields];
-                      nextFields[idx] = { ...nextFields[idx], value: val };
-
-                      setActiveCollection({ ...activeCollection, fields: nextFields });
-                    }}
-                    onFocusChange={idx => {
-                      setActiveCollection({ ...activeCollection, focusedFieldIndex: idx });
-                    }}
-                    onExecute={handleCollectionSubmit}
-                    onCancel={() => setActiveCollection(null)}
-                  />
-                </div>
-              </div>
-            )}
+            {null}
 
             {/* Standard Search Interface (Transitioned to Hidden during Automation) */}
             <div
@@ -9117,7 +7794,17 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                     }
                   }
 
-                  const nextValue = mapFullNameToShortcut(e.currentTarget.innerText || '');
+                  const rawEditableText = (e.currentTarget.textContent || e.currentTarget.innerText || '').replace(/\u00A0/g, ' ');
+                  const knownSlashLabels = Object.values(slashFilterMeta)
+                    .map(meta => String(meta.label || '').trim())
+                    .filter(Boolean)
+                    .sort((a, b) => b.length - a.length);
+                  const editableText = knownSlashLabels.reduce((text, label) => {
+                    return text.toLowerCase().startsWith(label.toLowerCase())
+                      ? text.slice(label.length).trimStart()
+                      : text;
+                  }, rawEditableText);
+                  const nextValue = mapFullNameToShortcut(editableText, slashFilterMeta);
 
                   // Sync mentioned tabs with actual DOM pills present in the input
                   const pillNodes = e.currentTarget.querySelectorAll('span[data-tab-id]');
@@ -9141,6 +7828,9 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                     setSelectedCommand(null);
                   }
                   setValue(nextValue);
+                  if (nextValue.trim().length > 1) {
+                    onSearchbarFocus?.(true);
+                  }
                   setIsSuggestionsHidden(false);
                   setTimeout(updateCursorPosition, 0);
 
@@ -9172,15 +7862,14 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                   setIsFocused(true);
                   setIsSuggestionsHidden(false);
 
-                  const isUserInitiated = pendingUserFocusRef.current || isInitialAltSFocus;
+             
 
+                  const isUserInitiated = pendingUserFocusRef.current || isInitialAltSFocus;
                   pendingUserFocusRef.current = false;
 
                   onSearchbarFocus?.(isUserInitiated);
 
-
-
-                  document.documentElement.classList.add('is-searchbar-focused');
+document.documentElement.classList.add('is-searchbar-focused');
                   setTimeout(updateCursorPosition, 0);
                 }}
                 onBlur={() =>
@@ -9190,6 +7879,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                     if (document.activeElement !== inputRef.current) {
                       setKeepBoardViewOpen(false);
                       setIsFocused(false);
+                      setShowEmptySlashDropdown(false);
                       document.documentElement.classList.remove('is-searchbar-focused');
                     }
                   }, 150)
@@ -9197,18 +7887,13 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                 onScroll={syncScroll}
                 onSelect={updateCursorPosition}
                 onClick={() => {
-
                   updateCursorPosition();
-
-                  const isUserInitiated = pendingUserFocusRef.current || isInitialAltSFocus;
                   if (pendingUserFocusRef.current) {
-                    onSearchbarFocus?.(true);
                     pendingUserFocusRef.current = false;
-                  } else if (!value.trim()) {
-                    onSearchbarFocus?.(true);
                   }
-
-
+                  if (!value.trim()) {
+                    setShowEmptySlashDropdown(prev => !prev);
+                  }
                 }}
                 onKeyUp={updateCursorPosition}
                 onKeyDown={handleKeyDown}
@@ -9220,7 +7905,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                 data-suggestion-visible={isSuggestionVisible}
                 id="searchbar-input"
                 data-searchbar-input="true"
-                className={`${activeCollection ? 'opacity-0 w-[1px] h-[1px] overflow-hidden absolute -z-10' : ''} w-full ${inputRightPadding} py-3 rounded-t-xl bg-[var(--color-inputBg)] border border-[#aeaeae] dark:border-white/10 text-neutral-200 caret-auto focus:ring-0 focus:outline-none shadow-none backdrop-blur-xl resize-none overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-400/50 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-600/50 [&::-webkit-scrollbar-track]:bg-transparent text-[16px] min-[1680px]:text-[18px] min-[1880px]:text-[20px] min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px] empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--color-textPlaceholder)] empty:before:absolute empty:before:pointer-events-none`}
+                className={`${activeCollection ? 'opacity-0 w-[1px] h-[1px] overflow-hidden absolute -z-10' : ''} w-full ${inputRightPadding} py-3 rounded-t-xl bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] caret-auto focus:ring-0 focus:outline-none shadow-none backdrop-blur-xl resize-none overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-400/50 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-600/50 [&::-webkit-scrollbar-track]:bg-transparent text-[16px] min-[1680px]:text-[18px] min-[1880px]:text-[20px] min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px] empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--color-textPlaceholder)] empty:before:absolute empty:before:pointer-events-none`}
                 style={{
                   paddingLeft: inputLeftPaddingPx,
                   ['--placeholder-padding-left' as any]: `${inputLeftPaddingPx}px`,
@@ -9271,23 +7956,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
           ) : null}
           {/* Right-side Actions (Attachment + Keyboard Shortcut) */}
           <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-3 pointer-events-auto z-20">
-            {(lockedCommand === 'store' || lockedCommand === 'saved-automation') && (
-              <button
-                type="button"
-                onClick={e => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onToggleStoreTab?.();
-                }}
-                className="flex items-center gap-2 px-2.5 py-1 animate-in fade-in slide-in-from-right-2 duration-300 cursor-pointer transition-all hover:bg-white/5 rounded-lg active:scale-95 group">
-                <span className="text-[10px] font-black text-white/60 tracking-widest bg-white/20 px-1.5 py-0.5 rounded border border-white/10 shadow-sm group-hover:bg-white/30 transition-colors uppercase">
-                  Tab
-                </span>
-                <span className="text-[10px] font-bold text-white/60 group-hover:text-white transition-colors">
-                  {activeStoreTab === 'catalog' ? 'Saved Automations' : 'Automation Store'}
-                </span>
-              </button>
-            )}
+
             {/* Alt + S Indication - Hidden when search has text (except when value is exactly '/' to show slash popup dot) */}
             {(!value || value === '/') && !activeCollection && !lockedCommand && (
               <div className="flex items-center gap-2 pl-2 pr-0 py-1 animate-in fade-in slide-in-from-right-2 duration-300 transition-all rounded-lg select-none">
@@ -9296,8 +7965,8 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                   return null;
                 })()}
                 {!isInitialAltSFocus ? (
-                  <div className="flex items-center justify-center px-1.5 py-0.5 rounded border border-neutral-500 dark:border-neutral-400 bg-transparent opacity-30 pointer-events-none">
-                    <span className="text-[9px] font-black text-neutral-600 dark:text-neutral-300 tracking-widest uppercase">
+                  <div className="flex items-center justify-center px-1.5 py-0.5 rounded border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] pointer-events-none">
+                    <span className="text-[9px] font-bold text-[var(--color-textSecondary)] tracking-widest uppercase">
                       ALT + S
                     </span>
                   </div>
@@ -9311,8 +7980,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const newVal = !autoTriggerDropdown;
-                        setAutoTriggerDropdown(newVal);
+                        setShowEmptySlashDropdown(prev => !prev);
                       }}
                       className="relative w-7 h-7 flex items-center justify-center rounded-md bg-[#073642]/5 dark:bg-white/5 border border-neutral-300 dark:border-white/10 hover:bg-[#073642]/10 dark:hover:bg-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all text-xs font-semibold focus:outline-none cursor-pointer"
                     >
@@ -9427,11 +8095,11 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                 left: '0px',
                 width: '100%',
               }}>
-              <div className="p-2 border-b border-[#eee8d5] dark:border-white/10 flex items-center justify-between">
-                <span className="text-xs font-semibold text-[#657b83] dark:text-neutral-400 px-2">
+              <div className="p-2 border-b border-[var(--color-borderDefault)] flex items-center justify-between">
+                <span className="text-xs font-semibold text-[var(--color-textSecondary)] px-2">
                   Matching All AI Chat Agents
                 </span>
-                <span className="text-[10px] bg-[#eee8d5]/50 dark:bg-white/5 text-[#657b83]/70 dark:text-neutral-400 px-1.5 py-0.5 rounded">
+                <span className="text-[10px] bg-[var(--color-inputBg)] text-[var(--color-textMuted)] px-1.5 py-0.5 rounded">
                   {savedAgentSuggestions.length} found
                 </span>
               </div>
@@ -9441,19 +8109,19 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
                   return (
                     <div
                       key={agent.id}
-                      className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-all cursor-pointer group ${isHighlighted ? 'bg-[#eee8d5] dark:bg-white/10' : 'hover:bg-[#eee8d5]/70 dark:hover:bg-white/5'
+                      className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-all cursor-pointer group ${isHighlighted ? 'bg-[var(--color-selectedBg)]' : 'hover:bg-[var(--color-hoverBg)]'
                         }`}
                       onClick={() => handleSavedAgentSelection(agent)}
                       onMouseEnter={() => setSavedAgentHighlightIndex(index)}>
                       <span
                         className={`text-[12px] truncate flex-1 ${isHighlighted
-                          ? 'text-[#073642] font-bold dark:text-white'
-                          : 'text-[#657b83] group-hover:text-[#073642] dark:text-white/60 dark:group-hover:text-white'
+                          ? 'text-[var(--color-textPrimary)] font-bold'
+                          : 'text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)]'
                           }`}>
                         {agent.name}
                       </span>
                       {isHighlighted && (
-                        <span className="text-[10px] opacity-60 font-normal text-[#073642] dark:text-white">
+                        <span className="text-[10px] opacity-60 font-normal text-[var(--color-textPrimary)]">
                           Press Enter
                         </span>
                       )}
@@ -9479,8 +8147,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
             />
           )}
 
-
-        </div>
+</div>
       </div>
     );
   },

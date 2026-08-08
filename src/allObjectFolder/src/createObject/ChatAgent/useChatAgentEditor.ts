@@ -18,6 +18,8 @@ import type { ChatAgentRecord, CreateChatAgentInput, UpdateChatAgentInput } from
 import { useChatAgent } from './chatAgentHooks';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
+import { getItemCompoundId } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
+import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
 
 export interface ChatAgentEditorProps {
   agentId?: string | null;
@@ -177,6 +179,28 @@ export function useChatAgentEditor(props: ChatAgentEditorProps) {
           tagIds: finalTagIds,
         };
         savedAgent = await updateChatAgent(currentAgentId, input);
+        
+        const oldWsObj = lastSavedWorkspaceIdRef.current ? { workspace_id: lastSavedWorkspaceIdRef.current } : null;
+        const oldFldObj = lastSavedFolderIdRef.current ? { folder_id: lastSavedFolderIdRef.current } : null;
+        const oldCompoundId = getItemCompoundId({
+          id: currentAgentId,
+          workspace_id: oldWsObj?.workspace_id || null,
+          folder_id: oldFldObj?.folder_id || null,
+          snippet: { id: currentAgentId, category: 'agent' }
+        });
+        
+        const newWsObj = savedAgent.workspaceId ? { workspace_id: savedAgent.workspaceId } : null;
+        const newFldObj = savedAgent.folderId ? { folder_id: savedAgent.folderId } : null;
+        const newCompoundId = getItemCompoundId({
+          id: savedAgent.id,
+          workspace_id: newWsObj?.workspace_id || null,
+          folder_id: newFldObj?.folder_id || null,
+          snippet: { id: savedAgent.id, category: 'agent' }
+        });
+        
+        if (oldCompoundId && newCompoundId && oldCompoundId !== newCompoundId) {
+          await migrateItemCompoundId(oldCompoundId, newCompoundId, 'agent');
+        }
       }
 
       // Sync state back

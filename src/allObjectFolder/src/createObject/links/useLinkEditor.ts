@@ -22,6 +22,8 @@ import { getItemCompoundId, readAllShortcuts } from '../../../../shared-componen
 import { saveShortcut, clearShortcut } from '../../../../shared-components/shortcuts';
 import { useShortcutValidation } from '../../../../shared-components/shortcuts/hooks/useShortcutValidation';
 import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
+import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
+import { getVersionsNewestFirst, getSnapshotById } from '../../../../shared-components/versionHistory/structuredVersionHistory';
 
 export interface UseLinkEditorParams {
   linkId?: string; // If provided, load this link
@@ -240,8 +242,50 @@ export function useLinkEditor(props: LinkEditorProps) {
   const liveLinkRef = useRef(liveLink);
   liveLinkRef.current = liveLink;
 
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+
+  const versionHistory = liveLink?.versionHistory;
+  const versionHistoryItems = useMemo(() => {
+    if (!versionHistory || !Array.isArray(versionHistory.versions) || versionHistory.versions.length === 0) {
+      return [];
+    }
+    const historyEntries = getVersionsNewestFirst(versionHistory);
+    const items: Array<{ id: string; label: string; savedAt?: number; isCurrent?: boolean }> = [
+      { id: 'current', label: 'Current', isCurrent: true },
+    ];
+    historyEntries.forEach((entry, idx) => {
+      const versionNum = historyEntries.length - idx;
+      items.push({
+        id: entry.id,
+        label: `Version ${versionNum}`,
+        savedAt: entry.savedAt,
+      });
+    });
+    return items;
+  }, [versionHistory]);
+
+  const historicalSnapshot = useMemo(() => {
+    if (!selectedVersionId || selectedVersionId === 'current' || !versionHistory) return null;
+    return getSnapshotById(versionHistory, selectedVersionId);
+  }, [selectedVersionId, versionHistory]);
+
+  const isViewingHistory = Boolean(historicalSnapshot);
+
+  const displayTitle = historicalSnapshot ? historicalSnapshot.title : linkTitle;
+  const displayUrls = historicalSnapshot ? historicalSnapshot.urls : linkUrls;
+  const displayWorkspaceId = historicalSnapshot ? historicalSnapshot.workspaceId : workspaceId;
+  const displayFolderId = historicalSnapshot ? historicalSnapshot.folderId : folderId;
+  const displayTagIds = historicalSnapshot ? historicalSnapshot.tagIds : tagIds;
+  const displayShortcut = (historicalSnapshot && historicalSnapshot.shortcut) ? historicalSnapshot.shortcut : linkShortcut;
+
+  useEffect(() => {
+    setSelectedVersionId(null);
+  }, [linkId, activeLinkId]);
+
   let isDirty = false;
-  if (isInitialized && isShortcutInitialized) {
+  if (isViewingHistory) {
+    isDirty = false;
+  } else if (isInitialized && isShortcutInitialized) {
     const hasTitle = linkTitle.trim().length > 0;
     const hasUrls = linkUrls.length > 0;
 
@@ -311,7 +355,17 @@ export function useLinkEditor(props: LinkEditorProps) {
           snippet: { id: activeLinkId, category: 'link' }
         });
         const shortcutsMap = await readAllShortcuts();
-        const sc = normalizeShortcutTrigger(shortcutsMap[targetCompoundId] || '');
+        let sc = normalizeShortcutTrigger(
+          shortcutsMap[targetCompoundId] || shortcutsMap[activeLinkId] || '',
+        );
+        if (!sc) {
+          const matchingKey = Object.keys(shortcutsMap).find(
+            key => key === activeLinkId || key.endsWith(`-${activeLinkId}`),
+          );
+          if (matchingKey) {
+            sc = normalizeShortcutTrigger(shortcutsMap[matchingKey] || '');
+          }
+        }
         if (isMounted.current) {
           if (!isShortcutManuallyEditedRef.current) {
             setLinkShortcut(sc);
@@ -523,6 +577,15 @@ export function useLinkEditor(props: LinkEditorProps) {
       try {
         let savedLink: LinkRecord;
         const isCreating = !currentLinkId || isImportedCloudSnippetRef.current;
+        const previousCompoundId =
+          !isCreating && currentLinkId
+            ? getItemCompoundId({
+                id: currentLinkId,
+                workspace_id: lastSavedWorkspaceIdRef.current || null,
+                folder_id: lastSavedFolderIdRef.current || null,
+                snippet: { id: currentLinkId, category: 'link' },
+              })
+            : '';
 
         if (isCreating) {
           const input: CreateLinkInput = {
@@ -532,6 +595,7 @@ export function useLinkEditor(props: LinkEditorProps) {
             title: loopTitle,
             urls: sanitizedUrls,
             tagIds: loopTagIds,
+            shortcut: loopShortcut,
           };
 
           savedLink = await createLink(input);
@@ -544,6 +608,7 @@ export function useLinkEditor(props: LinkEditorProps) {
             workspaceId: loopWsId || undefined,
             folderId: loopFId,
             tagIds: loopTagIds,
+            shortcut: loopShortcut,
             expectedUpdatedAt: lastSavedUpdatedAtRef.current ?? undefined,
           };
 
@@ -609,6 +674,23 @@ export function useLinkEditor(props: LinkEditorProps) {
           snippet: { id: savedLink.id, category: 'link' }
         });
 
+        if (previousCompoundId && targetCompoundId && previousCompoundId !== targetCompoundId) {
+          await migrateItemCompoundId(previousCompoundId, targetCompoundId, 'link');
+        }
+
+        if (currentLinkId && currentLinkId !== savedLink.id) {
+          const previousRawIdCompound = getItemCompoundId({
+            id: currentLinkId,
+            workspace_id: savedLink.workspaceId || null,
+            folder_id: savedLink.folderId || null,
+            snippet: { id: currentLinkId, category: 'link' },
+          });
+
+          if (previousRawIdCompound && previousRawIdCompound !== targetCompoundId) {
+            await migrateItemCompoundId(previousRawIdCompound, targetCompoundId, 'link');
+          }
+        }
+
         const finalShortcut = normalizeEditorShortcut(loopShortcut);
         if (finalShortcut) {
           const valRes = await validateShortcut(finalShortcut, savedLink.id);
@@ -620,7 +702,7 @@ export function useLinkEditor(props: LinkEditorProps) {
           }
           // Always update the ref to prevent infinite autosave loops
           lastSavedShortcutRef.current = finalShortcut;
-        } else {
+        } else if (lastSavedShortcutRef.current !== '') {
           console.log(`[ShortcutDebug] handleSave: Clearing shortcut for item "${savedLink.id}"...`);
           await clearShortcut(savedLink.id, targetCompoundId, 'link');
           lastSavedShortcutRef.current = '';
@@ -759,7 +841,7 @@ export function useLinkEditor(props: LinkEditorProps) {
   // If liveLink is fetched from IndexedDB, update the editor if we aren't currently dirty
   useEffect(() => {
     console.log('[DEBUG-Sync] liveLink sync effect triggered:', { liveLink, isDirty, activeLinkId });
-    if (liveLink === undefined) return;
+    if (liveLink === undefined || !activeLinkId) return;
     hasLoadedLiveLinkRef.current = true;
 
     if (liveLink === null) {
@@ -1021,17 +1103,27 @@ export function useLinkEditor(props: LinkEditorProps) {
     };
   }, [workspaceId, folderId, tagIds]);
 
-  return {
+  currentInputsRef.current = {
     linkTitle,
     linkUrls,
-    linkShortcut,
-    setLinkShortcut,
-    isShortcutManuallyEditedRef,
-    activeLinkId: linkId || activeLinkId,
-    liveLink,
     workspaceId,
     folderId,
     tagIds,
+    isInitialized,
+    linkShortcut,
+  };
+
+  return {
+    linkTitle: displayTitle,
+    linkUrls: displayUrls,
+    linkShortcut: displayShortcut,
+    setLinkShortcut,
+    isShortcutManuallyEditedRef,
+    activeLinkId,
+    liveLink,
+    workspaceId: displayWorkspaceId,
+    folderId: displayFolderId,
+    tagIds: displayTagIds,
     saveStatus,
     setSaveStatus,
     saveError,
@@ -1040,8 +1132,8 @@ export function useLinkEditor(props: LinkEditorProps) {
     setLastSavedAt,
     lastSavedTitleRef,
     lastSavedShortcutRef,
-    isDirty,
-    isInitialized: isInitialized && (linkId === activeLinkId),
+    isDirty: isViewingHistory ? false : isDirty,
+    isInitialized,
     isShortcutInitialized,
     isDeleteDialogOpen,
     isUnsavedChangesDialogOpen,
@@ -1050,7 +1142,10 @@ export function useLinkEditor(props: LinkEditorProps) {
     titleInputRef,
     setLinkTitle,
     setLinkUrls,
-    handleSave,
+    handleSave: async (silent?: boolean, overrideProps?: any) => {
+      if (selectedVersionId && selectedVersionId !== 'current') return false;
+      return handleSave(silent, overrideProps);
+    },
     handleDelete,
     handleClose,
     setIsDeleteDialogOpen,
@@ -1058,6 +1153,10 @@ export function useLinkEditor(props: LinkEditorProps) {
     handlePropertiesChange,
     resolveConflictWithRemote,
     keepLocalVersion,
-    resetEditor
+    resetEditor,
+    versionHistoryItems,
+    selectedVersionId,
+    setSelectedVersionId,
+    isViewingHistory,
   };
 }

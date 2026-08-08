@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { NoteItem, PopupPosition } from '../types';
 
@@ -99,7 +99,13 @@ interface InjectedSnippetDropdownUIProps {
   onClose: () => void;
   onEdit?: (note: NoteItem) => void;
   externalQuery?: string; // Query from host input (text after //)
+  verticalOffset?: number;
 }
+
+const DEFAULT_POPUP_VERTICAL_OFFSET = 36;
+const DESIRED_POPUP_HEIGHT = 320;
+const MIN_USABLE_POPUP_HEIGHT = 180;
+const VIEWPORT_PADDING = 8;
 
 const InjectedSnippetDropdownUI: React.FC<InjectedSnippetDropdownUIProps> = ({
   notes,
@@ -108,6 +114,7 @@ const InjectedSnippetDropdownUI: React.FC<InjectedSnippetDropdownUIProps> = ({
   onClose,
   onEdit,
   externalQuery = '',
+  verticalOffset = DEFAULT_POPUP_VERTICAL_OFFSET,
 }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -158,17 +165,19 @@ const InjectedSnippetDropdownUI: React.FC<InjectedSnippetDropdownUIProps> = ({
   useLayoutEffect(() => {
     if (!containerRef.current) return;
 
-    const popupHeight = containerRef.current.offsetHeight || 300;
-    const windowHeight = window.innerHeight;
-
-    // position.y (document-space) already includes scrollY + caretHeight + 8 + 36 (POPUP_VERTICAL_OFFSET)
-    // Convert to viewport-space for fixed positioning:
+    const popupHeight = Math.min(containerRef.current.offsetHeight || DESIRED_POPUP_HEIGHT, DESIRED_POPUP_HEIGHT);
     const viewportY = position.y - window.scrollY;
+    const caretHeight = position.caretHeight || 20;
+    const caretTopViewport = viewportY - VIEWPORT_PADDING - verticalOffset - caretHeight;
+    const availableBelow = window.innerHeight - viewportY - VIEWPORT_PADDING;
+    const availableAbove = caretTopViewport - VIEWPORT_PADDING;
 
-    // If the popup placed at viewportY would overflow the viewport bottom, flip it above.
-    const wouldOverflow = viewportY + popupHeight > windowHeight - 8;
-    setFlipped(wouldOverflow);
-  }, [position, filteredNotes.length]); // Re-calculate if notes change (height changes)
+    setFlipped(
+      availableBelow < popupHeight &&
+        availableAbove > availableBelow &&
+        availableAbove >= MIN_USABLE_POPUP_HEIGHT,
+    );
+  }, [position, filteredNotes.length, verticalOffset]); // Re-calculate if notes change (height changes)
 
   // Handle keyboard events from the host input (via window listener)
   useEffect(() => {
@@ -237,16 +246,18 @@ const InjectedSnippetDropdownUI: React.FC<InjectedSnippetDropdownUIProps> = ({
             // then use CSS bottom to grow upward from that point.
             (() => {
               const caretH = position.caretHeight || 20;
+              const viewportY = position.y - window.scrollY;
+              const caretTopViewport = viewportY - VIEWPORT_PADDING - verticalOffset - caretH;
+              const availableAbove = Math.max(MIN_USABLE_POPUP_HEIGHT, caretTopViewport - VIEWPORT_PADDING);
               // Undo the offsets: position.y = rect.bottom + scrollY + 8 + 36
               // rect.bottom = rect.top + caretH, so caret top in viewport = position.y - scrollY - 8 - 36 - caretH
-              const caretTopViewport = position.y - window.scrollY - 8 - 36 - caretH;
               return {
                 bottom: `${window.innerHeight - caretTopViewport + 4}px`,
                 top: 'auto',
-                maxHeight: `${caretTopViewport - 8}px`,
+                maxHeight: `${Math.min(DESIRED_POPUP_HEIGHT, availableAbove)}px`,
               };
             })()
-          : { top: `${position.y - window.scrollY}px`, bottom: 'auto' }),
+          : { top: `${position.y - window.scrollY}px`, bottom: 'auto', maxHeight: `${DESIRED_POPUP_HEIGHT}px` }),
       }}
       onMouseDown={event => {
         // Prevent the host page from focusing elsewhere while interacting with the popup.
@@ -263,7 +274,7 @@ const InjectedSnippetDropdownUI: React.FC<InjectedSnippetDropdownUIProps> = ({
           padding: '6px 10px',
         }}>
         <img
-          src={chrome.runtime.getURL('content/tasklabs_logo.png')}
+          src={chrome.runtime.getURL('content/cmdOS_logo.png')}
           alt="Logo"
           style={{ height: '18px', opacity: 1 }}
         />
@@ -458,15 +469,20 @@ const InjectedSnippetDropdownUI: React.FC<InjectedSnippetDropdownUIProps> = ({
                       return note.preview;
                     })()}
                   </div>
-                  {note.tags.length > 0 && (
-                    <div className="note-tags">
-                      {note.tags.slice(0, 3).map(tag => (
-                        <span key={tag} className="note-tag">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    const isRawTagId = (t: string) => !t || /^TAG_/i.test(t.trim()) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t.trim());
+                    const displayTags = note.tags.filter(t => !isRawTagId(t));
+                    if (displayTags.length === 0) return null;
+                    return (
+                      <div className="note-tags">
+                        {displayTags.slice(0, 3).map(tag => (
+                          <span key={tag} className="note-tag">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* <button

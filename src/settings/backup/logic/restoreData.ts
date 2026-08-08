@@ -25,6 +25,8 @@ export const restoreDatabaseFromJSON = async (backupData: BackupData): Promise<v
     'todos',
     'userHotkeys',
     'userShortcuts',
+    'triggerDailySummary',
+    'triggerDailyBreakdown',
     'favorites'
   ] as const;
 

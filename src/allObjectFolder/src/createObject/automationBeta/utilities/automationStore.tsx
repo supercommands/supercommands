@@ -1,16 +1,16 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import {
-  FaTimes,
+import * as React from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { FaTimes,
   FaRobot,
   FaTrash,
   FaCloudDownloadAlt,
-  FaLayerGroup,
   FaChevronLeft,
   FaCheck,
-  FaPlus,
-} from 'react-icons/fa';
+  FaPlus } from 'react-icons/fa';
 import type { ModuleDefinition } from '../../../../../../background/src/automation/runtime_Execution_Engine/runner';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
+import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
+
 
 const normalizeAutomations = (raw: unknown): any[] => {
   if (!raw) return [];

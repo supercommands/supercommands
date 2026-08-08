@@ -17,6 +17,11 @@ export function isLocalEntityId(id: any): boolean {
  */
 export const extractSnippetIdFromCompoundId = (compoundId: any): string => {
   if (!compoundId || typeof compoundId !== 'string') return String(compoundId || '');
+  if (compoundId.startsWith('workspace_') || compoundId.startsWith('folder_') || 
+      compoundId.startsWith('ws_') || compoundId.startsWith('fld_')) {
+    const parts = compoundId.split('-');
+    if (parts.length > 5) return parts.slice(5).join('-');
+  }
   if (!compoundId.includes('-')) return compoundId;
   const parts = compoundId.split('-');
   return parts.slice(-1)[0].length > 8 ? parts.slice(-5).join('-') : compoundId;

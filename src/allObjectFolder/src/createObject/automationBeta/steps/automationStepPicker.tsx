@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactDOM, { createPortal } from 'react-dom';
 import AutomationStore from '../utilities/automationStore';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
