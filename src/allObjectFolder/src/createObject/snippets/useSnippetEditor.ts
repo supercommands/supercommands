@@ -23,6 +23,7 @@ import { saveShortcut, clearShortcut, useShortcutValidation } from '../../../../
 import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
 import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
+import { getVersionsNewestFirst, getSnapshotById } from '../../../../shared-components/versionHistory/structuredVersionHistory';
 
 export interface SnippetEditorViewProps {
   snippetId?: string | null;
@@ -86,6 +87,8 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
   const currentInputsRef = useRef({ snippetTitle, snippetConfig, workspaceId, folderId, tagIds, isInitialized, snippetShortcut });
   currentInputsRef.current = { snippetTitle, snippetConfig, workspaceId, folderId, tagIds, isInitialized, snippetShortcut };
 
+  const hasMountedDraftRef = useRef(false);
+
   // Initialize draft OR load existing snippet ID
   useEffect(() => {
     isShortcutManuallyEditedRef.current = false;
@@ -115,8 +118,18 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
 
     activeSnippetIdRef.current = null;
     setActiveSnippetId(null);
-    setSnippetTitle(initialDraftKey || '');
-    setSnippetConfig(initialDraftConfig || '');
+    if (!hasMountedDraftRef.current) {
+      hasMountedDraftRef.current = true;
+      setSnippetTitle(initialDraftKey || '');
+      setSnippetConfig(initialDraftConfig || '');
+      lastSavedTitleRef.current = initialDraftKey || '';
+      lastSavedConfigRef.current = initialDraftConfig || '';
+    } else {
+      setSnippetTitle('');
+      setSnippetConfig('');
+      lastSavedTitleRef.current = '';
+      lastSavedConfigRef.current = '';
+    }
     setIsUnsavedChangesDialogOpen(false);
 
     // Background Destination Logic: Snippets have no UI for this on initial render
@@ -149,6 +162,46 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
   // Natively sync across tabs using Dexie's useLiveQuery
   const liveSnippet = useSnippet(activeSnippetId);
 
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+
+  const versionHistory = liveSnippet?.versionHistory;
+  const versionHistoryItems = useMemo(() => {
+    if (!versionHistory || !Array.isArray(versionHistory.versions) || versionHistory.versions.length === 0) {
+      return [];
+    }
+    const historyEntries = getVersionsNewestFirst(versionHistory);
+    const items: Array<{ id: string; label: string; savedAt?: number; isCurrent?: boolean }> = [
+      { id: 'current', label: 'Current', isCurrent: true },
+    ];
+    historyEntries.forEach((entry, idx) => {
+      const versionNum = historyEntries.length - idx;
+      items.push({
+        id: entry.id,
+        label: `Version ${versionNum}`,
+        savedAt: entry.savedAt,
+      });
+    });
+    return items;
+  }, [versionHistory]);
+
+  const historicalSnapshot = useMemo(() => {
+    if (!selectedVersionId || selectedVersionId === 'current' || !versionHistory) return null;
+    return getSnapshotById(versionHistory, selectedVersionId);
+  }, [selectedVersionId, versionHistory]);
+
+  const isViewingHistory = Boolean(historicalSnapshot);
+
+  const displayTitle = historicalSnapshot ? historicalSnapshot.title : snippetTitle;
+  const displayConfig = historicalSnapshot ? historicalSnapshot.config : snippetConfig;
+  const displayTagIds = historicalSnapshot ? historicalSnapshot.tagIds : tagIds;
+  const displayWorkspaceId = historicalSnapshot ? historicalSnapshot.workspaceId : workspaceId;
+  const displayFolderId = historicalSnapshot ? historicalSnapshot.folderId : folderId;
+  const displayShortcut = (historicalSnapshot && historicalSnapshot.shortcut) ? historicalSnapshot.shortcut : snippetShortcut;
+
+  useEffect(() => {
+    setSelectedVersionId(null);
+  }, [snippetId, activeSnippetId]);
+
   // Helper to safely compare configs (which might be strings or objects)
   const isConfigEqual = (configA: string | Record<string, any>, configB: string | Record<string, any>) => {
     const normalize = (c: any) => typeof c === 'string' ? c : JSON.stringify(c);
@@ -160,6 +213,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
   };
 
   const isDirty = useMemo(() => {
+    if (isViewingHistory) return false;
     if (!isInitialized || !isShortcutInitialized) return false;
     const hasTitle = snippetTitle.trim().length > 0;
     const normalizedConfig = typeof snippetConfig === 'string' ? snippetConfig : JSON.stringify(snippetConfig || {});
@@ -242,9 +296,11 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
         } finally {
           saveInProgressRef.current = false;
           savePromiseRef.current = null;
-          if (saveAgainRef.current) {
+          if (saveAgainRef.current && activeSnippetIdRef.current !== null) {
             saveAgainRef.current = false;
             return handleSave(silent);
+          } else {
+            saveAgainRef.current = false;
           }
         }
       };
@@ -284,6 +340,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
             title: currentTitle,
             config: currentConfig,
             tagIds: activeTagIds,
+            shortcut: snippetShortcut,
           };
           savedSnippet = await createSnippet(input);
         } else {
@@ -294,6 +351,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
             workspaceId: activeWorkspaceId || undefined,
             folderId: activeFolderId,
             tagIds: activeTagIds,
+            shortcut: snippetShortcut,
           };
           savedSnippet = await updateSnippet(currentSnippetId, input);
         }
@@ -326,7 +384,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
           }
           // Always update the ref to prevent infinite autosave loops
           lastSavedShortcutRef.current = finalShortcut;
-        } else {
+        } else if (lastSavedShortcutRef.current !== '') {
           console.log(`[ShortcutDebug][SnippetEditor] handleSave: Clearing shortcut for snippet "${savedSnippet.id}"...`);
           await clearShortcut(savedSnippet.id, compoundId, 'snippet');
           lastSavedShortcutRef.current = '';
@@ -374,10 +432,12 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
         saveInProgressRef.current = false;
         savePromiseRef.current = null;
 
-        if (saveAgainRef.current) {
+        if (saveAgainRef.current && activeSnippetIdRef.current !== null) {
           saveAgainRef.current = false;
           // Trigger save again with the LATEST refs! (Do not pass stale overrideProps)
           return handleSave(silent);
+        } else {
+          saveAgainRef.current = false;
         }
       }
     }; // end performSave
@@ -472,7 +532,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
 
   // If liveSnippet is fetched from IndexedDB, update the editor if we aren't currently dirty
   useEffect(() => {
-    if (!liveSnippet) return;
+    if (!liveSnippet || !activeSnippetId) return;
 
     let parsedConfig = liveSnippet.config;
     if (typeof liveSnippet.config === 'string') {
@@ -572,6 +632,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
   }, []);
 
   const handlePropertiesChange = useCallback((newProps: Partial<SharedProperties>) => {
+    if (selectedVersionId && selectedVersionId !== 'current') return;
     const prevWsId = currentInputsRef.current.workspaceId;
     const prevFId = currentInputsRef.current.folderId;
     const prevTIds = currentInputsRef.current.tagIds;
@@ -612,30 +673,33 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
 
     // Trigger an immediate SILENT save if location or tags change!
     void handleSave(true, newProps);
-  }, [handleSave]);
+  }, [handleSave, selectedVersionId]);
 
   return {
-    snippetTitle,
-    snippetConfig,
-    snippetShortcut,
+    snippetTitle: displayTitle,
+    snippetConfig: displayConfig,
+    snippetShortcut: displayShortcut,
     activeSnippetId: snippetId || activeSnippetId,
     liveSnippet,
-    workspaceId,
-    folderId,
-    tagIds,
+    workspaceId: displayWorkspaceId,
+    folderId: displayFolderId,
+    tagIds: displayTagIds,
     saveStatus,
     setSaveStatus,
     lastSavedAt,
     setLastSavedAt,
     lastSavedTitleRef,
     lastSavedShortcutRef,
-    isDirty,
+    isDirty: isViewingHistory ? false : isDirty,
     isDeleteDialogOpen,
     isUnsavedChangesDialogOpen,
     setSnippetTitle: updateSnippetTitleAndShortcut,
     setSnippetConfig,
     setSnippetShortcut: updateSnippetShortcut,
-    handleSave,
+    handleSave: async (silent?: boolean, overrideProps?: any) => {
+      if (selectedVersionId && selectedVersionId !== 'current') return false;
+      return handleSave(silent, overrideProps);
+    },
     handleDelete,
     handleClose,
     setIsDeleteDialogOpen,
@@ -644,5 +708,9 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
     loadSnippet,
     isInitialized: isInitialized && (snippetId === activeSnippetId),
     isShortcutInitialized,
+    versionHistoryItems,
+    selectedVersionId,
+    setSelectedVersionId,
+    isViewingHistory,
   };
 }

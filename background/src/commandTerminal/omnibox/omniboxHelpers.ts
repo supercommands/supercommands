@@ -1,11 +1,6 @@
 import type { CommandRecord } from '../../../../src/allObjectFolder/src/createObject/commands/commandTypes';
 import type { CustomOmniboxPrefixes } from '../../../../src/storage/localStorage/customSearchPrefixesForOmniboxStorage';
-
-export const DEFAULT_OMNIBOX_PREFIXES = {
-  note: ['n', 'note'],
-  link: ['l', 'link'],
-  command: ['c', 'cmd', 'command'],
-} as const;
+import { buildShortcutPrefixRegistry } from '../../../../src/shared-components/triggers';
 
 export type ResolvedOmniboxInput = {
   prefix: string;
@@ -68,56 +63,17 @@ export function isSameSnippetIdentity(left: any, right: any): boolean {
   return leftSnippetId === rightSnippetId || leftSnippetId === rightId || leftId === rightSnippetId;
 }
 
-function resolveUniquePrefix(
-  type: 'note' | 'link' | 'command',
-  candidates: Array<string | null | undefined>,
-  usedPrefixes: Set<string>,
-): string {
-  for (const candidate of candidates) {
-    const normalized = normalizeOmniboxKey(candidate);
-    if (!normalized) continue;
-    if (usedPrefixes.has(normalized)) continue;
-
-    usedPrefixes.add(normalized);
-    return normalized;
-  }
-
-  const fallback =
-    DEFAULT_OMNIBOX_PREFIXES[type].find(prefix => !usedPrefixes.has(prefix)) ?? `${type}-${usedPrefixes.size}`;
-  usedPrefixes.add(fallback);
-  return fallback;
-}
-
 export function buildRegistry(
-  commands: CommandRecord[],
+  _commands: CommandRecord[],
   customPrefixes: CustomOmniboxPrefixes | null,
 ): Record<string, 'note' | 'link' | 'command'> {
-  let noteKey: string | null = null;
-  let linkKey: string | null = null;
-  let commandKey: string | null = null;
-
-  for (const cmd of commands) {
-    if (cmd.id === 'search_notes' && cmd.prefix && cmd.prefix.trim()) {
-      noteKey = cmd.prefix.replace(/^\/+/, '').trim().toLowerCase();
-    } else if (cmd.id === 'search_links' && cmd.prefix && cmd.prefix.trim()) {
-      linkKey = cmd.prefix.replace(/^\/+/, '').trim().toLowerCase();
-    } else if (cmd.id === 'search_commands' && cmd.prefix && cmd.prefix.trim()) {
-      commandKey = cmd.prefix.replace(/^\/+/, '').trim().toLowerCase();
-    }
-  }
-
-  if (customPrefixes?.note && customPrefixes.note.trim()) noteKey = customPrefixes.note.trim().toLowerCase();
-  if (customPrefixes?.link && customPrefixes.link.trim()) linkKey = customPrefixes.link.trim().toLowerCase();
-  if (customPrefixes?.command && customPrefixes.command.trim())
-    commandKey = customPrefixes.command.trim().toLowerCase();
-
-  const registry: Record<string, 'note' | 'link' | 'command'> = {};
-  const usedPrefixes = new Set<string>();
-  registry[resolveUniquePrefix('note', [noteKey, 'n', 'note'], usedPrefixes)] = 'note';
-  registry[resolveUniquePrefix('link', [linkKey, 'l', 'link'], usedPrefixes)] = 'link';
-  registry[resolveUniquePrefix('command', [commandKey, 'c', 'cmd', 'command'], usedPrefixes)] = 'command';
-
-  return registry;
+  return Object.entries(buildShortcutPrefixRegistry(customPrefixes)).reduce<Record<string, 'note' | 'link' | 'command'>>(
+    (registry, [prefix, type]) => {
+      if (type === 'note' || type === 'link' || type === 'command') registry[prefix] = type;
+      return registry;
+    },
+    {},
+  );
 }
 
 const isSymbolPrefix = (value: string) => /^[^a-z0-9]+$/i.test(value);

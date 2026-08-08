@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import * as React from 'react';
+import { useEffect } from 'react';
 import { NoteEditorView } from '../../allObjectFolder/src';
 import { useUIStore } from '../uiStateManager';
 import { useDbStore } from '../../storage/store/useDbStore';

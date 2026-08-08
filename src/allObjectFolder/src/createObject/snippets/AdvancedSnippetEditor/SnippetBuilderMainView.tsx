@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { EditorContent } from '@tiptap/react';
 import { useSnippetBuilder, SnippetBuilderProvider } from './context/SnippetBuilderContext';
 import { SnippetFormattingToolbar } from './components/SnippetFormattingToolbar';
@@ -360,8 +361,8 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
                   {item.icon}
                 </span>
                 <div className="flex flex-col text-left">
-                  <span className="text-xs font-semibold">{item.title}</span>
-                  <span className="text-[10px] text-neutral-500">{item.description}</span>
+                  <span className="text-xs font-normal text-white opacity-100">{item.title}</span>
+                  <span className="text-[10px] text-neutral-400 opacity-90">{item.description}</span>
                 </div>
               </div>
             );
@@ -372,11 +373,11 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
       {textModalState.isOpen && (
         <div
           onKeyDown={handleModalKeyDown}
-          className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50 backdrop-blur-[2px] animate-in fade-in duration-200"
+          className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-[2px] animate-in fade-in duration-200"
           onClick={closeModals}
         >
           <div
-            className="bg-[#171821] border border-neutral-200 dark:border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-200 text-left"
+            className="bg-[#171821] border border-neutral-200 dark:border-white/10 rounded-xl shadow-2xl w-full max-w-md max-h-[85vh] p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-200 text-left overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-3 border-b border-neutral-200 dark:border-white/10 pb-4 flex-shrink-0">
@@ -393,7 +394,7 @@ export const SnippetBuilderMainViewEditor: React.FC = () => {
               </h3>
             </div>
 
-            <div className="flex flex-col gap-4 overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 flex-1">
+            <div className="flex flex-col gap-4 overflow-y-auto max-h-[55vh] custom-scrollbar pr-2 flex-1">
               <div className="flex flex-col gap-1.5">
                 <label className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">Field Label</label>
                 <input

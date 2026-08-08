@@ -6,7 +6,8 @@
  * existing prompts list using ExistingItemsTable at the bottom.
  */
 
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import * as React from 'react';
+import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
@@ -26,6 +27,7 @@ import { FiSearch, FiCopy, FiTag, FiStar } from 'react-icons/fi';
 import { getFaviconUrl, stripCmdStatus } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { AutoSaveIndicator } from '../../../../../shared-components/autoSaveEngine/autoSave';
 import { ExistingItemsTable } from '../../../../../shared-components/editorContainer/ExistingItemsTable';
+import { RightSideItemsPanel } from '../../../../../shared-components/editorContainer/RightSideItemsPanel';
 import { WorkspaceEditorLayout } from '../../../../../shared-components/editorContainer/WorkspaceEditorLayout';
 import { EditorTitleShortcutInput } from '../../../../../shared-components/editorContainer/EditorTitleShortcutInput';
 import { SharedPropertiesToolbar } from '../../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
@@ -89,6 +91,8 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
   const [customPromptText, setCustomPromptText] = useState('');
   
   const [searchQuery, setSearchQuery] = useState('');
+  const [isRightPanelExpanded, setIsRightPanelExpanded] = useState(false);
+  const rightSideSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [shortcutsMap, setShortcutsMap] = useState<Record<string, string>>({});
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [tagPopupOpen, setTagPopupOpen] = useState(false);
@@ -193,7 +197,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
     };
     useUIStore.getState().setEditorEscapeHandler(handler);
     return () => useUIStore.getState().setEditorEscapeHandler(null);
-  }, [state, isAddModelOpen]);
+  }, [isAddModelOpen, state.isUnsavedChangesDialogOpen, state.isDeleteDialogOpen, state.handleClose]);
 
   const toggleModelExclusion = (modelId: string) => {
     setExcludedModels(prev => {
@@ -405,7 +409,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
   return (
     <>
       <WorkspaceEditorLayout
-        title={state.activeAiPromptId ? 'AI Prompts' : 'Create a AI Prompt'}
+        title={state.activeAiPromptId ? 'Edit AI Prompt' : 'Create an AI Prompt'}
         isDirty={state.isDirty}
         saveStatus={state.saveStatus}
         lastSavedAt={state.lastSavedAt}
@@ -419,6 +423,59 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         searchPlaceholder="Search prompts..."
+        isRightSiblingExpanded={isRightPanelExpanded}
+        rightSiblingPanel={
+          <RightSideItemsPanel<any>
+            items={filteredPrompts}
+            activeItemId={state.activeAiPromptId}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchPlaceholder="Search prompts..."
+            getItemTitle={p => p.title || 'Untitled Prompt'}
+            getItemPreview={p => p.prompt ? p.prompt.replace(/<[^>]+>/g, '').substring(0, 100) : ''}
+            getItemCompoundId={p =>
+              getItemCompoundId({
+                id: p.id,
+                workspace_id: p.workspaceId || null,
+                folder_id: p.folderId || null,
+                snippet: { id: p.id, category: 'aiPrompt' },
+              })
+            }
+            getItemType={() => 'aiPrompt'}
+            getItemWorkspaceId={p => p.workspaceId || null}
+            getItemFolderId={p => p.folderId || null}
+            getItemTagIds={p => p.tagIds || []}
+            shortcutPrefix="a"
+            shortcutsMap={shortcutsMap}
+            hotkeysMap={hotkeysMap}
+            workspaceNamesMap={workspaceNamesMap}
+            folderNamesMap={folderNamesMap}
+            tagNamesMap={tagNamesMap}
+            onLoadItem={id => {
+              const rec = aiPrompts.find(p => p.id === id);
+              if (rec) state.loadPrompt(rec);
+            }}
+            onDeleteItem={id => {
+              setPromptToDeleteId(id);
+              state.setIsDeleteDialogOpen(true);
+            }}
+            onUpdateShortcut={async (id, val) => {
+              await handleUpdateItemField(id, 'shortcut', val);
+            }}
+            onUpdateTitle={async (id, val) => {
+              await handleUpdateItemField(id, 'title', val);
+            }}
+            onUpdateTags={async (id, tagText) => {
+              await handleUpdateItemField(id, 'tags', tagText);
+            }}
+            isFavorite={isFavorite}
+            toggleFavorite={toggleFavorite}
+            isExpanded={isRightPanelExpanded}
+            onExpandChange={setIsRightPanelExpanded}
+            searchInputRef={rightSideSearchInputRef}
+            emptyStateMessage="No AI prompts found"
+          />
+        }
         deleteModalProps={{
           isOpen: state.isDeleteDialogOpen,
           onClose: () => {
@@ -428,17 +485,16 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
           onConfirm: async () => {
             if (promptToDeleteId) {
               try {
-                const wsObj = state.workspaceId ? { workspace_id: state.workspaceId } : null;
-                const fldObj = state.folderId ? { folder_id: state.folderId } : null;
+                const targetPrompt = aiPrompts.find(p => p.id === promptToDeleteId);
                 const compoundId = getItemCompoundId({
                   id: promptToDeleteId,
-                  workspace_id: state.workspaceId || null,
-                  folder_id: state.folderId || null,
+                  workspace_id: targetPrompt?.workspaceId || state.workspaceId || null,
+                  folder_id: targetPrompt?.folderId || state.folderId || null,
                   snippet: { id: promptToDeleteId, category: 'aiPrompt' }
                 });
                 await clearShortcut(promptToDeleteId, compoundId, 'aiPrompt');
                 await deleteAiPrompt(promptToDeleteId);
-                if (promptToDeleteId === state.activeAiPromptId) {
+                if (promptToDeleteId === state.activeAiPromptId || promptToDeleteId === props.aiPromptId) {
                   state.loadPrompt(null);
                 }
               } catch (err) {
@@ -461,16 +517,28 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             showShortcut={false}
             showTodo={true}
             onCreateTodo={async (deadlineVal, isRecurring, recurringCycle) => {
-              if (!state.activeAiPromptId) return;
+              console.log('[AiPromptEditorView:onCreateTodo] Called with:', { deadlineVal, isRecurring, recurringCycle, activeAiPromptId: state.activeAiPromptId, promptTitle: state.promptTitle });
+              let promptId = state.activeAiPromptId;
+              if (!promptId || state.isDirty) {
+                const savedId = await state.handleSave();
+                if (!savedId) {
+                  console.warn('[AiPromptEditorView:onCreateTodo] Could not save AI prompt before creating todo.');
+                  return;
+                }
+                promptId = savedId;
+              }
               const scheduleTime = deadlineVal ? new Date(deadlineVal).getTime() : Date.now();
+              const todoTitle = state.promptTitle || 'New Prompt';
               try {
                 const newTodo = await createTodo(
-                  state.promptTitle || 'New Prompt',
-                  [{ type: 'aiPrompt', id: state.activeAiPromptId }],
+                  todoTitle,
+                  [{ type: 'aiPrompt', id: promptId, name: todoTitle }],
                   isRecurring ? 'recurring' : 'one-time',
                   scheduleTime,
-                  isRecurring ? recurringCycle as any : undefined
+                  isRecurring ? recurringCycle as any : undefined,
+                  state.promptBody || undefined
                 );
+                console.log('[AiPromptEditorView:onCreateTodo] Successfully created To-Do in Dexie:', newTodo);
 
                 const chromeAny = (window as any).chrome;
                 if (chromeAny?.runtime?.sendMessage) {
@@ -479,9 +547,10 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
                     todoId: newTodo.id,
                     scheduleTime: scheduleTime
                   });
+                  console.log('[AiPromptEditorView:onCreateTodo] Dispatched schedule_newtodo_alarm for todoId:', newTodo.id);
                 }
               } catch (err) {
-                console.error('Failed to create aiPrompt todo', err);
+                console.error('[AiPromptEditorView:onCreateTodo] Failed to create aiPrompt todo', err);
               }
             }}
             saveStatus={state.saveStatus}
@@ -586,41 +655,6 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             </div>
           </div>
         }
-        bottomListContent={
-          <ExistingItemsTable
-            items={filteredPrompts}
-            activeItemId={state.activeAiPromptId}
-            onLoadItem={(id: string) => {
-              const rec = aiPrompts.find(p => p.id === id);
-              if (rec) state.loadPrompt(rec);
-            }}
-            getItemTitle={(p: any) => p.title || ''}
-            getItemPreview={(p: any) => p.prompt ? p.prompt.replace(/<[^>]+>/g, '').substring(0, 100) : ''}
-            getItemCompoundId={(p: any) => getItemCompoundId({
-              id: p.id,
-              workspace_id: p.workspaceId || null,
-              folder_id: p.folderId || null,
-              snippet: { id: p.id, category: 'aiPrompt' }
-            })}
-            getItemType={() => 'aiPrompt'}
-            shortcutsMap={shortcutsMap}
-            hotkeysMap={hotkeysMap}
-            isFavorite={isFavorite}
-            toggleFavorite={toggleFavorite}
-            onDeleteClick={(id: string) => {
-              setPromptToDeleteId(id);
-              state.setIsDeleteDialogOpen(true);
-            }}
-            onFavoriteToggled={fetchAllShortcuts}
-            onUpdateItemField={handleUpdateItemField}
-            folderNamesMap={folderNamesMap}
-            workspaceNamesMap={workspaceNamesMap}
-            tagNamesMap={tagNamesMap}
-            emptyStateMessage="No AI prompts found. Type above to create your first prompt!"
-            isFullScreenMode={isFullScreenMode}
-            title=""
-          />
-        }
       >
         <div ref={containerRef} className="flex-1 flex flex-col min-h-0 relative">
           <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2 overflow-hidden">
@@ -637,7 +671,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
               shortcut={state.promptShortcut}
               setShortcut={state.setPromptShortcut}
               titlePlaceholder="Title"
-              shortcutPlaceholder="Shortcut"
+              shortcutPlaceholder="Command Shortcut"
               onTitleBlur={() => {
                 if (!state.promptTitle.trim()) {
                   setTitleError('Enter the title');
@@ -646,17 +680,11 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
                 }
               }}
               onShortcutBlur={() => state.isDirty && state.handleSave()}
-              onTitleEnter={async (shiftKey) => {
-                if (shiftKey) {
-                  handleCopyTitleToShortcut();
-                  const editorDom = containerRef.current?.querySelector('.ProseMirror, .ql-editor') as HTMLElement | null;
-                  editorDom?.focus();
-                } else {
-                  if (!state.promptTitle.trim()) {
-                    setTitleError('Enter the title');
-                  } else if (state.isDirty) {
-                    await state.handleSave();
-                  }
+              onTitleEnter={async () => {
+                if (!state.promptTitle.trim()) {
+                  setTitleError('Enter the title');
+                } else if (state.isDirty) {
+                  await state.handleSave();
                 }
               }}
               onShortcutEnter={async () => {
@@ -675,10 +703,10 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             <div className="flex-1 flex flex-col min-w-0 relative h-full max-h-full overflow-hidden mt-4">
               {/* Prompt Text Editor */}
               <div className="flex-1 min-h-[140px] relative flex flex-col gap-1.5 pb-2 text-sm font-medium">
-                <h4 className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 px-3.5 flex items-center gap-1">
+                <h4 className="text-xs font-semibold text-[var(--color-textSecondary)] px-3.5 flex items-center gap-1">
                   Prompt <span className="text-red-500">*</span>
                 </h4>
-                <div className="flex-1 relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-0 py-0">
+                <div className="flex-1 relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm overflow-hidden px-0 py-0">
                   <TextEditor
                     key={state.activeAiPromptId || 'new'}
                     value={state.promptBody}
@@ -705,7 +733,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
                     setShowTooltip(true);
                   }}
                   onMouseLeave={() => setShowTooltip(false)}
-                  className="absolute bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[10px] font-semibold shadow-sm transition-all active:scale-95 border-black/10 dark:border-white/20 bg-neutral-100 dark:bg-white/10 text-neutral-800 dark:text-white/90 hover:bg-neutral-200 dark:hover:bg-white/20 hover:text-neutral-900 dark:hover:text-white cursor-pointer select-none"
+                  className="absolute bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] cursor-pointer select-none"
                 >
                   <span>Create another</span>
                 </button>

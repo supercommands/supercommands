@@ -382,7 +382,7 @@ export async function executeTodoAction(todoId: string) {
                 chrome.tabs.create({ url });
               }
             });
-          } else if (['note', 'snippet', 'prompt', 'custom'].includes(matchedCat)) {
+          } else if (['note', 'snippet', 'custom'].includes(matchedCat)) {
             chrome.tabs.create({
               url: chrome.runtime.getURL(
                 `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(itemId)}`,
@@ -430,12 +430,12 @@ export async function executeTodoAction(todoId: string) {
           chrome.tabs.create({ url });
         }
       });
-    } else if (['note', 'snippet', 'prompt'].includes(category)) {
+    } else if (['note', 'snippet'].includes(category)) {
       const url = chrome.runtime.getURL(
         `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(snippetId)}`,
       );
       chrome.tabs.create({ url });
-    } else if (['command', 'module', 'automation', 'install', 'agent', 'chat_agent'].includes(category)) {
+    } else if (['command', 'module', 'automation', 'install', 'agent', 'chat_agent', 'aiprompt', 'ai_prompt', 'prompt'].includes(category)) {
       const url = chrome.runtime.getURL(
         `AltS_search_newtab/index.html?trigger_hotkey=true&type=${category}&id=${encodeURIComponent(value || snippetId)}`,
       );

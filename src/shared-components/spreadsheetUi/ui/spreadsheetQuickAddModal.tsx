@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useAppearance } from '@extension/ui';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -53,7 +53,7 @@ const SpreadsheetQuickAddModal: React.FC = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [isFav, setIsFav] = useState(false);
 
-  
+
   useEffect(() => {
     getUserId().then(id => setUserId(id));
   }, []);
@@ -385,31 +385,31 @@ const SpreadsheetQuickAddModal: React.FC = () => {
         newId = snippet.id;
       }
 
-        // 2. Favorite Sync
-        if (newId && isFav) {
-          try {
-            await toggleFavorite(newId, 'snippet', title.trim());
-          } catch (e) {
-            console.error('Favorite sync failed:', e);
-          }
+      // 2. Favorite Sync
+      if (newId && isFav) {
+        try {
+          await toggleFavorite(newId, 'snippet', title.trim());
+        } catch (e) {
+          console.error('Favorite sync failed:', e);
         }
+      }
 
-        // 4. Update Last Destination
-        const storageKey =
-          category === 'link'
-            ? 'lastLinkDestination'
-            : category === 'note'
-              ? 'lastNoteDestination'
-              : 'lastSnippetDestination';
+      // 4. Update Last Destination
+      const storageKey =
+        category === 'link'
+          ? 'lastLinkDestination'
+          : category === 'note'
+            ? 'lastNoteDestination'
+            : 'lastSnippetDestination';
 
-        await chrome.storage.local.set({
-          [storageKey]: {
-            workspace_id: selectedLocation.workspaceId,
-            folder_id: selectedLocation.folderId,
-          },
-        });
+      await chrome.storage.local.set({
+        [storageKey]: {
+          workspace_id: selectedLocation.workspaceId,
+          folder_id: selectedLocation.folderId,
+        },
+      });
 
-        useUIStore.getState().queueNotification({ message: `New ${category} added successfully`, type: 'success' });
+      useUIStore.getState().queueNotification({ message: `New ${category} added successfully`, type: 'success' });
       // Close the modal on success regardless of specific response structure
       setQuickAddModal(null);
     } catch (error) {
@@ -452,21 +452,21 @@ const SpreadsheetQuickAddModal: React.FC = () => {
                   ? 'Note'
                   : 'Snippet'}
             </h2>
-              <button
-                onClick={() => setQuickAddModal(null)}
-                className={clsx(
-                  "p-1 rounded transition-all",
-                  "hover:bg-white/10 text-neutral-500 hover:text-neutral-300"
-                )}>
-                <FaTimes size={13} />
-              </button>
+            <button
+              onClick={() => setQuickAddModal(null)}
+              className={clsx(
+                "p-1 rounded transition-all",
+                "hover:bg-white/10 text-neutral-500 hover:text-neutral-300"
+              )}>
+              <FaTimes size={13} />
+            </button>
           </div>
 
           {/* Form - Vertical Split Rhythm */}
           <div className={clsx("flex flex-col relative", "bg-[var(--color-containerBg)]")}>
             {/* Title Row */}
             <div className={clsx(
-              'flex items-stretch border-b transition-all relative', 
+              'flex items-stretch border-b transition-all relative',
               'border-white/10',
               ROW_HEIGHT
             )}>
@@ -563,8 +563,8 @@ const SpreadsheetQuickAddModal: React.FC = () => {
                     <textarea
                       ref={contentRef}
                       placeholder={
-                        quickAddModal.type === 'note' 
-                          ? 'Enter description...' 
+                        quickAddModal.type === 'note'
+                          ? 'Enter description...'
                           : 'Enter snippet body...'
                       }
                       value={content}

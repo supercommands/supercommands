@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useUIStore } from '../uiStateManager';
 

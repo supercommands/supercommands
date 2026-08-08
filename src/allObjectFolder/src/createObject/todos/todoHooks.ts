@@ -61,7 +61,7 @@ export const useConvertibleItems = () => {
         items.push({ id: `agent-${a.id}`, name: (a as any).title || (a as any).name || 'Untitled Agent', category: 'agent', data: a });
       });
       aiPrompts.forEach(p => {
-        items.push({ id: `prompt-${p.id}`, name: (p as any).title || (p as any).name || 'Untitled Prompt', category: 'prompt', data: p });
+        items.push({ id: p.id, name: (p as any).title || (p as any).name || 'Untitled Prompt', category: 'aiPrompt', data: p });
       });
       sessions.forEach(s => {
         items.push({ id: `session-${s.id}`, name: (s as any).title || (s as any).name || 'Untitled Tab Session', category: 'tabgroup', data: s });

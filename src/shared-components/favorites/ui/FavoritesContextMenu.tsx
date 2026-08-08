@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useAppearance } from '@extension/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -451,6 +451,7 @@ export const FavoritesContextMenu: React.FC<FavoritesContextMenuProps> = ({
                         const hasModifier = e.ctrlKey || e.metaKey;
                         if (e.key === 'Enter') {
                           e.preventDefault();
+                          if (conflictId?.endsWith('-reserved')) return;
                           if (isHotkeyError && conflictId) onOverwriteHotkey?.(conflictId);
                           else onSaveHotkey(hotkeyEditValue);
                         } else {
@@ -574,18 +575,19 @@ export const FavoritesContextMenu: React.FC<FavoritesContextMenuProps> = ({
                 }`}>
                 <button
                   onClick={() => {
+                    if (conflictId?.endsWith('-reserved')) return;
                     if (focusedRow === 0 && isShortcutError && conflictId) onOverwriteShortcut?.(conflictId);
                     else if (focusedRow === 1 && isHotkeyError && conflictId) onOverwriteHotkey?.(conflictId);
                     else if (focusedRow === 0) onSaveShortcut(shortcutEditValue);
                     else if (focusedRow === 1) onSaveHotkey(hotkeyEditValue);
                   }}
-                  disabled={isSaving}
+                  disabled={isSaving || conflictId?.endsWith('-reserved')}
                   className={`flex items-center gap-2 rounded-md border px-4 py-1.5 text-[10px] font-bold tracking-tight transition-all active:scale-95 shadow-sm disabled:opacity-50 ${
                     isDarkMode
                       ? 'border-[#9fa2ff] bg-neutral-800 text-neutral-100 hover:border-[#8f93ff]'
                       : 'border-[#c7bcff] bg-[#f5f3ff] text-[#073642] hover:border-[#b9adff] hover:bg-[#ebeeff]'
                   }`}>
-                  {isSaving ? 'Saving...' : isShortcutError || isHotkeyError ? 'Overwrite' : 'Save'}
+                  {isSaving ? 'Saving...' : conflictId?.endsWith('-reserved') ? 'Reserved' : isShortcutError || isHotkeyError ? 'Overwrite' : 'Save'}
                 </button>
               </motion.div>
             )}

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAppData } from '../hooks/useAppData';
 import { useAppearance } from '@extension/ui';
 import WallpaperLayer from '../../../../settings/uiPersonalization/WallpaperLayer';
@@ -14,8 +15,12 @@ import {
   FiStar,
   FiCommand,
   FiCheckSquare,
+  FiTerminal,
+  FiFileText,
 } from 'react-icons/fi';
-import { FaCode,
+import { BsCalendarCheck } from 'react-icons/bs';
+import {
+  FaCode,
   FaLink,
   FaCheckCircle,
   FaCheck,
@@ -39,51 +44,28 @@ import { FaCode,
   FaRobot,
   FaGithub,
   FaCamera,
+  FaCopy,
   FaExpand,
   FaImages,
-  FaTable } from 'react-icons/fa';
+  FaTable
+} from 'react-icons/fa';
 import NotesIcon from '../components/NotesIcon';
 import { getFaviconUrl } from '../../../../shared-components/searchBarMain/utilityFunctions/utils';
-import { extractUrlsFromSnippet } from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
+import {
+  extractUrlsFromSnippet,
+  type SnippetActionDetail,
+} from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
 import { getUserId } from '../../../../storage/API/core/api';
 import { buildUrl, SHARED_ALL_COMMANDS, THIS_SECTION_ACTION_PREFIXES } from '../../../../shared-components/commands';
 import { extractSnippetIdFromCompoundId } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
-import { db } from '../../../../storage/indexDB/dbConfig';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
-import cmdOSLogo from '../../../../shared-components/assets/tasklabs_logo.png';
+import cmdOSLogo from '../../../../shared-components/assets/cmdOS_logo.png';
 import { useUIStore } from '../../../../shared-components/uiStateManager';
-import NotificationContainer from '../../../../shared-components/notifications/NotificationContainer';
+import { executeItemDelete } from '../../../../shared-components/utils/itemDelete';
 
-const showWebsiteToast = (message: string, bg = '#1a73e8') => {
-  const container = (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body;
-  const toastId = `alts-website-toast-${Date.now()}`;
-  const toast = document.createElement('div');
-  toast.id = toastId;
-  toast.textContent = message;
-  toast.style.cssText = [
-    'position:fixed',
-    'bottom:24px',
-    'left:50%',
-    'transform:translateX(-50%)',
-    `background:${bg}`,
-    'color:white',
-    'padding:10px 22px',
-    'border-radius:20px',
-    'z-index:2147483647',
-    'font-family:system-ui,sans-serif',
-    'font-size:13px',
-    'font-weight:600',
-    'box-shadow:0 8px 24px rgba(0,0,0,0.4)',
-    'pointer-events:none',
-    'transition:opacity 0.2s ease-in-out',
-  ].join(';');
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    setTimeout(() => toast.remove(), 200);
-  }, 2500);
-};
+
+
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { resolveEntityById } from '../../../../shared-components/utils/entityResolver';
 
@@ -91,37 +73,46 @@ import { BsKeyboard } from 'react-icons/bs';
 import { LuSparkles } from 'react-icons/lu';
 import { PAGE_ACTION_ITEMS, executePageActionCommand, type AltQPageActionItem } from '../commands/pageActions';
 import { CustomSearchPrefixesForOmniboxStorage } from '../../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
+import { createCommandIndex } from '../../../../shared-components/searchBarMain/searchLogicAndAlgorithms/commandSearch';
 import BoardView from '../../../../shared-components/BoardView/BoardView';
 import SpreadsheetMainContainer from '../../../../shared-components/spreadsheetUi/ui/spreadsheetMainContainer';
 import { EditablePrefixKey } from '../../../../shared-components/shortcuts/ui/EditablePrefixKey';
 import { SessionGridIcon } from '../../../../shared-components/icons/sessionGridIcon';
-
+import { useSearchbarSuggestions } from '../../../../shared-components/searchBarMain/keyboardAndUiHooks/useSearchbarSuggestions';
+import {
+  buildShortcutPrefixRegistry,
+  getCommandSpacePrefix,
+  matchesShortcutCategory,
+  parseShortcutInvocation,
+  recordAssignedTriggerUsage,
+} from '../../../../shared-components/triggers';
 
 // Map command IDs to specific React Icons
 const BROWSER_ICONS: Record<string, React.ReactNode> = {
-  history: <FaHistory size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  downloads: <FaDownload size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  settings: <FaCog size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  extensions: <FaPuzzlePiece size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  bookmarks: <FaBookmark size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  flags: <FaFlag size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  inspect: <FaCode size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  version: <FaTag size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  about: <FaInfoCircle size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  tasks: <FaMemory size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  gpu: <FaMicrochip size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  dino: <FaGamepad size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  passwords: <FaKey size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  help: <FaQuestionCircle size={22} className="text-[#586e75] dark:text-neutral-400" />,
-  ai: <FaRobot size={22} className="text-[#586e75] dark:text-neutral-400 object-contain" />,
+  history: <FaHistory size={22} className="text-[var(--color-iconDefault)]" />,
+  downloads: <FaDownload size={22} className="text-[var(--color-iconDefault)]" />,
+  settings: <FaCog size={22} className="text-[var(--color-iconDefault)]" />,
+  extensions: <FaPuzzlePiece size={22} className="text-[var(--color-iconDefault)]" />,
+  bookmarks: <FaBookmark size={22} className="text-[var(--color-iconDefault)]" />,
+  flags: <FaFlag size={22} className="text-[var(--color-iconDefault)]" />,
+  inspect: <FaCode size={22} className="text-[var(--color-iconDefault)]" />,
+  version: <FaTag size={22} className="text-[var(--color-iconDefault)]" />,
+  about: <FaInfoCircle size={22} className="text-[var(--color-iconDefault)]" />,
+  tasks: <FaMemory size={22} className="text-[var(--color-iconDefault)]" />,
+  gpu: <FaMicrochip size={22} className="text-[var(--color-iconDefault)]" />,
+  dino: <FaGamepad size={22} className="text-[var(--color-iconDefault)]" />,
+  passwords: <FaKey size={22} className="text-[var(--color-iconDefault)]" />,
+  help: <FaQuestionCircle size={22} className="text-[var(--color-iconDefault)]" />,
+  ai: <FaRobot size={22} className="text-[var(--color-iconDefault)] object-contain" />,
 };
 
 // Icons for page-action commands (screenshot / download)
 const PAGE_ACTION_ICONS: Record<string, React.ReactNode> = {
-  capture_screenshot: <FaCamera size={14} className="text-[#A1A6B3]" />,
-  capture_full_screenshot: <FaExpand size={14} className="text-[#A1A6B3]" />,
-  downloadallimages: <FaImages size={14} className="text-[#A1A6B3]" />,
-  downloadalltables: <FaTable size={14} className="text-[#A1A6B3]" />,
+  capture_screenshot: <FaCamera size={14} className="text-[var(--color-iconDefault)]" />,
+  capture_clip_screenshot: <FaCopy size={14} className="text-[var(--color-iconDefault)]" />,
+  capture_full_screenshot: <FaExpand size={14} className="text-[var(--color-iconDefault)]" />,
+  downloadallimages: <FaImages size={14} className="text-[var(--color-iconDefault)]" />,
+  downloadalltables: <FaTable size={14} className="text-[var(--color-iconDefault)]" />,
 };
 
 // Alias map: alias (uppercase) to section name
@@ -182,29 +173,95 @@ const FILTER_LABELS: Record<string, string> = {
   au: 'Automations',
   b: 'Bookmarks',
   bm: 'Bookmarks',
-  sn: 'Snippets',
+  sn: 'Text Expanders',
   p: 'Prompts',
 };
 
 function getActiveTagInfo(
   searchValue: string,
   commandPrefix = 'c',
+  omniboxPrefixes?: Record<string, string>
 ): { prefix: string; label: string; query: string } | null {
+  const categoryToLabel: Record<string, string> = {
+    note: 'Notes',
+    link: 'Links',
+    bookmark: 'Bookmarks',
+    todo: 'Todos',
+    command: 'Commands',
+    session: 'Tab Sessions',
+    automation: 'Automations',
+    agent: 'Chat Agents',
+    snippet: 'Text Expanders',
+    prompt: 'Prompts',
+  };
+
+  // 1. Check custom colon prefix
+  const colonMatch = searchValue.match(/^([a-zA-Z0-9_-]+):\s/);
+  if (colonMatch && colonMatch[0] && omniboxPrefixes) {
+    const colonAlias = colonMatch[1].toLowerCase();
+    let matchedCategory = '';
+    for (const [key, val] of Object.entries(omniboxPrefixes)) {
+      if (val && val.toLowerCase() === colonAlias) {
+        matchedCategory = key;
+        break;
+      }
+    }
+    if (matchedCategory) {
+      const prefix = colonMatch[0];
+      const rest = searchValue.slice(prefix.length);
+      const label = categoryToLabel[matchedCategory] || matchedCategory;
+      return {
+        prefix: prefix.trim(),
+        label,
+        query: rest,
+      };
+    }
+  }
+
+  // 2. Existing slash matching
   const hasLeadingSlash = searchValue.startsWith('/');
   const textToMatch = hasLeadingSlash ? searchValue.slice(1) : searchValue;
   const match = textToMatch.match(/^[a-zA-Z]+/);
   if (!match) return null;
+
   const prefix = match[0];
   const rest = textToMatch.slice(prefix.length);
   const lowerPrefix = prefix.toLowerCase();
+  
   if (!hasLeadingSlash && lowerPrefix === commandPrefix.toLowerCase()) return null;
   if (lowerPrefix === 'a') return null;
-  if (FILTER_SHORTCUTS.includes(lowerPrefix) && (rest === '' || rest.startsWith(' '))) {
-    return {
-      prefix: hasLeadingSlash ? `/${prefix}` : prefix,
-      label: FILTER_LABELS[lowerPrefix] || prefix,
-      query: rest.startsWith(' ') ? rest.slice(1) : '',
-    };
+
+  // Try custom slash matching first
+  if (omniboxPrefixes) {
+    let matchedCategory = '';
+    for (const [key, val] of Object.entries(omniboxPrefixes)) {
+      if (val && val.toLowerCase() === lowerPrefix) {
+        matchedCategory = key;
+        break;
+      }
+    }
+    if (matchedCategory) {
+      const isValid = hasLeadingSlash ? (rest === '' || rest.startsWith(' ')) : rest.startsWith(' ');
+      if (isValid) {
+        return {
+          prefix: hasLeadingSlash ? `/${prefix}` : prefix,
+          label: categoryToLabel[matchedCategory] || matchedCategory,
+          query: rest.startsWith(' ') ? rest.slice(1) : '',
+        };
+      }
+    }
+  }
+
+  // Allow 'ts' (This Site) as a fixed fallback since it has no custom prefix
+  if (lowerPrefix === 'ts') {
+    const isValid = hasLeadingSlash ? (rest === '' || rest.startsWith(' ')) : rest.startsWith(' ');
+    if (isValid) {
+      return {
+        prefix: hasLeadingSlash ? `/${prefix}` : prefix,
+        label: 'This Site',
+        query: rest.startsWith(' ') ? rest.slice(1) : '',
+      };
+    }
   }
   return null;
 }
@@ -249,38 +306,77 @@ const getDomain = (urlStr: string) => {
  *   - activeSection: category activated by ALIAS+Space, or null
  *   - searchQuery: text typed after the space for within-category search
  */
-function parseAtMode(searchValue: string): {
+function parseAtMode(
+  searchValue: string,
+  omniboxPrefixes?: Record<string, string>
+): {
   atDropdown: boolean;
   activeSection: string | null;
   searchQuery: string;
 } {
   const textAfterAt = searchValue;
 
-  // Find longest matching alias prefix
   let bestAlias = '';
   let activeSection: string | null = null;
 
-  // Support both with and without leading slash (e.g. "N " or "/N ")
   const hasLeadingSlash = textAfterAt.startsWith('/');
   const textToMatch = hasLeadingSlash ? textAfterAt.slice(1) : textAfterAt;
+  const upperText = textToMatch.toUpperCase();
 
-  for (const [alias, section] of Object.entries(SECTION_ALIASES)) {
-    const upperText = textToMatch.toUpperCase();
-    const upperAlias = alias.toUpperCase();
+  const categoryToLabel: Record<string, string> = {
+    note: 'Notes',
+    link: 'Links',
+    bookmark: 'Bookmarks',
+    todo: 'Todos',
+    command: 'Commands',
+    session: 'Tab Sessions',
+    automation: 'Automations',
+    agent: 'Chat Agents',
+    snippet: 'Snippets',
+    prompt: 'Prompts',
+  };
 
-    // Active if matches exactly followed by a space
-    const matchWithSpace = upperText.startsWith(upperAlias + ' ');
-
-    if (matchWithSpace) {
-      if (alias.length > bestAlias.length) {
-        bestAlias = alias;
-        activeSection = section;
+  // 1. Check custom colon prefix first
+  const colonMatch = searchValue.match(/^([a-zA-Z0-9_-]+):\s/);
+  if (colonMatch && colonMatch[0] && omniboxPrefixes) {
+    const colonAlias = colonMatch[1].toLowerCase();
+    for (const [key, value] of Object.entries(omniboxPrefixes)) {
+      if (value && value.toLowerCase() === colonAlias) {
+        let query = searchValue.slice(colonMatch[0].length);
+        return {
+          atDropdown: false,
+          activeSection: categoryToLabel[key] || key,
+          searchQuery: query,
+        };
       }
     }
   }
 
+  // 1. Try matching custom prefix
+  if (omniboxPrefixes) {
+    for (const [key, value] of Object.entries(omniboxPrefixes)) {
+      if (!value) continue;
+      const upperAlias = value.toUpperCase();
+      const matchWithSpace = upperText.startsWith(upperAlias + ' ');
+
+      if (matchWithSpace) {
+        if (value.length > bestAlias.length) {
+          bestAlias = value;
+          activeSection = categoryToLabel[key] || key;
+        }
+      }
+    }
+  }
+
+  // Allow 'ts' (This Site) as a fixed fallback
+  if (!activeSection) {
+    if (upperText.startsWith('TS ')) {
+      bestAlias = 'ts';
+      activeSection = 'This Site';
+    }
+  }
+
   if (activeSection) {
-    // Slice off the alias (+ optional slash prefix) + trailing space
     let query = textToMatch.slice(bestAlias.length);
     if (query.startsWith(' ')) {
       query = query.slice(1);
@@ -288,12 +384,17 @@ function parseAtMode(searchValue: string): {
     return { atDropdown: false, activeSection, searchQuery: query };
   }
 
-  return { atDropdown: false, activeSection: null, searchQuery: searchValue };
+  return {
+    atDropdown: searchValue === '/',
+    activeSection: null,
+    searchQuery: textAfterAt,
+  };
 }
 
 type WebsiteCommandSpaceCategory =
   | 'note'
   | 'link'
+  | 'bookmark'
   | 'snippet'
   | 'session'
   | 'prompt'
@@ -323,28 +424,24 @@ const isExtractionCommandItem = (item: any): boolean => item?.category === 'page
 
 /** Build a { actionId -> prefix } map from current omniboxPrefixes (falls back to empty string). */
 const getActionPrefixMap = (omniboxPrefixes: any): Record<string, string> => {
-  const ACTION_KEYS = [
-    'capture_screenshot',
-    'capture_full_screenshot',
-    'downloadallimages',
-    'downloadalltables',
-    'save_link',
-    'save_session',
-    'save_chat',
-    'add_to_existing',
-    'add_to_existing_session',
-    'summarize_page',
-  ] as const;
   const map: Record<string, string> = {};
-  for (const key of ACTION_KEYS) {
-    if (omniboxPrefixes?.[key]) map[key] = omniboxPrefixes[key];
-  }
+  map['capture_screenshot'] = omniboxPrefixes?.capture_screenshot || 'cs';
+  map['capture_clip_screenshot'] = omniboxPrefixes?.capture_clip_screenshot || 'ccs';
+  map['capture_full_screenshot'] = omniboxPrefixes?.capture_full_screenshot || 'cfp';
+  map['downloadallimages'] = omniboxPrefixes?.downloadallimages || 'dai';
+  map['downloadalltables'] = omniboxPrefixes?.downloadalltables || 'dat';
+  map['save_link'] = omniboxPrefixes?.save_link || 'clc';
+  map['save_session'] = omniboxPrefixes?.save_session || 'cls';
+  map['save_chat'] = omniboxPrefixes?.save_chat || 'csc';
+  map['add_to_existing'] = omniboxPrefixes?.add_to_existing || 'cae';
+  map['add_to_existing_session'] = omniboxPrefixes?.add_to_existing_session || 'caes';
+  map['summarize_page'] = omniboxPrefixes?.summarize_page || 'csp';
   return map;
 };
 
 function parseWebsiteCommandSpace(searchValue: string, omniboxPrefixes: any): WebsiteCommandSpaceState {
   const normalizedValue = searchValue.replace(/\u00A0/g, ' ');
-  const commandPrefix = omniboxPrefixes?.command?.trim().toLowerCase() || 'c';
+  const commandPrefix = getCommandSpacePrefix(omniboxPrefixes);
 
   if (!normalizedValue.toLowerCase().startsWith(`${commandPrefix} `)) {
     return {
@@ -360,18 +457,23 @@ function parseWebsiteCommandSpace(searchValue: string, omniboxPrefixes: any): We
   const queryAfterCommand = normalizedValue.slice(commandPrefix.length + 1);
   const queryAfterCommandLower = queryAfterCommand.toLowerCase();
 
-  const nestedPrefixes: Array<{ key: WebsiteCommandSpaceCategory; prefix: string }> = [
-    { key: 'snippet', prefix: omniboxPrefixes?.snippet?.trim().toLowerCase() || 'sn' },
-    { key: 'note', prefix: omniboxPrefixes?.note?.trim().toLowerCase() || 'n' },
-    { key: 'link', prefix: omniboxPrefixes?.link?.trim().toLowerCase() || 'l' },
-    { key: 'session', prefix: omniboxPrefixes?.session?.trim().toLowerCase() || 's' },
-    { key: 'prompt', prefix: omniboxPrefixes?.prompt?.trim().toLowerCase() || 'p' },
-    { key: 'automation', prefix: omniboxPrefixes?.automation?.trim().toLowerCase() || 'a' },
-    { key: 'agent', prefix: omniboxPrefixes?.agent?.trim().toLowerCase() || 'g' },
-    { key: 'todo', prefix: omniboxPrefixes?.todo?.trim().toLowerCase() || 't' },
-    { key: 'system_command', prefix: omniboxPrefixes?.system_command?.trim().toLowerCase() || 'sc' },
-    { key: 'command', prefix: commandPrefix },
-  ];
+  const allowedCategories = new Set<WebsiteCommandSpaceCategory>([
+    'snippet',
+    'note',
+    'link',
+    'bookmark',
+    'session',
+    'prompt',
+    'automation',
+    'agent',
+    'todo',
+    'system_command',
+    'command',
+  ]);
+  const nestedPrefixes = Object.entries(buildShortcutPrefixRegistry(omniboxPrefixes))
+    .filter(([, key]) => allowedCategories.has(key as WebsiteCommandSpaceCategory))
+    .map(([prefix, key]) => ({ key: key as WebsiteCommandSpaceCategory, prefix }))
+    .sort((a, b) => b.prefix.length - a.prefix.length);
 
   let activeCategoryFilter: WebsiteCommandSpaceCategory | null = null;
   let actualQuery = queryAfterCommand.trim();
@@ -406,14 +508,14 @@ function parseWebsiteCommandSpace(searchValue: string, omniboxPrefixes: any): We
 
 const SECTION_META: Record<string, { title: string; icon: React.ReactNode }> = {
   thissite: { title: 'This Site', icon: <FaRegFileAlt className="w-4 h-4 shrink-0" /> },
-  todos: { title: 'Todos', icon: <FaCheckCircle className="w-4 h-4 shrink-0" /> },
+  todos: { title: 'Todos', icon: <BsCalendarCheck className="w-4 h-4 shrink-0" /> },
   automations: { title: 'Automations', icon: <FiZap className="w-4 h-4 shrink-0" /> },
-  notes: { title: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0" /> },
+  notes: { title: 'Notes', icon: <FiFileText className="w-4 h-4 shrink-0" /> },
   links: { title: 'Links', icon: <FaLink className="w-4 h-4 shrink-0" /> },
   sessions: { title: 'Tab Sessions', icon: <SessionGridIcon className="w-4 h-4 shrink-0" /> },
-  snippets: { title: 'Snippets', icon: <FaCode className="w-4 h-4 shrink-0" /> },
-  commands: { title: 'Commands', icon: <FaTerminal className="w-4 h-4 shrink-0" /> },
-  system_commands: { title: 'System Commands', icon: <FaTerminal className="w-4 h-4 shrink-0" /> },
+  snippets: { title: 'Text Expanders', icon: <FaCode className="w-4 h-4 shrink-0" /> },
+  commands: { title: 'Commands', icon: <FiTerminal className="w-4 h-4 shrink-0" /> },
+  system_commands: { title: 'System Commands', icon: <FiTerminal className="w-4 h-4 shrink-0" /> },
   chat_agents: { title: 'Chat Agents', icon: <FaRobot className="w-4 h-4 shrink-0" /> },
 };
 
@@ -577,6 +679,7 @@ function fuzzyScore(text: string, query: string): number {
  */
 function getItemSearchText(item: any): string {
   const parts: string[] = [];
+  if (item._displayShortcut) parts.push(String(item._displayShortcut));
   // Primary identifiers
   if (item.name) parts.push(String(item.name));
   if (item.key) parts.push(String(item.key));
@@ -616,11 +719,14 @@ interface AppProps {
   isOpen: boolean;
   onClose: () => void;
   theme?: 'dark' | 'light';
+  initialCommand?: string;
 }
 
-const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
+const App: React.FC<AppProps> = ({ isOpen, onClose, theme, initialCommand }) => {
   const { theme: appearanceTheme } = useAppearance();
   const hasWallpaper = !!appearanceTheme?.wallpaper?.src;
+  const containerBackground = appearanceTheme?.tokens?.containerBg || 'var(--color-containerBg)';
+  const inputBackground = appearanceTheme?.tokens?.inputBg || 'var(--color-inputBg)';
   const [searchValue, setSearchValue] = useState('');
   const [debouncedSearchValue, setDebouncedSearchValue] = useState('');
   const [showSpreadsheet, setShowSpreadsheet] = useState(false);
@@ -632,11 +738,15 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     return () => clearTimeout(handler);
   }, [searchValue]);
 
+  // initialCommand effect moved to below handleExecute
+
   const [autoTriggerDropdown, setAutoTriggerDropdown] = useState(true);
 
   const updateSearchValue = (val: string) => {
     setSearchValue(val);
   };
+
+
 
   const shouldShowDefaultPopup = (val: string) => val.trim() === '';
 
@@ -693,6 +803,14 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
   const [dropdownSelectedIndex, setDropdownSelectedIndex] = useState(0);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const [selectedSidebarSection, setSelectedSidebarSection] = useState<string>('all');
+  const [showSidebarSectionPill, setShowSidebarSectionPill] = useState(false);
+  const showDefaultPopup = () => {
+    setSearchValue('');
+    setSelectedSidebarSection('all');
+    setShowSidebarSectionPill(false);
+    setDropdownSelectedIndex(0);
+    setIsDropdownVisible(true);
+  };
   const [isSettingsDropdownOpen, setIsSettingsDropdownOpen] = useState(false);
   const settingsDropdownRef = useRef<HTMLDivElement | null>(null);
   const [recordingState, setRecordingState] = useState<any>(null);
@@ -725,6 +843,8 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
 
   const [omniboxPrefixes, setOmniboxPrefixes] = useState<any>(null);
 
+
+
   useEffect(() => {
     const loadPrefixes = async () => {
       try {
@@ -756,6 +876,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
   const selectedTeam = useUIStore((s: any) => s.selectedTeam) as any;
   const allWorkspaces = useDbStore(state => state.workspaces);
   const dbSessions = useDbStore(state => state.sessions);
+  const userShortcuts = useDbStore(state => state.userShortcuts);
 
   // Derive the workspace to save new links into.
   // Prefer the selected team's first workspace, otherwise fall back to the first Dexie workspace.
@@ -787,7 +908,10 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
           nodes.forEach(node => {
             if (node.url) {
               list.push({
-                id: node.id,
+                id: `bookmark-${node.id}`,
+                _kind: 'bookmark',
+                type: 'bookmark',
+                title: node.title || node.url,
                 name: node.title || node.url,
                 url: node.url,
                 isBookmark: true,
@@ -810,7 +934,10 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
           return;
         }
         const list = response.results.map((n: any) => ({
-          id: n.id || String(Math.random()),
+          id: `bookmark-${n.id || n.url}`,
+          _kind: 'bookmark',
+          type: 'bookmark',
+          title: (n.title || '').trim() || n.url,
           name: (n.title || '').trim() || n.url,
           url: n.url,
           isBookmark: true,
@@ -966,76 +1093,46 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     return Array.from(map.values());
   }, [globalCommands]);
 
-  const filteredCommands = useMemo(() => {
-    if (
-      debouncedCommandSpace.isActive &&
-      debouncedCommandSpace.activeCategoryFilter &&
-      debouncedCommandSpace.activeCategoryFilter !== 'command'
-    ) {
-      return [];
-    }
+  const commandIndex = useMemo(() => createCommandIndex(allCommands), [allCommands]);
 
-    // Always separate page-action commands — they must never be sliced away
-    const pageActionCmds = allCommands.filter(c => (c as any).category === 'page_action');
-    const otherCmds = allCommands.filter(c => (c as any).category !== 'page_action');
+  const suggestionState = useSearchbarSuggestions({
+    value: debouncedSearchValue,
+    lockedCommand: null,
+    lockedLocalDef: null,
+    selectedTeam: null,
+    searchTeamLike: null,
+    dbWorkspaces: [],
+    selectedFolder: null,
+    isInitialAltSFocus: false,
+    isFocused: true,
+    isSearchFocusEnabled: true,
+    selectedImages: [],
+    commands: allCommands,
+    commandIndex: commandIndex,
+    bookmarkSuggestions: [],
+    commonCommandEntries: [],
+    automationSuggestions: automations || [],
+    agentCollectionSuggestions: [],
+    moduleSuggestions: [],
+    selectedAtCommand: null,
+    activeSnippetCommandId: null,
+    isSnippetCommand: false,
+    activeCollection: null,
+    showAIHistoryPanel: false,
+    commandKey: getCommandSpacePrefix(omniboxPrefixes),
+    workspaceItemIndex: [],
+    userDbShortcuts: userShortcuts || [],
+    userDbHotkeys: [],
+    customPrefixes: omniboxPrefixes || {},
+    isEmbedded: true,
+    contextUrl: activeTabUrl,
+  });
 
-    const effectiveSearchValue = debouncedCommandSpace.isActive
-      ? debouncedCommandSpace.actualQuery
-      : debouncedSearchValue;
-
-    const getCategoryPriority = (c: any) => {
-      const cat = (c.category || '').toLowerCase();
-      if (cat === 'page_action') return 1;
-      if (cat === 'ai' && c.id !== 'ai') return 2;
-      if (cat === 'browser') return 3;
-      if (c.isGlobal === false) return 4; // Local app commands
-      if (cat === 'thissite_action') return 5;
-      return 6; // Other global commands
-    };
-
-    if (!effectiveSearchValue.trim()) {
-      const sortedCmds = [...pageActionCmds, ...otherCmds].sort((a, b) => {
-        return getCategoryPriority(a) - getCategoryPriority(b);
-      });
-
-      return sortedCmds.slice(0, 40);
-    }
-
-    const lower = effectiveSearchValue.toLowerCase();
-    const core = lower.replace(/^\//, '');
-
-    // Match page-action items against label, prefix, id AND keywords
-    const matchedPageActions = pageActionCmds.filter(
-      c =>
-        c.label.toLowerCase().includes(core) ||
-        c.prefix.toLowerCase().includes(core) ||
-        String(c.id).toLowerCase().includes(core) ||
-        (THIS_SECTION_ACTION_PREFIXES[c.id]?.toLowerCase().startsWith(core) ?? false) ||
-        ((c as any).keywords as string[] | undefined)?.some((kw: string) => kw.toLowerCase().includes(core)),
-    );
-
-    const matchedOthers = otherCmds.filter(
-      c =>
-        c.id !== 'ai' &&
-        (c.label.toLowerCase().includes(core) ||
-          c.prefix.toLowerCase().includes(core) ||
-          String(c.id).toLowerCase().includes(core)),
-    );
-
-    const matchedAll = [...matchedPageActions, ...matchedOthers].sort((a, b) => {
-      return getCategoryPriority(a) - getCategoryPriority(b);
-    });
-
-    return matchedAll.slice(0, 40);
-  }, [allCommands, debouncedSearchValue, debouncedCommandSpace]);
-
-  const filtered = useMemo(() => {
+  const filteredThisSite = useMemo(() => {
     const { atDropdown, activeSection, searchQuery } = debouncedCommandSpace.isActive
       ? { atDropdown: false, activeSection: null, searchQuery: debouncedSearchValue }
-      : parseAtMode(debouncedSearchValue);
+      : parseAtMode(debouncedSearchValue, omniboxPrefixes);
 
-    // When a section is activated via /ALIAS+Space, use searchQuery for filtering
-    // When normal search, use searchValue directly
     const effectiveSearchValue = atDropdown ? '' : activeSection !== null ? searchQuery : debouncedSearchValue;
 
     const fuzzyFilter = (list: any[], queryOverride?: string) => {
@@ -1047,13 +1144,6 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         .sort((a, b) => b.score - a.score)
         .map(({ item }) => item);
     };
-    // Keep 'filter' as an alias so call-sites below don't need renaming
-    const filter = fuzzyFilter;
-
-    const allSnippets = safeList(snippets);
-    const actualSnippets = allSnippets.filter(s => (s.category || '').toLowerCase() !== 'prompt');
-    const actualPrompts = allSnippets.filter(s => (s.category || '').toLowerCase() === 'prompt');
-    const allSessions = safeList(dbSessions);
 
     const activeDomain = getDomain(activeTabUrl);
     const activeNormalized = normalizeUrl(activeTabUrl);
@@ -1064,20 +1154,6 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
       ['chatgpt.com', 'claude.ai', 'gemini.google.com', 'chat.openai.com', 'perplexity.ai'].some(domain =>
         activeDomain.includes(domain),
       );
-
-    // Use raw links (not filtered) so saved-state is NEVER affected by search input.
-    const allRawLinks = safeList(links);
-    const filteredLinks = filter(allRawLinks);
-
-    // isAlreadySaved is computed against the full raw link list, independent of search.
-    const isAlreadySaved = !!(
-      activeNormalized &&
-      (optimisticSavedUrls.some(u => normalizeUrl(u) === activeNormalized) ||
-        allRawLinks.some(link => {
-          const urls = [...extractUrlsFromSnippet(link), ...(link.urls || []).map((u: any) => u.url || u)];
-          return urls.some((u: string) => normalizeUrl(u) === activeNormalized);
-        }))
-    );
 
     const thisSiteItems: any[] = [];
     if (activeNormalized && activeDomain && !activeTabUrl.startsWith('chrome-extension://')) {
@@ -1113,7 +1189,6 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         category: 'thissite_action',
         icon: <SessionGridIcon className="w-4 h-4 shrink-0 text-gray-400" />,
       });
-      // Directly include page action extraction commands under "This Site"
       PAGE_ACTION_ITEMS.forEach((item: any) => {
         thisSiteItems.push({
           id: item.id,
@@ -1123,11 +1198,10 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
           icon: PAGE_ACTION_ICONS[item.id] || <FaRegFileAlt className="w-4 h-4 shrink-0 text-gray-400" />,
         });
       });
-
       thisSiteItems.push({
         id: 'summarize_page',
         name: 'Summarize This Page',
-        category: 'page_action',
+        category: 'thissite_action',
         icon: <FaInfoCircle className="w-4 h-4 shrink-0 text-gray-400" />,
       });
     }
@@ -1144,240 +1218,32 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
 
     if (debouncedCommandSpace.isActive) {
       const commandQuery = debouncedCommandSpace.actualQuery;
-      const matchThisSiteItems = (items: any[]) => {
-        if (!commandQuery.trim()) return items;
+      if (debouncedCommandSpace.activeCategoryFilter === 'command' || !debouncedCommandSpace.activeCategoryFilter) {
+        if (!commandQuery.trim()) return visibleThisSiteItems;
         const lower = commandQuery.toLowerCase();
-        return items.filter(
+        return visibleThisSiteItems.filter(
           item =>
             item.name.toLowerCase().includes(lower) ||
-            (THIS_SECTION_ACTION_PREFIXES[item.id]?.toLowerCase().startsWith(lower) ?? false),
+            (THIS_SECTION_ACTION_PREFIXES[item.id]?.toLowerCase().startsWith(lower) ?? false) ||
+            (actionPrefixMap[item.id]?.toLowerCase().startsWith(lower) ?? false),
         );
-      };
-
-      const emptyResult = {
-        thissite: [] as any[],
-        automations: [] as any[],
-        notes: [] as any[],
-        todos: [] as any[],
-        links: [] as any[],
-        snippets: [] as any[],
-        prompts: [] as any[],
-        sessions: [] as any[],
-        bookmarks: [] as any[],
-        commands: [] as any[],
-        system_commands: [] as any[],
-      };
-
-      switch (debouncedCommandSpace.activeCategoryFilter) {
-        case 'note':
-          return { ...emptyResult, notes: filter(safeList(notes), commandQuery).slice(0, 30) };
-        case 'link':
-          return { ...emptyResult, links: filter(allRawLinks, commandQuery).slice(0, 30) };
-        case 'snippet':
-          return { ...emptyResult, snippets: filter(actualSnippets, commandQuery).slice(0, 30) };
-        case 'session':
-          return { ...emptyResult, sessions: filter(allSessions, commandQuery).slice(0, 30) };
-        case 'prompt':
-          return { ...emptyResult, prompts: filter(actualPrompts, commandQuery).slice(0, 30) };
-        case 'automation':
-          return { ...emptyResult, automations: filter(safeList(automations), commandQuery).slice(0, 30) };
-        case 'agent':
-          return emptyResult;
-        case 'system_command':
-          return {
-            ...emptyResult,
-            system_commands: filter(allCommands, commandQuery).slice(0, 40),
-          };
-        case 'command':
-          return {
-            ...emptyResult,
-            thissite: matchThisSiteItems(visibleThisSiteItems),
-            commands: filteredCommands,
-          };
-        default:
-          return {
-            ...emptyResult,
-            thissite: matchThisSiteItems(visibleThisSiteItems),
-            commands: filteredCommands,
-          };
       }
+      return [];
     }
 
-    if (activeSection && activeSection !== 'all') {
-      const emptyResult = {
-        thissite: [] as any[],
-        automations: [] as any[],
-        notes: [] as any[],
-        todos: [] as any[],
-        links: [] as any[],
-        snippets: [] as any[],
-        prompts: [] as any[],
-        sessions: [] as any[],
-        bookmarks: [] as any[],
-        commands: [] as any[],
-        system_commands: [] as any[],
-      };
-
-      switch (activeSection) {
-        case 'thissite':
-          return {
-            ...emptyResult,
-            thissite: effectiveSearchValue.trim() ? filter(visibleThisSiteItems, searchQuery) : visibleThisSiteItems,
-          };
-        case 'todos':
-          return {
-            ...emptyResult,
-            todos: filter(
-              safeList(todos).filter(t => !t.is_done),
-              searchQuery,
-            ).slice(0, 30),
-          };
-        case 'commands':
-          return {
-            ...emptyResult,
-            commands: filter(allCommands, searchQuery).slice(0, 40),
-          };
-        case 'system_commands':
-          return {
-            ...emptyResult,
-            system_commands: filter(allCommands, searchQuery).slice(0, 40),
-          };
-        case 'links':
-          return {
-            ...emptyResult,
-            links: filter(allRawLinks, searchQuery).slice(0, 30),
-          };
-        case 'notes':
-          return {
-            ...emptyResult,
-            notes: filter(safeList(notes), searchQuery).slice(0, 30),
-          };
-        case 'sessions':
-          return {
-            ...emptyResult,
-            sessions: filter(allSessions, searchQuery).slice(0, 30),
-          };
-        case 'automations':
-          return {
-            ...emptyResult,
-            automations: filter(safeList(automations), searchQuery).slice(0, 30),
-          };
-        case 'bookmarks':
-          return {
-            ...emptyResult,
-            bookmarks: filter(safeList(allBookmarks), searchQuery).slice(0, 30),
-          };
-        case 'snippets':
-          return {
-            ...emptyResult,
-            snippets: filter(actualSnippets, searchQuery).slice(0, 30),
-          };
-        case 'prompts':
-          return {
-            ...emptyResult,
-            prompts: filter(actualPrompts, searchQuery).slice(0, 30),
-          };
-        default:
-          return emptyResult;
-      }
+    if (activeSection && activeSection === 'thissite') {
+      return effectiveSearchValue.trim() ? fuzzyFilter(visibleThisSiteItems, searchQuery) : visibleThisSiteItems;
     }
 
-    return {
-      thissite: effectiveSearchValue.trim() ? filter(visibleThisSiteItems) : visibleThisSiteItems,
-      automations: filter(safeList(automations)).slice(0, 30),
-      notes: filter(safeList(notes)).slice(0, 30),
-      todos: filter(safeList(todos).filter(t => !t.is_done)).slice(0, 30),
-      links: filteredLinks.slice(0, 30),
-      snippets: filter(actualSnippets).slice(0, 30),
-      prompts: filter(actualPrompts).slice(0, 30),
-      sessions: filter(allSessions).slice(0, 30),
-      bookmarks: filter(safeList(allBookmarks)).slice(0, 30),
-      commands: filteredCommands,
-      system_commands: [],
-    };
+    return effectiveSearchValue.trim() ? fuzzyFilter(visibleThisSiteItems) : visibleThisSiteItems;
   }, [
-    automations,
-    allCommands,
-    notes,
-    snippets,
-    todos,
-    links,
     debouncedSearchValue,
-    allBookmarks,
-    filteredCommands,
     activeTabUrl,
-    optimisticSavedUrls,
-    isLoggedIn,
-    dbSessions,
     debouncedCommandSpace,
+    omniboxPrefixes,
   ]);
 
-  const sections = useMemo(() => {
-    let currentStart = 0;
-    const result: { name: string; start: number; count: number }[] = [];
 
-    // When command-space is active (e.g. "c n "), parseAtMode would mis-read
-    // "c" as the 'commands' alias — so skip slash-mode parsing in that case.
-    const { activeSection: slashActiveSection, searchQuery } = debouncedCommandSpace.isActive
-      ? { activeSection: null, searchQuery: debouncedSearchValue }
-      : parseAtMode(debouncedSearchValue);
-
-    // The query that is actually used for filtering content
-    const effectiveSearchValue = slashActiveSection !== null ? searchQuery : debouncedSearchValue;
-
-    const addSection = (name: string) => {
-      if (result.some(s => s.name === name)) return;
-      const itemsLength = filtered[name as keyof typeof filtered]?.length || 0;
-
-      // During search: only show sections that have matching results.
-      if (effectiveSearchValue.trim() && itemsLength === 0) {
-        return;
-      }
-
-      const hasNewButton = name !== 'bookmarks' && name !== 'commands' && name !== 'system_commands';
-      // During search, don't add "new" button slot — only real items count
-      const count = effectiveSearchValue.trim() ? itemsLength : itemsLength + (hasNewButton ? 1 : 0);
-
-      if (count > 0) {
-        result.push({ name, start: currentStart, count });
-        currentStart += count;
-      }
-    };
-
-    const allKeys = [
-      'thissite',
-      'todos',
-      'commands',
-      'system_commands',
-      'links',
-      'notes',
-      'sessions',
-      'automations',
-      'bookmarks',
-      'snippets',
-      'prompts',
-    ];
-
-    if (slashActiveSection && slashActiveSection !== 'all') {
-      // /ALIAS+Space mode (e.g. "/N ") — show ONLY that one section
-      addSection(slashActiveSection);
-    } else if (
-      showAllSections ||
-      slashActiveSection === 'all' ||
-      effectiveSearchValue.trim() ||
-      debouncedCommandSpace.isActive
-    ) {
-      // Normal search, "all" alias, command-space mode — show all sections that have items
-      allKeys.forEach(name => addSection(name));
-    } else {
-      // Empty search, no alias — only show This Site contextual actions
-      if ((filtered.thissite?.length || 0) > 0) {
-        addSection('thissite');
-      }
-    }
-
-    return result;
-  }, [filtered, showAllSections, debouncedSearchValue, debouncedCommandSpace]);
 
   const dropdownOptions = useMemo(() => {
     const cleanSearch = debouncedCommandSpace.isActive
@@ -1387,7 +1253,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         : debouncedSearchValue;
     const filterText = cleanSearch.toLowerCase();
 
-    const baseSiteItems = filtered.thissite || [];
+    const baseSiteItems = filteredThisSite || [];
 
     const actionPrefixMap = getActionPrefixMap(omniboxPrefixes);
 
@@ -1433,15 +1299,15 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     const categories = debouncedCommandSpace.isActive
       ? []
       : categoryNames
-          .filter(name => {
-            if (!filterText) return true;
-            return name.toLowerCase().startsWith(filterText);
-          })
-          .map(name => ({
-            type: 'category',
-            id: name,
-            name: name,
-          }));
+        .filter(name => {
+          if (!filterText) return true;
+          return name.toLowerCase().startsWith(filterText);
+        })
+        .map(name => ({
+          type: 'category',
+          id: name,
+          name: name,
+        }));
 
     const thisSiteActions = [...siteCommandActions, ...extractionActions];
 
@@ -1452,7 +1318,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
       categories,
       totalList: [...thisSiteActions, ...categories],
     };
-  }, [debouncedSearchValue, filtered.thissite, debouncedCommandSpace, omniboxPrefixes]);
+  }, [debouncedSearchValue, filteredThisSite, debouncedCommandSpace, omniboxPrefixes]);
 
   // Reset dropdown selected index when search value changes so that it always starts at the first item (Categories)
   useEffect(() => {
@@ -1484,7 +1350,6 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
     };
     const mappedType = typeMap[type.toLowerCase()];
     if (!mappedType) return;
-    chrome.runtime.sendMessage({ type: 'tasklabs:open-create-menu', creatorType: mappedType });
     onClose();
   };
 
@@ -1510,7 +1375,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
             initialNames = sessionRecord.urls.map((u: any) => u.title || u.name || '');
           }
         }
-      } catch (err) {}
+      } catch (err) { }
 
       if (initialUrls.length === 0) {
         try {
@@ -1522,7 +1387,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
             if (Array.isArray(parsed.urls)) initialUrls = parsed.urls;
             if (Array.isArray(parsed.names)) initialNames = parsed.names;
           }
-        } catch (err) {}
+        } catch (err) { }
       }
 
       if (initialUrls.length === 0) {
@@ -1544,10 +1409,6 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
         },
         response => {
           const count = initialUrls.length;
-          showWebsiteToast(
-            `🚀 Tab Session "${sessionName}" started with ${count} tab${count !== 1 ? 's' : ''}`,
-            '#10b981',
-          );
           useUIStore.getState().queueNotification({
             message: `🚀 Tab Session "${sessionName}" started with ${count} tab${count !== 1 ? 's' : ''}`,
             type: 'success',
@@ -1616,7 +1477,7 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
             tabUrl = pageUrl;
             tabTitle = document.title || 'Untitled Page';
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       const getFallbackWorkspaceId = (): string | null => defaultWorkspaceId || allWorkspaces[0]?.id || null;
@@ -1713,96 +1574,98 @@ const App: React.FC<AppProps> = ({ isOpen, onClose, theme }) => {
           // Perform full context scraping and AI dispatching
           const defaultPrompt = 'Summarize the main points, key takeaways, and outline of this page.';
 
-          chrome.runtime.sendMessage({ action: 'scrape_page_content' }, (scrapeRes: any) => {
-            const pageContent = scrapeRes?.ok && typeof scrapeRes.content === 'string' ? scrapeRes.content : '';
+          const directDomText = document.body
+            ? (document.body.innerText || document.body.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 12000)
+            : '';
 
-            const enhancedPrompt = pageContent
-              ? `User Question: ${defaultPrompt}
+          const enhancedPrompt = directDomText
+            ? `User Question: ${defaultPrompt}
 
 I'm looking at a webpage titled "${title}" (${url}).
 
 Here is the page content for context:
 ---
-${pageContent}
+${directDomText}
 ---`
-              : `Summarize this page for me: ${url}`;
+            : `Summarize this page for me: ${url}`;
 
-            chrome.storage.local.get('selectedAIs', (result: any) => {
-              const finalIds = ['gpt'];
-              const aiFallbacks: Record<string, { url: string; kind: 'chatgpt' | 'claude' | 'gemini' | 'perplexity' }> =
-                {
-                  gpt: { url: 'https://chatgpt.com/', kind: 'chatgpt' },
-                  claude: { url: 'https://claude.ai/new', kind: 'claude' },
-                  gemini: { url: 'https://gemini.google.com/app', kind: 'gemini' },
-                  perplexity: { url: 'https://www.perplexity.ai/', kind: 'perplexity' },
-                };
+          chrome.storage.local.get('selectedAIs', (result: any) => {
+            const raw = result?.selectedAIs;
+            const userSelectedIds = Array.isArray(raw) ? raw.filter((x: any) => typeof x === 'string') : [];
+            const finalIds = userSelectedIds.length > 0 ? userSelectedIds : ['gpt'];
 
-              const getBaseAIUrl = (kind?: string): string => {
-                if (kind === 'chatgpt') return 'https://chatgpt.com/';
-                if (kind === 'claude') return 'https://claude.ai/new';
-                if (kind === 'gemini') return 'https://gemini.google.com/app';
-                if (kind === 'perplexity') return 'https://www.perplexity.ai/';
-                return '';
-              };
+            const aiFallbacks: Record<string, { url: string; kind: 'chatgpt' | 'claude' | 'gemini' | 'perplexity' }> = {
+              gpt: { url: 'https://chatgpt.com/', kind: 'chatgpt' },
+              claude: { url: 'https://claude.ai/new', kind: 'claude' },
+              gemini: { url: 'https://gemini.google.com/app', kind: 'gemini' },
+              perplexity: { url: 'https://www.perplexity.ai/', kind: 'perplexity' },
+            };
 
-              const links = finalIds
-                .map((id: string) => {
-                  const fallback = aiFallbacks[id];
-                  if (fallback) {
-                    return {
-                      id,
-                      label: id,
-                      urlTemplate: fallback.url,
-                      autoSubmit: fallback.kind,
-                    };
-                  }
+            const getBaseAIUrl = (kind?: string): string => {
+              if (kind === 'chatgpt') return 'https://chatgpt.com/';
+              if (kind === 'claude') return 'https://claude.ai/new';
+              if (kind === 'gemini') return 'https://gemini.google.com/app';
+              if (kind === 'perplexity') return 'https://www.perplexity.ai/';
+              return '';
+            };
 
-                  const cmd = globalCommands.find(c => c.id === id);
-                  if (cmd) return cmd;
+            const links = finalIds
+              .map((id: string) => {
+                const fallback = aiFallbacks[id];
+                if (fallback) {
+                  return {
+                    id,
+                    label: id,
+                    urlTemplate: fallback.url,
+                    autoSubmit: fallback.kind,
+                  };
+                }
 
-                  return null;
-                })
-                .filter((cmd: any): cmd is any => Boolean(cmd))
-                .map((cmd: any) => {
-                  const targetUrl = cmd.autoSubmit
-                    ? getBaseAIUrl(cmd.autoSubmit) || cmd.urlTemplate.replace('{query}', '')
-                    : cmd.urlTemplate.replace('{query}', encodeURIComponent(enhancedPrompt));
+                const cmd = globalCommands.find(c => c.id === id);
+                if (cmd) return cmd;
 
-                  if (cmd.autoSubmit) {
-                    return {
-                      url: targetUrl,
-                      autoSubmit: {
-                        kind: cmd.autoSubmit,
-                        prompt: enhancedPrompt,
-                      },
-                    };
-                  }
-                  return { url: targetUrl };
-                });
+                return null;
+              })
+              .filter((cmd: any): cmd is any => Boolean(cmd))
+              .map((cmd: any) => {
+                const targetUrl = cmd.autoSubmit
+                  ? getBaseAIUrl(cmd.autoSubmit) || cmd.urlTemplate.replace('{query}', '')
+                  : cmd.urlTemplate.replace('{query}', encodeURIComponent(enhancedPrompt));
 
-              if (links.length > 0) {
-                const hasAutoSubmit = links.some((l: any) => Boolean(l.autoSubmit));
-                const delay = hasAutoSubmit ? 1200 : 200;
+                if (cmd.autoSubmit) {
+                  return {
+                    url: targetUrl,
+                    autoSubmit: {
+                      kind: cmd.autoSubmit,
+                      prompt: enhancedPrompt,
+                    },
+                  };
+                }
+                return { url: targetUrl };
+              });
 
-                chrome.runtime.sendMessage({
-                  action: 'open_multiple_links',
-                  links,
-                  delay,
-                });
-              } else {
-                // Fallback to ChatGPT
-                chrome.runtime.sendMessage({
-                  action: 'open_tab_with_auto_submit',
-                  url: 'https://chatgpt.com/',
-                  autoSubmit: {
-                    kind: 'chatgpt',
-                    prompt: enhancedPrompt,
-                  },
-                  active: true,
-                });
-              }
-            });
+            if (links.length > 0) {
+              const hasAutoSubmit = links.some((l: any) => Boolean(l.autoSubmit));
+              const delay = hasAutoSubmit ? 1200 : 200;
+
+              chrome.runtime.sendMessage({
+                action: 'open_multiple_links',
+                links,
+                delay,
+              });
+            } else {
+              chrome.runtime.sendMessage({
+                action: 'open_tab_with_auto_submit',
+                url: 'https://chatgpt.com/',
+                autoSubmit: {
+                  kind: 'chatgpt',
+                  prompt: enhancedPrompt,
+                },
+                active: true,
+              });
+            }
           });
+
           onClose();
         }
       };
@@ -1841,6 +1704,27 @@ ${pageContent}
       }
 
       dropdownActionGuardRef.current = { id: itemId, ts: now };
+      const parsedShortcut = parseShortcutInvocation(searchValue, omniboxPrefixes);
+      const matchedShortcut = parsedShortcut.trigger
+        ? (userShortcuts || []).find(
+            (shortcut: any) =>
+              String(shortcut.trigger || '').toLowerCase() === parsedShortcut.trigger &&
+              matchesShortcutCategory(String(shortcut.referenceType || ''), parsedShortcut.categoryFilter),
+          )
+        : null;
+      if (matchedShortcut && String(matchedShortcut.referenceId || '') === itemId) {
+        recordAssignedTriggerUsage({
+          triggerKind: 'user_shortcut',
+          triggerValue: matchedShortcut.trigger,
+          triggerSource: parsedShortcut.triggerSource === 'command_space' ? 'command_space' : 'website_popup',
+          referenceId: matchedShortcut.referenceId,
+          referenceType: matchedShortcut.referenceType,
+          surface: 'website_popup',
+          url: activeTabUrl,
+          targetLabelSnapshot: item?.name || item?.title || item?.key || itemId,
+          triggerLabelSnapshot: matchedShortcut.trigger,
+        }).catch(err => console.warn('[AltS-Website] Failed to record shortcut usage:', err));
+      }
       handleExecute(item);
       setSearchValue('');
       setDropdownSelectedIndex(-1);
@@ -1852,7 +1736,17 @@ ${pageContent}
         }
       }, 0);
     },
-    [handleExecute],
+    [activeTabUrl, handleExecute, omniboxPrefixes, searchValue, userShortcuts],
+  );
+
+  const handleWebsiteDeleteRequest = useCallback(
+    async (detail: SnippetActionDetail) => {
+      const result = await executeItemDelete(detail, 'AltS-Website');
+      if (result.status !== 'skipped') {
+        syncDbFromBackground();
+      }
+    },
+    [syncDbFromBackground],
   );
 
   const handleContextMenu = useCallback((e: React.MouseEvent, item: any, title: string) => {
@@ -1966,14 +1860,21 @@ ${pageContent}
             });
             if (res && res.success) {
               syncDbFromBackground();
+              useUIStore.getState().queueNotification({
+                message: res.isFavorited ? 'Added to favorites' : 'Removed from favorites',
+                type: 'success',
+              });
+            } else {
+              useUIStore.getState().queueNotification({
+                message: 'Failed to update favorites',
+                type: 'error',
+              });
             }
           },
         );
-
-        showWebsiteToast('Favorites updated');
-        useUIStore.getState().queueNotification({ message: 'Favorites updated', type: 'info' });
       } catch (error) {
         console.error('[AltQ] Failed to update favorites:', error);
+        useUIStore.getState().queueNotification({ message: 'Failed to update favorites', type: 'error' });
       }
     },
     [userId],
@@ -2028,7 +1929,7 @@ ${pageContent}
 
     const exactAction =
       PAGE_ACTION_ITEMS.find(item => item.id === commandSpace.exactThisSectionActionId) ||
-      filtered.thissite.find((item: any) => item.id === commandSpace.exactThisSectionActionId);
+      filteredThisSite.find((item: any) => item.id === commandSpace.exactThisSectionActionId);
 
     if (!exactAction) {
       return;
@@ -2037,7 +1938,7 @@ ${pageContent}
     autoTriggeredThisSectionInputRef.current = normalizedInput;
     setSearchValue('');
     handleExecute((exactAction as any).item || exactAction);
-  }, [commandSpace, filtered.thissite, handleExecute]);
+  }, [commandSpace, filteredThisSite, handleExecute]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -2062,19 +1963,30 @@ ${pageContent}
     }
   }, [isOpen]);
 
+  // Handle initialCommand
+  useEffect(() => {
+    let timer: any;
+    if (initialCommand && isOpen) {
+      timer = setTimeout(() => {
+        // Find the matching item from PAGE_ACTION_ITEMS or construct a minimal one for thisSiteItems
+        const item = PAGE_ACTION_ITEMS.find((i: any) => i.id === initialCommand) || {
+          id: initialCommand,
+          category: 'thissite_action'
+        };
+        handleExecute(item);
+      }, 50);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [initialCommand, isOpen]);
+
   if (!isOpen) return null;
 
-  const isDropdownActive = parseAtMode(searchValue).atDropdown;
-  const [isExplicitlyExpanded, setIsExplicitlyExpanded] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setIsExplicitlyExpanded(false);
-    }
-  }, [isOpen]);
+  const isDropdownActive = parseAtMode(searchValue, omniboxPrefixes).atDropdown;
+  const activeTypedTag = getActiveTagInfo(searchValue, commandSpace.commandPrefix, omniboxPrefixes);
 
   const isExpanded =
-    isExplicitlyExpanded ||
     searchValue.trim().length > 0 ||
     (selectedSidebarSection !== 'all' && selectedSidebarSection !== '');
 
@@ -2124,11 +2036,11 @@ ${pageContent}
             className={clsx(
               'z-[2] flex flex-col transition-all duration-200',
               isExpanded
-                ? 'absolute inset-0 rounded-none overflow-hidden border border-[var(--color-borderDefault)] bg-[#171821]'
-                : 'relative w-full rounded-xl bg-transparent overflow-visible border-none shadow-none',
+                ? 'absolute inset-0 rounded-none overflow-hidden border border-[var(--color-borderDefault)] bg-[var(--color-containerBg)]'
+                : 'relative w-full rounded-xl bg-[var(--color-containerBg)] overflow-visible border-none shadow-none',
             )}
             style={{
-              background: isExpanded ? '#171821' : 'transparent',
+              backgroundColor: containerBackground,
               opacity: 1,
               backdropFilter: 'none',
               WebkitBackdropFilter: 'none',
@@ -2136,17 +2048,19 @@ ${pageContent}
             {/* Top Left Branding */}
             {isExpanded && !showSpreadsheet && (
               <div className="absolute top-7 left-8 flex items-center z-50 select-none">
-                <img src={cmdOSLogo} alt="cmdOS" className="h-6 w-auto" />
-                <span className="text-lg font-bold text-white tracking-wide ml-2">cmdOS</span>
+                <div className="w-6 h-6 rounded-md flex items-center justify-center">
+                  <img src={cmdOSLogo} alt="cmdOS" className="w-full h-full object-contain" />
+                </div>
+                <span className="text-lg font-bold text-[var(--color-textPrimary)] tracking-wide ml-2">cmdOS</span>
               </div>
             )}
 
             {/* Top Right Action Buttons */}
-            {isExpanded && (
+            {isExpanded && !showSpreadsheet && (
               <div className="absolute top-6 right-6 flex items-center gap-1.5 z-[100]">
                 <button
                   onClick={onClose}
-                  className="w-9 h-9 flex items-center justify-center bg-transparent hover:bg-white/5 text-neutral-500 hover:text-neutral-300 transition-colors rounded-lg cursor-pointer focus:outline-none"
+                  className="w-9 h-9 flex items-center justify-center bg-transparent hover:bg-[var(--color-hoverBg)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] transition-colors rounded-lg cursor-pointer focus:outline-none"
                   title="Close (Esc)">
                   <FiX className="w-5 h-5" />
                 </button>
@@ -2162,20 +2076,27 @@ ${pageContent}
                 ref={searchContainerRef}
                 className={clsx(
                   'relative flex items-center border border-[var(--color-borderDefault)] min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px] px-6 group transition-colors shadow-none focus-within:ring-1 focus-within:ring-white/10 z-[60]',
-                  isExpanded ? 'w-[50%] bg-[var(--color-inputBg)] backdrop-blur-xl' : 'w-full bg-[#171821] shadow-2xl',
+                  isExpanded ? 'w-[50%] bg-[var(--color-inputBg)]' : 'w-full bg-[var(--color-inputBg)] shadow-2xl',
                   isDropdownVisible &&
                     (dropdownOptions.totalList.length > 0 ||
                       (searchValue.startsWith('/') &&
                         searchValue.trim() !== '' &&
-                        !parseAtMode(searchValue).activeSection))
+                        !parseAtMode(searchValue, omniboxPrefixes).activeSection))
                     ? 'rounded-t-xl'
                     : 'rounded-xl',
-                )}>
+                )}
+                style={{
+                  backgroundColor: inputBackground,
+                  opacity: 1,
+                  backdropFilter: 'none',
+                  WebkitBackdropFilter: 'none',
+                }}>
                 <div className="relative flex-1 h-full flex items-center">
                   {(() => {
-                    const activeTag =
-                      getActiveTagInfo(searchValue, commandSpace.commandPrefix) ||
-                      (searchValue.trim() === '' ? getSidebarSectionTagInfo(selectedSidebarSection) : null);
+                    const activeTag = showSidebarSectionPill
+                      ? activeTypedTag ||
+                        (searchValue.trim() === '' ? getSidebarSectionTagInfo(selectedSidebarSection) : null)
+                      : null;
                     if (!activeTag) {
                       return (
                         <input
@@ -2190,6 +2111,7 @@ ${pageContent}
                             setIsDropdownVisible(shouldShowDefaultPopup(val));
                             if (val === '') {
                               setSelectedSidebarSection('all');
+                              setShowSidebarSectionPill(false);
                             }
                           }}
                           onKeyDown={e => {
@@ -2202,8 +2124,7 @@ ${pageContent}
                                 (lower.startsWith('/') && FILTER_SHORTCUTS.includes(lower.slice(1)));
                               if (isShortcut && (searchValue === trimmed || searchValue === trimmed + ' ')) {
                                 e.preventDefault();
-                                setSearchValue('');
-                                setSelectedSidebarSection('all');
+                                showDefaultPopup();
                                 return;
                               }
                             }
@@ -2228,21 +2149,24 @@ ${pageContent}
                                   if (chosen.type.includes('action')) {
                                     handleExecute((chosen as any).item || chosen);
                                     setSearchValue('');
+                                    setShowSidebarSectionPill(false);
                                     setDropdownSelectedIndex(-1);
                                     setIsDropdownVisible(false);
                                   } else {
                                     setSelectedSidebarSection(chosen.id);
+                                    setShowSidebarSectionPill(false);
                                     const alias = SECTION_ALIAS_DISPLAY[chosen.id];
                                     const newSearchValue =
                                       chosen.id === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
                                     setSearchValue(newSearchValue);
                                     setDropdownSelectedIndex(-1);
-                                    setIsDropdownVisible(false);
+                                    setIsDropdownVisible(newSearchValue.trim() === '');
                                   }
                                 }
                               } else if (e.key === 'Escape') {
                                 e.preventDefault();
                                 setSearchValue('');
+                                setShowSidebarSectionPill(false);
                                 setDropdownSelectedIndex(-1);
                                 setIsDropdownVisible(false);
                               }
@@ -2257,7 +2181,7 @@ ${pageContent}
 
                     return (
                       <div className="flex-1 flex items-center h-full">
-                        <div className="flex items-center gap-1.5 mr-2 bg-[#eee8d5]/10 dark:bg-white/10 border border-[#eee8d5]/20 dark:border-white/20 rounded-lg px-2.5 py-0.5 shadow-sm text-white select-none">
+                        <div className="flex items-center gap-1.5 mr-2 bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] rounded-lg px-2.5 py-0.5 shadow-sm text-[var(--color-textPrimary)] select-none">
                           <span className="text-xs font-medium">{activeTag.label}</span>
                         </div>
                         <input
@@ -2276,8 +2200,7 @@ ${pageContent}
                             e.stopPropagation();
                             if (e.key === 'Backspace' && activeTag.query === '') {
                               e.preventDefault();
-                              setSearchValue('');
-                              setSelectedSidebarSection('all');
+                              showDefaultPopup();
                               return;
                             }
                             if (dropdownOptions.totalList.length > 0) {
@@ -2310,7 +2233,7 @@ ${pageContent}
                                       chosen.id === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
                                     setSearchValue(newSearchValue);
                                     setDropdownSelectedIndex(-1);
-                                    setIsDropdownVisible(false);
+                                    setIsDropdownVisible(newSearchValue.trim() === '');
                                   }
                                 }
                               } else if (e.key === 'Escape') {
@@ -2333,12 +2256,18 @@ ${pageContent}
                   (dropdownOptions.totalList.length > 0 ||
                     (searchValue.startsWith('/') &&
                       searchValue.trim() !== '' &&
-                      !parseAtMode(searchValue).activeSection)) && (
+                      !parseAtMode(searchValue, omniboxPrefixes).activeSection)) && (
                     <div
                       className={clsx(
                         'absolute top-[100%] left-0 w-full border border-[var(--color-borderDefault)] rounded-b-xl shadow-2xl z-[70] overflow-hidden flex flex-col pt-0 pb-2 max-h-[360px] overflow-y-auto custom-scrollbar group/sidebar',
-                        isExpanded ? 'bg-[var(--color-containerBg)] backdrop-blur-xl' : 'bg-[#171821]',
-                      )}>
+                        'bg-[var(--color-containerBg)]',
+                      )}
+                      style={{
+                        backgroundColor: containerBackground,
+                        opacity: 1,
+                        backdropFilter: 'none',
+                        WebkitBackdropFilter: 'none',
+                      }}>
                       {(() => {
                         if (dropdownOptions.totalList.length === 0) {
                           return (
@@ -2350,15 +2279,16 @@ ${pageContent}
 
                         const DROPDOWN_ITEM_BASE_CLASS =
                           'w-full appearance-none border-0 px-3 py-2 flex items-center justify-between cursor-pointer transition-colors mx-2 rounded-xl font-normal text-left text-[13px] group';
-                        const DROPDOWN_ITEM_SELECTED_CLASS = 'bg-white/10 text-white shadow-md border border-white/10';
+                        const DROPDOWN_ITEM_SELECTED_CLASS =
+                          'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] shadow-md border border-[var(--color-borderActive)]';
                         const DROPDOWN_ITEM_UNSELECTED_CLASS =
-                          'bg-transparent text-[#d1d5db] hover:bg-white/5 hover:text-white border border-transparent';
-                        const DROPDOWN_ITEM_LABEL_CLASS = 'truncate';
+                          'bg-transparent text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] border border-transparent';
+                        const DROPDOWN_ITEM_LABEL_CLASS = 'truncate text-[var(--color-textPrimary)]';
                         const DROPDOWN_ITEM_SHORTCUT_CLASS =
-                          'ml-auto flex items-center justify-center gap-1 px-1.5 py-0 rounded border border-white/5 bg-white/5 text-[13px] font-light font-mono text-[var(--color-textPrimary)] opacity-70 select-none lowercase';
+                          'ml-auto flex items-center justify-center gap-1 px-1.5 py-0 rounded border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[13px] font-light font-mono text-[var(--color-textSecondary)] select-none lowercase';
 
                         const DropdownSectionHeader = ({ title }: { title: string }) => (
-                          <div className="text-[10px] font-bold tracking-[0.08em] text-[#8b949e] px-4 py-1 mt-1">
+                          <div className="text-[10px] font-bold tracking-[0.08em] text-[var(--color-textMuted)] px-4 py-1 mt-1">
                             {title}
                           </div>
                         );
@@ -2370,7 +2300,7 @@ ${pageContent}
                               (() => {
                                 return (
                                   <>
-                                    <DropdownSectionHeader title=" Save as Commands (Current tab)" />
+                                    <DropdownSectionHeader title=" Actions (Save current tab as) " />
                                     {dropdownOptions.siteCommandActions.map((opt: any, idx: number) => {
                                       const globalIdx = idx;
                                       const isSelected = dropdownSelectedIndex === globalIdx;
@@ -2378,19 +2308,19 @@ ${pageContent}
                                       const icon =
                                         PAGE_ACTION_ICONS[opt.id] ||
                                         (opt.id === 'save_link' ? (
-                                          <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <FaLink className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />
                                         ) : opt.id === 'save_session' ? (
-                                          <SessionGridIcon className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <SessionGridIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />
                                         ) : opt.id === 'saved_indicator' ? (
-                                          <FaCheck className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <FaCheck className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />
                                         ) : opt.id === 'add_to_existing' ? (
-                                          <FaLink className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <FaLink className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />
                                         ) : opt.id === 'add_to_existing_session' ? (
-                                          <SessionGridIcon className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <SessionGridIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />
                                         ) : opt.id === 'summarize_page' ? (
-                                          <LuSparkles className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <LuSparkles className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />
                                         ) : (
-                                          <FaRegFileAlt className="w-4 h-4 shrink-0 text-current opacity-80" />
+                                          <FaRegFileAlt className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />
                                         ));
 
                                       const actionPrefixVal =
@@ -2404,10 +2334,9 @@ ${pageContent}
                                           type="button"
                                           key={opt.id}
                                           id={`alts-dropdown-item-${globalIdx}`}
-                                          onPointerDown={e => {
+                                          onMouseDown={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            executeDropdownItem(opt.item);
                                           }}
                                           onClick={e => {
                                             e.preventDefault();
@@ -2417,10 +2346,10 @@ ${pageContent}
                                           onContextMenu={
                                             allowContextMenu
                                               ? e => {
-                                                  e.preventDefault();
-                                                  e.stopPropagation();
-                                                  handleContextMenu(e, opt.item, opt.name);
-                                                }
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                handleContextMenu(e, opt.item, opt.name);
+                                              }
                                               : undefined
                                           }
                                           onMouseEnter={() => setDropdownSelectedIndex(globalIdx)}
@@ -2485,10 +2414,9 @@ ${pageContent}
                                           type="button"
                                           key={opt.id}
                                           id={`alts-dropdown-item-${globalIdx}`}
-                                          onPointerDown={e => {
+                                          onMouseDown={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            executeDropdownItem(opt.item);
                                           }}
                                           onClick={e => {
                                             e.preventDefault();
@@ -2498,10 +2426,10 @@ ${pageContent}
                                           onContextMenu={
                                             allowContextMenu
                                               ? e => {
-                                                  e.preventDefault();
-                                                  e.stopPropagation();
-                                                  handleContextMenu(e, opt.item, opt.name);
-                                                }
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                handleContextMenu(e, opt.item, opt.name);
+                                              }
                                               : undefined
                                           }
                                           onMouseEnter={() => setDropdownSelectedIndex(globalIdx)}
@@ -2539,25 +2467,25 @@ ${pageContent}
                                     const isAll = optName === 'all';
                                     const meta = isAll
                                       ? {
-                                          title: 'All',
-                                          icon: (
-                                            <svg
-                                              className="w-4 h-4 shrink-0"
-                                              viewBox="0 0 24 24"
-                                              fill="none"
-                                              stroke="currentColor"
-                                              strokeWidth="2">
-                                              <rect x="3" y="3" width="7" height="7" rx="1" />
-                                              <rect x="14" y="3" width="7" height="7" rx="1" />
-                                              <rect x="14" y="14" width="7" height="7" rx="1" />
-                                              <rect x="3" y="14" width="7" height="7" rx="1" />
-                                            </svg>
-                                          ),
-                                        }
+                                        title: 'All',
+                                        icon: (
+                                          <svg
+                                            className="w-4 h-4 shrink-0"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2">
+                                            <rect x="3" y="3" width="7" height="7" rx="1" />
+                                            <rect x="14" y="3" width="7" height="7" rx="1" />
+                                            <rect x="14" y="14" width="7" height="7" rx="1" />
+                                            <rect x="3" y="14" width="7" height="7" rx="1" />
+                                          </svg>
+                                        ),
+                                      }
                                       : SECTION_META[optName] || {
-                                          title: optName,
-                                          icon: <FaCheckCircle className="w-4 h-4 shrink-0" />,
-                                        };
+                                        title: optName,
+                                        icon: <FaCheckCircle className="w-4 h-4 shrink-0" />,
+                                      };
 
                                     const categoryPrefixMap: Record<string, string> = {
                                       todos: 'todo',
@@ -2583,37 +2511,37 @@ ${pageContent}
                                           e.preventDefault();
                                           e.stopPropagation();
                                           setSelectedSidebarSection(optName);
-                                          setIsExplicitlyExpanded(true);
+                                          setShowSidebarSectionPill(false);
                                           const alias = SECTION_ALIAS_DISPLAY[optName];
                                           const newSearchValue =
                                             optName === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
                                           setSearchValue(newSearchValue);
                                           setDropdownSelectedIndex(-1);
-                                          setIsDropdownVisible(false);
+                                          setIsDropdownVisible(newSearchValue.trim() === '');
                                         }}
                                         onClick={e => {
                                           e.preventDefault();
                                           e.stopPropagation();
                                           setSelectedSidebarSection(optName);
-                                          setIsExplicitlyExpanded(true);
+                                          setShowSidebarSectionPill(false);
                                           const alias = SECTION_ALIAS_DISPLAY[optName];
                                           const newSearchValue =
                                             optName === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
                                           setSearchValue(newSearchValue);
                                           setDropdownSelectedIndex(-1);
-                                          setIsDropdownVisible(false);
+                                          setIsDropdownVisible(newSearchValue.trim() === '');
                                         }}
                                         onMouseDown={e => {
                                           e.preventDefault();
                                           e.stopPropagation();
                                           setSelectedSidebarSection(optName);
-                                          setIsExplicitlyExpanded(true);
+                                          setShowSidebarSectionPill(false);
                                           const alias = SECTION_ALIAS_DISPLAY[optName];
                                           const newSearchValue =
                                             optName === 'all' || !alias ? '' : `/${alias.toLowerCase()} `;
                                           setSearchValue(newSearchValue);
                                           setDropdownSelectedIndex(-1);
-                                          setIsDropdownVisible(false);
+                                          setIsDropdownVisible(newSearchValue.trim() === '');
                                         }}
                                         onMouseEnter={() => setDropdownSelectedIndex(globalIdx)}
                                         className={clsx(
@@ -2655,107 +2583,90 @@ ${pageContent}
               !(
                 isDropdownVisible &&
                 (dropdownOptions.totalList.length > 0 ||
-                  (searchValue.startsWith('/') && searchValue.trim() !== '' && !parseAtMode(searchValue).activeSection))
+                  (searchValue.startsWith('/') && searchValue.trim() !== '' && !parseAtMode(searchValue, omniboxPrefixes).activeSection))
               ) && (
-              <div className={clsx('flex-1 min-h-0 w-full flex flex-col', showSpreadsheet ? 'p-0' : 'px-8 py-6')}>
-                {showSpreadsheet ? (
-                  <SpreadsheetMainContainer
-                    isEmbedded={true}
-                    onClose={onClose}
-                    isLoggedIn={isLoggedIn}
-                    onBoardViewRedirect={() => setShowSpreadsheet(false)}
-                    onCreateOrganization={() => {
-                      const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
-                      chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
-                    }}
-                    onOrganizationSettings={(orgId, orgName) => {
-                      const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
-                      chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
-                    }}
-                    onCreateWorkspace={() => {
-                      const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
-                      chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
-                    }}
-                  />
-                ) : (
-                  <BoardView
-                    ref={boardViewRef}
-                    hideCloseButton={true}
-                    isEmbedded={true}
-                    forceNativeStyling={true}
-                    includeWebsitePageActions={true}
-                    searchValue={debouncedSearchValue}
-                    unfilteredSuggestions={[]}
-                    isLoggedIn={isLoggedIn}
-                    onClose={onClose}
-                    onExecuteItem={handleExecute}
-                    onSheetRedirect={() => {
-                      setShowSpreadsheet(true);
-                    }}
-                    state={
-                      {
-                        value: debouncedSearchValue,
-                        isVisible: true,
-                        suggestions: [
-                          ...filtered.todos.map(t => ({ ...t, _kind: 'todo', type: 'todo' })),
-                          ...filtered.notes.map(n => ({ ...n, _kind: 'note', type: 'note', note: n })),
-                          ...filtered.links.map(l => ({ ...l, _kind: 'link', type: 'link' })),
-                          ...filtered.sessions.map((s: any) => ({
-                            ...s,
-                            _kind: 'session',
-                            type: 'session',
-                            session: s,
-                            data: s,
-                            category: 'session',
-                          })),
-                          ...filtered.snippets.map(s => ({ ...s, _kind: 'snippet', type: 'snippet', snippet: s })),
-                          ...filtered.commands.map(c => ({ ...c, _kind: 'command', command: c })),
-                          ...filtered.system_commands.map((c: any) => ({ ...c, _kind: 'command', command: c })),
-                          ...filtered.automations.map(a => ({
-                            ...a,
-                            _kind: 'automation',
-                            type: 'automation',
-                            automation: a,
-                          })),
-                          ...filtered.bookmarks.map(b => ({ ...b, _kind: 'bookmark', type: 'bookmark' })),
-                          ...filtered.prompts.map(p => ({ ...p, _kind: 'prompt', type: 'prompt', prompt: p })),
-                        ],
-                        highlightIndex: 0,
-                        mode: 'mixed',
-                        onQueryChange: (val: string) => {
-                          updateSearchValue(val);
+                <div className={clsx('flex-1 min-h-0 w-full flex flex-col', showSpreadsheet ? 'p-0' : 'px-8 py-6')}>
+                  {showSpreadsheet ? (
+                    <SpreadsheetMainContainer
+                      isEmbedded={true}
+                      onClose={onClose}
+                      isLoggedIn={isLoggedIn}
+                      onBoardViewRedirect={() => setShowSpreadsheet(false)}
+                      onCreateOrganization={() => {
+                        const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
+                        chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
+                      }}
+                      onOrganizationSettings={(orgId, orgName) => {
+                        const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
+                        chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
+                      }}
+                      onCreateWorkspace={() => {
+                        const url = chrome.runtime.getURL('AltS_search_newtab/index.html');
+                        chrome.runtime.sendMessage({ action: 'open_tab', url, active: true });
+                      }}
+                    />
+                  ) : (
+                    <BoardView
+                      ref={boardViewRef}
+                      hideCloseButton={true}
+                      isEmbedded={true}
+                      forceNativeStyling={true}
+                      includeWebsitePageActions={true}
+                      searchValue={debouncedSearchValue}
+                      unfilteredSuggestions={[]}
+                      externalBookmarks={allBookmarks}
+                      isLoggedIn={isLoggedIn}
+                      onClose={onClose}
+                      onExecuteItem={handleExecute}
+                      onSheetRedirect={() => {
+                        setShowSpreadsheet(true);
+                      }}
+                      state={
+                        {
+                          value: debouncedSearchValue,
+                          isVisible: true,
+                          suggestions: suggestionState.debouncedFuseResults,
+                          highlightIndex: 0,
+                          mode: 'mixed',
+                          onQueryChange: (val: string) => {
+                            updateSearchValue(val);
+                          },
+                          onSidebarSectionSelect: (sectionId: string) => {
+                            setSelectedSidebarSection(sectionId);
+                            setShowSidebarSectionPill(sectionId !== 'all');
+                          },
+                          onSnippetSelect: (item: any) => handleExecute(item),
+                          onCommonCommandSelect: (item: any) => handleExecute(item),
+                          onRequestSnippetDelete: handleWebsiteDeleteRequest,
+                          onToggleFavorite: handleToggleFavorite,
+                          onRequestOpenUrls: (urls: string[], title?: string) => {
+                            if (urls && urls.length > 0) {
+                              chrome.tabs.create({ url: urls[0] });
+                              if (onClose) onClose();
+                            }
+                          },
+                        } as any
+                      }
+                      extraGroups={[
+                        {
+                          title: 'This Site',
+                          items: filteredThisSite,
+                          icon: <FaRegFileAlt className="w-4 h-4 shrink-0 text-[#A1A6B3]" />,
                         },
-                        onSnippetSelect: (item: any) => handleExecute(item),
-                        onCommonCommandSelect: (item: any) => handleExecute(item),
-                        onToggleFavorite: handleToggleFavorite,
-                        onRequestOpenUrls: (urls: string[], title?: string) => {
-                          if (urls && urls.length > 0) {
-                            chrome.tabs.create({ url: urls[0] });
-                            if (onClose) onClose();
-                          }
-                        },
-                      } as any
-                    }
-                    extraGroups={[
-                      {
-                        title: 'This Site',
-                        items: filtered.thissite,
-                        icon: <FaRegFileAlt className="w-4 h-4 shrink-0 text-[#A1A6B3]" />,
-                      },
-                    ]}
-                    portalContainer={
-                      (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body
-                    }
-                  />
-                )}
-              </div>
-            )}
+                      ]}
+                      portalContainer={
+                        (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body
+                      }
+                    />
+                  )}
+                </div>
+              )}
             {/* Footer Indications */}
             {!isDropdownActive &&
               !showSpreadsheet &&
               !(
                 dropdownOptions.totalList.length > 0 ||
-                (searchValue.startsWith('/') && searchValue.trim() !== '' && !parseAtMode(searchValue).activeSection)
+                (searchValue.startsWith('/') && searchValue.trim() !== '' && !parseAtMode(searchValue, omniboxPrefixes).activeSection)
               ) && (
                 <div
                   className={clsx(
@@ -2863,7 +2774,7 @@ ${pageContent}
                         const targetTitle = addExistingTitle || activeTabTitle || document.title || 'Untitled Page';
 
                         if (!targetUrl) {
-                          showWebsiteToast('Unable to detect page URL to add', '#ef4444');
+                          useUIStore.getState().queueNotification({ message: 'Unable to detect page URL to add', type: 'error' });
                           return;
                         }
 
@@ -2892,15 +2803,13 @@ ${pageContent}
                         syncDbFromBackground();
                         setShowAddExistingModal(false);
 
-                        // Show success toast
-                        showWebsiteToast(`Added to "${linkItem.title}" successfully`);
                         useUIStore.getState().queueNotification({
                           message: `Added to "${linkItem.title}" successfully`,
                           type: 'success',
                         });
                       } catch (err) {
                         console.error('Failed to add url to existing link:', err);
-                        showWebsiteToast('Failed to add URL to link collection', '#ef4444');
+                        useUIStore.getState().queueNotification({ message: 'Failed to add URL to link collection', type: 'error' });
                       }
                     }}
                     className="w-full text-left px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-neutral-300 hover:text-white transition-all text-sm font-medium flex items-center justify-between cursor-pointer">
@@ -2951,7 +2860,7 @@ ${pageContent}
                         const targetTitle = addExistingTitle || activeTabTitle || document.title || 'Untitled Page';
 
                         if (!targetUrl) {
-                          showWebsiteToast('Unable to detect page URL to add', '#ef4444');
+                          useUIStore.getState().queueNotification({ message: 'Unable to detect page URL to add', type: 'error' });
                           return;
                         }
 
@@ -2980,15 +2889,13 @@ ${pageContent}
                         syncDbFromBackground();
                         setShowAddExistingSessionModal(false);
 
-                        // Show success toast
-                        showWebsiteToast(`Added to "${sessionItem.title}" successfully`);
                         useUIStore.getState().queueNotification({
                           message: `Added to "${sessionItem.title}" successfully`,
                           type: 'success',
                         });
                       } catch (err) {
                         console.error('Failed to add url to existing session:', err);
-                        showWebsiteToast('Failed to add URL to session', '#ef4444');
+                        useUIStore.getState().queueNotification({ message: 'Failed to add URL to session', type: 'error' });
                       }
                     }}
                     className="w-full text-left px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-neutral-300 hover:text-white transition-all text-sm font-medium flex items-center justify-between cursor-pointer">
@@ -3007,7 +2914,6 @@ ${pageContent}
           </div>
         </div>
       )}
-      <NotificationContainer />
     </AnimatePresence>
   );
 };

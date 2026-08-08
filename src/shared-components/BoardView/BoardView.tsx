@@ -1,4 +1,5 @@
-import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import * as React from 'react';
+import { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppearance } from '@extension/ui';
 import { useUIStore } from '../uiStateManager';
 import { clsx } from 'clsx';
@@ -22,7 +23,8 @@ import {
   FaCamera,
   FaExpand,
   FaImages,
-  FaTable
+  FaTable,
+  FaCopy
 } from 'react-icons/fa';
 import { LuSparkles } from 'react-icons/lu';
 import { FiX } from 'react-icons/fi';
@@ -58,18 +60,20 @@ import {
 } from '../shortcuts/core/shortcutDbData';
 import { updateTodo } from '../../allObjectFolder/src/createObject/todos/todoData';
 import { deleteAiPrompt } from '../../allObjectFolder/src/createObject/aiPrompt/aiPromptData';
+import { runAiPrompt } from '../../allObjectFolder/src/createObject/aiPrompt';
 import { deleteSession } from '../../allObjectFolder/src/createObject/session/sessionData';
 import { useFavorites } from '../favorites';
 import { db } from '../../storage/indexDB/dbConfig';
 import { isCommandId } from '../commands';
 import { SHARED_ALL_COMMANDS } from '../commands/surface';
 
-import { FiPlay, FiExternalLink, FiEdit2, FiTrash2, FiStar, FiZap } from 'react-icons/fi';
+import { FiPlay, FiExternalLink, FiEdit2, FiTrash2, FiStar, FiZap, FiPlus } from 'react-icons/fi';
 import { FaStar } from 'react-icons/fa';
 import { BsKeyboard, BsCalendarCheck } from 'react-icons/bs';
 import { MdOutlineShortcut } from 'react-icons/md';
 import { saveShortcut as apiSaveShortcut } from '../shortcuts';
 import { SessionGridIcon } from '../icons/sessionGridIcon';
+import { getCommandSpacePrefix } from '../triggers';
 
 
 // Helper for query highlighting
@@ -83,7 +87,7 @@ const highlightMatch = (text: string, query: string) => {
   return (
     <>
       {text.substring(0, startIndex)}
-      <span className="font-semibold text-neutral-900 dark:text-white">{text.substring(startIndex, endIndex)}</span>
+      <span className="font-bold text-[var(--color-textPrimary)] bg-amber-300/40 dark:bg-amber-400/30 rounded-sm px-0.5">{text.substring(startIndex, endIndex)}</span>
       {text.substring(endIndex)}
     </>
   );
@@ -199,10 +203,28 @@ interface SlashMode {
 function parseSlashMode(value: string, slashSectionAliases: Record<string, string>, commandPrefix: string = 'c'): SlashMode {
   const normalizedValue = value.replace(/\u00A0/g, ' ');
   let textAfterPrefix = '';
+  
+  const colonMatch = normalizedValue.match(/^([a-zA-Z0-9_-]+):\s/);
+  let isColon = false;
+  let colonPrefix = '';
+  let colonSection = '';
+
+  if (colonMatch && colonMatch[0]) {
+    const colonAlias = colonMatch[1].toUpperCase();
+    
+    if (slashSectionAliases[colonAlias]) {
+      isColon = true;
+      colonPrefix = colonMatch[0];
+      colonSection = slashSectionAliases[colonAlias];
+    }
+  }
+
   const isSlash = normalizedValue.startsWith('/');
   const isCmd = normalizedValue.toLowerCase().startsWith(`${commandPrefix.toLowerCase()} `);
 
-  if (isSlash) {
+  if (isColon) {
+    textAfterPrefix = normalizedValue.slice(colonPrefix.length);
+  } else if (isSlash) {
     textAfterPrefix = normalizedValue.slice(1);
   } else if (isCmd) {
     textAfterPrefix = normalizedValue.slice(commandPrefix.length + 1);
@@ -213,6 +235,14 @@ function parseSlashMode(value: string, slashSectionAliases: Record<string, strin
   // Find the longest matching alias
   let bestAlias = '';
   let activeSection: string | null = null;
+
+  if (isColon) {
+    activeSection = colonSection;
+    if (activeSection) {
+      let query = textAfterPrefix;
+      return { slashDropdown: false, activeSection, searchQuery: query };
+    }
+  }
 
   for (const [alias, section] of Object.entries(slashSectionAliases)) {
     const upperText = textAfterPrefix.toUpperCase();
@@ -256,22 +286,78 @@ const SLASH_SECTION_META: Record<string, { title: string; icon: React.ReactNode 
     ),
   },
   todos: { title: 'Todos', icon: <BsCalendarCheck size={16} className="text-[var(--color-iconDefault)]" /> },
-  notes: { title: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0 text-amber-400" /> },
-  snippets: { title: 'Snippets', icon: <FaCode size={16} className="text-[var(--color-iconDefault)]" /> },
-  links: { title: 'Links', icon: <FaLink size={16} className="text-blue-400" /> },
-  bookmarks: { title: 'Bookmarks', icon: <FaBookmark size={16} className="text-pink-400" /> },
+  notes: { title: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
+  snippets: { title: 'Text Expanders', icon: <FaCode size={16} className="text-[var(--color-iconDefault)]" /> },
+  links: { title: 'Links', icon: <FaLink size={16} className="text-[var(--color-iconDefault)]" /> },
+  bookmarks: { title: 'Bookmarks', icon: <FaBookmark size={16} className="text-[var(--color-iconDefault)]" /> },
   chat_agents: { title: 'Chat Agents', icon: <FaRobot size={16} className="text-[var(--color-iconDefault)]" /> },
-  sessions: { title: 'Tab Sessions', icon: <SessionGridIcon size={16} className="text-purple-400" /> },
+  sessions: { title: 'Tab Sessions', icon: <SessionGridIcon size={16} className="text-[var(--color-iconDefault)]" /> },
   commands: { title: 'Commands', icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
   system_commands: { title: 'System Commands', icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
   automations: { title: 'Automations', icon: <FiZap size={16} className="text-[var(--color-iconDefault)]" /> },
 };
-// ─────────────────────────────────────────────────────────────────────────────
+export type SlashLauncherItem =
+  | {
+      kind: 'action';
+      id: 'ai' | 'collections';
+      title: string;
+      description?: string;
+      icon: React.ReactNode;
+      keywords?: string[];
+    }
+  | {
+      kind: 'category';
+      id: string;
+      title: string;
+      alias: string;
+      icon: React.ReactNode;
+      keywords?: string[];
+    };
+
+const SUGGESTION_ACTION_ITEMS: Array<Extract<SlashLauncherItem, { kind: 'action' }>> = [
+  {
+    kind: 'action',
+    id: 'ai',
+    title: 'All AI Chat Agents',
+    description: 'Search across all AI assistants at once',
+    keywords: ['ai', 'chat', 'assistants', 'gpt', 'claude', 'gemini', 'perplexity'],
+    icon: (
+      <div className="flex -space-x-1.5 items-center justify-start shrink-0 py-0.5">
+        {['chatgpt.com', 'claude.ai', 'gemini.google.com', 'perplexity.ai'].map((host, idx) => (
+          <div
+            key={host}
+            className="w-4 h-4 rounded-full flex items-center justify-center overflow-hidden border border-white dark:border-neutral-800 bg-white shadow-sm shrink-0 relative"
+            style={{ zIndex: 4 - idx }}>
+            <img src={getFaviconUrl(host)} alt={host} className="w-full h-full object-cover" />
+          </div>
+        ))}
+      </div>
+    ),
+  },
+  {
+    kind: 'action',
+    id: 'collections',
+    title: 'All Command Shortcuts',
+    description: 'Access all your saved collections and shortcuts',
+    keywords: ['collections', 'shortcuts', 'commands', 'all', 'folders'],
+    icon: (
+      <div className="w-5 h-5 flex items-center justify-center shrink-0">
+        <svg className="w-4 h-4 text-[var(--color-iconDefault)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+        </svg>
+      </div>
+    ),
+  },
+];
 
 interface BoardViewProps {
   state?: SuggestionState | null;
   searchValue?: string;
   unfilteredSuggestions?: SuggestionListItem[];
+  externalBookmarks?: SuggestionListItem[];
   onClose?: () => void;
   isLoggedIn?: boolean;
   extraGroups?: {
@@ -285,7 +371,7 @@ interface BoardViewProps {
   forceNativeStyling?: boolean;
   includeWebsitePageActions?: boolean;
   portalContainer?: HTMLElement;
-  onSheetRedirect?: () => void;
+  onSheetRedirect?: (section?: string) => void;
   onBoardRedirect?: () => void;
 }
 
@@ -293,6 +379,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   state,
   searchValue = '',
   unfilteredSuggestions = [],
+  externalBookmarks = [],
   onClose,
   isLoggedIn,
   extraGroups = [],
@@ -445,8 +532,18 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     });
     return reverse;
   }, [slashSectionAliases]);
-  const commandPrefix = String(omniboxPrefixes?.command || 'c').trim().toLowerCase() || 'c';
-  const slashMode = useMemo(() => parseSlashMode(rawSearchValue, slashSectionAliases, commandPrefix), [rawSearchValue, slashSectionAliases, commandPrefix]);
+  const commandPrefix = getCommandSpacePrefix(omniboxPrefixes);
+  const parsedSlashMode = useMemo(() => parseSlashMode(rawSearchValue, slashSectionAliases, commandPrefix), [rawSearchValue, slashSectionAliases, commandPrefix]);
+  const slashMode = useMemo(() => {
+    if (state?.showEmptySlashDropdown) {
+      return {
+        slashDropdown: true,
+        activeSection: null,
+        searchQuery: '',
+      };
+    }
+    return parsedSlashMode;
+  }, [parsedSlashMode, state?.showEmptySlashDropdown]);
   const normalizedSearchValue = rawSearchValue.replace(/\u00A0/g, ' ').trimStart().toLowerCase();
   const isBroadCommandMode =
     !slashMode.slashDropdown &&
@@ -983,10 +1080,16 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       // Clear existing conflict using full compound ID — no ID stripping
       await deleteUserHotkeyByReference(conflictId);
       await saveHotkey(contextMenuState.item, editValue);
+      setEditingHotkeyFor(null);
+      setEditValue('');
+      setConflictId(null);
+      await new Promise(resolve => setTimeout(resolve, 800));
+      setContextMenuState(null);
     } catch (err) {
       console.error('Overwrite hotkey failed:', err);
       useUIStore.getState().setCommandStatus({ status: 'error', message: 'Overwrite failed' });
       setTimeout(() => useUIStore.getState().resetCommandStatus(), 3000);
+    } finally {
       setIsSaving(false);
     }
   };
@@ -1000,10 +1103,16 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       // Clear existing conflict using full compound ID — no ID stripping
       await deleteUserShortcutByReference(conflictId);
       await saveShortcut(contextMenuState.item, editValue);
+      setEditingShortcutFor(null);
+      setEditValue('');
+      setConflictId(null);
+      await new Promise(resolve => setTimeout(resolve, 800));
+      setContextMenuState(null);
     } catch (err) {
       console.error('Overwrite shortcut failed:', err);
       useUIStore.getState().setCommandStatus({ status: 'error', message: 'Overwrite failed' });
       setTimeout(() => useUIStore.getState().resetCommandStatus(), 3000);
+    } finally {
       setIsSaving(false);
     }
   };
@@ -1311,6 +1420,40 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         icon: <FiTrash2 size={14} />,
         className: 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
         onSelect: () => {
+          const actualSnippet = item.snippet || item.session || item.data || item;
+          const snippetId = actualSnippet?.snippet_id || actualSnippet?.id || item.todo_id || item.id;
+          if (state?.onRequestSnippetDelete && snippetId) {
+            let commandId:
+              | 'delete_snippet'
+              | 'delete_link'
+              | 'delete_folder'
+              | 'delete_todo'
+              | 'delete_session'
+              | 'delete_prompt'
+              | 'delete_agent'
+              | 'delete_automation' = 'delete_snippet';
+            if (isLink) commandId = 'delete_link';
+            else if (isTodo) commandId = 'delete_todo';
+            else if (isSession) commandId = 'delete_session';
+            else if (kind === 'aiPrompt') commandId = 'delete_prompt';
+            else if (kind === 'chat_agent') commandId = 'delete_agent';
+            else if (isAutomation) commandId = 'delete_automation';
+
+            const wsId = item.workspace?.workspace_id || actualSnippet?.workspaceId || actualSnippet?.workspace_id;
+            const fId = item.folder?.folder_id || actualSnippet?.folderId || actualSnippet?.folder_id;
+
+            state.onRequestSnippetDelete({
+              snippetId,
+              snippetKey: actualSnippet?.key || actualSnippet?.title || actualSnippet?.name || getTitle(item),
+              id: snippetId,
+              key: actualSnippet?.key || actualSnippet?.title || actualSnippet?.name || getTitle(item),
+              category: actualSnippet?.category || (isLink ? 'link' : isTodo ? 'todo' : kind),
+              workspaceId: wsId || '',
+              folderId: fId,
+              commandId,
+            });
+            return;
+          }
           if (kind === 'aiPrompt' || kind === 'chat_agent') {
             const id = item.id || item.data?.id;
             if (id) {
@@ -1325,27 +1468,6 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
               deleteSession(snippetId).catch(console.error);
             }
             return;
-          }
-          if (state?.onRequestSnippetDelete) {
-            const actualSnippet = item.snippet || item.session || item.data || item;
-            const snippetId = actualSnippet?.snippet_id || actualSnippet?.id || item.todo_id || item.id;
-            const isItemLink = isLink;
-            let commandId: 'delete_snippet' | 'delete_link' | 'delete_folder' | 'delete_todo' = 'delete_snippet';
-            if (isItemLink) commandId = 'delete_link';
-            else if (isTodo) commandId = 'delete_todo';
-
-            const wsId = item.workspace?.workspace_id || actualSnippet?.workspaceId || actualSnippet?.workspace_id;
-            const fId = item.folder?.folder_id || actualSnippet?.folderId || actualSnippet?.folder_id;
-
-            state.onRequestSnippetDelete({
-              snippetId,
-              id: snippetId,
-              key: actualSnippet?.key || actualSnippet?.title || actualSnippet?.name || getTitle(item),
-              category: actualSnippet?.category || (isItemLink ? 'link' : isTodo ? 'todo' : 'snippet'),
-              workspaceId: wsId,
-              folderId: fId,
-              commandId,
-            });
           }
         },
       });
@@ -1550,8 +1672,10 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       });
     }
 
-    if (chromeBookmarks.length > 0) {
-      boardItems.push(...chromeBookmarks);
+    const availableBookmarks = externalBookmarks.length > 0 ? externalBookmarks : chromeBookmarks;
+
+    if (availableBookmarks.length > 0) {
+      boardItems.push(...availableBookmarks);
     } else {
       const fallbackSuggestions = unfilteredSuggestions.length > 0 ? unfilteredSuggestions : state?.suggestions || [];
       fallbackSuggestions.forEach((item: any) => {
@@ -1743,9 +1867,10 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         (s: any) => s._kind === 'command' || s.commandType !== undefined || s._kind === 'workspace_item',
       );
 
+    const availableBookmarks = externalBookmarks.length > 0 ? externalBookmarks : chromeBookmarks;
     const filteredBookmarks = isExplicitCommandMenu
       ? []
-      : chromeBookmarks.filter(
+      : availableBookmarks.filter(
         b =>
           (b.title && String(b.title).toLowerCase().includes(lowerQuery)) ||
           (b.url && String(b.url).toLowerCase().includes(lowerQuery)),
@@ -1769,7 +1894,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           param = 'create_link=true';
           break;
         case 'sessions':
-        case 'Tab Sessions':
+        case 'tab sessions':
           param = 'session_mode=true';
           break;
         case 'todos':
@@ -1781,6 +1906,14 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           break;
         case 'automations':
           param = 'create_automation=true';
+          break;
+        case 'bookmarks':
+          param = 'create_link=true';
+          break;
+        case 'commands':
+        case 'system commands':
+        case 'system_commands':
+          param = 'trigger_hotkey=true&type=command&id=new';
           break;
       }
       console.log('[BoardView] Embedded mode redirecting with parameter:', param);
@@ -1802,7 +1935,6 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     switch (groupKey) {
       case 'notes':
         useUIStore.getState().openEditor({ type: 'note', id: 'new', props: { category: 'note' } });
-        useUIStore.getState().openEditor({ type: 'note', id: 'new' });
         break;
       case 'snippets':
         useUIStore.getState().openEditor({ type: 'snippet', id: 'new' });
@@ -1811,7 +1943,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         useUIStore.getState().openEditor({ type: 'link', id: 'new' });
         break;
       case 'sessions':
-      case 'Tab Sessions':
+      case 'tab sessions':
         useUIStore.getState().openEditor({ type: 'session', id: 'new' });
         break;
       case 'todos':
@@ -1827,6 +1959,14 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         useUIStore
           .getState()
           .openEditor({ type: 'agent', id: 'new', isNew: true, props: { editMode: false, automation: null } });
+        break;
+      case 'bookmarks':
+        useUIStore.getState().openEditor({ type: 'link', id: 'new' });
+        break;
+      case 'commands':
+      case 'system commands':
+      case 'system_commands':
+        useUIStore.getState().setSidebar('commandListSidebar' as any, { open: true });
         break;
     }
   };
@@ -1896,17 +2036,17 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       items: [] as SuggestionListItem[],
       icon: <BsCalendarCheck size={16} className="text-[var(--color-iconDefault)]" />,
     },
-    notes: { title: 'Notes', items: [] as SuggestionListItem[], icon: <NotesIcon className="w-4 h-4 shrink-0" /> },
-    snippets: { title: 'Snippets', items: [] as SuggestionListItem[], icon: <FaCode size={16} /> },
-    links: { title: 'Links', items: [] as SuggestionListItem[], icon: <FaLink size={16} /> },
-    bookmarks: { title: 'Bookmarks', items: [] as SuggestionListItem[], icon: <FaBookmark size={16} /> },
-    sessions: { title: 'Tab Sessions', items: [] as SuggestionListItem[], icon: <SessionGridIcon size={16} /> },
+    notes: { title: 'Notes', items: [] as SuggestionListItem[], icon: <NotesIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
+    snippets: { title: 'Text Expanders', items: [] as SuggestionListItem[], icon: <FaCode size={16} className="text-[var(--color-iconDefault)]" /> },
+    links: { title: 'Links', items: [] as SuggestionListItem[], icon: <FaLink size={16} className="text-[var(--color-iconDefault)]" /> },
+    bookmarks: { title: 'Bookmarks', items: [] as SuggestionListItem[], icon: <FaBookmark size={16} className="text-[var(--color-iconDefault)]" /> },
+    sessions: { title: 'Tab Sessions', items: [] as SuggestionListItem[], icon: <SessionGridIcon size={16} className="text-[var(--color-iconDefault)]" /> },
     chat_agents: {
       title: 'Chat Agents',
       items: [] as SuggestionListItem[],
       icon: <FaRobot size={16} className="text-[var(--color-iconDefault)]" />,
     },
-    commands: { title: 'Commands', items: [] as SuggestionListItem[], icon: <FaTerminal size={16} /> },
+    commands: { title: 'Commands', items: [] as SuggestionListItem[], icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
     system_commands: {
       title: 'System Commands',
       items: [] as SuggestionListItem[],
@@ -2084,7 +2224,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     if (kind === 'command' || kind === 'common_command') return item.label || item.command?.label || 'Command';
     if (kind === 'aggregate') return item.label || 'All AI Chat Agents';
     if (kind === 'snippet')
-      return item.snippet?.key || item.snippet?.title || item.snippet?.name || item.snippet?.url || 'Snippet';
+      return item.snippet?.key || item.snippet?.title || item.snippet?.name || item.snippet?.url || 'Text Expander';
     if (kind === 'session')
       return (
         item.session?.key ||
@@ -2167,7 +2307,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     if (kind === 'snippet' || kind === 'note' || kind === 'link' || kind === 'workspace_item') {
       if (['note', 'notes'].includes(normalizedCategory)) return 'Note';
       if (['link', 'links', 'collection'].includes(normalizedCategory)) return 'Link';
-      if (['snippet', 'snippets'].includes(normalizedCategory)) return 'Snippet';
+      if (['snippet', 'snippets'].includes(normalizedCategory)) return 'Text Expander';
       if (['session', 'sessions', 'tab session'].includes(normalizedCategory)) return 'Session';
       if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(normalizedCategory)) {
         return 'Chat Agent';
@@ -2298,6 +2438,31 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     return urls;
   };
 
+  const isLightTheme = Boolean(theme && !theme.isDark);
+
+  const getTodoMetadataTextClass = (
+    isFocused: boolean,
+    tone: 'date' | 'description' | 'overdue' = 'description',
+  ) => {
+    if (!isLightTheme) {
+      return isFocused ? 'text-white/90' : 'text-white/70';
+    }
+
+    if (tone === 'overdue') {
+      return 'text-[var(--color-error)]';
+    }
+
+    if (tone === 'date') {
+      return isFocused
+        ? 'text-[var(--color-textPrimary)]'
+        : 'text-[var(--color-textSecondary)]';
+    }
+
+    return isFocused
+      ? 'text-[var(--color-textSecondary)]'
+      : 'text-[var(--color-textMuted)]';
+  };
+
   const renderTodoMetadata = (item: any, isFocused: boolean) => {
     if (!item.event_deadline) {
       if (item.is_anytime) {
@@ -2305,7 +2470,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           <span
             className={clsx(
               'text-[11px] font-medium transition-colors',
-              isFocused ? 'text-white/90' : 'text-white/70',
+              getTodoMetadataTextClass(isFocused, 'date'),
             )}>
             Anytime
           </span>
@@ -2317,7 +2482,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <span
           className={clsx(
             'text-[11px] truncate transition-colors',
-            isFocused ? 'text-white/90' : 'text-white/70',
+            getTodoMetadataTextClass(isFocused, 'description'),
           )}>
           {val}
         </span>
@@ -2331,7 +2496,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <span
           className={clsx(
             'text-[11px] truncate transition-colors',
-            isFocused ? 'text-white/90' : 'text-white/70',
+            getTodoMetadataTextClass(isFocused, 'description'),
           )}>
           {item.is_anytime ? 'Anytime' : ''}
           {val ? ` • ${val}` : ''}
@@ -2369,7 +2534,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       <div className="flex flex-col min-w-0 w-full text-[11px] leading-relaxed">
         <div className="flex items-center gap-1.5 flex-wrap">
           {isOverdue ? (
-            <span className={clsx('font-semibold', isFocused ? 'text-white/90' : 'text-white/70')}>
+            <span className={clsx('font-semibold', getTodoMetadataTextClass(isFocused, 'overdue'))}>
               {dateStr}, {timeStr} (
               {(() => {
                 const diffMs = now.getTime() - d.getTime();
@@ -2383,15 +2548,19 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
               )
             </span>
           ) : (
-            <span className={clsx('font-semibold', isFocused ? 'text-white/90' : 'text-white/70')}>
+            <span className={clsx('font-semibold', getTodoMetadataTextClass(isFocused, 'date'))}>
               {dateStr === 'Anytime' ? 'Anytime' : `${dateStr}, ${timeStr}`}
             </span>
           )}
-          {isRecurring && <span className="text-emerald-500 dark:text-emerald-400 font-medium">• Recurring</span>}
+          {isRecurring && (
+            <span className={clsx('font-medium', isLightTheme ? 'text-[var(--color-success)]' : 'text-emerald-500 dark:text-emerald-400')}>
+              • Recurring
+            </span>
+          )}
         </div>
         {val && (
           <span
-            className={clsx('truncate mt-0.5 transition-colors', isFocused ? 'text-white/90' : 'text-white/70')}>
+            className={clsx('truncate mt-0.5 transition-colors', getTodoMetadataTextClass(isFocused, 'description'))}>
             {val}
           </span>
         )}
@@ -2463,8 +2632,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     if (entityKind === 'todo') {
       return (
         <div
-          className="w-full h-full cursor-pointer flex items-center justify-center transition-transform hover:scale-110"
-          onClick={e => {
+          className="w-full h-full cursor-pointer flex items-center justify-center transition-transform hover:scale-110 group/check"
+          onPointerDown={e => {
+            e.preventDefault();
             e.stopPropagation();
             handleToggleTodo(e, item);
           }}>
@@ -2483,6 +2653,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       const cmdId = entity.id || entity.command?.id || '';
       if (cmdType === 'page_action') {
         if (cmdId === 'capture_screenshot') return <FaCamera className="text-sky-400" size={16} />;
+        if (cmdId === 'capture_clip_screenshot') return <FaCopy className="text-sky-400" size={16} />;
         if (cmdId === 'capture_full_screenshot') return <FaExpand className="text-sky-400" size={16} />;
         if (cmdId === 'downloadallimages') return <FaImages className="text-emerald-400" size={16} />;
         if (cmdId === 'downloadalltables') return <FaTable className="text-amber-400" size={16} />;
@@ -2556,7 +2727,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
 
       if (['link'].includes(category)) return <FaLink className="text-blue-400" size={16} />;
       if (category === 'snippet') return <FaCode className="text-[var(--color-iconDefault)]" size={16} />;
-      return <NotesIcon className="text-amber-400" size={16} />;
+      return <NotesIcon className="text-[var(--color-iconDefault)]" size={16} />;
     }
 
     if (entityKind === 'bookmark' || entityKind === 'open_url') {
@@ -2881,81 +3052,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     }
 
     if (kind === 'aiPrompt' || kind === 'prompt' || kind === 'chatAgent' || kind === 'chat_agent' || kind === 'agent') {
-      const defaultModels = [
-        { id: 'gpt', host: 'chatgpt.com' },
-        { id: 'claude', host: 'claude.ai' },
-        { id: 'gemini', host: 'gemini.google.com' },
-        { id: 'perplexity', host: 'perplexity.ai' },
-      ];
-
-      const allActiveModels = [
-        ...defaultModels,
-        ...(entity.customModels || [])
-      ];
-
-      const cleanPrompt = String(entity.prompt || '')
-        .replace(/<\/p>/gi, '\n')
-        .replace(/<\/div>/gi, '\n')
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<[^>]+>/g, '')
-        .trim();
-
-      StorageManager.getItem('aiPrompt_excludedModels').then(async (stored: any) => {
-        let excluded: string[] = [];
-        if (stored) {
-          try {
-            excluded = JSON.parse(stored);
-          } catch {
-            // ignore
-          }
-        }
-
-        const tabIds: number[] = [];
-        const trackingModels: string[] = [];
-
-        await Promise.all(
-          allActiveModels.map(async (model) => {
-            if (excluded.includes(model.id)) {
-              return;
-            }
-            const targetUrl = (entity.modelUrls && entity.modelUrls[model.id]) || `https://${model.host}`;
-
-            let autoKind = 'chatgpt';
-            if (model.id.includes('claude')) autoKind = 'claude';
-            else if (model.id.includes('gemini')) autoKind = 'gemini';
-            else if (model.id.includes('perplexity')) autoKind = 'perplexity';
-
-            try {
-              const response = await new Promise<any>((resolve) => {
-                chromeAny?.runtime?.sendMessage({
-                  action: 'open_tab_with_auto_submit',
-                  url: targetUrl,
-                  autoSubmit: { kind: autoKind, prompt: cleanPrompt },
-                  forceNewTab: true,
-                }, (res: any) => {
-                  resolve(res);
-                });
-              });
-
-              if (response?.tabId) {
-                tabIds.push(response.tabId);
-                trackingModels.push(model.id);
-              }
-            } catch (err) {
-              console.error('[BoardView] Failed to launch model:', model.id, err);
-            }
-          })
-        );
-
-        if (tabIds.length > 0 && chromeAny?.runtime?.sendMessage) {
-          chromeAny.runtime.sendMessage({
-            action: 'track_ai_session',
-            prompt: cleanPrompt,
-            tabIds,
-            models: trackingModels,
-            aiPromptId: entity.id,
-          });
-        }
+      void runAiPrompt(entity).catch(err => {
+        console.error('[BoardView] Failed to run AI prompt:', err);
       });
       return;
     }
@@ -3456,7 +3554,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     }
     // When slash mode is exited, only reset to 'all' if it was selected by a slash command
     if (!slashMode.slashDropdown && !slashMode.activeSection) {
-      if (prev.startsWith('/') && !rawSearchValue.startsWith('/')) {
+      const prevWasSlashOrColon = prev.startsWith('/') || /^[a-zA-Z0-9_-]+:/.test(prev);
+      const currIsSlashOrColon = rawSearchValue.startsWith('/') || /^[a-zA-Z0-9_-]+:/.test(rawSearchValue);
+      if (prevWasSlashOrColon && !currIsSlashOrColon) {
         if (isSlashSelectedRef.current) {
           setSelectedSidebarSection('all');
           isSlashSelectedRef.current = false;
@@ -3465,55 +3565,112 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     }
   }, [slashMode.activeSection, slashMode.slashDropdown, rawSearchValue]);
 
+  // Slash launcher options (Suggestions + All Results)
+  const slashPickerFilterText = String(rawSearchValue.slice(1) || '').trim().toLowerCase();
+
+  const filteredSuggestions = useMemo(() => {
+    return SUGGESTION_ACTION_ITEMS.filter(item => {
+      if (!slashPickerFilterText) return true;
+      return (
+        item.title.toLowerCase().includes(slashPickerFilterText) ||
+        item.id.toLowerCase().includes(slashPickerFilterText) ||
+        (item.keywords && item.keywords.some(k => k.toLowerCase().includes(slashPickerFilterText)))
+      );
+    });
+  }, [slashPickerFilterText]);
+
+  const filteredCategories = useMemo(() => {
+    return Object.keys(SLASH_SECTION_META)
+      .map(name => {
+        const meta = SLASH_SECTION_META[name];
+        const alias = slashAliasDisplay[name] || '';
+        return {
+          kind: 'category' as const,
+          id: name,
+          title: meta.title,
+          alias,
+          icon: meta.icon,
+        };
+      })
+      .filter(item => {
+        if (!slashPickerFilterText) return true;
+        return (
+          item.title.toLowerCase().includes(slashPickerFilterText) ||
+          item.id.toLowerCase().includes(slashPickerFilterText) ||
+          item.alias.toLowerCase().includes(slashPickerFilterText)
+        );
+      });
+  }, [slashPickerFilterText, slashAliasDisplay]);
+
+  const visibleLauncherItems = useMemo<SlashLauncherItem[]>(() => {
+    return [...filteredSuggestions, ...filteredCategories];
+  }, [filteredSuggestions, filteredCategories]);
+
+  const executeLauncherItem = useCallback((item: SlashLauncherItem) => {
+    if (item.kind === 'action') {
+      setSlashDropdownSelectedIndex(-1);
+      state?.onDismissSlashDropdown?.({ clearQuery: true, blur: false });
+      state?.onQueryChange?.('');
+      if (item.id === 'ai') {
+        if (state?.onSlashSuggestionSelect) {
+          state.onSlashSuggestionSelect('ai');
+        } else {
+          useUIStore.getState().setLockedCommand('ai');
+        }
+      } else if (item.id === 'collections') {
+        if (onSheetRedirect) {
+          onSheetRedirect('collections');
+        } else if (state?.onSlashSuggestionSelect) {
+          state.onSlashSuggestionSelect('collections');
+        } else {
+          useUIStore.getState().openSheet('collections');
+        }
+      }
+    } else {
+      const alias = item.alias;
+      state?.onQueryChange?.(`/${alias} `);
+      setSlashDropdownSelectedIndex(-1);
+      requestAnimationFrame(() => {
+        focusSearchbarInput();
+      });
+    }
+  }, [state, onSheetRedirect]);
+
+  // Reset highlight index when dropdown closes
+  useEffect(() => {
+    if (!slashMode.slashDropdown) {
+      setSlashDropdownSelectedIndex(-1);
+    }
+  }, [slashMode.slashDropdown]);
+
   // Keyboard navigation for the slash dropdown
   useEffect(() => {
     if (!slashMode.slashDropdown) return;
-
-    const filterText = String(rawSearchValue.slice(1) || '').toLowerCase();
-    const visibleOptions = Object.keys(SLASH_SECTION_META).filter(name => {
-      const alias = slashAliasDisplay[name] || '';
-      return String(name).toLowerCase().includes(filterText) || String(alias).toLowerCase().includes(filterText);
-    });
 
     const handleSlashKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         e.stopPropagation();
-        setSlashDropdownSelectedIndex(prev => Math.min(prev + 1, visibleOptions.length - 1));
+        setSlashDropdownSelectedIndex(prev => (prev < visibleLauncherItems.length - 1 ? prev + 1 : 0));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         e.stopPropagation();
-        setSlashDropdownSelectedIndex(prev => Math.max(prev - 1, 0));
-      } else if (e.key === 'Enter' && slashDropdownSelectedIndex >= 0) {
+        setSlashDropdownSelectedIndex(prev => (prev > 0 ? prev - 1 : Math.max(0, visibleLauncherItems.length - 1)));
+      } else if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
-        const chosen = visibleOptions[slashDropdownSelectedIndex];
-        if (chosen) {
-          const alias = slashAliasDisplay[chosen] || '';
-          state?.onQueryChange?.(`/${alias} `);
-          setSlashDropdownSelectedIndex(-1);
-          requestAnimationFrame(() => {
-            focusSearchbarInput();
-          });
+        const selected = visibleLauncherItems[slashDropdownSelectedIndex >= 0 ? slashDropdownSelectedIndex : 0];
+        if (selected) {
+          executeLauncherItem(selected);
         }
       }
     };
 
     window.addEventListener('keydown', handleSlashKey, { capture: true });
-
-    const unregister = slashMode.slashDropdown
-      ? useUIStore.getState().registerEscapeInterceptor(() => {
-        state?.onQueryChange?.('');
-        setSlashDropdownSelectedIndex(-1);
-        return true;
-      })
-      : () => { };
-
     return () => {
       window.removeEventListener('keydown', handleSlashKey, { capture: true });
-      unregister();
     };
-  }, [slashMode.slashDropdown, rawSearchValue, slashDropdownSelectedIndex, state]);
+  }, [slashMode.slashDropdown, visibleLauncherItems, slashDropdownSelectedIndex, executeLauncherItem]);
 
   // When slash mode is active, re-filter board items using the slash searchQuery
   // (e.g. /n google → filter notes by "google")
@@ -3577,6 +3734,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   // ESC to clear search globally when active, as long as context menus aren't open
   useEffect(() => {
     const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
+      if (slashMode.slashDropdown) return false;
       if (todoCreatePrefill) return false;
 
       if (rawSearchValue) {
@@ -3591,7 +3749,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       return false;
     });
     return unregister;
-  }, [rawSearchValue, state, onClose, todoCreatePrefill]);
+  }, [slashMode.slashDropdown, rawSearchValue, state, onClose, todoCreatePrefill]);
 
   // Filter the active groups based on the selected sidebar section.
   // Rules:
@@ -3715,7 +3873,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <svg
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
           viewBox="0 0 24 24"
           fill="none"
@@ -3735,7 +3893,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <div
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors flex items-center justify-center',
-            isSelected ? 'text-white' : 'text-neutral-400',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}>
           {eg.icon}
         </div>
@@ -3748,7 +3906,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <BsCalendarCheck
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
@@ -3760,19 +3918,19 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <NotesIcon
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
     },
     {
       id: 'snippets',
-      label: 'Snippets',
+      label: 'Text Expander',
       icon: (isSelected: boolean) => (
         <FaCode
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
@@ -3785,7 +3943,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <FaLink
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
@@ -3797,7 +3955,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <FaBookmark
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
@@ -3809,7 +3967,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <SessionGridIcon
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
@@ -3821,7 +3979,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <FaRobot
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
@@ -3833,7 +3991,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <FaTerminal
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
@@ -3845,7 +4003,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <FaTerminal
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
@@ -3857,22 +4015,14 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         <FiZap
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
-            isSelected ? 'text-white' : 'text-neutral-400 group-hover:text-neutral-200',
+            isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
           )}
         />
       ),
     },
   ];
 
-  // Slash picker visible options
-  const slashPickerFilterText = String(rawSearchValue.slice(1) || '').toLowerCase();
-  const slashPickerOptions = Object.keys(SLASH_SECTION_META).filter(name => {
-    const alias = slashAliasDisplay[name] || '';
-    return (
-      String(name).toLowerCase().includes(slashPickerFilterText) ||
-      String(alias).toLowerCase().includes(slashPickerFilterText)
-    );
-  });
+
 
   return (
     <div
@@ -3888,7 +4038,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       {onClose && !slashMode.slashDropdown && !hideCloseButton && (
         <button
           onClick={onClose}
-          className="absolute -top-10 right-0 z-[60] p-2 flex items-center justify-center text-neutral-500 hover:text-neutral-300 hover:bg-white/5 rounded-lg transition-all hover:scale-110 cursor-pointer focus:outline-none"
+          className="absolute -top-10 right-0 z-[60] p-2 flex items-center justify-center text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] rounded-lg transition-all hover:scale-110 cursor-pointer focus:outline-none"
           title="Close Board View (Esc)">
           <FiX size={22} strokeWidth={2.5} />
         </button>
@@ -3896,20 +4046,21 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       <div
         className={clsx(
           'w-full flex items-stretch overflow-hidden transition-all duration-300 ease-in-out relative',
-          isEmbedded ? 'flex-1 min-h-0' : 'h-[600px]',
-          slashMode.slashDropdown || (isEmbedded && !forceNativeStyling)
-            ? 'border-transparent shadow-none'
-            : 'rounded-2xl border border-white/10 shadow-2xl',
+          slashMode.slashDropdown
+            ? 'h-auto border-transparent shadow-none bg-transparent'
+            : isEmbedded
+              ? 'flex-1 min-h-0 rounded-2xl border border-[var(--color-borderDefault)] shadow-2xl'
+              : 'h-[600px] rounded-2xl border border-[var(--color-borderDefault)] shadow-2xl',
         )}
         style={{
-          backgroundColor: theme?.tokens?.sheetBg || 'var(--color-sheetBg)',
+          backgroundColor: slashMode.slashDropdown ? 'transparent' : (theme?.tokens?.sheetBg || 'var(--color-sheetBg)'),
           opacity: 1,
           backdropFilter: 'none',
           WebkitBackdropFilter: 'none',
         }}>
         {/* Left Sidebar */}
         {!slashMode.slashDropdown && (
-          <div className="w-[220px] shrink-0 flex flex-col border-r border-white/10 py-4 px-3 overflow-y-auto hover-scrollbar group/sidebar">
+          <div className="w-[220px] shrink-0 flex flex-col border-r border-[var(--color-borderDefault)] py-4 px-3 overflow-y-auto hover-scrollbar group/sidebar">
             {SIDEBAR_ITEMS.map(item => {
               const isSelected = effectiveSidebarSection === item.id;
               return (
@@ -3922,6 +4073,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                   onClick={e => {
                     e.stopPropagation();
                     isSlashSelectedRef.current = false;
+                    (state as any)?.onSidebarSectionSelect?.(item.id);
                     if (state?.onQueryChange) {
                       const alias = slashAliasDisplay[item.id];
                       const newQuery = alias ? `/${alias} ` : '';
@@ -3935,7 +4087,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                   }}
                   className={clsx(
                     'flex items-center gap-3 px-2 py-1.5 rounded-xl text-[13px] font-medium transition-colors cursor-pointer w-full text-left mb-1 group',
-                    isSelected ? 'text-white bg-white/10' : 'text-neutral-400 hover:text-white hover:bg-white/5',
+                    isSelected
+                      ? 'text-[var(--color-textPrimary)] font-semibold bg-[var(--color-selectedBg)] border border-[var(--color-borderSelected,var(--color-borderDefault))] shadow-xs'
+                      : 'text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] border border-transparent',
                   )}>
                   <div className="shrink-0 w-[22px] h-[22px] flex items-center justify-center">
                     {item.icon(isSelected)}
@@ -4016,7 +4170,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                         e.stopPropagation();
                         onSheetRedirect();
                       }}
-                      className="w-[28px] h-[28px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white focus:outline-none"
+                      className="w-[28px] h-[28px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] hover:border-[var(--color-borderActive)] focus:outline-none"
                       title="Table (SpreadSheet)"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -4036,7 +4190,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                         e.stopPropagation();
                         onBoardRedirect();
                       }}
-                      className="w-[28px] h-[28px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white focus:outline-none"
+                      className="w-[28px] h-[28px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] hover:border-[var(--color-borderActive)] focus:outline-none"
                       title="Board (Kanaban)"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -4078,12 +4232,12 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                   key={group.title}
                   className={clsx(
                     'flex flex-col items-start flex-1 min-w-[260px] max-w-[400px] bg-transparent pr-4 pl-4 pt-4 pb-4 box-border',
-                    'border-r border-white/10 last:border-r-0',
+                    'border-r border-[var(--color-borderDefault)] last:border-r-0',
                   )}>
                   {/* Header */}
                   <div className="w-full pb-1 mb-1 justify-between min-h-[32px] shrink-0 flex items-center box-border">
                     <div className="flex items-center min-w-0 flex-1">
-                      <div className="text-white/80 shrink-0 mr-3 flex items-center justify-center">{group.icon}</div>
+                      <div className="text-[var(--color-iconDefault)] shrink-0 mr-3 flex items-center justify-center">{group.icon}</div>
                       <div className="flex flex-col min-w-0 flex-1">
                         <h2 className="text-[14px] font-medium text-[var(--color-textPrimary)] tracking-tight leading-tight capitalize truncate flex items-center gap-1.5">
                           {group.title}
@@ -4091,17 +4245,14 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                         </h2>
                       </div>
                     </div>
-                    {isLoggedIn &&
-                      ['todos', 'notes', 'snippets', 'links', 'Tab Sessions', 'chat agents', 'automations'].includes(
-                        String(group.title).toLowerCase(),
-                      ) && (
-                        <button
-                          onClick={e => handleCreateItem(String(group.title).toLowerCase(), e)}
-                          className="shrink-0 p-1.5 rounded-md text-neutral-500 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                          title={`Create new ${String(group.title).toLowerCase().slice(0, -1)}`}>
-                          <FaPlus className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                    {!['bookmarks', 'commands', 'system commands'].includes(String(group.title).toLowerCase()) && (
+                      <button
+                        onClick={e => handleCreateItem(String(group.title).toLowerCase(), e)}
+                        className="shrink-0 p-1.5 rounded-md text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] transition-colors cursor-pointer"
+                        title={`Create new ${String(group.title).toLowerCase().slice(0, -1)}`}>
+                        <FiPlus className="w-4 h-4" strokeWidth={2.5} />
+                      </button>
+                    )}
                   </div>
 
                   {/* Cards Scrollable Area */}
@@ -4153,8 +4304,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                 className={clsx(
                                   'rounded-xl transition-all duration-200 overflow-hidden box-border h-full py-2 px-3 w-full flex flex-col justify-center text-left',
                                   isFocused
-                                    ? 'bg-white/10 shadow-md border border-white/10'
-                                    : 'bg-transparent hover:bg-white/5 border border-transparent',
+                                    ? 'bg-[var(--color-selectedBg)] shadow-md border border-[var(--color-borderActive)]'
+                                    : 'bg-transparent hover:bg-[var(--color-hoverBg)] border border-transparent',
                                 )}>
                                 <div className="flex items-center justify-between min-w-0 w-full gap-2">
                                   <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -4163,10 +4314,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                     </div>
                                     <div className="flex items-center gap-2 min-w-0 flex-1">
                                       <span
-                                        className={clsx(
-                                          'text-[13px] tracking-tight truncate leading-tight flex-1 min-w-0 font-medium transition-colors duration-200',
-                                          isFocused ? 'text-white' : 'text-white/90 group-hover:text-white',
-                                        )}>
+                                        className="text-[13px] tracking-tight truncate leading-tight flex-1 min-w-0 font-medium text-[var(--color-textPrimary)] transition-colors duration-200">
                                         {highlightMatch(rawTitle, query)}
                                       </span>
                                       {shouldShowCategoryLabel(unwrappedItem) && categoryLabel && (
@@ -4174,8 +4322,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                           className={clsx(
                                             'shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium tracking-tight border',
                                             isFocused
-                                              ? 'text-white/80 border-white/15 bg-white/10'
-                                              : 'text-white/65 border-white/10 bg-white/[0.04] group-hover:text-white/75 group-hover:border-white/15',
+                                              ? 'text-[var(--color-textPrimary)] border-[var(--color-borderActive)] bg-[var(--color-selectedBg)]'
+                                              : 'text-[var(--color-textSecondary)] border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] group-hover:text-[var(--color-textPrimary)]',
                                           )}>
                                           {categoryLabel}
                                         </span>
@@ -4184,8 +4332,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                   </div>
                                   {displayedShortcut && (
                                     <div className="shrink-0 ml-2">
-                                      <span className="px-1.5 py-0.5 rounded text-[10px]  text-[var(--color-textSecondary)] 
-                                     border border-neutral-200 dark:border-neutral-700 ">
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] text-[var(--color-textSecondary)] border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] font-mono">
                                         {displayedShortcut.toLowerCase()}
                                       </span>
                                     </div>
@@ -4193,11 +4340,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                 </div>
                                 {desc && (
                                   <div className="flex min-w-0 w-full pl-[34px] mt-0.5">
-                                    <span
-                                      className={clsx(
-                                        'text-[11px] truncate w-full leading-relaxed transition-colors duration-200',
-                                        isFocused ? 'text-white/90' : 'text-white/70',
-                                      )}>
+                                    <span className="text-[11px] truncate w-full leading-relaxed text-[var(--color-textSecondary)]">
                                       {desc}
                                     </span>
                                   </div>
@@ -4283,8 +4426,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                               className={clsx(
                                 'rounded-xl transition-all duration-200 overflow-hidden box-border h-full py-2 px-3 w-full flex flex-col justify-center text-left',
                                 isFocused
-                                  ? 'bg-white/10 shadow-md border border-white/10'
-                                  : 'bg-transparent hover:bg-white/5 border border-transparent',
+                                  ? 'bg-[var(--color-selectedBg)] shadow-md border border-[var(--color-borderActive)]'
+                                  : 'bg-transparent hover:bg-[var(--color-hoverBg)] border border-transparent',
                               )}>
                               <div className="flex items-center justify-between min-w-0 w-full gap-2">
                                 <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -4292,10 +4435,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                     {renderIcon(item)}
                                   </div>
                                   <span
-                                    className={clsx(
-                                      'text-[13px] tracking-tight truncate leading-tight flex-1 min-w-0 font-medium transition-colors duration-200',
-                                      isFocused ? 'text-white' : 'text-white/90 group-hover:text-white',
-                                    )}>
+                                    className="text-[13px] tracking-tight truncate leading-tight flex-1 min-w-0 font-medium text-[var(--color-textPrimary)] transition-colors duration-200">
                                     {highlightMatch(rawTitle, query)}
                                   </span>
                                 </div>
@@ -4313,12 +4453,12 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                         return (
                           <div
                             key={`${key}-header`}
-                            className="w-full py-2 px-3 flex items-center gap-1.5 select-none cursor-pointer hover:bg-white/[0.02] rounded-lg transition-all"
+                            className="w-full py-2 px-3 flex items-center gap-1.5 select-none cursor-pointer hover:bg-[var(--color-hoverBg)] rounded-lg transition-all"
                             onClick={e => {
                               e.stopPropagation();
                               setBoardCollapsedGroups(prev => ({ ...prev, [key]: !prev[key] }));
                             }}>
-                            <span className="text-[10px] font-bold tracking-[0.08em] text-[#8b949e] uppercase flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold tracking-[0.08em] text-[var(--color-textMuted)] uppercase flex items-center gap-1.5">
                               {isCollapsed ? '▶' : '▼'} {label} ({count})
                             </span>
                           </div>
@@ -4339,17 +4479,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                       }
 
                       // 2. Active
-                      rows.push(makeHeaderLocal('active', 'Active', activeItems.length));
-                      if (!boardCollapsedGroups.active) {
-                        if (activeItems.length === 0) {
-                          rows.push(
-                            <div
-                              key="active-empty"
-                              className="px-8 py-1 text-[11px] text-neutral-600 italic w-full text-left">
-                              No active tasks
-                            </div>,
-                          );
-                        } else {
+                      if (activeItems.length > 0) {
+                        rows.push(makeHeaderLocal('active', 'Active', activeItems.length));
+                        if (!boardCollapsedGroups.active) {
                           sorted(activeItems).forEach(t => {
                             rows.push(renderTodoRowLocal(t, localIdx++));
                           });
@@ -4357,17 +4489,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                       }
 
                       // 3. Scheduled
-                      rows.push(makeHeaderLocal('scheduled_fut', 'Scheduled', scheduledItems.length));
-                      if (!boardCollapsedGroups.scheduled_fut) {
-                        if (scheduledItems.length === 0) {
-                          rows.push(
-                            <div
-                              key="scheduled-empty"
-                              className="px-8 py-1 text-[11px] text-neutral-600 italic w-full text-left">
-                              No scheduled tasks
-                            </div>,
-                          );
-                        } else {
+                      if (scheduledItems.length > 0) {
+                        rows.push(makeHeaderLocal('scheduled_fut', 'Scheduled', scheduledItems.length));
+                        if (!boardCollapsedGroups.scheduled_fut) {
                           sorted(scheduledItems).forEach(t => {
                             rows.push(renderTodoRowLocal(t, localIdx++));
                           });
@@ -4375,17 +4499,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                       }
 
                       // 4. Completed
-                      rows.push(makeHeaderLocal('completed', 'Completed', allDone.length));
-                      if (!boardCollapsedGroups.completed) {
-                        if (allDone.length === 0) {
-                          rows.push(
-                            <div
-                              key="completed-empty"
-                              className="px-8 py-1 text-[11px] text-neutral-600 italic w-full text-left">
-                              No completed tasks
-                            </div>,
-                          );
-                        } else {
+                      if (allDone.length > 0) {
+                        rows.push(makeHeaderLocal('completed', 'Completed', allDone.length));
+                        if (!boardCollapsedGroups.completed) {
                           [...allDone]
                             .sort((a, b) => parseTaskDateLocal(b).getTime() - parseTaskDateLocal(a).getTime())
                             .forEach(t => {
@@ -4420,8 +4536,13 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.1 }}
-              className="absolute inset-0 z-[65] bg-transparent rounded-xl"
-              onClick={() => state?.onQueryChange?.('')}
+              onClick={() => {
+                if (state?.onDismissSlashDropdown) {
+                  state.onDismissSlashDropdown({ clearQuery: true, blur: true });
+                } else {
+                  state?.onQueryChange?.('');
+                }
+              }}
             />
             {/* Dropdown panel */}
             <motion.div
@@ -4430,51 +4551,102 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
               exit={{ opacity: 0, y: -6, scale: 0.97 }}
               transition={{ duration: 0.13, ease: [0.16, 1, 0.3, 1] }}
               className="absolute top-[-16px] left-0 right-0 z-[70] flex justify-center px-6 pt-0">
-              <div className="w-full max-w-[480px] min-[1600px]:max-w-[540px] min-[1800px]:max-w-2xl max-[1480px]:max-w-[440px] max-[1370px]:max-w-[400px] max-[1270px]:max-w-[360px] bg-[var(--color-containerBg)] border border-white/10 rounded-b-xl rounded-t-none shadow-2xl overflow-hidden flex flex-col">
+              <div
+                role="listbox"
+                aria-label="Slash search suggestions"
+                className="w-full max-w-[480px] min-[1600px]:max-w-[540px] min-[1800px]:max-w-2xl max-[1480px]:max-w-[440px] max-[1370px]:max-w-[400px] max-[1270px]:max-w-[360px] bg-[var(--color-containerBg)] border border-[var(--color-borderDefault)] rounded-b-xl rounded-t-none shadow-2xl overflow-hidden flex flex-col">
                 {/* Options */}
-                <div className="flex flex-col py-1.5">
-                  {slashPickerOptions.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-neutral-500">No matching categories</div>
+                <div className="flex flex-col py-1.5 max-h-[420px] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:w-0 [&::-webkit-scrollbar]:h-0">
+                  {visibleLauncherItems.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-[var(--color-textMuted)] select-none">No matching results</div>
                   ) : (
-                    slashPickerOptions.map((optName, idx) => {
-                      const meta = SLASH_SECTION_META[optName];
-                      const alias = slashAliasDisplay[optName] || '';
-                      const isSelected = slashDropdownSelectedIndex === idx;
-                      return (
-                        <div
-                          key={optName}
-                          onClick={() => {
-                            state?.onQueryChange?.(`/${alias} `);
-                            setSlashDropdownSelectedIndex(-1);
-                            requestAnimationFrame(() => {
-                              focusSearchbarInput();
-                            });
-                          }}
-                          onMouseEnter={() => setSlashDropdownSelectedIndex(idx)}
-                          className={clsx(
-                            'mx-2 px-3 py-2 flex items-center justify-start gap-3 cursor-pointer transition-colors rounded-none',
-                            isSelected ? 'bg-white/5 text-white' : 'text-neutral-400 hover:bg-white/5 hover:text-white',
-                          )}>
-                          <div className="flex items-center gap-3 w-[140px] shrink-0">
-                            <div className="shrink-0 w-[22px] h-[22px] flex items-center justify-center opacity-80">
-                              {meta.icon}
-                            </div>
-                            <span className="text-[13px] font-medium tracking-tight">{meta.title}</span>
+                    <>
+                      {filteredSuggestions.length > 0 && (
+                        <div className="flex flex-col">
+                          <div className="px-4 pt-2.5 pb-1 text-[10px] font-bold text-[var(--color-textMuted)] tracking-wider uppercase select-none">
+                            SUGGESTIONS
                           </div>
-                          {alias && (
-                            <span
-                              className={clsx(
-                                'text-[11px] font-mono px-2 py-0.5 rounded-md border font-semibold tracking-wider min-w-[34px] text-center',
-                                isSelected
-                                  ? 'border-white/20 bg-white/10 text-white'
-                                  : 'border-white/10 bg-white/5 text-neutral-400',
-                              )}>
-                              /{alias}
-                            </span>
-                          )}
+                          {filteredSuggestions.map(item => {
+                            const globalIndex = visibleLauncherItems.indexOf(item);
+                            const isSelected = slashDropdownSelectedIndex === globalIndex;
+                            return (
+                              <div
+                                key={item.id}
+                                role="option"
+                                aria-selected={isSelected}
+                                onMouseDown={e => e.preventDefault()}
+                                onPointerDown={e => e.preventDefault()}
+                                onClick={() => executeLauncherItem(item)}
+                                onMouseEnter={() => setSlashDropdownSelectedIndex(globalIndex)}
+                                className={clsx(
+                                  'mx-2 px-3 py-2 flex items-center justify-between gap-3 cursor-pointer transition-colors rounded-lg',
+                                  isSelected
+                                    ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)]'
+                                    : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
+                                )}>
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="shrink-0 min-w-[36px] flex items-center justify-start">
+                                    {item.icon}
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-[13px] font-medium tracking-tight truncate">{item.title}</span>
+                                    {item.description && (
+                                      <span className="text-[11px] text-[var(--color-textMuted)] truncate opacity-80">{item.description}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })
+                      )}
+
+                      {filteredCategories.length > 0 && (
+                        <div className="flex flex-col mt-1">
+                          <div className="px-4 pt-2.5 pb-1 text-[10px] font-bold text-[var(--color-textMuted)] tracking-wider uppercase select-none">
+                            ALL RESULTS
+                          </div>
+                          {filteredCategories.map(item => {
+                            const globalIndex = visibleLauncherItems.indexOf(item);
+                            const isSelected = slashDropdownSelectedIndex === globalIndex;
+                            return (
+                              <div
+                                key={item.id}
+                                role="option"
+                                aria-selected={isSelected}
+                                onMouseDown={e => e.preventDefault()}
+                                onPointerDown={e => e.preventDefault()}
+                                onClick={() => executeLauncherItem(item)}
+                                onMouseEnter={() => setSlashDropdownSelectedIndex(globalIndex)}
+                                className={clsx(
+                                  'mx-2 px-3 py-2 flex items-center justify-between gap-3 cursor-pointer transition-colors rounded-lg',
+                                  isSelected
+                                    ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)]'
+                                    : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
+                                )}>
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="shrink-0 w-[22px] h-[22px] flex items-center justify-center opacity-80 text-[var(--color-iconDefault)]">
+                                    {item.icon}
+                                  </div>
+                                  <span className="text-[13px] font-medium tracking-tight truncate">{item.title}</span>
+                                </div>
+                                {item.alias && (
+                                  <span
+                                    className={clsx(
+                                      'text-[11px] font-mono px-2 py-0.5 rounded-md border font-semibold tracking-wider min-w-[34px] text-center shrink-0',
+                                      isSelected
+                                        ? 'border-[var(--color-borderActive)] bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)]'
+                                        : 'border-[var(--color-borderDefault)] bg-transparent text-[var(--color-textMuted)]',
+                                    )}>
+                                    /{item.alias}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

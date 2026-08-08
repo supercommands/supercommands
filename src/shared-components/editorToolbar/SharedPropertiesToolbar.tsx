@@ -1,14 +1,17 @@
-import React, { useState, useRef, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { FaStar, FaFolder } from 'react-icons/fa';
 import { FiStar, FiTag, FiZapOff, FiEdit2, FiTrash2 } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { useFavorites } from '../favorites';
+import { MoreHorizontal, MoreVertical, RotateCcwClock } from 'lucide-react';
 
 import { HotkeyAssignButton, saveHotkey, clearHotkey } from '../hotkeys';
 import { ShortcutAssignButton, saveShortcut, clearShortcut } from '../shortcuts';
 import { normalizeShortcutTrigger } from '../shortcuts/core/shortcutDbData';
 import { deleteUserShortcutByReference } from '../shortcuts/core/shortcutDbData';
+import { deleteUserHotkeyByReference } from '../hotkeys/core/hotkeyDbData';
 import { AltSlashPopup } from './AltSlashPopup';
 import { DestinationPicker } from './DestinationPicker';
 import { NewDueDateDropdown } from '../../allObjectFolder/src/createObject/todos/ui/newDueDateDropdown';
@@ -28,6 +31,8 @@ import { useTags, createTag, updateTag, deleteTag } from '../../allObjectFolder/
 import { useDbStore } from '../../storage/store/useDbStore';
 
 import type { SharedPropertiesToolbarProps, SharedProperties } from './types';
+import VersionHistoryManager from './VersionHistoryManager';
+import { VersionHistoryComparisonModal } from '../versionHistory';
 
 const getTagColor = (tagName: string) => {
   const colors = [
@@ -53,9 +58,11 @@ const getTagColor = (tagName: string) => {
 export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPropertiesToolbarProps>((props, ref) => {
   const {
     initialSnippet,
+    currentSnapshot: currentSnapshotProp,
     compoundId,
     defaultName,
     onChange,
+    activeNoteId,
     showTodo = true,
     todoStatus,
     onCreateTodo,
@@ -68,9 +75,75 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     showShortcut = true,
     showLocationPicker = true,
     layout = 'vertical',
+    setNoteVersionIndex,
+    selectedNoteVersionIndex,
+    versionHistoryItems,
+    selectedVersionId,
+    onSelectVersion,
+    entityType,
   } = props;
 
-  const { isFavorite, toggleFavorite, addFavorite, removeFavorite, setFavoriteCategory, getFavoriteRecord } = useFavorites();
+  const isSupportedEntity = React.useMemo(() => {
+    if (entityType) {
+      return ['note', 'todo', 'snippet', 'link', 'session'].includes(String(entityType).toLowerCase());
+    }
+    if (activeNoteId) return true;
+    if (versionHistoryItems && versionHistoryItems.length > 0) return true;
+    const cat = String(initialSnippet?.category || '').toLowerCase();
+    if (['note', 'notes', 'todo', 'todos', 'snippet', 'snippets', 'link', 'links', 'tabgroup', 'session', 'sessions'].some(c => cat.includes(c))) {
+      return true;
+    }
+    return false;
+  }, [entityType, activeNoteId, versionHistoryItems, initialSnippet]);
+
+  const showVersionHistoryButton = Boolean(
+    compoundId &&
+      compoundId !== 'new' &&
+      isSupportedEntity,
+  );
+
+  const notes = useDbStore(state => state.notes);
+
+  const resolvedEntityType = React.useMemo(() => {
+    if (entityType) return String(entityType).toLowerCase();
+    if (activeNoteId) return 'note';
+    const cat = String(initialSnippet?.category || '').toLowerCase();
+    if (cat.includes('note')) return 'note';
+    if (cat.includes('todo')) return 'todo';
+    if (cat.includes('snippet')) return 'snippet';
+    if (cat.includes('link')) return 'link';
+    if (cat.includes('session') || cat.includes('tab')) return 'session';
+    return 'note';
+  }, [entityType, activeNoteId, initialSnippet]);
+
+  const resolvedVersionHistory = React.useMemo(() => {
+    if (props.versionHistory) return props.versionHistory;
+    if (activeNoteId) {
+      const n = notes.find(item => item.id === activeNoteId);
+      if (n?.versionHistory) return n.versionHistory;
+    }
+    return initialSnippet?.versionHistory;
+  }, [props.versionHistory, activeNoteId, notes, initialSnippet]);
+
+  const resolvedCurrentSnapshot = React.useMemo(() => {
+    // If the caller provides an explicit currentSnapshot, use it directly.
+    // This is the preferred path for typed editors (e.g. Link) that have a live
+    // state object with all required fields (urls, title, etc.).
+    if (currentSnapshotProp !== undefined) {
+      return currentSnapshotProp;
+    }
+    if (resolvedEntityType === 'note') {
+      if (activeNoteId) {
+        const n = notes.find(item => item.id === activeNoteId);
+        if (n?.body !== undefined) return n.body;
+      }
+      return initialSnippet?.body || '';
+    }
+    return initialSnippet;
+  }, [currentSnapshotProp, resolvedEntityType, activeNoteId, notes, initialSnippet]);
+
+  const { isFavorite, toggleFavorite, addFavorite, removeFavorite, setFavoriteCategory, getFavoriteRecord } =
+    useFavorites();
 
   // --- Internally Managed State for Shared Properties ---
   const [isFav, setIsFav] = useState<boolean>(false);
@@ -79,8 +152,6 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   const [isAltSlashOpen, setIsAltSlashOpen] = useState<boolean>(false);
   const [isFavoriteCategoryOpen, setIsFavoriteCategoryOpen] = useState<boolean>(false);
   const [selectedFavoriteCategoryId, setSelectedFavoriteCategoryId] = useState<string | null>(null);
-
-
 
   const [selectedTags, setSelectedTags] = useState<TagRecord[]>([]);
   const [availableTags, setAvailableTags] = useState<TagRecord[]>([]);
@@ -107,7 +178,7 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     if (!trimmed) return;
     try {
       await updateTag(tagId, { name: trimmed });
-      setSelectedTags(prev => prev.map(t => t.id === tagId ? { ...t, name: trimmed } : t));
+      setSelectedTags(prev => prev.map(t => (t.id === tagId ? { ...t, name: trimmed } : t)));
     } catch (err) {
       console.error('[SharedPropertiesToolbar] Failed to update tag:', err);
     }
@@ -159,6 +230,19 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   useEffect(() => {
     const handleAltSlashKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && (e.key === '/' || e.code === 'Slash')) {
+        const activeElement = document.activeElement;
+
+        // Handle shadow DOMs if applicable (e.g. content scripts)
+        let target = activeElement;
+        while (target && target.shadowRoot && target.shadowRoot.activeElement) {
+          target = target.shadowRoot.activeElement;
+        }
+
+        // Ignore if focused inside a specific hotkey assigner input
+        if (target && target.getAttribute && target.getAttribute('data-is-hotkey-input') === 'true') {
+          return;
+        }
+
         e.preventDefault();
         e.stopPropagation();
         setIsAltSlashOpen(prev => !prev);
@@ -184,7 +268,8 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     const prevRawId = extractSnippetIdFromCompoundId(prevCompoundIdRef.current || '');
     const newRawId = extractSnippetIdFromCompoundId(compoundId || '');
     const wasFullyFormed = !!prevCompoundIdRef.current && prevCompoundIdRef.current !== prevRawId;
-    const isMove = prevCompoundIdRef.current !== compoundId && prevRawId === newRawId && prevRawId !== '' && wasFullyFormed;
+    const isMove =
+      prevCompoundIdRef.current !== compoundId && prevRawId === newRawId && prevRawId !== '' && wasFullyFormed;
 
     if (!isMove) {
       prevIncomingRef.current = {
@@ -232,11 +317,12 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
 
     const wasUnsaved =
       (!prevCompoundIdRef.current || prevCompoundIdRef.current === 'new') && !!compoundId && compoundId !== 'new';
-      
+
     const prevRawId = extractSnippetIdFromCompoundId(prevCompoundIdRef.current || '');
     const newRawId = extractSnippetIdFromCompoundId(compoundId || '');
     const wasFullyFormed = !!prevCompoundIdRef.current && prevCompoundIdRef.current !== prevRawId;
-    const isMove = prevCompoundIdRef.current !== compoundId && prevRawId === newRawId && prevRawId !== '' && wasFullyFormed;
+    const isMove =
+      prevCompoundIdRef.current !== compoundId && prevRawId === newRawId && prevRawId !== '' && wasFullyFormed;
 
     prevCompoundIdRef.current = compoundId;
 
@@ -310,16 +396,19 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
         initialSnippet.tagIds || (initialSnippet.tags ? initialSnippet.tags.map((t: any) => t.id) : []);
       const incomingTagIdsStr = [...incomingTagIds].sort().join(',');
 
-      const resolvedTags = Array.isArray(initialSnippet.tags) && initialSnippet.tags.length > 0
-        ? initialSnippet.tags.map((t: any) => {
-            const found = dbTags.find(dbT => dbT.id === t.id);
-            const name = (t.name && t.name !== '...' && t.name !== t.id) ? t.name : (found ? found.name : (t.name || t.id));
-            return { id: t.id || t.name, name };
-          })
-        : incomingTagIds.map((id: string) => {
-            const found = dbTags.find(t => t.id === id);
-            return found ? { id: found.id, name: found.name } : { id: id, name: id.startsWith('temp_') ? id.replace('temp_', '') : id };
-          });
+      const resolvedTags =
+        Array.isArray(initialSnippet.tags) && initialSnippet.tags.length > 0
+          ? initialSnippet.tags.map((t: any) => {
+              const found = dbTags.find(dbT => dbT.id === t.id);
+              const name = t.name && t.name !== '...' && t.name !== t.id ? t.name : found ? found.name : t.name || t.id;
+              return { id: t.id || t.name, name };
+            })
+          : incomingTagIds.map((id: string) => {
+              const found = dbTags.find(t => t.id === id);
+              return found
+                ? { id: found.id, name: found.name }
+                : { id: id, name: id.startsWith('temp_') ? id.replace('temp_', '') : id };
+            });
 
       const hasMissingNames = selectedTags.some((t: any) => t.name === '...');
       const canResolveNow = resolvedTags.some((rt: any) => {
@@ -428,19 +517,23 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     const handleClickOutside = (event: MouseEvent) => {
       const path = event.composedPath();
       if (
-        todoPopupRef.current && !path.includes(todoPopupRef.current) &&
+        todoPopupRef.current &&
+        !path.includes(todoPopupRef.current) &&
         (!todoPortalRef.current || !path.includes(todoPortalRef.current))
       ) {
         setIsTodoPopupOpen(false);
       }
       if (
-        locationPopupRef.current && !path.includes(locationPopupRef.current) &&
+        locationPopupRef.current &&
+        !path.includes(locationPopupRef.current) &&
         (!locationPortalRef.current || !path.includes(locationPortalRef.current))
       ) {
         setIsLocationPickerOpen(false);
       }
+
       if (
-        popupRef.current && !path.includes(popupRef.current) &&
+        popupRef.current &&
+        !path.includes(popupRef.current) &&
         (!tagPortalRef.current || !path.includes(tagPortalRef.current))
       ) {
         setTagPopupOpen(false);
@@ -492,6 +585,7 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     setIsTodoPopupOpen(false);
     setIsLocationPickerOpen(false);
     setTagPopupOpen(false);
+    setIsVersionHistoryCategoryOpen(false);
     setSelectedFavoriteCategoryId(getFavoriteRecord(compoundId || '')?.favoriteCategoryId ?? null);
     setIsFavoriteCategoryOpen(true);
 
@@ -587,6 +681,29 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     }
   };
 
+  const onHotkeyOverwrite = async (conflictId: string, hotkeyValue: string) => {
+    if (!compoundId || compoundId === 'new') return;
+
+    try {
+      const snippetId = initialSnippet?.id || initialSnippet?.snippet_id || '';
+      let itemType: any = 'note';
+      const cat = String(initialSnippet?.category || '').toLowerCase();
+      if (['session', 'sessions', 'tab session'].includes(cat)) itemType = 'session';
+      else if (initialSnippet?.urls || ['link', 'links', 'tabgroup'].includes(cat)) itemType = 'link';
+      else if (['snippet', 'snippets'].includes(cat)) itemType = 'snippet';
+      else if (['automation', 'automations'].includes(cat)) itemType = 'automation';
+      else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat))
+        itemType = 'aiPrompt';
+      else if (['todo', 'todos'].includes(cat)) itemType = 'todo';
+
+      await deleteUserHotkeyByReference(conflictId);
+      await saveHotkey(snippetId || compoundId, compoundId, hotkeyValue, itemType);
+      setPendingHotkey(hotkeyValue);
+    } catch (err) {
+      console.error('Failed to overwrite hotkey', err);
+    }
+  };
+
   const onShortcutOverwrite = async (conflictId: string, shortcutValue: string) => {
     if (!compoundId || compoundId === 'new') return;
 
@@ -617,6 +734,72 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   const [isTodoPopupOpen, setIsTodoPopupOpen] = useState(false);
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [tagPopupOpen, setTagPopupOpen] = useState(false);
+  const [isVersionHistoryCategoryOpen, setIsVersionHistoryCategoryOpen] = useState<boolean>(false);
+  const [isToolbarExpanded, setIsToolbarExpanded] = useState(false);
+
+  useEffect(() => {
+    if (
+      isAltSlashOpen ||
+      isFavoriteCategoryOpen ||
+      isTodoPopupOpen ||
+      isLocationPickerOpen ||
+      tagPopupOpen ||
+      isVersionHistoryCategoryOpen
+    ) {
+      setIsToolbarExpanded(true);
+    }
+  }, [
+    isAltSlashOpen,
+    isFavoriteCategoryOpen,
+    isTodoPopupOpen,
+    isLocationPickerOpen,
+    tagPopupOpen,
+    isVersionHistoryCategoryOpen,
+  ]);
+
+  useEffect(() => {
+    const handleEscapeKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isFavoriteCategoryOpen) {
+          setIsFavoriteCategoryOpen(false);
+          return;
+        }
+        if (isTodoPopupOpen) {
+          setIsTodoPopupOpen(false);
+          return;
+        }
+        if (isLocationPickerOpen) {
+          setIsLocationPickerOpen(false);
+          return;
+        }
+        if (tagPopupOpen) {
+          setTagPopupOpen(false);
+          return;
+        }
+        if (isVersionHistoryCategoryOpen) {
+          setIsVersionHistoryCategoryOpen(false);
+          return;
+        }
+        if (isAltSlashOpen) {
+          setIsAltSlashOpen(false);
+          return;
+        }
+        if (isToolbarExpanded) {
+          setIsToolbarExpanded(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleEscapeKeyDown);
+    return () => window.removeEventListener('keydown', handleEscapeKeyDown);
+  }, [
+    isFavoriteCategoryOpen,
+    isTodoPopupOpen,
+    isLocationPickerOpen,
+    tagPopupOpen,
+    isVersionHistoryCategoryOpen,
+    isAltSlashOpen,
+    isToolbarExpanded,
+  ]);
 
   const todoHoverTimerRef = useRef<NodeJS.Timeout | null>(null);
   const locationHoverTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -625,7 +808,9 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
   const hotkeyButtonRef = useRef<HTMLButtonElement>(null);
   const shortcutButtonRef = useRef<HTMLButtonElement>(null);
   const todoPopupRef = useRef<HTMLDivElement>(null);
+  const versionHistoryParentRef = useRef<HTMLDivElement>(null);
   const locationPopupRef = useRef<HTMLDivElement>(null);
+  const versionHistoryCategoryRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null); // Tag popup ref
 
   const todoPortalRef = useRef<HTMLDivElement>(null);
@@ -634,6 +819,9 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
 
   const [todoPopupPos, setTodoPopupPos] = useState<{ x: number; y: number } | null>(null);
   const [locationPopupPos, setLocationPopupPos] = useState<{ x: number; y: number } | null>(null);
+  const [versionHistoryCategoryPopupPos, setVersionHistoryCategoryPopupPos] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (tagPopupOpen && popupRef.current) {
@@ -692,6 +880,25 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     }
   }, [isLocationPickerOpen, openPopupsToBottom, openPopupsToLeft]);
 
+  useEffect(() => {
+    if (isVersionHistoryCategoryOpen && versionHistoryParentRef?.current) {
+      const rect = versionHistoryParentRef.current.getBoundingClientRect();
+      let x = rect.left;
+      let y = rect.bottom + 4;
+      if (openPopupsToBottom) {
+        x = Math.max(12, rect.right - 260);
+        y = rect.bottom + 4;
+      } else if (openPopupsToLeft) {
+        x = rect.left - 264;
+        y = rect.top;
+      } else {
+        x = rect.right + 12;
+        y = rect.top;
+      }
+      setVersionHistoryCategoryPopupPos({ x, y });
+    }
+  }, [isVersionHistoryCategoryOpen, openPopupsToBottom, openPopupsToLeft]);
+
   // --- Todo State ---
   const [isAnytime, setIsAnytime] = useState(false);
   const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
@@ -708,28 +915,66 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     setIsTodoPopupOpen(prev => !prev);
     setIsLocationPickerOpen(false);
     setTagPopupOpen(false);
+    setIsVersionHistoryCategoryOpen(false);
   };
 
   const handleLocationPickerToggle = () => {
     setIsLocationPickerOpen(prev => !prev);
     setIsTodoPopupOpen(false);
     setTagPopupOpen(false);
+    setIsVersionHistoryCategoryOpen(false);
   };
 
   const handleTagIconClick = () => {
     setTagPopupOpen(prev => !prev);
     setIsTodoPopupOpen(false);
     setIsLocationPickerOpen(false);
+    setIsVersionHistoryCategoryOpen(false);
+  };
+
+  const handleVersionHistoryToggle = () => {
+    setIsVersionHistoryCategoryOpen(prev => !prev);
+    setIsTodoPopupOpen(false);
+    setIsLocationPickerOpen(false);
+    setTagPopupOpen(false);
+  };
+
+  const handleMoreActionsToggle = () => {
+    setIsToolbarExpanded(prev => {
+      const next = !prev;
+      if (!next) {
+        setIsTodoPopupOpen(false);
+        setIsLocationPickerOpen(false);
+        setTagPopupOpen(false);
+        setIsFavoriteCategoryOpen(false);
+        setIsVersionHistoryCategoryOpen(false);
+        setIsAltSlashOpen(false);
+      }
+      return next;
+    });
+  };
+
+  const handleMoreActionsDoubleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsToolbarExpanded(false);
+    setIsTodoPopupOpen(false);
+    setIsLocationPickerOpen(false);
+    setTagPopupOpen(false);
+    setIsFavoriteCategoryOpen(false);
+    setIsVersionHistoryCategoryOpen(false);
+    setIsAltSlashOpen(false);
   };
 
   const handleCreateTodoFromNote = () => {
     if (onCreateTodo) {
       let deadlineVal = '';
-      if (!isAnytime && reminderDate && reminderTime) {
+      if (reminderDate) {
         try {
-          deadlineVal = new Date(reminderDate + 'T' + reminderTime).toISOString();
+          const timeStr = reminderTime ? (reminderTime.length === 5 ? `${reminderTime}:00` : reminderTime) : '09:00:00';
+          deadlineVal = new Date(`${reminderDate}T${timeStr}`).toISOString();
         } catch (e) {
-          deadlineVal = '';
+          deadlineVal = new Date(reminderDate).toISOString();
         }
       }
       onCreateTodo(deadlineVal, isRecurring, recurringCycle || 'daily');
@@ -762,408 +1007,523 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
     <>
       <div
         data-shared-toolbar="true"
+        onMouseEnter={() => setIsToolbarExpanded(true)}
         className={
           layout === 'horizontal'
-            ? 'flex items-center gap-1.5 relative z-10 w-full pr-2'
+            ? 'flex items-center gap-1.5 relative z-10 w-fit'
             : 'flex flex-col items-center gap-1 relative z-10'
         }>
-        {/* Favorites (Star) */}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={e => {
-              void handleFavoriteStarClick(e);
-            }}
-            className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Favorite (Alt+/)">
-            {isFav ? <FaStar size={20} className="text-yellow-500 fill-yellow-500" /> : <FiStar size={20} />}
-          </button>
-          <FavoriteCategoryManager
-            isOpen={isFavoriteCategoryOpen}
-            onOpenChange={setIsFavoriteCategoryOpen}
-            showTrigger={false}
-            popoverClassName={`absolute ${
-              openPopupsToBottom
-                ? 'right-0 top-full mt-2'
-                : openPopupsToLeft
-                  ? 'right-full top-0 mr-3'
-                  : 'left-full top-0 ml-3'
-            }`}
-            isFavorite={isFav}
-            selectedCategoryId={selectedFavoriteCategoryId}
-            onSelectCategory={(categoryId: string | null) => {
-              void handleFavoriteCategorySelect(categoryId);
-            }}
-            onRemoveFavorite={() => {
-              void handleRemoveFavorite();
-            }}
-          />
-        </div>
-
-        {/* Hotkeys */}
-        <div className="relative">
-          <div className={layout === 'horizontal' ? 'flex items-center gap-1.5' : 'flex flex-col items-center gap-1'}>
-            <HotkeyAssignButton
-              ref={hotkeyButtonRef}
+        {!isToolbarExpanded && showShortcut && (
+          <div className="relative">
+            <ShortcutAssignButton
+              ref={shortcutButtonRef}
               itemId={compoundId}
-              currentHotkey={pendingHotkey}
-              onHotkeyChange={onHotkeyChange}
-              isFavorite={isFav}
-              onToggleFavorite={onToggleFavorite}
-              showFavorite={false}
-              isFavLoading={false}
-              isHotkeyLoading={false}
+              currentShortcut={pendingShortcut}
+              onShortcutChange={(shortcut: string) => {
+                if (onShortcutChange) onShortcutChange(shortcut);
+              }}
+              onOverwriteShortcut={onShortcutOverwrite}
+              defaultName={defaultName}
+              isShortcutLoading={false}
               sidebarMode={true}
               openToLeft={openPopupsToLeft}
               openToBottom={openPopupsToBottom}
-              title="Hotkey (Alt+/)"
+              title="Shortcut (Alt+/)"
               className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer border-none bg-transparent shadow-none disabled:opacity-30 disabled:cursor-not-allowed"
             />
-            {showShortcut && (
-              <ShortcutAssignButton
-                ref={shortcutButtonRef}
-                itemId={compoundId}
-                currentShortcut={pendingShortcut}
-                onShortcutChange={(shortcut: string) => {
-                  if (onShortcutChange) onShortcutChange(shortcut);
+          </div>
+        )}
+        {isToolbarExpanded && (
+          <div
+            className={
+              layout === 'horizontal'
+                ? 'flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-150'
+                : 'flex flex-col items-center gap-1 animate-in fade-in zoom-in-95 duration-150'
+            }>
+            {/* Favorites (Star) */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={e => {
+                  void handleFavoriteStarClick(e);
                 }}
-                onOverwriteShortcut={onShortcutOverwrite}
-                defaultName={defaultName}
-                isShortcutLoading={false}
+                className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed"
+                title="Favorite (Alt+/)">
+                {isFav ? <FaStar size={20} className="text-yellow-500 fill-yellow-500" /> : <FiStar size={20} />}
+              </button>
+              <FavoriteCategoryManager
+                isOpen={isFavoriteCategoryOpen}
+                onOpenChange={setIsFavoriteCategoryOpen}
+                showTrigger={false}
+                popoverClassName={`absolute ${
+                  openPopupsToBottom
+                    ? 'right-0 top-full mt-2'
+                    : openPopupsToLeft
+                      ? 'right-full top-0 mr-3'
+                      : 'left-full top-0 ml-3'
+                }`}
+                isFavorite={isFav}
+                selectedCategoryId={selectedFavoriteCategoryId}
+                onSelectCategory={(categoryId: string | null) => {
+                  void handleFavoriteCategorySelect(categoryId);
+                }}
+                onRemoveFavorite={() => {
+                  void handleRemoveFavorite();
+                }}
+              />
+            </div>
+
+            {/* Hotkeys */}
+            <div className="relative">
+              <HotkeyAssignButton
+                ref={hotkeyButtonRef}
+                itemId={compoundId}
+                currentHotkey={pendingHotkey}
+                onHotkeyChange={onHotkeyChange}
+                isFavorite={isFav}
+                onToggleFavorite={onToggleFavorite}
+                showFavorite={false}
+                isFavLoading={false}
+                isHotkeyLoading={false}
                 sidebarMode={true}
                 openToLeft={openPopupsToLeft}
                 openToBottom={openPopupsToBottom}
-                title="Shortcut (Alt+/)"
+                onOverwriteHotkey={onHotkeyOverwrite}
+                title="Hotkey (Alt+/)"
                 className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer border-none bg-transparent shadow-none disabled:opacity-30 disabled:cursor-not-allowed"
               />
-            )}
-          </div>
-        </div>
-        {/* Create To-Do */}
-        {showTodo && (
-          <div
-            ref={todoPopupRef}>
-            <button
-              type="button"
-              onClick={handleTodoPopupToggle}
-              className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isTodoPopupOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
-              title="Create Todo (Alt+/)">
-              <BsCalendarCheck size={20} />
-            </button>
-            {isTodoPopupOpen && todoPopupPos && createPortal(
-              <div
-                ref={todoPortalRef}
-                style={{
-                  position: 'fixed',
-                  left: `${todoPopupPos.x}px`,
-                  top: `${todoPopupPos.y}px`,
-                  zIndex: 2147483647,
-                }}>
-                <NewDueDateDropdown
-                  isOpen={isTodoPopupOpen}
-                  onClose={() => setIsTodoPopupOpen(false)}
-                  positionClassName=""
-                  onSelect={({ date, time }) => {
-                    isUserChangeRef.current = true;
-                    setReminderDate(date);
-                    setReminderTime(time || '');
-                    setIsTodoPopupOpen(false);
-                  }}
-                  currentDate={reminderDate}
-                  currentTime={reminderTime}
-                />
-              </div>,
-              document.body
-            )}
-          </div>
-        )}
+            </div>
 
-        {/* Location (Folder) */}
-        {showLocationPicker && (
-          <div
-            ref={locationPopupRef}>
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation();
-                handleLocationPickerToggle();
-              }}
-              disabled={saveStatus === 'saving'}
-              className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isLocationPickerOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
-              title={`${snippetBreadCrum?.folder_name || snippetBreadCrum?.workspace_name || 'Folders'} (Alt+/)`}>
-              <FaFolder size={20} />
-            </button>
-            {isLocationPickerOpen && locationPopupPos && createPortal(
-              <div
-                ref={locationPortalRef}
-                style={{
-                  position: 'fixed',
-                  left: `${locationPopupPos.x}px`,
-                  top: `${locationPopupPos.y}px`,
-                  zIndex: 2147483647,
-                }}
-                className="w-[260px]">
-                <DestinationPicker
-                  selectedWorkspaceId={workspaceId}
-                  selectedFolderId={folderId}
-                  onSelectWorkspace={handleWorkspaceDestination}
-                  onSelectFolder={handleFolderDestination}
-                  onClear={() => {
-                    isUserChangeRef.current = true;
-                    setWorkspaceId(null);
-                    setFolderId(null);
+            {/* Text Command / Shortcut */}
+            {showShortcut && (
+              <div className="relative">
+                <ShortcutAssignButton
+                  ref={shortcutButtonRef}
+                  itemId={compoundId}
+                  currentShortcut={pendingShortcut}
+                  onShortcutChange={(shortcut: string) => {
+                    if (onShortcutChange) onShortcutChange(shortcut);
                   }}
-                  onClose={() => setIsLocationPickerOpen(false)}
+                  onOverwriteShortcut={onShortcutOverwrite}
+                  defaultName={defaultName}
+                  isShortcutLoading={false}
+                  sidebarMode={true}
+                  openToLeft={openPopupsToLeft}
+                  openToBottom={openPopupsToBottom}
+                  title="Shortcut (Alt+/)"
+                  className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer border-none bg-transparent shadow-none disabled:opacity-30 disabled:cursor-not-allowed"
                 />
-              </div>,
-              document.body
-            )}
-          </div>
-        )}
-
-        {/* Tags */}
-        <div
-          ref={popupRef}>
-          <button
-            type="button"
-            onClick={handleTagIconClick}
-            className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed ${tagPopupOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
-            title={`${selectedTags.length > 0 ? selectedTags.map(t => t.name).join(', ') : 'Tags'} (Alt+/)`}>
-            <FiTag size={20} />
-            {selectedTags.length > 0 && (
-              <span className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-500 text-[8px] font-bold text-white shadow-sm ring-1 ring-white dark:ring-[#141414]">
-                {selectedTags.length}
-              </span>
-            )}
-          </button>
-          {tagPopupOpen && tagPopupPos && createPortal(
-            <div
-              ref={tagPortalRef}
-              style={{
-                position: 'fixed',
-                left: `${tagPopupPos.x}px`,
-                top: `${tagPopupPos.y}px`,
-                zIndex: 2147483647,
-              }}
-              className="w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col">
-              
-              {/* Integrated Inline Search Row */}
-              <div className="border-b border-slate-100 dark:border-white/5 flex items-center">
-                <form
-                  onSubmit={async e => {
-                    e.preventDefault();
-                    if (!newTagName.trim()) return;
-                    const trimmed = newTagName.trim();
-                    const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
-                    if (existing) {
-                      handleTagSelect({ id: existing.id, name: existing.name });
-                    } else {
-                      if (workspaceId) {
-                        const newTagRecord = await createTag(trimmed, workspaceId);
-                        handleTagSelect({ id: newTagRecord.id, name: newTagRecord.name });
-                      } else {
-                        handleTagSelect({ id: `temp_${trimmed}`, name: trimmed });
-                      }
-                    }
-                    setNewTagName('');
-                  }}
-                  className="flex-1 flex">
-                  <input
-                    type="text"
-                    placeholder="Type to search or create..."
-                    value={newTagName}
-                    onChange={e => setNewTagName(e.target.value)}
-                    className="w-full bg-transparent px-3 py-2 text-xs outline-none text-neutral-900 dark:text-white placeholder-[var(--color-textPlaceholder)]"
-                  />
-                </form>
               </div>
+            )}
 
-              {/* Selected Tags list (if any tags are selected, show them in a tight flex container) */}
-              {selectedTags.length > 0 && (
-                <div className="px-2 py-1.5 flex flex-wrap gap-1 border-b border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
-                  {selectedTags.map(st => (
-                    <span
-                      key={st.id}
-                      className="flex items-center gap-1 bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium border border-blue-500/20">
-                      {st.name}
-                      <button
-                        type="button"
-                        onClick={() => handleTagSelect(st)}
-                        className="hover:text-blue-800 dark:hover:text-blue-200 opacity-70 hover:opacity-100 transition-opacity">
-                        <FiZapOff size={10} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* Tag List Area */}
-              <style dangerouslySetInnerHTML={{__html: `
-                .no-scrollbar::-webkit-scrollbar {
-                  display: none !important;
-                }
-                .no-scrollbar {
-                  -ms-overflow-style: none !important;
-                  scrollbar-width: none !important;
-                }
-              `}} />
-              <div className="p-2 flex flex-col gap-1 max-h-[140px] overflow-y-auto no-scrollbar">
-                {/* Clear Tags item (Remove radical) with red dot */}
-                {selectedTags.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={e => {
-                      e.stopPropagation();
-                      isUserChangeRef.current = true;
-                      setSelectedTags([]);
-                    }}
-                    className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-left text-xs text-red-500 hover:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 transition-colors mb-1">
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-red-500" />
-                    <span className="font-medium flex-1">Clear Tags</span>
-                    <FiZapOff size={10} className="opacity-75" />
-                  </button>
-                )}
-
-                {newTagName.trim() && (
-                  <button
-                    type="button"
-                    onClick={async e => {
-                      e.stopPropagation();
-                      const trimmed = newTagName.trim();
-                      const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
-                      if (existing) {
-                        handleTagSelect({ id: existing.id, name: existing.name });
-                      } else {
-                        if (workspaceId) {
-                          const newTagRecord = await createTag(trimmed, workspaceId);
-                          handleTagSelect({ id: newTagRecord.id, name: newTagRecord.name });
-                        } else {
-                          handleTagSelect({ id: `temp_${trimmed}`, name: trimmed });
-                        }
-                      }
-                      setNewTagName('');
-                    }}
-                    className="flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white transition-colors border border-dashed border-neutral-300 dark:border-white/10 mb-1">
-                    <div className="flex items-center gap-2">
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="text-neutral-400 dark:text-neutral-500">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" y1="8" x2="12" y2="16" />
-                        <line x1="8" y1="12" x2="16" y2="12" />
-                      </svg>
-                      <span>Create "{newTagName.trim()}"</span>
-                    </div>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded border border-neutral-200 dark:border-white/10 bg-neutral-50 dark:bg-white/5 text-neutral-400 dark:text-neutral-400 font-mono scale-90">
-                      Enter
-                    </span>
-                  </button>
-                )}
-
-                {dbTags.map((tag, idx) => {
-                  const isSelected = selectedTags.some(t => t.id === tag.id);
-                  const dotColor = getTagColor(tag.name);
-                  const isEditingThisTag = editingTagId === tag.id;
-
-                  if (isEditingThisTag) {
-                    return (
-                      <div key={tag.id || idx} className="flex items-center gap-1.5 px-2 py-1 bg-black/10 dark:bg-white/10 rounded-lg">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: dotColor }}
-                        />
-                        <input
-                          autoFocus
-                          type="text"
-                          value={editingTagName}
-                          onChange={e => setEditingTagName(e.target.value)}
-                          onKeyDown={async e => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              await handleSaveTagEdit(tag.id);
-                            } else if (e.key === 'Escape') {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setEditingTagId(null);
-                            }
-                          }}
-                          onBlur={() => handleSaveTagEdit(tag.id)}
-                          className="flex-1 bg-transparent px-1 py-0.5 text-xs outline-none text-neutral-900 dark:text-white font-medium border-b border-blue-500 min-w-0"
-                        />
-                      </div>
-                    );
-                  }
-
-                  return (
+            {/* Create To-Do */}
+            {showTodo && (
+              <div ref={todoPopupRef} className="relative">
+                <button
+                  type="button"
+                  onClick={handleTodoPopupToggle}
+                  className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed border-none bg-transparent shadow-none"
+                  title={
+                    reminderDate
+                      ? `Todo set for ${reminderDate}${reminderTime ? ' at ' + reminderTime : ''}`
+                      : 'Create Todo (Alt+/)'
+                  }>
+                  <BsCalendarCheck size={20} />
+                </button>
+                {isTodoPopupOpen &&
+                  todoPopupPos &&
+                  createPortal(
                     <div
-                      key={tag.id || idx}
-                      onClick={() => handleTagSelect({ id: tag.id, name: tag.name })}
-                      className={`group flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs transition-colors cursor-pointer ${
-                        isSelected
-                          ? 'bg-black/5 dark:bg-white/10 text-neutral-900 dark:text-white font-medium'
-                          : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: dotColor }}
-                        />
-                        <span className="truncate">{tag.name}</span>
-                      </div>
+                      ref={todoPortalRef}
+                      style={{
+                        position: 'fixed',
+                        left: `${todoPopupPos.x}px`,
+                        top: `${todoPopupPos.y}px`,
+                        zIndex: 2147483647,
+                      }}>
+                      <NewDueDateDropdown
+                        isOpen={isTodoPopupOpen}
+                        onClose={() => setIsTodoPopupOpen(false)}
+                        positionClassName=""
+                        onSelect={({ date, time }) => {
+                          console.log('[SharedPropertiesToolbar:onSelect] Selected date & time from NewDueDateDropdown:', {
+                            date,
+                            time,
+                          });
+                          isUserChangeRef.current = true;
+                          setReminderDate(date);
+                          const selectedTime = time || '';
+                          setReminderTime(selectedTime);
+                          setIsTodoPopupOpen(false);
 
-                      <div className="flex items-center gap-1 shrink-0 ml-2">
-                        {/* Pencil / Edit Icon */}
+                          if (onCreateTodo) {
+                            let deadlineVal = '';
+                            if (date) {
+                              try {
+                                const timeStr = selectedTime
+                                  ? selectedTime.length === 5
+                                    ? `${selectedTime}:00`
+                                    : selectedTime
+                                  : '09:00:00';
+                                deadlineVal = new Date(`${date}T${timeStr}`).toISOString();
+                              } catch (e) {
+                                deadlineVal = new Date(date).toISOString();
+                              }
+                            }
+                            console.log(
+                              '[SharedPropertiesToolbar:onSelect] Invoking onCreateTodo with deadlineVal:',
+                              deadlineVal,
+                            );
+                            onCreateTodo(deadlineVal, isRecurring, recurringCycle || 'daily');
+                          } else {
+                            console.warn('[SharedPropertiesToolbar:onSelect] onCreateTodo callback prop is not defined!');
+                          }
+                        }}
+                        currentDate={reminderDate}
+                        currentTime={reminderTime}
+                      />
+                    </div>,
+                    document.body,
+                  )}
+              </div>
+            )}
+
+            {/* Location (Folder) */}
+            {showLocationPicker && (
+              <div ref={locationPopupRef}>
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    handleLocationPickerToggle();
+                  }}
+                  disabled={saveStatus === 'saving'}
+                  className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isLocationPickerOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
+                  title={`${snippetBreadCrum?.folder_name || snippetBreadCrum?.workspace_name || 'Folders'} (Alt+/)`}>
+                  <FaFolder size={20} />
+                </button>
+                {isLocationPickerOpen &&
+                  locationPopupPos &&
+                  createPortal(
+                    <div
+                      ref={locationPortalRef}
+                      style={{
+                        position: 'fixed',
+                        left: `${locationPopupPos.x}px`,
+                        top: `${locationPopupPos.y}px`,
+                        zIndex: 2147483647,
+                      }}
+                      className="w-[260px]">
+                      <DestinationPicker
+                        selectedWorkspaceId={workspaceId}
+                        selectedFolderId={folderId}
+                        onSelectWorkspace={handleWorkspaceDestination}
+                        onSelectFolder={handleFolderDestination}
+                        onClear={() => {
+                          isUserChangeRef.current = true;
+                          setWorkspaceId(null);
+                          setFolderId(null);
+                        }}
+                        onClose={() => setIsLocationPickerOpen(false)}
+                      />
+                    </div>,
+                    document.body,
+                  )}
+              </div>
+            )}
+
+            {/* Tags */}
+            <div ref={popupRef}>
+              <button
+                type="button"
+                onClick={handleTagIconClick}
+                className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed ${tagPopupOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
+                title={`${selectedTags.length > 0 ? selectedTags.map(t => t.name).join(', ') : 'Tags'} (Alt+/)`}>
+                <FiTag size={20} />
+                {selectedTags.length > 0 && (
+                  <span className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-500 text-[8px] font-bold text-white shadow-sm ring-1 ring-white dark:ring-[#141414]">
+                    {selectedTags.length}
+                  </span>
+                )}
+              </button>
+              {tagPopupOpen &&
+                tagPopupPos &&
+                createPortal(
+                  <div
+                    ref={tagPortalRef}
+                    style={{
+                      position: 'fixed',
+                      left: `${tagPopupPos.x}px`,
+                      top: `${tagPopupPos.y}px`,
+                      zIndex: 2147483647,
+                    }}
+                    className="w-[240px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col">
+                    {/* Integrated Inline Search Row */}
+                    <div className="border-b border-slate-100 dark:border-white/5 flex items-center">
+                      <form
+                        onSubmit={async e => {
+                          e.preventDefault();
+                          if (!newTagName.trim()) return;
+                          const trimmed = newTagName.trim();
+                          const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
+                          if (existing) {
+                            handleTagSelect({ id: existing.id, name: existing.name });
+                          } else {
+                            if (workspaceId) {
+                              const newTagRecord = await createTag(trimmed, workspaceId);
+                              handleTagSelect({ id: newTagRecord.id, name: newTagRecord.name });
+                            } else {
+                              handleTagSelect({ id: `temp_${trimmed}`, name: trimmed });
+                            }
+                          }
+                          setNewTagName('');
+                        }}
+                        className="flex-1 flex">
+                        <input
+                          type="text"
+                          placeholder="Type to search or create..."
+                          value={newTagName}
+                          onChange={e => setNewTagName(e.target.value)}
+                          className="w-full bg-transparent px-3 py-2 text-xs outline-none text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)]"
+                        />
+                      </form>
+                    </div>
+
+                    {/* Selected Tags list (if any tags are selected, show them in a tight flex container) */}
+                    {selectedTags.length > 0 && (
+                      <div className="px-2 py-1.5 flex flex-wrap gap-1 border-b border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                        {selectedTags.map(st => (
+                          <span
+                            key={st.id}
+                            className="flex items-center gap-1 bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium border border-blue-500/20">
+                            {st.name}
+                            <button
+                              type="button"
+                              onClick={() => handleTagSelect(st)}
+                              className="hover:text-blue-800 dark:hover:text-blue-200 opacity-70 hover:opacity-100 transition-opacity">
+                              <FiZapOff size={10} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Tag List Area */}
+                    <style
+                      dangerouslySetInnerHTML={{
+                        __html: `
+                    .no-scrollbar::-webkit-scrollbar {
+                      display: none !important;
+                    }
+                    .no-scrollbar {
+                      -ms-overflow-style: none !important;
+                      scrollbar-width: none !important;
+                    }
+                  `,
+                      }}
+                    />
+                    <div className="p-2 flex flex-col gap-1 max-h-[140px] overflow-y-auto no-scrollbar">
+                      {/* Clear Tags item (Remove radical) with red dot */}
+                      {selectedTags.length > 0 && (
                         <button
                           type="button"
                           onClick={e => {
                             e.stopPropagation();
-                            setEditingTagId(tag.id);
-                            setEditingTagName(tag.name);
+                            isUserChangeRef.current = true;
+                            setSelectedTags([]);
                           }}
-                          className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-neutral-200 transition-all cursor-pointer"
-                          title="Rename Tag"
-                        >
-                          <FiEdit2 size={11} />
+                          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-left text-xs text-red-500 hover:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 transition-colors mb-1">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-red-500" />
+                          <span className="font-medium flex-1">Clear Tags</span>
+                          <FiZapOff size={10} className="opacity-75" />
                         </button>
+                      )}
 
-                        {/* Trash / Delete Icon */}
+                      {newTagName.trim() && (
                         <button
                           type="button"
                           onClick={async e => {
                             e.stopPropagation();
-                            await handleDeleteTag(tag.id);
+                            const trimmed = newTagName.trim();
+                            const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
+                            if (existing) {
+                              handleTagSelect({ id: existing.id, name: existing.name });
+                            } else {
+                              if (workspaceId) {
+                                const newTagRecord = await createTag(trimmed, workspaceId);
+                                handleTagSelect({ id: newTagRecord.id, name: newTagRecord.name });
+                              } else {
+                                handleTagSelect({ id: `temp_${trimmed}`, name: trimmed });
+                              }
+                            }
+                            setNewTagName('');
                           }}
-                          className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-neutral-400 hover:text-red-400 transition-all cursor-pointer"
-                          title="Delete Tag"
-                        >
-                          <FiTrash2 size={11} />
-                        </button>
-
-                        {isSelected && (
-                          <span
-                            className="text-[var(--color-danger)] p-0.5 rounded flex items-center justify-center bg-[var(--color-dangerBg)]"
-                            title="Added">
-                            <FiZapOff size={10} />
+                          className="flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white transition-colors border border-dashed border-neutral-300 dark:border-white/10 mb-1">
+                          <div className="flex items-center gap-2">
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="text-neutral-400 dark:text-neutral-500">
+                              <circle cx="12" cy="12" r="10" />
+                              <line x1="12" y1="8" x2="12" y2="16" />
+                              <line x1="8" y1="12" x2="16" y2="12" />
+                            </svg>
+                            <span>Create "{newTagName.trim()}"</span>
+                          </div>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded border border-neutral-200 dark:border-white/10 bg-neutral-50 dark:bg-white/5 text-neutral-400 dark:text-neutral-400 font-mono scale-90">
+                            Enter
                           </span>
-                        )}
-                      </div>
+                        </button>
+                      )}
+
+                      {dbTags
+                        .filter(
+                          (t, index, self) =>
+                            index === self.findIndex(x => x.name.trim().toLowerCase() === t.name.trim().toLowerCase()),
+                        )
+                        .map((tag, idx) => {
+                          const isSelected = selectedTags.some(
+                            t => t.id === tag.id || t.name.trim().toLowerCase() === tag.name.trim().toLowerCase(),
+                          );
+                          const dotColor = getTagColor(tag.name);
+                          const isEditingThisTag = editingTagId === tag.id;
+
+                          if (isEditingThisTag) {
+                            return (
+                              <div
+                                key={tag.id || idx}
+                                className="flex items-center gap-1.5 px-2 py-1 bg-black/10 dark:bg-white/10 rounded-lg">
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: dotColor }}
+                                />
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  value={editingTagName}
+                                  onChange={e => setEditingTagName(e.target.value)}
+                                  onKeyDown={async e => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      await handleSaveTagEdit(tag.id);
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setEditingTagId(null);
+                                    }
+                                  }}
+                                  onBlur={() => handleSaveTagEdit(tag.id)}
+                                  className="flex-1 bg-transparent px-1 py-0.5 text-xs outline-none text-[var(--color-textPrimary)] font-medium border-b border-blue-500 min-w-0"
+                                />
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={tag.id || idx}
+                              onClick={() => handleTagSelect({ id: tag.id, name: tag.name })}
+                              className={`group flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs transition-colors cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-medium'
+                                  : 'text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
+                              }`}>
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: dotColor }}
+                                />
+                                <span className="truncate">{tag.name}</span>
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                {/* Pencil / Edit Icon */}
+                                <button
+                                  type="button"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setEditingTagId(tag.id);
+                                    setEditingTagName(tag.name);
+                                  }}
+                                  className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/10 text-neutral-400 hover:text-neutral-200 transition-all cursor-pointer"
+                                  title="Rename Tag">
+                                  <FiEdit2 size={11} />
+                                </button>
+
+                                {/* Trash / Delete Icon */}
+                                <button
+                                  type="button"
+                                  onClick={async e => {
+                                    e.stopPropagation();
+                                    await handleDeleteTag(tag.id);
+                                  }}
+                                  className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-neutral-400 hover:text-red-400 transition-all cursor-pointer"
+                                  title="Delete Tag">
+                                  <FiTrash2 size={11} />
+                                </button>
+
+                                {isSelected && (
+                                  <span
+                                    className="text-[var(--color-danger)] p-0.5 rounded flex items-center justify-center bg-[var(--color-dangerBg)]"
+                                    title="Added">
+                                    <FiZapOff size={10} />
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                     </div>
-                  );
-                })}
+                  </div>,
+                  document.body,
+                )}
+            </div>
+
+            {/* Version History */}
+            {showVersionHistoryButton && (
+              <div ref={versionHistoryParentRef}>
+                <button
+                  type="button"
+                  onClick={handleVersionHistoryToggle}
+                  className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed ${isVersionHistoryCategoryOpen ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
+                  title="Version History (Alt+h)">
+                  <RotateCcwClock size={20} />
+                </button>
+
+                {isVersionHistoryCategoryOpen && (
+                  <VersionHistoryComparisonModal
+                    isOpen={isVersionHistoryCategoryOpen}
+                    onClose={() => setIsVersionHistoryCategoryOpen(false)}
+                    entityType={resolvedEntityType}
+                    entityId={compoundId}
+                    entityTitle={defaultName || initialSnippet?.title || initialSnippet?.name || 'Untitled'}
+                    currentSnapshot={resolvedCurrentSnapshot}
+                    versionHistory={resolvedVersionHistory}
+                    triggerRef={versionHistoryParentRef}
+                  />
+                )}
               </div>
-            </div>,
-            document.body
-          )}
-        </div>
+            )}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleMoreActionsToggle}
+          onDoubleClick={handleMoreActionsDoubleClick}
+          aria-label={isToolbarExpanded ? 'Hide shared properties' : 'Show shared properties'}
+          aria-expanded={isToolbarExpanded}
+          className={`p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 transition-all flex items-center justify-center cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed border-none bg-transparent shadow-none ${isToolbarExpanded ? 'bg-black/5 dark:bg-white/5 text-purple-500 dark:text-purple-400' : ''}`}
+          title={isToolbarExpanded ? 'Hide shared properties' : 'Show shared properties'}>
+          {isToolbarExpanded ? <MoreVertical size={20} /> : <MoreHorizontal size={20} />}
+        </button>
       </div>
 
       <AltSlashPopup
@@ -1214,7 +1574,9 @@ export const SharedPropertiesToolbar = React.forwardRef<HTMLDivElement, SharedPr
           }
         }}
         showTodo={showTodo}
-        showShortcut={showShortcut && !['snippet', 'snippets'].includes(String(initialSnippet?.category || '').toLowerCase())}
+        showShortcut={
+          showShortcut && !['snippet', 'snippets'].includes(String(initialSnippet?.category || '').toLowerCase())
+        }
         showLocationPicker={showLocationPicker}
         showTags={true}
       />

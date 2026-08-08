@@ -1,4 +1,5 @@
-import React, { useRef, useEffect } from 'react';
+import * as React from 'react';
+import { useRef, useEffect } from 'react';
 
 interface InlineTimeInputProps {
   value: string; // 'HH:mm' in 24h

@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import { FaTimes } from 'react-icons/fa';
 import { AutoSaveIndicator } from '../autoSaveEngine/autoSave';
 
@@ -13,6 +13,7 @@ export interface EditorHeaderProps {
   headerActions?: React.ReactNode;
   showAutoSaveStatus?: boolean;
   headerRightPaddingClass?: string;
+  showCloseButton?: boolean;
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = ({
@@ -26,11 +27,12 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   headerActions,
   showAutoSaveStatus = true,
   headerRightPaddingClass = '',
+  showCloseButton = true,
 }) => {
   return (
-    <div className="w-full flex items-center py-1.5 px-3 border-b border-black/10 dark:border-white/10 shrink-0 relative z-30">
+    <div className="w-full flex items-center py-1 px-3 border-b border-[var(--color-borderDefault)] shrink-0 relative z-30">
       <div className="flex items-center flex-1 min-w-0 relative">
-        <h3 className="text-lg font-bold text-neutral-700 dark:text-neutral-300 pl-2 truncate">
+        <h3 className="text-lg font-bold text-[var(--color-textPrimary)] pl-2 truncate">
           {title}
         </h3>
       </div>
@@ -53,13 +55,17 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           </div>
           {headerActions}
         </div>
-        <button
-          onClick={onCloseClick}
-          className="p-2 text-neutral-500 hover:text-neutral-300 rounded-lg hover:bg-white/5 transition-all focus:outline-none cursor-pointer z-50"
-          title="Close"
-        >
-          <FaTimes size={14} />
-        </button>
+        {showCloseButton !== false && (
+          <button
+            onClick={onCloseClick}
+            className={`p-2 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] rounded-lg transition-all focus:outline-none cursor-pointer z-50 ${
+              showCloseButton ? '' : 'md:hidden'
+            }`}
+            title="Close"
+          >
+            <FaTimes size={17} />
+          </button>
+        )}
       </div>
     </div>
   );

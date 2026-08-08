@@ -1,6 +1,5 @@
-import React from 'react';
-import { FaKeyboard } from 'react-icons/fa';
-import { FiCopy } from 'react-icons/fi';
+import * as React from 'react';
+import { CUnderscoreIcon } from '../icons/cUnderscoreIcon';
 
 export interface EditorTitleShortcutInputProps {
   title: string;
@@ -11,6 +10,7 @@ export interface EditorTitleShortcutInputProps {
 
   titlePlaceholder?: string;
   shortcutPlaceholder?: string;
+  shortcutLabel?: string;
 
   titleRef?: React.RefObject<HTMLInputElement | null>;
   shortcutRef?: React.RefObject<HTMLInputElement | null>;
@@ -18,7 +18,7 @@ export interface EditorTitleShortcutInputProps {
   onTitleBlur?: () => void;
   onShortcutBlur?: () => void;
 
-  onTitleEnter?: (shiftKey: boolean, event?: React.KeyboardEvent<HTMLInputElement>) => void;
+  onTitleEnter?: (shiftKey?: boolean, event?: React.KeyboardEvent<HTMLInputElement>) => void;
   onShortcutEnter?: () => void;
 
   onArrowDownPress?: () => void;
@@ -37,7 +37,8 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
   setShortcut,
   showShortcut = true,
   titlePlaceholder = 'Title',
-  shortcutPlaceholder = 'Shortcut',
+  shortcutPlaceholder = 'Command Shortcut',
+  shortcutLabel = 'Command Shortcut',
   titleRef,
   shortcutRef,
   onTitleBlur,
@@ -64,7 +65,7 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
         e.preventDefault();
         e.stopPropagation();
         if (onTitleEnter) {
-          onTitleEnter(e.shiftKey, e);
+          onTitleEnter(false, e);
         }
       }
     } else if (e.key === 'ArrowRight') {
@@ -89,9 +90,7 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
   const handleShortcutKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
-      if (e.shiftKey && onCopyTitleToShortcut && !shortcut && title.trim().length > 0) {
-        onCopyTitleToShortcut();
-      } else if (onShortcutEnter) {
+      if (onShortcutEnter) {
         onShortcutEnter();
       }
     } else if (e.key === 'ArrowLeft') {
@@ -116,7 +115,7 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
   return (
     <div className="flex items-center gap-4 flex-shrink-0 relative z-10 py-0.5 w-full pb-1.5">
       <div className="flex-1 flex flex-col relative z-10 gap-1 min-w-0">
-        <label className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 px-3.5 flex items-center justify-start gap-2 w-full">
+        <label className="text-xs font-semibold text-[var(--color-textSecondary)] px-3.5 flex items-center justify-start gap-2 w-full">
           <div className="flex items-center gap-1 whitespace-nowrap">
             Title <span className="text-red-500">*</span>
           </div>
@@ -126,7 +125,7 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
             </span>
           )}
         </label>
-        <div className="flex-1 relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-3.5 py-1.5 flex items-center">
+        <div className="flex-1 relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] overflow-hidden px-3.5 py-1.5 flex items-center shadow-sm">
           <input
             ref={titleRef}
             value={title}
@@ -135,15 +134,15 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
             onKeyDown={handleTitleKeyDown}
             type="text"
             placeholder={titlePlaceholder}
-            className="w-full text-sm font-medium text-neutral-700 dark:text-neutral-300 placeholder-black/35 dark:placeholder-white/35 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 p-0"
+            className="w-full text-sm font-semibold text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 p-0"
           />
         </div>
       </div>
 
       {showShortcut && setShortcut && (
         <div className="flex-1 flex flex-col relative z-10 gap-1 min-w-0">
-          <label className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 px-3.5 flex items-center justify-start gap-2 w-full">
-            <span className="whitespace-nowrap">Shortcut</span>
+          <label className="text-xs font-semibold text-[var(--color-textSecondary)] px-3.5 flex items-center justify-start gap-2 w-full">
+            <span className="whitespace-nowrap">{shortcutLabel}</span>
             {shortcutError && (
               <div className="flex items-center justify-start gap-1.5 flex-1 min-w-0">
                 <span className="text-[10px] text-red-500 font-medium truncate text-left">
@@ -162,7 +161,7 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
                       console.log('[ShortcutDebug] USER CLICKED OVERRIDE BUTTON for shortcut:', shortcut);
                       onOverrideShortcut();
                     }}
-                    className="px-2 py-0.5 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-neutral-700 dark:text-neutral-300 border border-black/10 dark:border-white/10 text-[10px] font-semibold transition-all cursor-pointer shrink-0 select-none"
+                    className="px-2 py-0.5 rounded-md bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] border border-[var(--color-borderDefault)] text-[10px] font-semibold transition-all cursor-pointer shrink-0 select-none"
                     title="Reassign shortcut to this item"
                   >
                     Override
@@ -171,8 +170,8 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
               </div>
             )}
           </label>
-          <div className="flex-1 relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-3.5 py-1.5 flex items-center">
-            <FaKeyboard className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500 pointer-events-none" size={14} />
+          <div className="flex-1 relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] overflow-hidden px-3.5 py-1.5 flex items-center shadow-sm">
+            <CUnderscoreIcon size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-iconDefault)] pointer-events-none select-none" />
             <input
               ref={shortcutRef}
               value={shortcut}
@@ -184,32 +183,8 @@ export const EditorTitleShortcutInput: React.FC<EditorTitleShortcutInputProps> =
               onKeyDown={handleShortcutKeyDown}
               type="text"
               placeholder={shortcutPlaceholder}
-              className={`w-full text-sm font-medium text-neutral-700 dark:text-neutral-300 placeholder-black/35 dark:placeholder-white/35 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 p-0 pl-5 ${!shortcut ? 'pr-28' : ''}`}
+              className="w-full text-sm font-semibold text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 p-0 pl-6"
             />
-            {!shortcut && (
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (onCopyTitleToShortcut) {
-                    onCopyTitleToShortcut();
-                  }
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (onCopyTitleToShortcut) {
-                    onCopyTitleToShortcut();
-                  }
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-white bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 rounded border border-black/10 dark:border-white/10 transition-all cursor-pointer select-none"
-                title="Copy Title to Shortcut (Shift+Enter)"
-              >
-                <FiCopy size={11} className="shrink-0" />
-                <span>Shift + Enter</span>
-              </button>
-            )}
           </div>
         </div>
       )}

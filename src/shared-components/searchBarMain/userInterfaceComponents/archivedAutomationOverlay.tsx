@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useCallback, useState } from 'react';
 import { FaArrowLeft } from 'react-icons/fa';
 import AutomationDataEntry from '../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/automationDataEntry';

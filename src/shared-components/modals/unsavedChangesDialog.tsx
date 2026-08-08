@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { FaExclamationTriangle } from 'react-icons/fa';

@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useCallback, useEffect, useRef, useState, forwardRef } from 'react';
 import { FaEllipsisV } from 'react-icons/fa';
 import { useShortcutValidation } from '../hooks/useShortcutValidation';

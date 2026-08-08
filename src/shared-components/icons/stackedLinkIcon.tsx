@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import { FaLink } from 'react-icons/fa';
 import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 import { SessionGridIcon } from './sessionGridIcon';

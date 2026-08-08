@@ -13,8 +13,40 @@ import { createNotification } from '@notifications/notifications';
 import { db } from '../../../src/storage/indexDB/dbConfig';
 import { resolveEntityById } from '../../../src/shared-components/utils/entityResolver';
 import { handleSessionMessage } from '@browserWindows/sessions';
+import { recordAssignedTriggerUsage } from '../../../src/shared-components/triggers';
 
 let cachedHotkeysMap: Record<string, { id: string; type: string }> | null = null;
+
+export const invalidateHotkeysCache = () => {
+  cachedHotkeysMap = null;
+
+  chrome.tabs.query({}, tabs => {
+    tabs.forEach(tab => {
+      if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'RELOAD_HOTKEYS' }).catch(() => {});
+    });
+  });
+};
+
+const recordHotkeyUsage = (request: any, success: boolean, errorCode?: string, overrides: Record<string, any> = {}) => {
+  const usage = request?.triggerUsage;
+  const triggerValue = usage?.triggerValue || request?.hotkey || request?.combination || request?.triggerValue;
+  if (!triggerValue) return;
+  recordAssignedTriggerUsage({
+    triggerKind: 'user_hotkey',
+    triggerValue,
+    triggerSource: 'hotkey',
+    referenceId: overrides.referenceId || usage?.referenceId || request.id || request.snippetId,
+    referenceType: overrides.referenceType || usage?.referenceType || request.type,
+    surface: usage?.surface || 'background',
+    url: usage?.url,
+    urlHost: usage?.urlHost,
+    targetLabelSnapshot: overrides.targetLabelSnapshot || usage?.targetLabelSnapshot,
+    triggerLabelSnapshot: usage?.triggerLabelSnapshot || triggerValue,
+    success,
+    errorCode,
+    correlationId: usage?.correlationId,
+  }).catch(err => console.warn('[HotkeyUsage] Failed to record usage:', err));
+};
 
 const extractSessionLaunchPayload = (sessionRecord: any) => {
   let initialUrls: string[] = [];
@@ -98,12 +130,17 @@ export function handleHotkeyMessage(
   }
 
   if (request.action === 'INVALIDATE_HOTKEYS_CACHE') {
-    cachedHotkeysMap = null;
+    invalidateHotkeysCache();
 
-    // Broadcast to all tabs to reload their local hotkeys map
+    sendResponse({ success: true });
+    return false;
+  }
+
+  if (request.action === 'INVALIDATE_SHORTCUTS_CACHE') {
+    // Broadcast to all tabs to reload their local shortcuts map if they are listening
     chrome.tabs.query({}, tabs => {
       tabs.forEach(tab => {
-        if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'RELOAD_HOTKEYS' }).catch(() => {});
+        if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'RELOAD_SHORTCUTS' }).catch(() => {});
       });
     });
 
@@ -129,6 +166,7 @@ export function handleHotkeyMessage(
         `AltS_search_newtab/index.html?trigger_hotkey=true&type=${type}&id=${encodeURIComponent(normalizedId)}`,
       );
       chrome.tabs.create({ url, active: true });
+      recordHotkeyUsage(request, true, undefined, { referenceId: normalizedId, referenceType: type });
       sendResponse({ ok: true });
       return true;
     }
@@ -138,6 +176,7 @@ export function handleHotkeyMessage(
     const compoundId = id as string;
 
     if (!compoundId) {
+      recordHotkeyUsage(request, false, 'missing_id');
       sendResponse({ ok: false, error: 'missing_id' });
       return false;
     }
@@ -147,6 +186,7 @@ export function handleHotkeyMessage(
       try {
         if (!resolved) {
           console.warn('[Background] trigger_hotkey: Entity not found in Dexie:', { compoundId });
+          recordHotkeyUsage(request, false, 'entity_not_found');
           sendResponse({ ok: false, error: 'entity_not_found' });
           return;
         }
@@ -173,6 +213,11 @@ export function handleHotkeyMessage(
 
           const result = handleSessionMessage(sessionRequest, sender, sendResponse);
           if (result !== undefined) {
+            recordHotkeyUsage(request, true, undefined, {
+              referenceId: actualEntityId,
+              referenceType: type,
+              targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+            });
             return;
           }
         }
@@ -228,6 +273,11 @@ export function handleHotkeyMessage(
         }
 
         if (!urls.length) {
+          recordHotkeyUsage(request, false, 'no_urls_found', {
+            referenceId: actualEntityId,
+            referenceType: type,
+            targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+          });
           sendResponse({ ok: false, error: 'no_urls_found' });
           return;
         }
@@ -246,6 +296,11 @@ export function handleHotkeyMessage(
           resolvedUrls.forEach((url, index) => {
             chrome.tabs.create({ url, active: index === 0 }, () => {
               if (index === resolvedUrls.length - 1) {
+                recordHotkeyUsage(request, true, undefined, {
+                  referenceId: actualEntityId,
+                  referenceType: type,
+                  targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+                });
                 sendResponse({ ok: true, openedUrls: resolvedUrls.length });
               }
             });
@@ -253,6 +308,7 @@ export function handleHotkeyMessage(
         }
       } catch (err) {
         console.error('[Background] trigger_hotkey error:', err);
+        recordHotkeyUsage(request, false, 'execution_failed');
         sendResponse({ ok: false, error: String(err) });
       }
     });
@@ -264,6 +320,7 @@ export function handleHotkeyMessage(
   if (request.action === 'execute_global_hotkey') {
     const compoundId = request.snippetId as string;
     if (!compoundId) {
+      recordHotkeyUsage(request, false, 'missing_snippet_id');
       sendResponse({ ok: false, error: 'missing_snippet_id' });
       return false;
     }
@@ -272,6 +329,7 @@ export function handleHotkeyMessage(
       try {
         if (!resolved) {
           console.warn('[Background] execute_global_hotkey: Entity not found in Dexie:', { compoundId });
+          recordHotkeyUsage(request, false, 'entity_not_found');
           sendResponse({ ok: false, error: 'entity_not_found' });
           return;
         }
@@ -298,6 +356,11 @@ export function handleHotkeyMessage(
 
           const result = handleSessionMessage(sessionRequest, sender, sendResponse);
           if (result !== undefined) {
+            recordHotkeyUsage(request, true, undefined, {
+              referenceId: actualEntityId,
+              referenceType: type,
+              targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+            });
             return;
           }
         }
@@ -348,6 +411,11 @@ export function handleHotkeyMessage(
         }
 
         if (!urls.length) {
+          recordHotkeyUsage(request, false, 'no_urls_found', {
+            referenceId: actualEntityId,
+            referenceType: type,
+            targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+          });
           sendResponse({ ok: false, error: 'no_urls_found' });
           return;
         }
@@ -369,10 +437,20 @@ export function handleHotkeyMessage(
           if (resolvedUrls.length === 1) {
             if (currentTab?.id) {
               chrome.tabs.update(currentTab.id, { url: resolvedUrls[0] }, () => {
+                recordHotkeyUsage(request, true, undefined, {
+                  referenceId: actualEntityId,
+                  referenceType: type,
+                  targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+                });
                 sendResponse({ ok: true, openedUrls: resolvedUrls.length });
               });
             } else {
               chrome.tabs.create({ url: resolvedUrls[0] }, () => {
+                recordHotkeyUsage(request, true, undefined, {
+                  referenceId: actualEntityId,
+                  referenceType: type,
+                  targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+                });
                 sendResponse({ ok: true, openedUrls: resolvedUrls.length });
               });
             }
@@ -382,6 +460,11 @@ export function handleHotkeyMessage(
             const openRest = () => {
               restUrls.forEach(url => {
                 chrome.tabs.create({ url, active: false });
+              });
+              recordHotkeyUsage(request, true, undefined, {
+                referenceId: actualEntityId,
+                referenceType: type,
+                targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
               });
               sendResponse({ ok: true, openedUrls: resolvedUrls.length });
             };
@@ -399,6 +482,7 @@ export function handleHotkeyMessage(
         });
       } catch (err) {
         console.error('[Background] execute_global_hotkey error:', err);
+        recordHotkeyUsage(request, false, 'execution_failed');
         sendResponse({ ok: false, error: String(err) });
       }
     });

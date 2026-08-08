@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useAppearance } from '@extension/ui';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { FaPlus, FaTrash, FaHistory, FaBookmark, FaGlobe } from 'react-icons/fa';

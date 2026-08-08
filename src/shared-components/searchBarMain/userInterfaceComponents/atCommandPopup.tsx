@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as React from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SiOpenai, SiPerplexity, SiGoogle } from 'react-icons/si';
 import { TbSparkles } from 'react-icons/tb';

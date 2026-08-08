@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useUIStore, useIsLinkEditModalOpen } from '../../../../../shared-components/uiStateManager';
 import { EditorItemsPanel } from './EditorItemsPanel';
 import { FavoritesPanel } from '../../../../../shared-components/favorites';
@@ -14,6 +14,7 @@ interface AppSidebarProps {
   onAutomationSelect?: (automation: any) => void;
   onNavigateToListView?: (type: 'notes' | 'links' | 'commands', section?: string) => void;
   openSpreadsheetView?: (section?: string) => void;
+  hideCreatePanelItems?: boolean;
 }
 
 export const AppSidebar: React.FC<AppSidebarProps> = props => {
@@ -22,15 +23,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = props => {
 
   let forceMode: 'links' | 'notes' | 'favorites' | 'snippets' = 'favorites';
 
-  if (isLinkEditModalOpen) {
-    forceMode = 'links';
-  } else if (activeEditor?.type === 'note') {
-    if (activeEditor?.props?.category === 'snippet') {
-      forceMode = 'snippets';
-    } else {
-      forceMode = 'notes';
-    }
-  }
+  // We no longer force the sidebar mode based on the active editor.
+  // The left sidebar will always remain in its default (favorites) state.
+  // The specific lists for the open editors are instead accessible via the RightSideItemsPanel.
+
 
   // If there is an active editor OR link modal, we might want EditorItemsPanel
   // but FavoritesPanel already handles forceMode!

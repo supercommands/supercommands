@@ -1,8 +1,10 @@
 import type { ErrorInfo, ReactNode } from 'react';
-import React, { useState, useEffect, Component } from 'react';
+import * as React from 'react';
+import { useState, useEffect, Component } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppearanceProvider } from '@extension/ui';
 import App from './landing/App';
+import NotificationContainer from '../../../shared-components/notifications/NotificationContainer';
 import './tailwind-input.css';
 
 // Error Boundary for stability
@@ -43,13 +45,13 @@ let reactRootInstance: any = null;
 let rootEl: HTMLDivElement | null = null;
 
 // Dynamic Mount & Unmount Functions
-const mountAndOpenPopup = async () => {
+const mountAndOpenPopup = async (initialCommand?: string) => {
   if (isAltsPopupOpen) return;
 
   rootEl = document.createElement('div');
   rootEl.id = 'alts-root';
   rootEl.style.cssText =
-    'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2147483647; pointer-events: auto; border: none; outline: none;';
+    'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2147483646; pointer-events: auto; border: none; outline: none;';
 
   document.body.appendChild(rootEl);
 
@@ -80,7 +82,7 @@ const mountAndOpenPopup = async () => {
       left: 0 !important;
       width: 100vw !important;
       height: 100vh !important;
-      z-index: 2147483647 !important;
+      z-index: 2147483646 !important;
       pointer-events: auto;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
@@ -97,13 +99,12 @@ const mountAndOpenPopup = async () => {
 
   const container = document.createElement('div');
   container.id = 'shadow-root-container';
-  container.classList.add('dark');
   shadowRoot.appendChild(container);
 
   (window as any).__ALTS_PORTAL_HOST__ = container;
   (window as any).__ALTQ_PORTAL_HOST__ = container; // Keep legacy reference just in case
 
-  const Main = () => {
+  const Main = ({ initialCommand }: { initialCommand?: string }) => {
     const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
     useEffect(() => {
@@ -133,35 +134,101 @@ const mountAndOpenPopup = async () => {
     return (
       <AppearanceProvider>
         <ErrorBoundary>
-          <App isOpen={true} onClose={destroyAndClosePopup} theme={theme} />
+          <App isOpen={true} onClose={destroyAndClosePopup} theme={theme} initialCommand={initialCommand} />
         </ErrorBoundary>
       </AppearanceProvider>
     );
   };
 
   reactRootInstance = createRoot(container);
-  reactRootInstance.render(<Main />);
+  reactRootInstance.render(<Main initialCommand={initialCommand} />);
   isAltsPopupOpen = true;
 };
 
 const destroyAndClosePopup = () => {
   if (!isAltsPopupOpen) return;
-
-  if (reactRootInstance) {
-    try {
-      reactRootInstance.unmount();
-    } catch (e) {
-      console.warn('[AltS] Error unmounting react tree:', e);
-    }
-    reactRootInstance = null;
-  }
-
-  if (rootEl) {
-    rootEl.remove();
-    rootEl = null;
-  }
-
   isAltsPopupOpen = false;
+
+  setTimeout(() => {
+    if (reactRootInstance) {
+      try {
+        reactRootInstance.unmount();
+      } catch (e) {
+        console.warn('[AltS] Error unmounting react tree:', e);
+      }
+      reactRootInstance = null;
+    }
+
+    if (rootEl) {
+      rootEl.remove();
+      rootEl = null;
+    }
+  }, 0);
+};
+
+let isNotificationSystemMounted = false;
+const mountStandaloneNotificationSystem = async () => {
+  if (isNotificationSystemMounted) return;
+
+  const notifRootEl = document.createElement('div');
+  notifRootEl.id = 'alts-notification-root';
+  notifRootEl.style.cssText =
+    'position: fixed; top: 0; left: 0; width: 100vw; height: 0; z-index: 2147483647; pointer-events: none; border: none; outline: none; overflow: visible;';
+
+  document.body.appendChild(notifRootEl);
+
+  const shadowRoot = notifRootEl.attachShadow({ mode: 'open' });
+
+  // Styles
+  const styleTag = document.createElement('style');
+  try {
+    const cssUrl = chrome.runtime.getURL('assets/alt-s-website.css');
+    const res = await fetch(cssUrl);
+    if (res.ok) {
+      styleTag.textContent = await res.text();
+    }
+  } catch (e) {
+    console.warn('[AltS] Failed to fetch extracted CSS for notifications:', e);
+  }
+  shadowRoot.appendChild(styleTag);
+
+  const themeStyleTag = document.createElement('style');
+  themeStyleTag.textContent = `
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    
+    :host {
+      all: initial !important;
+      display: block !important;
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 0 !important;
+      z-index: 2147483647 !important;
+      pointer-events: none;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    }
+    #shadow-root-container-notif {
+      all: initial;
+      display: block;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      font-family: 'Inter', sans-serif;
+    }
+  `;
+  shadowRoot.appendChild(themeStyleTag);
+
+  const container = document.createElement('div');
+  container.id = 'shadow-root-container-notif';
+  container.classList.add('dark');
+  shadowRoot.appendChild(container);
+
+  const notifReactRootInstance = createRoot(container);
+  
+  // Notification component is pure UI + store listener
+  notifReactRootInstance.render(<NotificationContainer variant="top-text-only" />);
+  isNotificationSystemMounted = true;
 };
 
 export function startAltSWebsite() {
@@ -171,6 +238,9 @@ export function startAltSWebsite() {
   );
   if ((window as any).__tasklabs_alt_s_started) return;
   (window as any).__tasklabs_alt_s_started = true;
+
+  // Mount the standalone notification system immediately
+  mountStandaloneNotificationSystem();
 
   // Capture phase key event interceptor to prevent host sites (like Google) from stealing keys
   const handleGlobalCapture = (event: KeyboardEvent) => {
@@ -222,7 +292,7 @@ export function startAltSWebsite() {
       if (isAltsPopupOpen) {
         destroyAndClosePopup();
       } else {
-        mountAndOpenPopup();
+        mountAndOpenPopup(message.creatorType);
       }
       if (sendResponse) sendResponse({ success: true });
     }

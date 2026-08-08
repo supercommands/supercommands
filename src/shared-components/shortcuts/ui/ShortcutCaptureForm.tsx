@@ -1,4 +1,5 @@
-import React, { useRef, useEffect } from 'react';
+import * as React from 'react';
+import { useRef, useEffect } from 'react';
 import { FiLoader, FiCheck, FiZap, FiZapOff } from 'react-icons/fi';
 import { normalizeShortcutTrigger } from '../core/shortcutDbData';
 
@@ -83,7 +84,7 @@ const ShortcutCaptureForm: React.FC<ShortcutCaptureFormProps> = ({
                 onKeyDown={e => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (error && conflictId && shortcutInput.onOverwrite) {
+                    if (error && conflictId && shortcutInput.onOverwrite && !conflictId.endsWith('-reserved')) {
                       shortcutInput.onOverwrite(conflictId);
                     } else if (!error) {
                       shortcutInput.onSave();
@@ -159,7 +160,7 @@ const ShortcutCaptureForm: React.FC<ShortcutCaptureFormProps> = ({
             title="Cancel">
             Cancel
           </button>
-          {error && shortcutInput.onOverwrite && conflictId !== 'extension-reserved' ? (
+          {error && shortcutInput.onOverwrite && !conflictId?.endsWith('-reserved') ? (
             <button
               onClick={e => {
                 e.stopPropagation();

@@ -4,7 +4,8 @@
  * Validates against reserved system and extension shortcuts.
  */
 
-import React, { useState, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useCallback } from 'react';
 import { checkReservedHotkey } from '../core/reservedHotkeys';
 import { buildHotkeyString } from '../core/eventParser';
 

@@ -330,7 +330,7 @@ export function startSilentInjection(filesToUpload: any[]) {
 }
 
 /**
- * Uses the Chrome DevTools Protocol to simulate trusted keyboard inputs (e.g., Alt+C, U)
+ * Uses the Chrome DevTools Protocol to simulate trusted keyboard inputs (e.g., U)
  * to open a file picker menu and initiates \`startSilentInjection\` to upload files silently.
  *
  * @param tabId The ID of the tab to perform the upload in.
@@ -406,5 +406,6 @@ export function handleDriveMessage(
       });
     return true; // Keep channel open
   }
+
   return undefined;
 }

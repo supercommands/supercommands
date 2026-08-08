@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAppearance } from '@extension/ui';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { FiZap, FiCommand, FiFolder, FiBriefcase, FiArrowLeft, FiChevronUp, FiChevronDown } from 'react-icons/fi';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import { useSpreadsheetStore } from '../../../../../shared-components/spreadsheetUi/logic/spreadsheetStateStore';
-import { FaCode, FaLink, FaRobot } from 'react-icons/fa';
+import { FaCaretDown, FaCaretRight, FaCode, FaLink, FaRobot } from 'react-icons/fa';
 import { BsCalendarCheck } from 'react-icons/bs';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
 import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
@@ -13,6 +14,11 @@ import {
   getSidebarStorageData,
   setSidebarStorageData,
 } from '../../../../../storage/localStorage/sidebarCustomizationStorage';
+import {
+  getMyLibrarySectionCollapsed,
+  MY_LIBRARY_SECTION_COLLAPSED_STORAGE_KEY,
+  setMyLibrarySectionCollapsed,
+} from '../../../../../storage/localStorage/myLibrarySectionCollapseStorage';
 
 interface ViewMenuPanelProps {
   searchbarRef?: React.RefObject<any>;
@@ -25,6 +31,7 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
 
   const [expandedCategory, setExpandedCategory] = useState<'folders' | 'organizations' | null>(null);
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const [isMyLibraryExpanded, setIsMyLibraryExpanded] = useState<boolean>(true);
   const workspaces = useDbStore(state => state.workspaces) || [];
   const folders = useDbStore(state => state.folders) || [];
 
@@ -61,6 +68,9 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
   // Load preferences from local storage and listen to changes
   useEffect(() => {
     const loadPreferences = async () => {
+      const isMyLibraryCollapsed = await getMyLibrarySectionCollapsed();
+      setIsMyLibraryExpanded(!isMyLibraryCollapsed);
+
       const result = await getSidebarStorageData([
         'sidebar_view_visible_items',
         'sidebar_view_items_order',
@@ -140,6 +150,9 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
       if (changes.customGroupNames) {
         setCustomGroupNames(changes.customGroupNames.newValue);
       }
+      if (changes[MY_LIBRARY_SECTION_COLLAPSED_STORAGE_KEY]) {
+        setIsMyLibraryExpanded(changes[MY_LIBRARY_SECTION_COLLAPSED_STORAGE_KEY].newValue !== true);
+      }
     };
 
     chrome.storage.onChanged.addListener(handleStorageChange);
@@ -211,13 +224,13 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
         id: 'folders',
         label: 'Folders',
         slash: '/f ',
-        icon: <FiFolder size={14} className="text-gray-400 shrink-0" />,
+        icon: <FiFolder size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
       },
       {
         id: 'organizations',
         label: 'Organizations',
         slash: '/org ',
-        icon: <FiBriefcase size={14} className="text-gray-400 shrink-0" />,
+        icon: <FiBriefcase size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
       },
       {
         id: 'all_shortcuts',
@@ -242,6 +255,15 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
       .map(id => rawOptions.find(o => o.id === id))
       .filter(Boolean) as any[];
   }, [viewItemsOrder, visibleViewItems, rawOptions]);
+
+  const handleToggleMyLibraryExpanded = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    setIsMyLibraryExpanded(prev => {
+      const next = !prev;
+      setMyLibrarySectionCollapsed(!next);
+      return next;
+    });
+  };
 
   const handleViewClick = (slash: string, optionId?: string) => {
     if (optionId === 'folders') {
@@ -284,7 +306,7 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
   const renderFolderItem = (folder: any) => (
     <div
       key={folder.id}
-      className="flex items-center cursor-pointer group py-[4px] pl-[34px] gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
+      className="flex items-center cursor-pointer group py-[4px] pr-[8px] pl-[34px] gap-2.5 rounded-md hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] transition-colors duration-150"
       onClick={e => {
         e.stopPropagation();
         if (openSpreadsheetView) {
@@ -296,10 +318,10 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
           useSpreadsheetStore.getState().setSearchTerm(folder.folderName || '');
         }, 100);
       }}>
-      <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
-        <FiFolder size={12} className="text-gray-400 opacity-80" />
+      <div className="w-4 h-4 flex items-center justify-center shrink-0">
+        <FiFolder size={14} className="text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)] transition-colors shrink-0" />
       </div>
-      <span className="text-[12px] font-medium tracking-tight text-neutral-500 group-hover:text-neutral-800 dark:text-neutral-400 dark:group-hover:text-neutral-200 truncate">
+      <span className="text-[12px] font-semibold tracking-tight text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)] transition-colors truncate">
         {folder.folderName || 'Untitled'}
       </span>
     </div>
@@ -308,7 +330,7 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
   const renderWorkspaceItem = (ws: any) => (
     <div
       key={ws.id}
-      className="flex items-center cursor-pointer group py-[4px] pl-[34px] gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
+      className="flex items-center cursor-pointer group py-[4px] pr-[8px] pl-[34px] gap-2.5 rounded-md hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] transition-colors duration-150"
       onClick={e => {
         e.stopPropagation();
         useUIStore.getState().setView({
@@ -316,10 +338,10 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
           section: 'allWorkspaces',
         });
       }}>
-      <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
-        <FiBriefcase size={12} className="text-gray-400 opacity-80" />
+      <div className="w-4 h-4 flex items-center justify-center shrink-0">
+        <FiBriefcase size={14} className="text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)] transition-colors shrink-0" />
       </div>
-      <span className="text-[12px] font-medium tracking-tight text-neutral-500 group-hover:text-neutral-800 dark:text-neutral-400 dark:group-hover:text-neutral-200 truncate">
+      <span className="text-[12px] font-semibold tracking-tight text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)] transition-colors truncate">
         {ws.workspaceName || 'Untitled'}
       </span>
     </div>
@@ -330,16 +352,13 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
     return (
       <React.Fragment key={opt.id}>
         <div
-          className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5`}
+          className={`flex items-center cursor-pointer group py-[4px] pr-[8px] ${paddingClass} gap-2.5 rounded-md hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] transition-colors duration-150`}
           onClick={e => {
             e.stopPropagation();
             handleViewClick(opt.slash, opt.id);
           }}>
           <div className="w-4 h-4 flex items-center justify-center shrink-0">{opt.icon}</div>
-          <span
-            className={`text-[12px] font-semibold tracking-tight ${
-              isDark ? 'text-neutral-400 group-hover:text-neutral-200' : 'text-neutral-500 group-hover:text-neutral-800'
-            }`}>
+          <span className="text-[12px] font-semibold tracking-tight transition-colors duration-150 text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)]">
             {opt.label}
           </span>
         </div>
@@ -370,75 +389,83 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
   return (
     <div className="flex flex-col select-none">
       {/* Header */}
-      <div className="px-3 pt-2.5 pb-1">
-        <div
-          className={`flex items-center justify-between px-3 py-1.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
-          <span className="text-[11px] font-bold tracking-wider capitalize text-neutral-500 dark:text-neutral-400">
+      <div className="px-3 pt-1 pb-1">
+        <button
+          type="button"
+          aria-label={isMyLibraryExpanded ? 'Collapse My Library' : 'Expand My Library'}
+          aria-expanded={isMyLibraryExpanded}
+          onClick={handleToggleMyLibraryExpanded}
+          className="w-full flex items-center gap-1.5 px-1 py-1 rounded-lg hover:bg-[var(--color-hoverBg)] transition-colors text-left">
+          <span className="text-[11px] font-bold tracking-wider capitalize text-[var(--color-textMuted)]">
             My Library
           </span>
-        </div>
+          <span className="w-4 h-4 flex items-center justify-center text-[var(--color-textMuted)]">
+            {isMyLibraryExpanded ? <FaCaretDown size={12} /> : <FaCaretRight size={12} />}
+          </span>
+        </button>
       </div>
 
       {/* Items list */}
-      <div className="flex flex-col px-3 pt-1 pb-2 gap-0.5">
-        {(() => {
-          let hasSeenHeader = false;
-          return viewItemsOrder.map((id, index) => {
-            if (id.startsWith('header-')) {
-              // A header is visible if any of its children are visible
-              let isVisible = false;
-              for (let i = index + 1; i < viewItemsOrder.length; i++) {
-                if (viewItemsOrder[i].startsWith('header-')) break;
-                if (visibleViewItems[viewItemsOrder[i]] || isExpanded) {
-                  isVisible = true;
-                  break;
+      {isMyLibraryExpanded && (
+        <div className="flex flex-col px-3 pt-1 pb-2 gap-0.5">
+          {(() => {
+            let hasSeenHeader = false;
+            return viewItemsOrder.map((id, index) => {
+              if (id.startsWith('header-')) {
+                // A header is visible if any of its children are visible
+                let isVisible = false;
+                for (let i = index + 1; i < viewItemsOrder.length; i++) {
+                  if (viewItemsOrder[i].startsWith('header-')) break;
+                  if (visibleViewItems[viewItemsOrder[i]] || isExpanded) {
+                    isVisible = true;
+                    break;
+                  }
                 }
-              }
 
-              if (isVisible) {
-                hasSeenHeader = true;
-                const groupId = id.replace('header-', '');
-                const title = customGroupNames[groupId] || groupId;
-                return (
-                  <div key={id} className="flex items-center gap-2 mt-2 mb-1 px-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                    <span
-                      className={`text-[11px] font-bold tracking-wider capitalize ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                      {title}
-                    </span>
-                  </div>
-                );
+                if (isVisible) {
+                  hasSeenHeader = true;
+                  const groupId = id.replace('header-', '');
+                  const title = customGroupNames[groupId] || groupId;
+                  return (
+                    <div key={id} className="flex items-center gap-2 mt-2 mb-1 px-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                      <span className="text-[11px] font-bold tracking-wider capitalize text-[var(--color-textMuted)]">
+                        {title}
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              } else {
+                const isBeforeFirstHeader = !viewItemsOrder.slice(0, index).some(x => x.startsWith('header-'));
+                const isVisible = isBeforeFirstHeader ? true : visibleViewItems[id];
+                if (!isVisible && !isExpanded) return null;
+                const opt = rawOptions.find(o => o.id === id);
+                if (!opt) return null;
+                return renderViewOptionItem(opt, hasSeenHeader);
               }
-              return null;
-            } else {
-              const isBeforeFirstHeader = !viewItemsOrder.slice(0, index).some(x => x.startsWith('header-'));
-              const isVisible = isBeforeFirstHeader ? true : visibleViewItems[id];
-              if (!isVisible && !isExpanded) return null;
-              const opt = rawOptions.find(o => o.id === id);
-              if (!opt) return null;
-              return renderViewOptionItem(opt, hasSeenHeader);
-            }
-          });
-        })()}
+            });
+          })()}
 
-        {viewItemsOrder.some((id, index) => {
-          if (id.startsWith('header-')) return false;
-          const isBeforeFirstHeader = !viewItemsOrder.slice(0, index).some(x => x.startsWith('header-'));
-          const isVisible = isBeforeFirstHeader ? true : visibleViewItems[id];
-          return !isVisible;
-        }) && (
-          <div className="flex justify-center mt-1">
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                setIsExpanded(!isExpanded);
-              }}
-              className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${isDark ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'}`}>
-              {isExpanded ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
-            </button>
-          </div>
-        )}
-      </div>
+          {viewItemsOrder.some((id, index) => {
+            if (id.startsWith('header-')) return false;
+            const isBeforeFirstHeader = !viewItemsOrder.slice(0, index).some(x => x.startsWith('header-'));
+            const isVisible = isBeforeFirstHeader ? true : visibleViewItems[id];
+            return !isVisible;
+          }) && (
+            <div className="flex justify-center mt-1">
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  setIsExpanded(!isExpanded);
+                }}
+                className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${isDark ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'}`}>
+                {isExpanded ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

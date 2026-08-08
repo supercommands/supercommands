@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import type { WorkspaceData } from '../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 import type { FolderData } from '../../settings/allWorkspaceManager/folders/folderTypes';
 import type { SnippetRecord } from '../../allObjectFolder/src/createObject/snippets/snippetTypes';

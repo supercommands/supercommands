@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useEffect } from 'react';
 import { FaTimes } from 'react-icons/fa';
 import { getAvatarColor, getSingleInitial } from '../../../../shared-components/utils/avatarColors';
 import { createFolder } from '../folderData';
@@ -101,26 +102,26 @@ const CreateFolderPanel: React.FC<CreateFolderPanelProps> = ({ onClose, onSucces
           </div>
 
           <div className="flex flex-col gap-4 mb-4 w-full">
-            <div className="relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-4 py-2.5 flex items-center">
+            <div className="relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] overflow-hidden px-4 py-2.5 flex items-center">
               <input
                 type="text"
                 value={folderName}
                 onChange={e => setFolderName(e.target.value)}
                 placeholder="Give your folder a name..."
-                className="flex-1 text-sm font-medium text-black dark:text-white placeholder-[var(--color-textPlaceholder)]/70 bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0"
+                className="flex-1 text-sm font-medium text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0"
                 autoFocus
               />
             </div>
             
-            <div className="relative rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] overflow-hidden px-4 py-2.5 flex items-center">
+            <div className="relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] overflow-hidden px-4 py-2.5 flex items-center">
               <select
                 value={selectedWorkspaceId}
                 onChange={e => setSelectedWorkspaceId(e.target.value)}
-                className="flex-1 text-sm font-medium text-black dark:text-white bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 cursor-pointer"
+                className="flex-1 text-sm font-medium text-[var(--color-textPrimary)] bg-transparent outline-none border-none shadow-none focus:ring-0 transition-all min-w-0 cursor-pointer"
               >
-                <option value="" disabled className="text-gray-500">Select workspace / space...</option>
+                <option value="" disabled className="text-[var(--color-textPlaceholder)]">Select workspace / space...</option>
                 {workspaces.map(workspace => (
-                  <option key={workspace.id} value={workspace.id} className="text-black dark:text-white bg-white dark:bg-[#1a1b1e]">
+                  <option key={workspace.id} value={workspace.id} className="text-[var(--color-textPrimary)] bg-[var(--color-popupBg)]">
                     {workspace.workspaceName}
                   </option>
                 ))}
@@ -135,7 +136,7 @@ const CreateFolderPanel: React.FC<CreateFolderPanelProps> = ({ onClose, onSucces
       <div
         className="flex items-center justify-between gap-3 px-6 py-4 
                 border-t border-[var(--color-borderDefault)]
-                bg-[var(--color-hoverBg)] 
+                bg-[var(--color-panelBg)] 
                 text-xs text-[var(--color-textSecondary)] flex-shrink-0"
       >
         <div className="flex items-center gap-4">
@@ -150,10 +151,10 @@ const CreateFolderPanel: React.FC<CreateFolderPanelProps> = ({ onClose, onSucces
         <button
           onClick={handleCreate}
           disabled={isCreating || !folderName.trim() || !selectedWorkspaceId}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--color-accent)] hover:bg-[var(--color-accentHover)] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all shadow-md border-none cursor-pointer"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] text-xs font-semibold transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isCreating ? 'Creating...' : 'Create'}
-          <span className="px-1.5 py-0.5 rounded bg-[var(--color-selectedBg)] text-[9px] font-bold">Alt+Enter</span>
+          <span className="px-1.5 py-0.5 rounded bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textSecondary)] text-[9px] font-bold">Alt+Enter</span>
         </button>
       </div>
     </div>

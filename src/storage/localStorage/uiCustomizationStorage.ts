@@ -1,4 +1,4 @@
-export type ThemeId = 'default-dark' | 'ocean-blue' | string;
+export type ThemeId = 'ocean-blue' | 'midnight-stars' | string;
 
 // --- Theme Storage ---
 export const getStoredThemeId = async (): Promise<ThemeId> => {
@@ -6,12 +6,17 @@ export const getStoredThemeId = async (): Promise<ThemeId> => {
     const chromeAny = (window as any).chrome;
     if (chromeAny?.storage?.local) {
       const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['appearance-theme'], resolve));
-      return result['appearance-theme'] || 'ocean-blue';
+      const stored = result['appearance-theme'];
+      if (!stored || stored === 'dark' || stored === 'default-dark') {
+        await new Promise<void>(resolve => chromeAny.storage.local.set({ 'appearance-theme': 'midnight-stars' }, resolve));
+        return 'midnight-stars';
+      }
+      return stored;
     }
   } catch (e) {
     console.error('Failed to get stored theme ID:', e);
   }
-  return 'ocean-blue';
+  return 'midnight-stars';
 };
 
 export const setStoredThemeId = async (themeId: ThemeId): Promise<void> => {

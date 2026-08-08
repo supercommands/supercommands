@@ -13,7 +13,7 @@
 }
 
 .ql-editor.ql-blank::before {
-  color: rgba(0, 0, 0, 0.35) !important;
+  color: var(--color-textPlaceholder) !important;
   font-style: normal !important;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
   font-weight: 500 !important;
@@ -25,12 +25,12 @@
 }
 
 .dark .ql-editor.ql-blank::before {
-  color: rgba(255, 255, 255, 0.35) !important;
+  color: var(--color-textPlaceholder) !important;
 }
 
 /* Tiptap Placeholder matching Quill */
 .ProseMirror p.is-editor-empty:first-child::before {
-  color: rgba(0, 0, 0, 0.35) !important;
+  color: var(--color-textPlaceholder) !important;
   font-style: normal !important;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
   font-weight: 500 !important;
@@ -43,12 +43,12 @@
 }
 
 .dark .ProseMirror p.is-editor-empty:first-child::before {
-  color: rgba(255, 255, 255, 0.35) !important;
+  color: var(--color-textPlaceholder) !important;
 }
 
 .ql-editor {
   background: transparent !important;
-  color: inherit !important;
+  color: var(--color-textPrimary) !important;
   border: none !important;
   font-family: inherit !important;
   font-size: inherit !important;
@@ -62,14 +62,14 @@
 .ql-editor p,
 .ql-editor div,
 .ql-editor span {
-  color: inherit !important;
+  color: var(--color-textPrimary) !important;
 }
 
 .dark .ql-editor,
 .dark .ql-editor p,
 .dark .ql-editor div,
 .dark .ql-editor span {
-  color: rgb(255, 255, 255) !important;
+  color: var(--color-textPrimary) !important;
 }
 
 /* Inline code & pre block styling for Light Mode */
@@ -322,6 +322,36 @@
   overflow-x: hidden !important;
 }
 
+.quill-wrapper-internal .ql-editor img[data-local-asset-id] {
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.ql-local-image-delete-button {
+  position: absolute;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(24, 24, 27, 0.92);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+}
+
+.ql-local-image-delete-button.is-visible {
+  display: inline-flex;
+}
+
+.ql-local-image-delete-button:hover {
+  background: #dc2626;
+  border-color: #ef4444;
+}
+
 /* Hide toolbar when toggle is off */
 .quill-wrapper-internal.toolbar-hidden .ql-toolbar {
   display: none !important;
@@ -378,4 +408,163 @@
 .ql-toolbar button.ql-active .ql-fill,
 .ql-snow.ql-toolbar button.ql-active .ql-fill {
   fill: #ffffff !important;
+}
+
+/* =========================================
+   Table Styling (Fix for pasted tables)
+   ========================================= */
+.ql-editor table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  table-layout: auto;
+}
+
+.ql-editor table th,
+.ql-editor table td {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  min-width: 120px;
+}
+
+/* Dark mode borders */
+.dark .ql-editor table th,
+.dark .ql-editor table td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* Header styling */
+.ql-editor table th {
+  background-color: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+.dark .ql-editor table th {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Optional: Alternating row colors for better readability */
+.ql-editor table tr:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.015);
+}
+
+.dark .ql-editor table tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* =========================================
+   Rich Text Formats (Fixes for Obsidian/Notion pastes)
+   ========================================= */
+
+/* Blockquotes */
+.ql-editor blockquote {
+  border-left: 4px solid #e5e7eb;
+  margin: 1rem 0;
+  padding-left: 1rem;
+  color: #6b7280;
+  font-style: italic;
+  background-color: rgba(0, 0, 0, 0.02);
+  padding: 0.5rem 1rem;
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.dark .ql-editor blockquote {
+  border-left-color: #4b5563;
+  color: #9ca3af;
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Code Blocks (pre) */
+.ql-editor pre.ql-syntax, 
+.ql-editor pre {
+  background-color: #1e1e1e !important; /* Dark theme for code blocks in both modes */
+  color: #e4e4e4 !important;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', Courier, monospace !important;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* Custom scrollbar for code blocks */
+.ql-editor pre::-webkit-scrollbar {
+  height: 8px;
+}
+.ql-editor pre::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+.ql-editor pre::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+.ql-editor pre::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Links */
+.ql-editor a {
+  color: #2563eb !important; /* Tailwind blue-600 */
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.2s;
+  cursor: pointer;
+}
+
+.ql-editor a:hover {
+  text-decoration-color: #2563eb;
+}
+
+.dark .ql-editor a {
+  color: #60a5fa !important; /* Tailwind blue-400 */
+}
+
+.dark .ql-editor a:hover {
+  text-decoration-color: #60a5fa;
+}
+
+/* Horizontal Rules */
+.ql-editor hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 2rem 0;
+}
+
+.dark .ql-editor hr {
+  border-top-color: #374151;
+}
+
+/* Task Lists (Checkboxes) Adjustments */
+.ql-editor li[data-list="checked"],
+.ql-editor li[data-list="unchecked"] {
+  padding-left: 1.5rem;
+}
+
+/* Adjust heading margins so they don't look squished */
+.ql-editor h1, .ql-editor h2, .ql-editor h3 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.ql-editor h1:first-child, .ql-editor h2:first-child, .ql-editor h3:first-child {
+  margin-top: 0;
+}
+
+/* Fix Quill toolbar active and hover states to be clearly visible */
+.ql-snow .ql-toolbar button.ql-active svg,
+.ql-snow.ql-toolbar button.ql-active svg,
+.ql-snow .ql-toolbar button:hover svg,
+.ql-snow.ql-toolbar button:hover svg {
+  filter: brightness(0) !important;
+}
+
+/* Dark mode overrides for toolbar active/hover states */
+.dark .ql-snow .ql-toolbar button.ql-active svg,
+.dark .ql-snow.ql-toolbar button.ql-active svg,
+.dark .ql-snow .ql-toolbar button:hover svg,
+.dark .ql-snow.ql-toolbar button:hover svg {
+  filter: brightness(0) invert(1) !important;
 }

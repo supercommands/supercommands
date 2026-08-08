@@ -327,33 +327,46 @@ export const mapFullNameToShortcut = (text: string, slashFilterMeta?: Record<str
 };
 
 export const getHighlightedHtml = (val: string, slashFilterMeta?: Record<string, { label: string }>): string => {
-  const match = val.match(/^\/[^\s\u00A0]*/);
-  if (match && match[0]) {
-    const prefix = match[0];
+  const colonMatch = val.match(/^([a-zA-Z0-9_-]+):/);
+  const slashMatch = val.match(/^\/[^\s\u00A0]*/);
+
+  let prefix = '';
+  let alias = '';
+  let isColon = false;
+
+  if (colonMatch && colonMatch[0]) {
+    prefix = colonMatch[0];
+    alias = colonMatch[1].toLowerCase();
+    isColon = true;
+  } else if (slashMatch && slashMatch[0]) {
+    prefix = slashMatch[0];
+    alias = prefix.slice(1).toLowerCase();
+  }
+
+  if (prefix) {
     const rest = val.slice(prefix.length);
 
-    const lowerPrefix = prefix.toLowerCase();
     const staticLabels: Record<string, string> = {
-      '/a': 'All',
-      '/n': 'Notes',
-      '/nm': 'Notes',
-      '/sn': 'Snippets',
-      '/s': 'Tab Sessions',
-      '/se': 'Tab Sessions',
-      '/p': 'Prompts',
-      '/l': 'Links',
-      '/c': 'Commands',
-      '/b': 'Bookmarks',
-      '/bm': 'Bookmarks',
-      '/t': 'Todos',
-      '/au': 'Automations',
-      '/ca': 'Chat Agents',
-      '/g': 'Chat Agents',
-      '/sc': 'System Commands',
+      'a': 'All',
+      'n': 'Notes',
+      'nm': 'Notes',
+      'sn': 'Text Expanders',
+      's': 'Tab Sessions',
+      'se': 'Tab Sessions',
+      'p': 'Prompts',
+      'l': 'Links',
+      'c': 'Commands',
+      'b': 'Bookmarks',
+      'bm': 'Bookmarks',
+      't': 'Todos',
+      'au': 'Automations',
+      'ca': 'Chat Agents',
+      'g': 'Chat Agents',
+      'sc': 'System Commands',
     };
-    const dynamicLabel = slashFilterMeta?.[lowerPrefix.slice(1)]?.label;
-    const label = dynamicLabel || staticLabels[lowerPrefix] || prefix;
-    const isFilterShortcut = !!dynamicLabel || !!staticLabels[lowerPrefix];
+    const dynamicLabel = slashFilterMeta?.[alias]?.label;
+    const label = dynamicLabel || staticLabels[alias] || prefix;
+    const isFilterShortcut = !!dynamicLabel || !!staticLabels[alias];
 
     const escapedRest = rest
       .replace(/&/g, '&amp;')
@@ -365,9 +378,9 @@ export const getHighlightedHtml = (val: string, slashFilterMeta?: Record<string,
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    const hasSpaceAfter = rest.startsWith(' ') || rest.startsWith('\u00A0');
+    const hasSpaceAfter = rest.startsWith(' ') || rest.startsWith('\u00A0') || rest === '';
 
-    if (isFilterShortcut && hasSpaceAfter) {
+    if (isFilterShortcut && (hasSpaceAfter || isColon)) {
       return `<span data-slash-filter-chip="true" contenteditable="false" style="display: inline-flex; align-items: center; justify-content: center; background: rgba(156, 163, 175, 0.15); border: 1.5px solid #9ca3af; color: #9ca3af; border-radius: 6px; padding: 1px 6px; font-weight: 700; margin-right: 4px; font-family: monospace; font-size: 13px;">${label}</span>${escapedRest}`;
     }
 

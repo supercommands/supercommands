@@ -32,6 +32,7 @@ export const migrateLocalStorageToChromeStorage = async (): Promise<void> => {
     'new_tab_dark_mode',
     'accessToken',
     'user_name',
+    'widget-dashboard-layout-v1',
   ];
 
   const themeKeys = ['theme', 'new_tab_is_dark_mode', 'new_tab_dark_mode'];

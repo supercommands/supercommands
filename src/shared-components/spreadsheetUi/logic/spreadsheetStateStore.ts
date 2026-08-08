@@ -1735,6 +1735,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
           urls: linkUrls,
           updated_at: item.updatedAt,
           tagIds: item.tagIds || [],
+          originalItem: item,
         };
       };
 
@@ -1789,6 +1790,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
           updated_at: t.updatedAt || 0,
           tagIds: t.tags || t.tagIds || [],
           isDone: t.isDone || t.is_done || false,
+          originalItem: t,
         };
       });
 

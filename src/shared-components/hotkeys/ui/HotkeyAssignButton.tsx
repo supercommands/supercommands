@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useCallback, useEffect, useRef, useState, forwardRef } from 'react';
 import { FaStar, FaEllipsisV } from 'react-icons/fa';
 import { FiStar } from 'react-icons/fi';

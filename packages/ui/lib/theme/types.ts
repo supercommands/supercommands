@@ -20,6 +20,7 @@ export interface ThemeTokens {
   snippetConfigBg: string;
   snippetChipBg: string;
   overlayBg: string;
+  backgroundGradient?: string;
 
   // Typography
   textPrimary: string;
@@ -58,6 +59,39 @@ export interface ThemeTokens {
   tutorialTextDescription: string;
   tutorialAccent: string;
   tutorialAccentMuted: string;
+
+  // Widget Card & Drag State
+  widgetBg: string;
+  widgetBorder: string;
+  widgetShadow: string;
+  widgetToolbarBg: string;
+  widgetToolbarBorder: string;
+  widgetToolbarShadow: string;
+  widgetToolbarText: string;
+  widgetToolbarMutedText: string;
+  widgetToolbarActiveBg: string;
+  widgetToolbarHoverBg: string;
+  widgetDragPlaceholderBg: string;
+  widgetDragShadow: string;
+  widgetDragOutline: string;
+
+  // Diff / Version History Comparison UI
+  diffAddedBg: string;
+  diffAddedBgStrong: string;
+  diffAddedText: string;
+  diffAddedBorder: string;
+  diffRemovedBg: string;
+  diffRemovedBgStrong: string;
+  diffRemovedText: string;
+  diffRemovedBorder: string;
+  diffModifiedBg: string;
+  diffModifiedText: string;
+  diffModifiedBorder: string;
+  diffMovedBg: string;
+  diffMovedText: string;
+  diffMovedBorder: string;
+  diffGutterBg: string;
+  diffLineNumberText: string;
 }
 
 export interface ThemeWallpaper {
@@ -75,4 +109,5 @@ export interface ThemeProfile {
   wallpaper?: ThemeWallpaper;
   glassOpacity?: number;
   glassBlur?: string;
+  pattern?: 'midnight-stars' | 'moonlit-ocean-stars' | 'none';
 }

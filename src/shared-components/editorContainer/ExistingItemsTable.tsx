@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FaStar, FaFolder, FaKeyboard, FaTag } from 'react-icons/fa';
 import { FiStar, FiChevronRight, FiBookmark, FiExternalLink, FiSearch } from 'react-icons/fi';
 import { saveUserHotkey, deleteUserHotkeyByReference } from '../hotkeys/core/hotkeyDbData';

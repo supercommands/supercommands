@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useUIStore } from '../../../../shared-components/uiStateManager';
 import Container from '../components/Container';
 
@@ -37,9 +37,10 @@ interface AppMainContentProps {
   handleLockedCommandChange: any;
   handleSearchbarFocus: any;
   setIsViewDropdownOpen: any;
-  isFocusMode: boolean;
-  isEmbedded: boolean;
-  isCreatingNewItem: boolean;
+  isFocusMode?: boolean;
+  isEmbedded?: boolean;
+  isCreatingNewItem?: boolean;
+  isWidgetEditMode?: boolean;
   selectedSnippet: any;
   showTutorial: boolean;
   setShowTutorial: React.Dispatch<React.SetStateAction<boolean>>;
@@ -84,6 +85,7 @@ export const AppMainContent: React.FC<AppMainContentProps> = ({
   isFocusMode,
   isEmbedded,
   isCreatingNewItem,
+  isWidgetEditMode,
   selectedSnippet,
   showTutorial,
   setShowTutorial,
@@ -95,11 +97,12 @@ export const AppMainContent: React.FC<AppMainContentProps> = ({
     <>
       {/* Main Content Area (Rich Text Editor) */}
       <div
-        className={`flex-1 flex flex-col text-neutral-900 dark:text-white min-w-0 w-full h-full relative ${isViewDropdownOpen ? 'z-[50]' : 'z-0'} ${isFullScreenModalOpen && theme.wallpaper ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+        className={`flex-1 flex flex-col text-[var(--color-textPrimary)] min-w-0 w-full h-full relative ${isViewDropdownOpen ? 'z-[50]' : 'z-0'} ${isFullScreenModalOpen && theme.wallpaper ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
         style={{
           transition: 'filter 0.3s ease',
         }}>
         <Container
+          isWidgetEditMode={isWidgetEditMode}
           showSidebarColumn={showSidebarColumn}
           onSuggestionStateChange={setSuggestionState}
           isLoggedIn={isLoggedIn}

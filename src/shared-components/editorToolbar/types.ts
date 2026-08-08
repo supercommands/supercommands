@@ -30,19 +30,41 @@ export interface SharedPropertiesToolbarProps {
    * The initially loaded object (note, link) from which we initialize our state.
    */
   initialSnippet?: any;
-  
+
+  /**
+   * An explicit, fully-typed current snapshot of the entity being edited.
+   * When provided, this is used as-is for version history comparison (right side / current side).
+   * Preferred over deriving the current snapshot from initialSnippet.
+   * Editors that haven't migrated yet can omit this and the existing fallback applies.
+   */
+  currentSnapshot?: any;
+
+  setNoteVersionIndex?: React.Dispatch<React.SetStateAction<number>>;
+  selectedNoteVersionIndex?: number;
+
+  versionHistoryItems?: Array<{
+    id: string;
+    label: string;
+    savedAt?: number;
+    isCurrent?: boolean;
+  }>;
+  selectedVersionId?: string | null;
+  onSelectVersion?: (versionId: string | null) => void;
+  versionHistory?: any;
+  entityType?: 'note' | 'todo' | 'snippet' | 'link' | 'session' | string;
+
   /**
    * Unique ID string for identifying this item across the app (used by hotkeys).
    */
   compoundId: string;
-  
+
   /**
    * Default name to fallback to if the snippet doesn't have a name.
    */
   defaultName: string;
 
   /**
-   * Fired whenever ANY of the shared properties change. 
+   * Fired whenever ANY of the shared properties change.
    * The parent should capture this state to include in its save payload.
    */
   onChange?: (properties: SharedProperties) => void;
@@ -53,7 +75,7 @@ export interface SharedPropertiesToolbarProps {
   onCreateTodo?: (deadlineVal: string, isRecurring: boolean, recurringCycle: string) => void;
   snippetBreadCrum?: any;
   saveStatus?: string;
-  
+
   // Organization data for location picker and tag picker
   orgTags?: TagRecord[];
   setOrgTags?: React.Dispatch<React.SetStateAction<TagRecord[]>>;
@@ -65,4 +87,6 @@ export interface SharedPropertiesToolbarProps {
   showLocationPicker?: boolean;
   /** Controls if the buttons are stacked vertically (default) or horizontally inline. */
   layout?: 'vertical' | 'horizontal';
+
+  activeNoteId?: string | null;
 }

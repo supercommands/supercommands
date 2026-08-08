@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo } from 'react';
+import * as React from 'react';
+import { useEffect, useMemo } from 'react';
 import { useAppearance } from '@extension/ui';
 import { useState } from 'react';
 import { FaSearch,
@@ -330,7 +331,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
         </svg>
       )},
       { type: 'category' as const, id: 'note', label: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
-      { type: 'category' as const, id: 'snippet', label: 'Snippets', icon: <FaCode className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
+      { type: 'category' as const, id: 'snippet', label: 'Text Expanders', icon: <FaCode className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
       { type: 'category' as const, id: 'todo', label: 'Todos', icon: <BsCalendarCheck className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
       { type: 'category' as const, id: 'link', label: 'Links', icon: <FaLink className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
       { type: 'category' as const, id: 'session', label: 'Tab Sessions', icon: <SessionGridIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
@@ -460,7 +461,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       id="sheet-ui-container"
       tabIndex={-1}
       className={clsx(
-        "flex overflow-hidden relative flex-col text-white font-sans text-[13px] antialiased focus:outline-none",
+        "flex overflow-hidden relative flex-col text-[var(--color-textPrimary)] font-sans text-[13px] antialiased focus:outline-none",
         isEmbedded 
           ? "w-full flex-1 min-h-0"
           : "h-full w-full min-[1600px]:[zoom:1.2] min-[1800px]:[zoom:1.28] flex-1 min-h-0"
@@ -476,7 +477,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       <div className="w-full flex items-center justify-between px-6 pt-3 pb-2 shrink-0 z-[200] gap-4">
         {/* Left: Branding */}
         <div className="flex items-center shrink-0 w-[200px]">
-          <Branding textColor="text-white font-bold tracking-wide" />
+          <Branding textColor="text-[var(--color-textPrimary)] font-bold tracking-wide" />
         </div>
 
         {/* Center: Search Bar */}
@@ -489,8 +490,8 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
                 "min-h-[36px] min-[1680px]:min-h-[40px] min-[1880px]:min-h-[44px]",
                 tutorialStep === 0
                   ? "border-[#22c55e]"
-                  : "border-white/10 focus-within:border-white/20 focus-within:bg-[var(--color-popupBg)]",
-                "bg-[var(--color-inputBg)] backdrop-blur-xl text-neutral-200"
+                  : "border-[var(--color-borderDefault)] focus-within:border-[var(--color-borderActive)] focus-within:bg-[var(--color-popupBg)]",
+                "bg-[var(--color-inputBg)] backdrop-blur-xl text-[var(--color-textPrimary)]"
               )}
             >
               <div className="flex items-center justify-center shrink-0">
@@ -505,7 +506,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
                 className={clsx(
                   "flex-1 bg-transparent font-medium outline-none border-none",
                   "text-[14px] min-[1680px]:text-[15px] min-[1880px]:text-[16px]",
-                  "text-neutral-200 placeholder:text-neutral-400"
+                  "text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)]"
                 )}
               />
               {searchTerm && (
@@ -513,7 +514,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
                   onClick={() => setSearchTerm('')}
                   className={clsx(
                     "p-1 rounded-md transition-colors",
-                    "text-[var(--color-iconDefault)] hover:text-white hover:bg-white/10"
+                    "text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]"
                   )}
                   title="Clear search"
                 >
@@ -538,12 +539,12 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
             onBoardViewRedirect={onBoardViewRedirect}
             isEmbedded={isEmbedded}
           />
-          {onClose && !isEmbedded && (
+          {onClose && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-md hover:bg-white/10 text-neutral-500 hover:text-white transition-colors focus:outline-none flex items-center justify-center"
+              className="p-1.5 rounded-md hover:bg-[var(--color-hoverBg)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] transition-colors focus:outline-none flex items-center justify-center cursor-pointer"
               aria-label="Close"
-              title="Close">
+              title="Close (Esc)">
               <FiX size={18} />
             </button>
           )}
@@ -554,7 +555,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       <div 
         className="flex-1 w-full flex flex-col relative z-0 min-h-0 transition-all duration-300"
       >
-        <div className="w-full h-full overflow-hidden flex flex-row border-t border-white/10 min-h-0 relative">
+        <div className="w-full h-full overflow-hidden flex flex-row border-t border-[var(--color-borderDefault)] min-h-0 relative">
         
 
         
@@ -574,14 +575,14 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
                   className={clsx(
                     "flex items-center gap-2.5 px-2.5 py-2 text-[11px] font-medium rounded-lg transition-all cursor-pointer text-left w-full group border",
                     active
-                      ? "bg-white/[0.12] text-white border-white/10 shadow-sm"
-                      : "text-neutral-300/80 border-transparent hover:bg-white/[0.06] hover:border-white/5 hover:text-white"
+                      ? "bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] border-[var(--color-borderActive)] shadow-sm font-bold"
+                      : "text-[var(--color-textSecondary)] border-transparent hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]"
                   )}
                 >
-                  <span className={clsx("w-4 flex justify-center shrink-0 text-[14px] transition-colors", active ? "text-white" : "text-neutral-400 group-hover:text-neutral-200")}>
+                  <span className={clsx("w-4 flex justify-center shrink-0 text-[14px] transition-colors", active ? "text-[var(--color-textPrimary)]" : "text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]")}>
                     {opt.icon}
                   </span>
-                  <span className={clsx("flex-1 truncate leading-tight tracking-[0.01em]", active ? "text-white" : "text-neutral-300 group-hover:text-white")}>
+                  <span className={clsx("flex-1 truncate leading-tight tracking-[0.01em]", active ? "text-[var(--color-textPrimary)] font-bold" : "text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)]")}>
                     {opt.label}
                   </span>
                   {omniboxPrefixes && (opt.id === 'note' || opt.id === 'snippet' || opt.id === 'todo' || opt.id === 'link' || opt.id === 'session' || opt.id === 'general_commands' || opt.id === 'commands' || opt.id === 'automation' || opt.id === 'agent') && (
@@ -628,7 +629,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
                      chromeAny.storage.local.set({ new_tab_is_board_view_enabled: true });
                    }
                 }}
-                className="w-[24px] h-[24px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white focus:outline-none"
+                className="w-[24px] h-[24px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] hover:border-[var(--color-borderActive)] focus:outline-none"
                 title="Board (Kanban)"
              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -661,7 +662,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
         {false && (
           <button
             onClick={toggleCompactMode}
-            className="absolute left-full top-1/2 -translate-y-1/2 -translate-x-1/2 z-[300] w-8 h-8 flex items-center justify-center rounded-full border border-[var(--color-borderDefault)] bg-[var(--color-sheetBg)] text-[var(--color-iconDefault)] hover:text-[var(--color-textMain)] hover:bg-white/10 transition-all shadow-lg cursor-pointer focus:outline-none"
+            className="absolute left-full top-1/2 -translate-y-1/2 -translate-x-1/2 z-[300] w-8 h-8 flex items-center justify-center rounded-full border border-[var(--color-borderDefault)] bg-[var(--color-sheetBg)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all shadow-lg cursor-pointer focus:outline-none"
             style={{
               backdropFilter: 'blur(24px) saturate(1.2)',
               WebkitBackdropFilter: 'blur(24px) saturate(1.2)',

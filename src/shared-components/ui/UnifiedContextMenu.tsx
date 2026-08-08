@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import * as React from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { FiCheck, FiExternalLink, FiLoader, FiZap, FiSearch, FiTrash, FiZapOff } from 'react-icons/fi';
 import { useUIStore } from '../../shared-components/uiStateManager';
@@ -383,7 +384,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
       <div className="flex flex-col min-w-fit w-max">
         {/* QUICK ACTIONS ROW (TOP LEVEL) */}
         {quickActions.length > 0 && (
-          <div className="px-3 py-2 flex items-center gap-2 border-b border-slate-100 dark:border-white/10 bg-slate-50/30 dark:bg-white/5 last:border-b-0">
+          <div className="px-3 py-2 flex items-center gap-2 border-b border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] last:border-b-0">
             {quickActions.map((action, idx) => (
               <button
                 key={`quick-${action.key || idx}`}
@@ -393,7 +394,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                   if (action.onSelect) action.onSelect();
                   if ((action as any).closeOnExecute !== false) onClose();
                 }}
-                className={`flex-1 flex items-center justify-center gap-2.5 px-4 py-2 rounded-lg text-[12.5px] font-bold transition-all whitespace-nowrap shadow-sm hover:shadow-md ${action.className || 'text-slate-600 dark:text-neutral-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                className={`flex-1 flex items-center justify-center gap-2.5 px-4 py-2 rounded-lg text-[12.5px] font-bold transition-all whitespace-nowrap shadow-sm hover:shadow-md ${action.className || 'text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                   } ${action.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {action.icon}
@@ -405,7 +406,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
         {/* HEADER */}
         {menuTarget?.label && (
-          <div className="px-3 py-2 border-b border-slate-100 dark:border-white/10">
+          <div className="px-3 py-2 border-b border-[var(--color-borderDefault)]">
             <div className="flex items-center gap-2 min-w-0">
               {menuTarget.iconUrl ? (
                 <img src={menuTarget.iconUrl} alt={menuTarget.label} className="w-4 h-4 rounded-sm object-cover" />
@@ -414,10 +415,10 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                   {menuTarget.icon}
                 </span>
               ) : (
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-neutral-500" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-textMuted)]" />
               )}
               <span 
-                className="text-[11px] font-semibold text-slate-500 dark:text-neutral-300 truncate whitespace-nowrap flex-1 block"
+                className="text-[11px] font-semibold text-[var(--color-textSecondary)] truncate whitespace-nowrap flex-1 block"
                 style={{ maxWidth: '300px' }}
                 title={menuTarget.label}
               >
@@ -435,7 +436,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                 filteredActions.map((action, idx) => {
                   if (action.divider) {
                     return (
-                      <div key={`divider-${idx}`} className="border-b border-slate-100 dark:border-white/10 mx-2 my-1" />
+                      <div key={`divider-${idx}`} className="border-b border-[var(--color-borderDefault)] mx-2 my-1" />
                     );
                   }
 
@@ -465,12 +466,12 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         }
                       }}
                       className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 transition-colors ${isSelected
-                        ? 'bg-slate-100 bg-[var(--color-accentBg)] text-blue-600 text-[var(--color-accent)] font-medium'
+                        ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
                         : isFocused
-                          ? 'bg-slate-100 dark:bg-neutral-800 text-slate-900 dark:text-white'
+                          ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-medium'
                           : action.className
                             ? action.className
-                            : 'text-slate-600 dark:text-neutral-300 hover:bg-slate-50 dark:hover:bg-neutral-700/50'
+                            : 'text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] font-medium'
                         } ${action.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
                       <div className="flex items-center gap-2">
                         {action.icon}
@@ -485,7 +486,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         {!action.divider &&
                           (action as any).shortcut &&
                           (typeof (action as any).shortcut === 'string' ? (
-                            <span className="text-[10px] text-slate-400 dark:text-neutral-400 font-medium ml-2">
+                            <span className="text-[10px] text-[var(--color-textSecondary)] font-medium ml-2">
                               {(action as any).shortcut}
                             </span>
                           ) : (
@@ -559,7 +560,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
             )}
 
             {/* Unified Conflict Link at Bottom Left */}
-            {error && conflictId && conflictId !== 'extension-reserved' && showAllHotkeysOption && (
+            {error && conflictId && !conflictId.endsWith('-reserved') && showAllHotkeysOption && (
               <div className="px-2 pb-2 pt-1 mt-auto border-t border-slate-100 dark:border-white/5 flex flex-col gap-1">
                 <button
                   onClick={e => {
@@ -630,6 +631,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     <input
                       ref={inputRef}
                       type="text"
+                      data-is-hotkey-input="true"
                       value={hotkeyInput.value}
                       readOnly
                       onKeyDown={hotkeyInput.onChange}
@@ -670,7 +672,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                               let typeDisplay = typeRaw;
                               if (typeRaw === 'note') typeDisplay = 'Note';
                               else if (typeRaw === 'link') typeDisplay = 'Link';
-                              else if (typeRaw === 'snippet') typeDisplay = 'Snippet';
+                              else if (typeRaw === 'snippet') typeDisplay = 'Text Expander';
                               else if (typeRaw === 'command') typeDisplay = 'Command';
                               else if (typeRaw) typeDisplay = typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1);
 
@@ -722,8 +724,8 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     title="Cancel">
                     Cancel
                   </button>
-                  {/* Only show Overwrite button if error exists, onOverwrite is defined, AND it's NOT an extension conflict */}
-                  {error && hotkeyInput.onOverwrite && conflictId !== 'extension-reserved' ? (
+                  {/* Only show Overwrite button if error exists, onOverwrite is defined, AND it's NOT an extension/OS conflict */}
+                  {error && hotkeyInput.onOverwrite && !conflictId?.endsWith('-reserved') ? (
                     <button
                       onClick={e => {
                         e.stopPropagation();
@@ -825,7 +827,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                               let typeDisplay = typeRaw;
                               if (typeRaw === 'note') typeDisplay = 'Note';
                               else if (typeRaw === 'link') typeDisplay = 'Link';
-                              else if (typeRaw === 'snippet') typeDisplay = 'Snippet';
+                              else if (typeRaw === 'snippet') typeDisplay = 'Text Expander';
                               else if (typeRaw === 'command') typeDisplay = 'Command';
                               else if (typeRaw) typeDisplay = typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1);
 
@@ -884,7 +886,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     title="Cancel">
                     Cancel
                   </button>
-                  {error && shortcutInput.onOverwrite ? (
+                  {error && shortcutInput.onOverwrite && !conflictId?.endsWith('-reserved') ? (
                     <button
                       onClick={e => {
                         e.stopPropagation();

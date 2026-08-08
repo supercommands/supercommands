@@ -14,16 +14,27 @@
 
 import type { PageActionCommand } from './types';
 import { ScreenshotCommand } from './ScreenshotCommand';
+import { ClipOutScreenshotCommand } from './ClipOutScreenshotCommand';
 import { FullPageScreenshotCommand } from './FullPageScreenshotCommand';
 import { DownloadAllImagesCommand } from './DownloadAllImagesCommand';
 import { DownloadAllTablesCommand } from './DownloadAllTablesCommand';
+import { MergeWindowsCommand } from './MergeWindowsCommand';
+import { CloseDuplicateTabsCommand } from './CloseDuplicateTabsCommand';
+import { MuteAllTabsCommand } from './MuteAllTabsCommand';
+import { UnmuteAllTabsCommand } from './UnmuteAllTabsCommand';
+import { useUIStore } from '../../../../shared-components/uiStateManager';
 
 /** All page-action commands in display order */
 export const PAGE_ACTION_COMMANDS: PageActionCommand[] = [
   ScreenshotCommand,
+  ClipOutScreenshotCommand,
   FullPageScreenshotCommand,
   DownloadAllImagesCommand,
   DownloadAllTablesCommand,
+  MergeWindowsCommand,
+  CloseDuplicateTabsCommand,
+  MuteAllTabsCommand,
+  UnmuteAllTabsCommand,
 ];
 
 /**
@@ -79,7 +90,7 @@ export async function executePageActionCommand(item: AltQPageActionItem, onClose
     await new Promise<void>(resolve => setTimeout(resolve, 800));
   }
 
-  const action = item._action;
+  const action = item._action || (item as any).action || item.id;
 
   try {
     if (action === 'execute_image_download') {
@@ -88,6 +99,7 @@ export async function executePageActionCommand(item: AltQPageActionItem, onClose
         if (chrome.runtime.lastError) {
           console.error('[AltQ PageAction] execute_image_download failed:', chrome.runtime.lastError);
         } else {
+          useUIStore.getState().queueNotification({ message: '🖼️ Downloading all images...', type: 'success' });
         }
       });
     } else if (action === 'execute_table_download') {
@@ -96,24 +108,95 @@ export async function executePageActionCommand(item: AltQPageActionItem, onClose
         if (chrome.runtime.lastError) {
           console.error('[AltQ PageAction] execute_table_download failed:', chrome.runtime.lastError);
         } else {
+          useUIStore.getState().queueNotification({ message: '📊 Downloading all tables...', type: 'success' });
         }
       });
-    } else if (action === 'CAPTURE_VISIBLE_TAB') {
-      // Visible-area screenshot → saved to Downloads
-      const response = await chrome.runtime.sendMessage({ action });
-      if (response?.success) {
-        showAltQToast('📸 Screenshot saved to Downloads', '#1a73e8');
-      } else {
-        console.error('[AltQ PageAction] CAPTURE_VISIBLE_TAB failed:', response?.error);
-      }
+    } else if (action === 'CAPTURE_VISIBLE_TAB' || action === 'CAPTURE_AND_CLIP_VISIBLE_TAB') {
+      const isClip = action === 'CAPTURE_AND_CLIP_VISIBLE_TAB';
+      chrome.runtime.sendMessage({ action }, response => {
+        if (chrome.runtime.lastError) {
+          // Port closed due to popup unmounting; task continues in background
+          console.log('[AltQ PageAction] Message sent to background service worker.');
+        } else if (response?.success) {
+          useUIStore.getState().queueNotification({
+            message: isClip
+              ? '📋 Image copied to Clipboard & saved to Downloads!'
+              : '📸 Screenshot saved to Downloads',
+            type: 'success',
+          });
+        }
+      });
     } else if (action === 'CAPTURE_FULL_PAGE') {
-      // Full-page screenshot (scrolls, stitches, saves)
-      const response = await chrome.runtime.sendMessage({ action });
-      if (response?.success) {
-        showAltQToast('📄 Full page screenshot saved to Downloads', '#1a73e8');
-      } else {
-        console.error('[AltQ PageAction] CAPTURE_FULL_PAGE failed:', response?.error);
-      }
+      showFormatSelectionModal(async (format) => {
+        const bgAction = `CAPTURE_FULL_PAGE_${format}`;
+        const response = await chrome.runtime.sendMessage({ action: bgAction });
+        if (response?.success) {
+          useUIStore.getState().queueNotification({ message: `📄 Full page screenshot saved as ${format}`, type: 'success' });
+        } else {
+          console.error(`[AltQ PageAction] ${bgAction} failed:`, response?.error);
+        }
+      });
+    } else if (action === 'execute_merge_windows') {
+      console.log('[AltQ PageAction] Sending execute_merge_windows message to background...');
+      chrome.runtime.sendMessage({ action }, response => {
+        console.log('[AltQ PageAction] execute_merge_windows response:', response);
+        if (chrome.runtime.lastError) {
+          console.error('[AltQ PageAction] execute_merge_windows failed with lastError:', chrome.runtime.lastError);
+        } else {
+          useUIStore.getState().queueNotification({ message: '🪟 All windows merged!', type: 'success' });
+        }
+      });
+    } else if (action === 'execute_close_duplicate_tabs') {
+      console.log('[AltQ PageAction] Sending execute_close_duplicate_tabs message to background...');
+      chrome.runtime.sendMessage({ action }, response => {
+        console.log('[AltQ PageAction] execute_close_duplicate_tabs response:', response);
+        if (chrome.runtime.lastError) {
+          console.error('[AltQ PageAction] execute_close_duplicate_tabs failed:', chrome.runtime.lastError);
+        } else if (response?.success) {
+          const count = response.count || 0;
+          if (count > 0) {
+            useUIStore.getState().queueNotification({ message: `🗑️ Closed ${count} duplicate tab${count > 1 ? 's' : ''}!`, type: 'success' });
+          } else {
+            useUIStore.getState().queueNotification({ message: '👍 No duplicate tabs found!', type: 'success' });
+          }
+        }
+      });
+    } else if (action === 'execute_mute_all_tabs') {
+      console.log('[AltQ PageAction] Sending execute_mute_all_tabs message to background...');
+      chrome.runtime.sendMessage({ action }, response => {
+        console.log('[AltQ PageAction] execute_mute_all_tabs response:', response);
+        if (chrome.runtime.lastError) {
+          console.error('[AltQ PageAction] execute_mute_all_tabs failed:', chrome.runtime.lastError);
+        } else if (response?.success) {
+          const count = response.count || 0;
+          if (count > 0) {
+            useUIStore.getState().queueNotification({ message: `🔇 Muted ${count} tab${count > 1 ? 's' : ''}!`, type: 'success' });
+          } else {
+            useUIStore.getState().queueNotification({ message: '👍 No tabs to mute!', type: 'success' });
+          }
+        } else {
+          console.error('[AltQ PageAction] execute_mute_all_tabs returned error:', response?.error);
+          useUIStore.getState().queueNotification({ message: `❌ Error muting tabs: ${response?.error}`, type: 'error' });
+        }
+      });
+    } else if (action === 'execute_unmute_all_tabs') {
+      console.log('[AltQ PageAction] Sending execute_unmute_all_tabs message to background...');
+      chrome.runtime.sendMessage({ action }, response => {
+        console.log('[AltQ PageAction] execute_unmute_all_tabs response:', response);
+        if (chrome.runtime.lastError) {
+          console.error('[AltQ PageAction] execute_unmute_all_tabs failed:', chrome.runtime.lastError);
+        } else if (response?.success) {
+          const count = response.count || 0;
+          if (count > 0) {
+            useUIStore.getState().queueNotification({ message: `🔊 Unmuted ${count} tab${count > 1 ? 's' : ''}!`, type: 'success' });
+          } else {
+            useUIStore.getState().queueNotification({ message: '👍 No tabs to unmute!', type: 'success' });
+          }
+        } else {
+          console.error('[AltQ PageAction] execute_unmute_all_tabs returned error:', response?.error);
+          useUIStore.getState().queueNotification({ message: `❌ Error unmuting tabs: ${response?.error}`, type: 'error' });
+        }
+      });
     } else {
       console.warn('[AltQ PageAction] Unknown action:', action);
     }
@@ -125,34 +208,123 @@ export async function executePageActionCommand(item: AltQPageActionItem, onClose
 // ---------------------------------------------------------------------------
 // Internal helper — creates standalone DOM toast on host page/portal host
 // ---------------------------------------------------------------------------
-function showAltQToast(message: string, bg = '#1a73e8'): void {
-  const container =
-    (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body;
-  const toastId = `altq-page-action-toast-${Date.now()}`;
-  const toast = document.createElement('div');
-  toast.id = toastId;
-  toast.textContent = message;
-  toast.style.cssText = [
-    'position:fixed',
-    'bottom:24px',
-    'left:50%',
-    'transform:translateX(-50%)',
-    `background:${bg}`,
-    'color:white',
-    'padding:10px 22px',
-    'border-radius:20px',
-    'z-index:2147483647',
-    'font-family:system-ui,sans-serif',
-    'font-size:13px',
-    'font-weight:600',
-    'box-shadow:0 8px 24px rgba(0,0,0,0.4)',
-    'pointer-events:none',
-    'transition:opacity 0.2s ease-in-out',
-  ].join(';');
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    setTimeout(() => toast.remove(), 200);
-  }, 2500);
-}
 
+
+// ---------------------------------------------------------------------------
+// Internal helper — creates standalone DOM modal for format selection
+// ---------------------------------------------------------------------------
+function showFormatSelectionModal(onSelect: (format: 'PNG' | 'JPG' | 'PDF') => void): void {
+  const container = document.body;
+  const modalId = `altq-format-modal-${Date.now()}`;
+  
+  // Detect current active theme from storage or system preference
+  const applyThemeToModal = (dialog: HTMLElement, title: HTMLElement, cancelBtn: HTMLElement, buttons: HTMLButtonElement[]) => {
+    chrome.storage.local.get(['theme', 'example-theme-storage'], (result) => {
+      const storedTheme = result.theme || result['example-theme-storage'];
+      const isDark = storedTheme === 'dark' || (!storedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+      if (isDark) {
+        dialog.style.background = '#1e1e2d';
+        dialog.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+        dialog.style.boxShadow = '0 20px 40px rgba(0, 0, 0, 0.6)';
+        title.style.color = '#f3f4f6';
+        
+        buttons.forEach(btn => {
+          btn.style.background = 'rgba(255, 255, 255, 0.08)';
+          btn.style.color = '#e5e7eb';
+          btn.style.border = '1px solid rgba(255, 255, 255, 0.12)';
+          
+          btn.onmouseover = () => {
+            btn.style.background = 'rgba(255, 255, 255, 0.16)';
+            btn.style.borderColor = 'rgba(255, 255, 255, 0.25)';
+            btn.style.color = '#ffffff';
+          };
+          btn.onmouseout = () => {
+            btn.style.background = 'rgba(255, 255, 255, 0.08)';
+            btn.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+            btn.style.color = '#e5e7eb';
+          };
+        });
+
+        cancelBtn.style.color = '#9ca3af';
+        cancelBtn.onmouseover = () => cancelBtn.style.color = '#f3f4f6';
+        cancelBtn.onmouseout = () => cancelBtn.style.color = '#9ca3af';
+      } else {
+        dialog.style.background = '#ffffff';
+        dialog.style.border = '1px solid rgba(0, 0, 0, 0.08)';
+        dialog.style.boxShadow = '0 20px 40px rgba(0, 0, 0, 0.15)';
+        title.style.color = '#111827';
+
+        buttons.forEach(btn => {
+          btn.style.background = '#f3f4f6';
+          btn.style.color = '#374151';
+          btn.style.border = '1px solid #e5e7eb';
+
+          btn.onmouseover = () => {
+            btn.style.background = '#e5e7eb';
+            btn.style.borderColor = '#d1d5db';
+            btn.style.color = '#111827';
+          };
+          btn.onmouseout = () => {
+            btn.style.background = '#f3f4f6';
+            btn.style.borderColor = '#e5e7eb';
+            btn.style.color = '#374151';
+          };
+        });
+
+        cancelBtn.style.color = '#6b7280';
+        cancelBtn.onmouseover = () => cancelBtn.style.color = '#111827';
+        cancelBtn.onmouseout = () => cancelBtn.style.color = '#6b7280';
+      }
+    });
+  };
+
+  const overlay = document.createElement('div');
+  overlay.id = modalId;
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:2147483647;';
+  
+  const dialog = document.createElement('div');
+  dialog.style.cssText = 'padding:24px 28px;border-radius:16px;display:flex;flex-direction:column;gap:20px;font-family:Inter,system-ui,sans-serif;min-width:320px;transition:all 0.2s ease;';
+  
+  const title = document.createElement('div');
+  title.textContent = 'Save Full Page As...';
+  title.style.cssText = 'font-weight:600;font-size:16px;text-align:center;letter-spacing:-0.01em;';
+  
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:12px;justify-content:center;';
+  
+  const createdButtons: HTMLButtonElement[] = [];
+
+  const createBtn = (text: string, format: 'PNG' | 'JPG' | 'PDF') => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = text;
+    btn.style.cssText = `flex:1;padding:10px 18px;border-radius:10px;cursor:pointer;font-weight:600;font-size:14px;transition:all 0.15s ease-in-out;outline:none;`;
+    btn.onmousedown = () => btn.style.transform = 'scale(0.96)';
+    btn.onmouseup = () => btn.style.transform = 'scale(1)';
+    btn.onclick = () => {
+      overlay.remove();
+      onSelect(format);
+    };
+    createdButtons.push(btn);
+    return btn;
+  };
+  
+  btnRow.appendChild(createBtn('PDF', 'PDF'));
+  btnRow.appendChild(createBtn('PNG', 'PNG'));
+  btnRow.appendChild(createBtn('JPG', 'JPG'));
+  
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'margin-top:2px;padding:8px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;transition:color 0.2s ease;outline:none;';
+  cancelBtn.onclick = () => overlay.remove();
+  
+  applyThemeToModal(dialog, title, cancelBtn, createdButtons);
+
+  dialog.appendChild(title);
+  dialog.appendChild(btnRow);
+  dialog.appendChild(cancelBtn);
+  overlay.appendChild(dialog);
+  container.appendChild(overlay);
+}

@@ -2,13 +2,14 @@
  * @file useTodoEditor.ts
  * @description Custom React hook managing state and autosave for Todo editor.
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { createTodo, updateTodoContent, deleteTodo } from './todoData';
-import type { TodoRecord, ScheduleType, RecurringType, TodoReference } from './todoTypes';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createTodo, updateTodoContent, deleteTodo, mapTodoReferences } from './todoData';
+import type { TodoRecord, ScheduleType, RecurringType } from './todoTypes';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { saveShortcut, clearShortcut, useShortcutValidation } from '../../../../shared-components/shortcuts';
 import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
+import { getVersionsNewestFirst, getSnapshotById } from '../../../../shared-components/versionHistory/structuredVersionHistory';
 
 export interface UseTodoEditorParams {
   todoId?: string;
@@ -37,7 +38,7 @@ export function useTodoEditor(props: UseTodoEditorParams) {
   const lastSavedTitleRef = useRef<string>(initialTitle || '');
   const lastSavedDescriptionRef = useRef<string>(initialDescription || '');
   const lastSavedScheduleTypeRef = useRef<ScheduleType | ''>(initialScheduleType || 'one-time');
-  const lastSavedScheduleTimeRef = useRef<number>(initialScheduleTime !== undefined ? initialScheduleTime : Date.now());
+  const lastSavedScheduleTimeRef = useRef<number | undefined>(initialScheduleTime !== undefined ? initialScheduleTime : undefined);
   const lastSavedRecurringCycleRef = useRef<RecurringType | undefined>(initialRecurringCycle);
   const lastSavedItemsRef = useRef<any[]>(initialItems || []);
   const lastSavedTagsRef = useRef<string[]>(initialTags || []);
@@ -94,7 +95,7 @@ export function useTodoEditor(props: UseTodoEditorParams) {
       lastSavedTitleRef.current = '';
       lastSavedDescriptionRef.current = '';
       lastSavedScheduleTypeRef.current = 'one-time';
-      lastSavedScheduleTimeRef.current = 0;
+      lastSavedScheduleTimeRef.current = undefined;
       lastSavedRecurringCycleRef.current = undefined;
       lastSavedItemsRef.current = [];
       lastSavedTagsRef.current = [];
@@ -140,6 +141,49 @@ export function useTodoEditor(props: UseTodoEditorParams) {
   // Sync state reactively with Zustand store using active todoId
   const liveTodo = useDbStore(state => state.todos.find(t => currentTargetId ? t.id === currentTargetId : false));
 
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+
+  const versionHistory = liveTodo?.versionHistory;
+  const versionHistoryItems = useMemo(() => {
+    if (!versionHistory || !Array.isArray(versionHistory.versions) || versionHistory.versions.length === 0) {
+      return [];
+    }
+    const historyEntries = getVersionsNewestFirst(versionHistory);
+    const items: Array<{ id: string; label: string; savedAt?: number; isCurrent?: boolean }> = [
+      { id: 'current', label: 'Current', isCurrent: true },
+    ];
+    historyEntries.forEach((entry, idx) => {
+      const versionNum = historyEntries.length - idx;
+      items.push({
+        id: entry.id,
+        label: `Version ${versionNum}`,
+        savedAt: entry.savedAt,
+      });
+    });
+    return items;
+  }, [versionHistory]);
+
+  const historicalSnapshot = useMemo(() => {
+    if (!selectedVersionId || selectedVersionId === 'current' || !versionHistory) return null;
+    return getSnapshotById(versionHistory, selectedVersionId);
+  }, [selectedVersionId, versionHistory]);
+
+  const isViewingHistory = Boolean(historicalSnapshot);
+
+  const displayTitle = historicalSnapshot ? historicalSnapshot.name : todoTitle;
+  const displayDescription = historicalSnapshot ? (historicalSnapshot.description || '') : todoDescription;
+  const displayScheduleType = historicalSnapshot ? historicalSnapshot.scheduleType : scheduleType;
+  const displayScheduleTime = historicalSnapshot ? historicalSnapshot.scheduleTime : scheduleTime;
+  const displayRecurringCycle = historicalSnapshot ? historicalSnapshot.recurringType : recurringCycle;
+  const displaySelectedItems = historicalSnapshot ? (historicalSnapshot.references || []) : selectedItems;
+  const displayTagIds = historicalSnapshot ? (historicalSnapshot.tagIds || []) : tagIds;
+  const displayIsDone = historicalSnapshot ? historicalSnapshot.isDone : (liveTodo?.isDone ?? false);
+  const displayShortcut = (historicalSnapshot && historicalSnapshot.shortcut) ? historicalSnapshot.shortcut : todoShortcut;
+
+  useEffect(() => {
+    setSelectedVersionId(null);
+  }, [todoId, activeTodoId]);
+
   // 1. Strings: Fallback to empty strings and trim whitespace
   const titleChanged = isInitialized && (todoTitle || '').trim() !== (lastSavedTitleRef.current || '').trim();
   const descriptionChanged = isInitialized && (todoDescription || '').trim() !== (lastSavedDescriptionRef.current || '').trim();
@@ -149,7 +193,10 @@ export function useTodoEditor(props: UseTodoEditorParams) {
   const recurringCycleChanged = isInitialized && (recurringCycle || '') !== (lastSavedRecurringCycleRef.current || '');
   
   // 3. Timestamps: Tolerate truncation discrepancies (< 60000ms variance)
-  const scheduleTimeChanged = isInitialized && Math.abs((scheduleTime || 0) - (lastSavedScheduleTimeRef.current || 0)) >= 60000;
+  const scheduleTimeChanged = isInitialized && (
+    (scheduleTime !== undefined && lastSavedScheduleTimeRef.current !== undefined && Math.abs(scheduleTime - lastSavedScheduleTimeRef.current) >= 60000) ||
+    (scheduleTime !== undefined && lastSavedScheduleTimeRef.current === undefined)
+  );
   
   // 4. Arrays (Tags): Sort and join to guarantee identical matching regardless of reference or order
   const safeTags = tagIds || [];
@@ -244,165 +291,163 @@ export function useTodoEditor(props: UseTodoEditorParams) {
     setIsTodoDeleted(false);
   }, [liveTodo, isInitialized, isTodoDeleted, isDirty]);
 
-  const handleSave = useCallback(async function saveFn(
-    isAutoSave: boolean = false,
-    overrideProps?: {
-      title?: string;
-      description?: string;
-      scheduleType?: ScheduleType | '';
-      scheduleTime?: number;
-      recurringCycle?: RecurringType;
-      selectedItems?: any[];
-      tagIds?: string[];
-    }
-  ): Promise<string | false> {
-    if (savePromiseRef.current) {
-      saveAgainRef.current = true;
-      if (overrideProps) {
-        queuedSaveOverrideRef.current = { ...(queuedSaveOverrideRef.current || {}), ...overrideProps };
+  const handleSave = useCallback(
+    async function saveFn(
+      isAutoSave: boolean = false,
+      overrideProps?: {
+        title?: string;
+        description?: string;
+        scheduleType?: ScheduleType | '';
+        scheduleTime?: number;
+        recurringCycle?: RecurringType;
+        selectedItems?: any[];
+        tagIds?: string[];
       }
-      queuedSaveIsAutoSaveRef.current = queuedSaveIsAutoSaveRef.current === null ? isAutoSave : queuedSaveIsAutoSaveRef.current && isAutoSave;
-      return savePromiseRef.current as Promise<any>;
-    }
-
-    const { todoTitle, todoDescription, scheduleType, scheduleTime, recurringCycle, selectedItems, tagIds, todoShortcut } = currentInputsRef.current;
-    const finalTitle = overrideProps?.title !== undefined ? overrideProps.title : todoTitle;
-    const finalDesc = overrideProps?.description !== undefined ? overrideProps.description : todoDescription;
-    const finalScheduleType = overrideProps?.scheduleType !== undefined ? overrideProps.scheduleType : scheduleType;
-    const finalScheduleTime = overrideProps?.scheduleTime !== undefined ? overrideProps.scheduleTime : scheduleTime;
-    const finalRecurring = overrideProps?.recurringCycle !== undefined ? overrideProps.recurringCycle : recurringCycle;
-    const finalItems = overrideProps?.selectedItems !== undefined ? overrideProps.selectedItems : selectedItems;
-    const finalTagIds = overrideProps?.tagIds !== undefined ? overrideProps.tagIds : tagIds;
-    const loopShortcut = todoShortcut;
-
-    // Use default title if none provided
-    const computedTitle = finalTitle.trim() ? finalTitle : (finalItems.length ? (finalItems[0].name || finalItems[0].title || finalItems[0].key || 'Untitled Todo') : 'Untitled Todo');
-
-    setSaveStatus('saving');
-    setSaveError(null);
-
-    const execute = async (): Promise<string | false> => {
-      try {
-        let savedRecord: TodoRecord;
-        if (!activeTodoIdRef.current) {
-          // CREATE
-          const created = await createTodo(
-            computedTitle,
-            finalItems,
-            (finalScheduleType || 'one-time') as ScheduleType,
-            finalScheduleTime,
-            finalRecurring,
-            finalDesc,
-            finalTagIds || []
-          );
-          
-          created.tagIds = finalTagIds || [];
-          savedRecord = created;
-          if (isMounted.current) {
-            activeTodoIdRef.current = created.id;
-            lastSavedTitleRef.current = created.name;
-            lastSavedDescriptionRef.current = created.description || '';
-            lastSavedScheduleTypeRef.current = created.scheduleType;
-            lastSavedScheduleTimeRef.current = created.scheduleTime;
-            lastSavedRecurringCycleRef.current = created.recurringType;
-            lastSavedItemsRef.current = created.references;
-            lastSavedTagsRef.current = created.tagIds || [];
-            lastSavedUpdatedAtRef.current = created.updatedAt;
-            setSaveStatus('saved');
-            setLastSavedAt(new Date(created.updatedAt));
-          }
-        } else {
-          // UPDATE
-          const mappedReferences: TodoReference[] = finalItems.map((ref: any) => ({
-            id: String(ref.id || ref.value || ref.snippet_id),
-            type: ref.type || ref.category || 'note',
-            name: ref.name || ref.title || ref.key || 'Untitled'
-          }));
-          const didReschedule =
-            Math.abs((finalScheduleTime || 0) - (lastSavedScheduleTimeRef.current || 0)) >= 60000;
-
-          const updates: Partial<TodoRecord> = {
-            name: computedTitle,
-            description: finalDesc,
-            scheduleType: (finalScheduleType || 'one-time') as ScheduleType,
-            scheduleTime: finalScheduleTime,
-            recurringType: finalRecurring,
-            references: mappedReferences,
-            tagIds: finalTagIds,
-            ...(didReschedule && finalScheduleTime > Date.now() ? { isDone: false } : {}),
-          };
-
-          const updated = await updateTodoContent(activeTodoIdRef.current, updates);
-          savedRecord = updated;
-          if (isMounted.current) {
-            lastSavedTitleRef.current = updated.name;
-            lastSavedDescriptionRef.current = updated.description || '';
-            lastSavedScheduleTypeRef.current = updated.scheduleType;
-            lastSavedScheduleTimeRef.current = finalScheduleTime;
-            lastSavedRecurringCycleRef.current = updated.recurringType;
-            lastSavedItemsRef.current = updated.references;
-            lastSavedTagsRef.current = updated.tagIds || [];
-            lastSavedUpdatedAtRef.current = updated.updatedAt;
-            setSaveStatus('saved');
-            setLastSavedAt(new Date(updated.updatedAt));
-          }
-        }
-
-        // Handle shortcuts
-        const targetId = activeTodoIdRef.current;
-        if (targetId && savedRecord) {
-          const targetCompoundId = getItemCompoundId({
-            id: targetId,
-            snippet: { id: targetId, category: 'todo' }
-          });
-          const finalShortcut = loopShortcut.toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (finalShortcut) {
-            const valRes = await validateShortcut(finalShortcut, targetId);
-            if (valRes.isValid) {
-              console.log(`[ShortcutDebug][TodoEditor] handleSave: Valid shortcut "${finalShortcut}", saving to DB for todo "${targetId}"...`);
-              await saveShortcut(targetId, targetCompoundId, finalShortcut, savedRecord.name, 'todo');
-              await updateTodoContent(targetId, { shortcut: finalShortcut });
-            } else {
-              console.warn(`[ShortcutDebug][TodoEditor] handleSave: Shortcut "${finalShortcut}" has validation error "${valRes.errorMessage}". SKIPPING DB save on background autosave.`);
-            }
-            // Always update the ref to prevent infinite autosave loops
-            lastSavedShortcutRef.current = finalShortcut;
-          } else {
-            console.log(`[ShortcutDebug][TodoEditor] handleSave: Clearing shortcut for todo "${targetId}"...`);
-            await clearShortcut(targetId, targetCompoundId, 'todo');
-            await updateTodoContent(targetId, { shortcut: '' });
-            lastSavedShortcutRef.current = '';
-          }
-        }
-
-        if (isMounted.current && activeTodoIdRef.current !== activeTodoId) {
-          setActiveTodoId(activeTodoIdRef.current);
-        }
-
-        return activeTodoIdRef.current || false;
-      } catch (err: any) {
-        console.error('save FAILED:', err);
-        if (isMounted.current) {
-          setSaveStatus('error');
-          setSaveError(err.message || 'Unknown save error');
-        }
+    ): Promise<string | false> {
+      if (selectedVersionId && selectedVersionId !== 'current') {
         return false;
-      } finally {
-        savePromiseRef.current = null;
-        if (saveAgainRef.current && isMounted.current) {
-          saveAgainRef.current = false;
-          const queuedOverride = queuedSaveOverrideRef.current;
-          const queuedIsAutoSave = queuedSaveIsAutoSaveRef.current ?? isAutoSave;
-          queuedSaveOverrideRef.current = null;
-          queuedSaveIsAutoSaveRef.current = null;
-          void saveFn(queuedIsAutoSave, queuedOverride || undefined);
-        }
       }
-    };
+      if (savePromiseRef.current) {
+        saveAgainRef.current = true;
+        if (overrideProps) {
+          queuedSaveOverrideRef.current = { ...(queuedSaveOverrideRef.current || {}), ...overrideProps };
+        }
+        queuedSaveIsAutoSaveRef.current = queuedSaveIsAutoSaveRef.current === null ? isAutoSave : queuedSaveIsAutoSaveRef.current && isAutoSave;
+        return savePromiseRef.current as Promise<any>;
+      }
 
-    savePromiseRef.current = execute() as Promise<string | false>;
-    return savePromiseRef.current;
-  }, []);
+      const { todoTitle, todoDescription, scheduleType, scheduleTime, recurringCycle, selectedItems, tagIds, todoShortcut } = currentInputsRef.current;
+      const finalTitle = overrideProps?.title !== undefined ? overrideProps.title : todoTitle;
+      const finalDesc = overrideProps?.description !== undefined ? overrideProps.description : todoDescription;
+      const finalScheduleType = overrideProps?.scheduleType !== undefined ? overrideProps.scheduleType : scheduleType;
+      const finalScheduleTime = overrideProps?.scheduleTime !== undefined ? overrideProps.scheduleTime : scheduleTime;
+      const finalRecurring = overrideProps?.recurringCycle !== undefined ? overrideProps.recurringCycle : recurringCycle;
+      const finalItems = overrideProps?.selectedItems !== undefined ? overrideProps.selectedItems : selectedItems;
+      const finalTagIds = overrideProps?.tagIds !== undefined ? overrideProps.tagIds : tagIds;
+      const loopShortcut = todoShortcut;
+
+      // Use default title if none provided
+      const computedTitle = finalTitle.trim() ? finalTitle : (finalItems.length ? (finalItems[0].name || finalItems[0].title || finalItems[0].key || 'Untitled Todo') : 'Untitled Todo');
+
+      setSaveStatus('saving');
+      setSaveError(null);
+
+      const execute = async (): Promise<string | false> => {
+        try {
+          let savedRecord: TodoRecord | undefined;
+
+          if (!activeTodoIdRef.current) {
+            // CREATE
+            const created = await createTodo(
+              computedTitle,
+              finalItems,
+              (finalScheduleType || 'one-time') as ScheduleType,
+              finalScheduleTime,
+              finalRecurring,
+              finalDesc,
+              finalTagIds || []
+            );
+            
+            savedRecord = created;
+            if (isMounted.current) {
+              activeTodoIdRef.current = created.id;
+              lastSavedTitleRef.current = created.name;
+              lastSavedDescriptionRef.current = created.description || '';
+              lastSavedScheduleTypeRef.current = created.scheduleType;
+              lastSavedScheduleTimeRef.current = created.scheduleTime;
+              lastSavedRecurringCycleRef.current = created.recurringType;
+              lastSavedItemsRef.current = created.references;
+              lastSavedTagsRef.current = created.tagIds || [];
+              lastSavedUpdatedAtRef.current = created.updatedAt;
+              setSaveStatus('saved');
+              setLastSavedAt(new Date(created.updatedAt));
+            }
+          } else {
+            // UPDATE
+            const mappedReferences = mapTodoReferences(finalItems);
+            const didReschedule =
+              Math.abs((finalScheduleTime || 0) - (lastSavedScheduleTimeRef.current || 0)) >= 60000;
+
+            const updates: Partial<TodoRecord> = {
+              name: computedTitle,
+              description: finalDesc,
+              scheduleType: (finalScheduleType || 'one-time') as ScheduleType,
+              scheduleTime: finalScheduleTime,
+              recurringType: finalRecurring,
+              references: mappedReferences,
+              tagIds: finalTagIds,
+              ...(didReschedule && finalScheduleTime > Date.now() ? { isDone: false } : {}),
+            };
+
+            const updated = await updateTodoContent(activeTodoIdRef.current, updates);
+            savedRecord = updated;
+            if (isMounted.current) {
+              lastSavedTitleRef.current = updated.name;
+              lastSavedDescriptionRef.current = updated.description || '';
+              lastSavedScheduleTypeRef.current = updated.scheduleType;
+              lastSavedScheduleTimeRef.current = finalScheduleTime;
+              lastSavedRecurringCycleRef.current = updated.recurringType;
+              lastSavedItemsRef.current = updated.references;
+              lastSavedTagsRef.current = updated.tagIds || [];
+              lastSavedUpdatedAtRef.current = updated.updatedAt;
+              setSaveStatus('saved');
+              setLastSavedAt(new Date(updated.updatedAt));
+            }
+          }
+
+          // Handle shortcuts
+          const targetId = activeTodoIdRef.current;
+          if (targetId && savedRecord) {
+            const targetCompoundId = getItemCompoundId({
+              id: targetId,
+              snippet: { id: targetId, category: 'todo' }
+            });
+            const finalShortcut = loopShortcut.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (finalShortcut) {
+              const valRes = await validateShortcut(finalShortcut, targetId);
+              if (valRes.isValid) {
+                console.log(`[ShortcutDebug][TodoEditor] handleSave: Valid shortcut "${finalShortcut}", saving to DB for todo "${targetId}"...`);
+                await saveShortcut(targetId, targetCompoundId, finalShortcut, savedRecord.name, 'todo');
+                await updateTodoContent(targetId, { shortcut: finalShortcut });
+              }
+            } else if (lastSavedShortcutRef.current && !finalShortcut) {
+              console.log(`[ShortcutDebug][TodoEditor] handleSave: Clearing shortcut for todo "${targetId}"...`);
+              await clearShortcut(targetId, targetCompoundId, 'todo');
+              await updateTodoContent(targetId, { shortcut: '' });
+              lastSavedShortcutRef.current = '';
+            }
+          }
+
+          if (isMounted.current && activeTodoIdRef.current !== activeTodoId) {
+            setActiveTodoId(activeTodoIdRef.current);
+          }
+
+          return activeTodoIdRef.current || false;
+        } catch (err: any) {
+          console.error('save FAILED:', err);
+          if (isMounted.current) {
+            setSaveStatus('error');
+            setSaveError(err.message || 'Unknown save error');
+          }
+          return false;
+        } finally {
+          savePromiseRef.current = null;
+          if (saveAgainRef.current && isMounted.current) {
+            saveAgainRef.current = false;
+            const queuedOverride = queuedSaveOverrideRef.current;
+            const queuedIsAutoSave = queuedSaveIsAutoSaveRef.current ?? isAutoSave;
+            queuedSaveOverrideRef.current = null;
+            queuedSaveIsAutoSaveRef.current = null;
+            void saveFn(queuedIsAutoSave, queuedOverride || undefined);
+          }
+        }
+      };
+
+      savePromiseRef.current = execute() as Promise<string | false>;
+      return savePromiseRef.current;
+    },
+    [selectedVersionId, validateShortcut]
+  );
 
   const handleDelete = useCallback(async () => {
     if (!activeTodoIdRef.current) return;
@@ -426,6 +471,7 @@ export function useTodoEditor(props: UseTodoEditorParams) {
     setSelectedItems([]);
     setTagIds([]);
     setTodoShortcut('');
+    setSelectedVersionId(null);
     lastSavedShortcutRef.current = '';
     lastLoadedCompoundIdRef.current = null;
 
@@ -444,18 +490,25 @@ export function useTodoEditor(props: UseTodoEditorParams) {
   }, []);
 
   return {
-    todoTitle, setTodoTitle,
-    todoDescription, setTodoDescription,
-    scheduleType, setScheduleType,
-    scheduleTime, setScheduleTime,
-    recurringCycle, setRecurringCycle,
-    selectedItems, setSelectedItems,
-    tagIds, setTagIds,
-    todoShortcut, setTodoShortcut: updateTodoShortcut,
-    saveStatus, setSaveStatus, saveError, setSaveError, lastSavedAt, setLastSavedAt, isDirty,
+    todoTitle: displayTitle, setTodoTitle,
+    todoDescription: displayDescription, setTodoDescription,
+    scheduleType: displayScheduleType, setScheduleType,
+    scheduleTime: displayScheduleTime, setScheduleTime,
+    recurringCycle: displayRecurringCycle, setRecurringCycle,
+    selectedItems: displaySelectedItems, setSelectedItems,
+    tagIds: displayTagIds, setTagIds,
+    todoShortcut: displayShortcut, setTodoShortcut: updateTodoShortcut,
+    saveStatus, setSaveStatus, saveError, setSaveError, lastSavedAt, setLastSavedAt, isDirty: isViewingHistory ? false : isDirty,
     lastSavedTitleRef, lastSavedShortcutRef,
     handleSave, handleDelete, isInitialized,
     activeTodoId: todoId || activeTodoId,
     resetEditor,
+    liveTodo,
+    versionHistory,
+    versionHistoryItems,
+    selectedVersionId,
+    setSelectedVersionId,
+    isViewingHistory,
+    displayIsDone,
   };
 }

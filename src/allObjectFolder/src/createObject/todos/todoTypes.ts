@@ -12,6 +12,7 @@
 export type TodoReferenceType =
   | 'note'
   | 'prompt'
+  | 'aiPrompt'
   | 'ai_prompt'
   | 'link'
   | 'snippet'
@@ -33,6 +34,23 @@ export interface TodoReference {
 export type ScheduleType = 'one-time' | 'recurring';
 export type RecurringType = 'daily' | 'weekly' | 'monthly';
 
+import type { StructuredVersionHistory } from '../../../../shared-components/versionHistory/structuredVersionHistory';
+
+export interface TodoSnapshot {
+  name: string;
+  description?: string;
+  references: TodoReference[];
+  isDone: boolean;
+  scheduleType: ScheduleType;
+  recurringType?: RecurringType;
+  scheduleTime: number;
+  tags?: string[];
+  tagIds?: string[];
+  shortcut?: string;
+  workspaceId?: string;
+  folderId?: string;
+}
+
 export interface TodoRecord {
   id: string; // todoId
   name: string; // todoName
@@ -52,5 +70,6 @@ export interface TodoRecord {
 
   createdAt: number;
   updatedAt: number;
-}
 
+  versionHistory?: StructuredVersionHistory<TodoSnapshot>;
+}

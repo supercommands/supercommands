@@ -9,6 +9,7 @@ export const DEFAULT_SELECTED_AIS: string[] = ['gpt', 'claude', 'gemini', 'perpl
 
 export const THIS_SECTION_ACTION_PREFIXES: Record<string, string> = {
   capture_screenshot: 'cs',
+  capture_clip_screenshot: 'ccs',
   capture_full_screenshot: 'cfp',
   downloadallimages: 'dai',
   downloadalltables: 'dat',

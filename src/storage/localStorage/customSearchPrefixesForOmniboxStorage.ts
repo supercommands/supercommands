@@ -15,6 +15,7 @@ export interface CustomOmniboxPrefixes {
   prompt?: string;
   // "This Section" action prefixes — user-customizable
   capture_screenshot?: string;
+  capture_clip_screenshot?: string;
   capture_full_screenshot?: string;
   downloadallimages?: string;
   downloadalltables?: string;
@@ -43,6 +44,7 @@ export const DEFAULT_OMNIBOX_PREFIXES: Required<CustomOmniboxPrefixes> = {
   prompt: 'p',
   // action prefixes
   capture_screenshot: 'cs',
+  capture_clip_screenshot: 'ccs',
   capture_full_screenshot: 'cfp',
   downloadallimages: 'dai',
   downloadalltables: 'dat',

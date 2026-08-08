@@ -13,9 +13,14 @@ import type { FavoriteCategoryRecord } from '../../allObjectFolder/src/createObj
 
 import type { UserHotkeyRecord } from '../../shared-components/hotkeys/core/hotkeyDbTypes';
 import type { UserShortcutRecord } from '../../shared-components/shortcuts/core/shortcutDbTypes';
+import type {
+  TriggerDailyBreakdownRecord,
+  TriggerDailySummaryRecord,
+} from '../../shared-components/triggers/types';
 import type { FavoriteRecord } from '../../shared-components/favorites/favoriteTypes';
 import type { CommandRecord } from '../../allObjectFolder/src/createObject/commands/commandTypes';
 import type { SessionRecord } from '../../allObjectFolder/src/createObject/session/sessionTypes';
+import type { AssetRecord } from '../assets/assetTypes';
 
 export class CmdOSDatabase extends Dexie {
   workspaces!: Table<WorkspaceData, string>;
@@ -31,9 +36,12 @@ export class CmdOSDatabase extends Dexie {
   favoriteCategories!: Table<FavoriteCategoryRecord, string>;
   userHotkeys!: Table<UserHotkeyRecord, string>;
   userShortcuts!: Table<UserShortcutRecord, string>;
+  triggerDailySummary!: Table<TriggerDailySummaryRecord, string>;
+  triggerDailyBreakdown!: Table<TriggerDailyBreakdownRecord, string>;
   favorites!: Table<FavoriteRecord, string>;
   commands!: Table<CommandRecord, string>;
   sessions!: Table<SessionRecord, string>;
+  assets!: Table<AssetRecord, string>;
 
   constructor() {
     super('cmdOS');
@@ -52,12 +60,14 @@ export class CmdOSDatabase extends Dexie {
       favoriteCategories: 'id, userId, name, updatedAt, [userId+updatedAt]',
       userHotkeys: 'id, userId, combination, referenceId, referenceType, updatedAt',
       userShortcuts: 'id, userId, trigger, referenceId, referenceType, updatedAt',
-      favorites: 'id, user_id, reference_id, reference_type, favoriteCategoryId, updatedAt, [user_id+reference_id], [user_id+favoriteCategoryId], [user_id+updatedAt]',
+      favorites:
+        'id, user_id, reference_id, reference_type, favoriteCategoryId, updatedAt, [user_id+reference_id], [user_id+favoriteCategoryId], [user_id+updatedAt]',
       commands: 'id, prefix, label, behavior, surface, enabled, updatedAt',
     });
 
     this.version(2).stores({
-      notes: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId], [workspaceId+folderId+updatedAt]',
+      notes:
+        'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId], [workspaceId+folderId+updatedAt]',
     });
 
     this.version(3).stores({
@@ -68,25 +78,93 @@ export class CmdOSDatabase extends Dexie {
       favoriteCategories: 'id, userId, name, updatedAt, [userId+updatedAt]',
     });
 
-    this.version(5).stores({
-      favoriteCategories: 'id, userId, name, updatedAt, [userId+updatedAt]',
-    }).upgrade(async tx => {
-      await tx.table('favoriteCategories').toCollection().modify((cat: any) => {
-        if (!cat.userId && cat.workspaceId) {
-          cat.userId = cat.workspaceId;
-        }
-        delete cat.workspaceId;
+    this.version(5)
+      .stores({
+        favoriteCategories: 'id, userId, name, updatedAt, [userId+updatedAt]',
+      })
+      .upgrade(async tx => {
+        await tx
+          .table('favoriteCategories')
+          .toCollection()
+          .modify((cat: any) => {
+            if (!cat.userId && cat.workspaceId) {
+              cat.userId = cat.workspaceId;
+            }
+            delete cat.workspaceId;
+          });
       });
+
+    this.version(6)
+      .stores({
+        favorites:
+          'id, user_id, reference_id, reference_type, favoriteCategoryId, updatedAt, [user_id+reference_id], [user_id+favoriteCategoryId], [user_id+updatedAt]',
+      })
+      .upgrade(async tx => {
+        await tx
+          .table('favorites')
+          .toCollection()
+          .modify((fav: any) => {
+            if (fav.favoriteCategoryId === undefined) {
+              fav.favoriteCategoryId = null;
+            }
+          });
+      });
+
+    this.version(7)
+      .stores({
+        notes:
+          'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId], [workspaceId+folderId+updatedAt], *assetIds',
+        assets: 'id, hash, createdAt, pendingDeletionAt',
+      })
+      .upgrade(async tx => {
+        await tx
+          .table('notes')
+          .toCollection()
+          .modify((note: any) => {
+            if (!note.assetIds) {
+              note.assetIds = [];
+            }
+          });
+      });
+
+    // incorporate notes version history
+    this.version(8).upgrade(async tx => {
+      await tx
+        .table('notes')
+        .toCollection()
+        .modify((note: any) => {
+          if (!note.versionHistory) {
+            note.versionHistory = {
+              lastSavedText: note.body || '',
+              historyBuffer: [],
+              lastCheckpointAt: note.updatedAt || Date.now(),
+            };
+          }
+        });
     });
 
-    this.version(6).stores({
-      favorites: 'id, user_id, reference_id, reference_type, favoriteCategoryId, updatedAt, [user_id+reference_id], [user_id+favoriteCategoryId], [user_id+updatedAt]',
-    }).upgrade(async tx => {
-      await tx.table('favorites').toCollection().modify((fav: any) => {
-        if (fav.favoriteCategoryId === undefined) {
-          fav.favoriteCategoryId = null;
+    // incorporate structured version history for todos, snippets, links, sessions
+    this.version(9).upgrade(async tx => {
+      const initVersionHistory = (record: any) => {
+        if (!record.versionHistory) {
+          record.versionHistory = {
+            schemaVersion: 1,
+            lastCheckpointAt: record.updatedAt || record.createdAt || Date.now(),
+            versions: [],
+          };
         }
-      });
+      };
+
+      await tx.table('todos').toCollection().modify(initVersionHistory);
+      await tx.table('snippets').toCollection().modify(initVersionHistory);
+      await tx.table('links').toCollection().modify(initVersionHistory);
+      await tx.table('sessions').toCollection().modify(initVersionHistory);
+    });
+
+    this.version(10).stores({
+      triggerDailySummary: 'id, [userId+dateKey], dateKey, userId',
+      triggerDailyBreakdown:
+        'id, [userId+dateKey], [userId+referenceId+dateKey], [userId+triggerKind+triggerValue+dateKey], [userId+triggerKind+dateKey]',
     });
   }
 }

@@ -67,16 +67,18 @@ document.documentElement.classList.add('dark');
     ]);
 
     // Apply theme immediately after await returns
-    const isDarkMode =
-      result.theme === 'dark' ||
-      result.new_tab_is_dark_mode === true ||
-      result.new_tab_dark_mode === true ||
-      (result.theme === undefined && result.new_tab_is_dark_mode === undefined);
+    const isLightMode =
+      result.theme === 'cherry-blossom' ||
+      result.theme === 'coastal-mint' ||
+      result.theme === 'reflect-gradient' ||
+      result.theme === 'periwinkle-mist' ||
+      result.theme === 'light' ||
+      result.new_tab_is_dark_mode === false;
 
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else if (result.theme === 'light' || result.new_tab_is_dark_mode === false) {
+    if (isLightMode) {
       document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
     }
 
     const resolved = {

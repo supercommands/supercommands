@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import { useRef, useState, useEffect } from 'react';
 import { useUIStore } from '../../../../shared-components/uiStateManager';
 import { createPortal } from 'react-dom';

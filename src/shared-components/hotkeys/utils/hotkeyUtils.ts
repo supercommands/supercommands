@@ -6,6 +6,9 @@ export const readAllShortcuts = async (): Promise<Record<string, string>> => {
   const chromeAny = (window as any)?.chrome;
   const all: Record<string, string> = {};
 
+  // Run one-time migration for old users who only have data in chrome.storage.local
+  await migrateLegacyShortcutsIfNeeded();
+
   // Primary source: IndexedDB (this is where saveShortcut writes)
   try {
     const dbShortcuts = await getAllUserShortcuts();
@@ -32,39 +35,7 @@ export const readAllShortcuts = async (): Promise<Record<string, string>> => {
     console.warn('[readAllShortcuts] Failed to read IndexedDB commands:', e);
   }
 
-  // Supplement with chrome.storage.local for legacy non-command data only.
-  if (chromeAny?.storage?.local) {
-    await new Promise<void>(resolve => {
-      chromeAny.storage.local.get(
-        ['link_commands', 'note_commands', 'session_commands', 'alts_automation_shortcuts'],
-        (res: any) => {
-          const linkCmds = res.link_commands || {};
-          const noteCmds = res.note_commands || {};
-          const sessionCmds = res.session_commands || {};
-          const autoShortcuts = res.alts_automation_shortcuts || {};
 
-          // Link Commands
-          Object.entries(linkCmds).forEach(([id, data]: [string, any]) => {
-            if (data?.shortcut && !all[id]) all[id] = normalizeShortcutTrigger(data.shortcut);
-          });
-          // Note Commands
-          Object.entries(noteCmds).forEach(([id, data]: [string, any]) => {
-            if (data?.shortcut && !all[id]) all[id] = normalizeShortcutTrigger(data.shortcut);
-          });
-          // Session Commands
-          Object.entries(sessionCmds).forEach(([id, data]: [string, any]) => {
-            if (data?.shortcut && !all[id]) all[id] = normalizeShortcutTrigger(data.shortcut);
-          });
-          // Automation Shortcuts
-          Object.entries(autoShortcuts).forEach(([id, sc]) => {
-            if (typeof sc === 'string' && !all[id]) all[id] = normalizeShortcutTrigger(sc);
-          });
-
-          resolve();
-        },
-      );
-    });
-  }
 
   return all;
 };
@@ -119,9 +90,57 @@ export const readAllHotkeys = async (): Promise<Record<string, string>> => {
   }
 
   // Default fallbacks
-  if (!all['create']) all['create'] = 'Alt+C';
 
   return all;
 };
+
+let hasMigratedLegacyShortcuts = false;
+
+async function migrateLegacyShortcutsIfNeeded() {
+  if (hasMigratedLegacyShortcuts) return;
+  hasMigratedLegacyShortcuts = true;
+
+  const chromeAny = (window as any)?.chrome;
+  if (!chromeAny?.storage?.local) return;
+
+  return new Promise<void>(resolve => {
+    chromeAny.storage.local.get(
+      ['link_commands', 'note_commands', 'session_commands', 'todo_commands', 'alts_automation_shortcuts'],
+      async (res: any) => {
+        const hasAnyData = Object.values(res).some(v => v && Object.keys(v as any).length > 0);
+        if (!hasAnyData) {
+          resolve();
+          return;
+        }
+
+        console.info('[migrateLegacyShortcuts] Migrating legacy text shortcuts to IndexedDB...');
+        const { saveUserShortcut } = await import('../../shortcuts/core/shortcutDbData');
+        
+        const migrateBucket = async (bucket: any, type: string) => {
+          if (!bucket) return;
+          for (const [compoundId, data] of Object.entries(bucket)) {
+             let sc = '';
+             if (typeof data === 'string') sc = data;
+             else if (data && (data as any).shortcut) sc = (data as any).shortcut;
+             if (sc) {
+               await saveUserShortcut(sc, compoundId, type as any).catch(console.error);
+             }
+          }
+        };
+
+        await migrateBucket(res.link_commands, 'link');
+        await migrateBucket(res.note_commands, 'note');
+        await migrateBucket(res.session_commands, 'session');
+        await migrateBucket(res.todo_commands, 'todo');
+        await migrateBucket(res.alts_automation_shortcuts, 'automation');
+
+        chromeAny.storage.local.remove(
+          ['link_commands', 'note_commands', 'session_commands', 'todo_commands', 'alts_automation_shortcuts'], 
+          () => resolve()
+        );
+      }
+    );
+  });
+}
 
 export { getItemCompoundId, extractSnippetIdFromCompoundId } from '../../utils/idGenerator';

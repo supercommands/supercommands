@@ -17,7 +17,8 @@
  * ```
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 
 import { useAppearance } from '@extension/ui';
 import { FaBuilding, FaLink, FaRegFolder } from 'react-icons/fa';

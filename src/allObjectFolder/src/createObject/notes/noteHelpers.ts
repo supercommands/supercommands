@@ -26,3 +26,14 @@ export function extractTextFromHTML(html: string): string {
     .replace(/&nbsp;/g, ' ')
     .trim();
 }
+
+export function extractAssetIdsFromHtml(html: string): string[] {
+  if (!html) return [];
+  const ids = new Set<string>();
+  const regex = /data-local-asset-id=["']([^"']+)["']/g;
+  let match;
+  while ((match = regex.exec(html)) !== null) {
+    if (match[1]) ids.add(match[1]);
+  }
+  return Array.from(ids);
+}

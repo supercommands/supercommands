@@ -1,4 +1,5 @@
-import React, {
+import * as React from 'react';
+import {
   forwardRef,
   useCallback,
   useImperativeHandle,
@@ -359,7 +360,7 @@ const KeyHint: React.FC<{ keys: string[] }> = ({ keys }) => {
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   return (
     <span className="flex items-center gap-1">
-      {keys.map(key => {
+      {keys.map((key: string) => {
         let displayKey = key;
         if (isMac) {
           if (key.toLowerCase() === 'ctrl') displayKey = '⌃';
@@ -578,12 +579,12 @@ const getItemTagMeta = (item: InteractiveItem, todoCounts?: { overdue: number; d
   }
 
   if (category === 'note') {
-    return { label: 'Snippet', isBadge: false };
+    return { label: 'Text Expander', isBadge: false };
   }
   if (category === 'snippet' || !category) {
     return { label: 'Note', isBadge: false };
   }
-  return { label: 'Snippet', isBadge: false };
+  return { label: 'Text Expander', isBadge: false };
 };
 
 const Row = ({ index, style, data }: any) => {
@@ -661,18 +662,15 @@ const Row = ({ index, style, data }: any) => {
 
   const isDark = data.isDark;
 
-  const glassStyle: React.CSSProperties = !isDark
-    ? {
-        background: isActive ? '#fdf6e3' : '#eee8d5',
-        border: isActive ? '1px solid rgba(0, 0, 0, 0.05)' : '1px solid rgba(255, 255, 255, 0.1)',
-        borderRadius: '0px',
-        boxShadow: isActive ? 'inset 0 1px 2px rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(0, 0, 0, 0.05)' : 'none',
-        backdropFilter: 'blur(4px)',
-      }
-    : {};
+  const glassStyle: React.CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '8px',
+    boxShadow: 'none',
+  };
 
-  const primaryTextColor = !isDark ? 'text-[#073642]' : 'text-[#FFFFFF]';
-  const secondaryTextColor = !isDark ? 'text-[#586e75]' : 'text-neutral-500';
+  const primaryTextColor = 'text-[var(--color-textPrimary)]';
+  const secondaryTextColor = 'text-[var(--color-textSecondary)]';
 
   return (
     <div style={style}>
@@ -683,7 +681,7 @@ const Row = ({ index, style, data }: any) => {
         }}
         className={`cursor-pointer h-full w-full group ${
           isActive ? (isDark ? 'shadow-sm dark:bg-white/10' : '') : ''
-        } ${!isDark ? 'hover:bg-[#fdf6e3]' : 'dark:hover:bg-white/5'}`}
+        } ${!isDark ? 'hover:bg-[var(--color-hoverBg)]' : 'dark:hover:bg-white/5'}`}
         aria-selected={isActive}
         role="button"
         onContextMenu={event => {
@@ -803,7 +801,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
       onNavigateToListView,
       isLoggedIn,
       todoCounts,
-    },
+    }: DefaultContainerProps,
     ref,
   ) => {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -1376,9 +1374,16 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         await deleteUserHotkeyByReference(conflictId);
         // 2. Save new
         await saveHotkey(focusedItem, editValue);
+        
+        // Success cleanup
+        setEditValue('');
+        setConflictId(null);
+        await new Promise(resolve => setTimeout(resolve, 800));
+        setEditingHotkeyFor(null);
       } catch (err) {
         console.error('Overwrite hotkey failed:', err);
         setSaveError('Overwrite failed. Please try again.');
+      } finally {
         setIsSaving(false);
       }
     }, [conflictId, focusedItem, editValue, saveHotkey]);
@@ -1393,9 +1398,16 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
         await deleteUserShortcutByReference(conflictId);
         // 2. Save new
         await saveShortcut(focusedItem, editValue);
+        
+        // Success cleanup
+        setEditValue('');
+        setConflictId(null);
+        await new Promise(resolve => setTimeout(resolve, 800));
+        setEditingShortcutFor(null);
       } catch (err) {
         console.error('Overwrite shortcut failed:', err);
         setSaveError('Overwrite failed. Please try again.');
+      } finally {
         setIsSaving(false);
       }
     }, [conflictId, focusedItem, editValue, saveShortcut]);
@@ -2451,8 +2463,6 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
     );
 
     useEffect(() => {
-      window.addEventListener('keydown', processKeyEvent, { capture: true });
-
       const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
         if (openMenuFor) {
           closeMenu();
@@ -2462,10 +2472,9 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
       });
 
       return () => {
-        window.removeEventListener('keydown', processKeyEvent, { capture: true });
         unregister();
       };
-    }, [processKeyEvent, openMenuFor, closeMenu]);
+    }, [openMenuFor, closeMenu]);
 
     useEffect(() => {
       if (focusIndex < 0) return;

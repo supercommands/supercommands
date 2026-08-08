@@ -1,5 +1,6 @@
 'use client';
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import { FaChevronRight, FaMoon, FaCheck, FaUsers, FaClock, FaRocket, FaChevronLeft, FaKeyboard, FaLink, FaTrash, FaExpand, FaCompress, FaShieldHalved } from 'react-icons/fa6';
@@ -2400,11 +2401,11 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
       style={{
-        background: 'rgba(5, 5, 10, 0.65)',
+        background: 'var(--color-backgroundGradient, var(--color-rootBg))',
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
       }}
-      className="fixed inset-0 z-[9999] h-screen w-screen max-h-screen max-w-screen flex flex-col items-center justify-between text-neutral-300 font-sans select-none overflow-hidden py-6 md:py-8 px-6 md:px-12">
+      className="fixed inset-0 z-[9999] h-screen w-screen max-h-screen max-w-screen flex flex-col items-center justify-between text-[var(--color-textPrimary)] font-sans select-none overflow-hidden py-6 md:py-8 px-6 md:px-12">
       <style>{scrollbarStyles}</style>
       <style>{styles}</style>
       
@@ -2825,50 +2826,83 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
                       <h3 className="ob-fluid-subtext font-bold text-neutral-400 tracking-wider uppercase text-left">
                         Select Theme
                       </h3>
-                      <div className="flex gap-4 justify-start">
-                        {['default-dark', 'ocean-blue'].map(id => {
-                          const isSelected = themeId === id;
-                          const label = id === 'default-dark' ? 'Dark Mode' : 'Ocean Blue';
-                          const bgColor = id === 'default-dark' ? '#000000' : '#090e1a';
+                      <div className="flex flex-wrap gap-4 justify-start">
+                        {['cherry-blossom', 'coastal-mint', 'periwinkle-mist', 'default-dark', 'ocean-blue', 'midnight-stars'].map(id => {
+                          const isSelected = themeId === id || (id === 'coastal-mint' && themeId === 'reflect-gradient');
+                          const isLight = id === 'cherry-blossom' || id === 'coastal-mint' || id === 'periwinkle-mist';
+                          const isPeriwinkle = id === 'periwinkle-mist';
+                          const label =
+                            id === 'default-dark'
+                              ? 'Dark Mode'
+                              : id === 'ocean-blue'
+                                ? 'Ocean Blue'
+                                : id === 'midnight-stars'
+                                  ? 'Midnight Stars'
+                                  : id === 'cherry-blossom'
+                                    ? 'Cherry Blossom'
+                                    : id === 'coastal-mint'
+                                      ? 'Coastal Mint'
+                                      : 'Periwinkle Mist';
+                          const bgStyle =
+                            id === 'default-dark'
+                              ? { background: 'linear-gradient(180deg, #000000 0%, #111115 100%)' }
+                              : id === 'ocean-blue'
+                                ? { background: 'linear-gradient(155deg, #070B14 0%, #090E1A 30%, #0D1625 62%, #17243A 100%)' }
+                                : id === 'midnight-stars'
+                                  ? { background: 'linear-gradient(180deg, #19202A 0%, #343A43 100%)' }
+                                  : id === 'cherry-blossom'
+                                    ? { background: 'linear-gradient(180deg, #DCBDE5 0%, #E9D1E1 48%, #F6E8DA 100%)' }
+                                    : id === 'coastal-mint'
+                                      ? { background: 'linear-gradient(180deg, #A5C8D1 0%, #BED6D4 50%, #D5E2D5 100%)' }
+                                      : { background: 'linear-gradient(180deg, #BBC6DE 0%, #C4CFE3 25%, #CCD8E7 50%, #D6E1EC 75%, #DFEAF0 100%)' };
                           
                           return (
                             <motion.div
                               key={id}
                               whileHover={{ scale: 1.03, y: -2 }}
                               whileTap={{ scale: 0.98 }}
-                              onClick={() => setThemeProfile(id)}
-                              style={{ backgroundColor: bgColor }}
+                              onClick={() => {
+                                setThemeProfile(id);
+                                if (id === 'cherry-blossom' || id === 'coastal-mint' || id === 'periwinkle-mist' || id === 'midnight-stars' || id === 'ocean-blue' || id === 'default-dark') {
+                                  setWallpaper('none');
+                                }
+                              }}
+                              style={bgStyle}
                               className={`ob-theme-item cursor-pointer border rounded-xl transition-all relative overflow-hidden shadow-lg ${
                                 isSelected
-                                  ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500'
-                                  : 'border-white/10 hover:border-white/20'
+                                  ? isPeriwinkle
+                                    ? 'border-[#607AAA] shadow-[0_0_15px_rgba(96,122,170,0.22)] ring-1 ring-[#607AAA]'
+                                    : 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500'
+                                  : isPeriwinkle
+                                    ? 'border-white/10 hover:border-[#607AAA] hover:shadow-[0_0_15px_rgba(96,122,170,0.22)]'
+                                    : 'border-white/10 hover:border-white/20'
                               }`}
                             >
                               {/* Subtle inner border for contrast */}
-                              <div className="absolute inset-0 border border-white/5 rounded-xl pointer-events-none" />
+                              <div className={`absolute inset-0 border ${isLight ? 'border-black/5' : 'border-white/5'} rounded-xl pointer-events-none`} />
 
                               {/* Mini Mockup layout illustration inside the card */}
                               <div className="absolute inset-2 flex gap-1.5 opacity-40 pointer-events-none">
                                 {/* Sidebar */}
-                                <div className="w-6 h-full rounded bg-white/10" />
+                                <div className={`w-6 h-full rounded ${isLight ? 'bg-black/15' : 'bg-white/10'}`} />
                                 {/* Content area */}
                                 <div className="flex-1 flex flex-col gap-1">
-                                  <div className="h-3 w-12 rounded bg-white/20" />
-                                  <div className="h-2 w-full rounded bg-white/10" />
-                                  <div className="h-2 w-2/3 rounded bg-white/10" />
+                                  <div className={`h-3 w-12 rounded ${isLight ? 'bg-black/25' : 'bg-white/20'}`} />
+                                  <div className={`h-2 w-full rounded ${isLight ? 'bg-black/15' : 'bg-white/10'}`} />
+                                  <div className={`h-2 w-2/3 rounded ${isLight ? 'bg-black/15' : 'bg-white/10'}`} />
                                 </div>
                               </div>
 
                               {/* Active Indicator Checkmark */}
                               {isSelected && (
-                                <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-md z-10 animate-in zoom-in-50 duration-150">
+                                <div className={`absolute top-2.5 right-2.5 w-5 h-5 rounded-full ${isPeriwinkle ? 'bg-[#607AAA]' : 'bg-emerald-500'} flex items-center justify-center text-white shadow-md z-10 animate-in zoom-in-50 duration-150`}>
                                   <FaCheck size={9} />
                                 </div>
                               )}
 
                               {/* Name Pill (Bottom Left Overlay) */}
-                              <div className="absolute bottom-2.5 left-2.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-md border border-white/10 z-10 select-none">
-                                <span className="text-[10px] font-bold text-white tracking-wide">{label}</span>
+                              <div className={`absolute bottom-2.5 left-2.5 px-2.5 py-0.5 ${isLight ? 'bg-white/70 border-black/10' : 'bg-black/60 border-white/10'} backdrop-blur-md rounded-md border z-10 select-none`}>
+                                <span className={`text-[10px] font-bold ${isLight ? (isPeriwinkle ? 'text-[#273445]' : 'text-[#263538]') : 'text-white'} tracking-wide`}>{label}</span>
                               </div>
                             </motion.div>
                           );
@@ -2954,27 +2988,46 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
                 <div className="onboarding-standard-content flex flex-col items-center justify-center">
                   
                   {/* Card container with a thin border */}
-                  <div className="w-full border border-white/10 rounded-2xl p-6 flex flex-col ob-fluid-gap-container">
+                  <div
+                    className="w-full rounded-2xl p-6 flex flex-col ob-fluid-gap-container border"
+                    style={{
+                      backgroundColor: 'var(--color-tutorialCardBg)',
+                      borderColor: 'var(--color-borderDefault)',
+                      boxShadow: '0 18px 44px var(--color-widgetShadow, rgba(0, 0, 0, 0.22))',
+                    }}>
                     <div className="text-center space-y-1.5">
-                      <h2 className="ob-fluid-h1 font-semibold text-white tracking-tight">
-                        Create <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Workspace</span>
+                      <h2
+                        className="ob-fluid-h1 font-semibold tracking-tight"
+                        style={{ color: 'var(--color-tutorialTextTitle)' }}>
+                        Create a{' '}
+                        <span
+                          className="text-transparent bg-clip-text"
+                          style={{
+                            backgroundImage:
+                              'linear-gradient(to right, var(--color-tutorialTextGradientStart), var(--color-tutorialTextGradientEnd))',
+                          }}>
+                          Workspace
+                        </span>
                       </h2>
                     </div>
 
                     {/* Workspace Name Input (reduced width and centered) */}
                     <div className="space-y-1.5 text-left w-full ob-fluid-input-container mx-auto">
-                      <label className="ob-fluid-note-text font-bold text-neutral-400 tracking-wider uppercase block text-left">
-                        Workspace Name <span className="text-red-500 font-normal ml-0.5">*</span>
+                      <label
+                        htmlFor="onboarding-workspace-name"
+                        className="ob-fluid-note-text font-bold text-[var(--color-tutorialTextDescription)] tracking-wider uppercase block text-left">
+                        Workspace Name <span className="text-[var(--color-danger)] font-normal ml-0.5">*</span>
                       </label>
                       <div className="relative flex items-center">
                         <input
+                          id="onboarding-workspace-name"
                           type="text"
                           value={orgName}
                           onChange={(e) => setOrgName(e.target.value)}
                           placeholder="John Doe"
-                          className="ob-fluid-input w-full pl-4 pr-[130px] bg-white/[0.02] border border-white/10 rounded-xl text-white placeholder-neutral-500 outline-none focus:border-[#8b5cf6]/50 focus:ring-1 focus:ring-[#8b5cf6]/20 transition-all font-medium shadow-inner"
+                          className="ob-fluid-input w-full pl-4 pr-[130px] bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] rounded-xl text-[var(--color-textPrimary)] placeholder:text-[var(--color-textPlaceholder)] outline-none focus:border-[var(--color-borderActive)] focus:ring-1 focus:ring-[var(--color-focusRing)] transition-all font-medium shadow-inner"
                         />
-                        <div className="absolute right-3 flex items-center gap-1.5 text-[10px] text-neutral-500 font-medium select-none pointer-events-none">
+                        <div className="absolute right-3 flex items-center gap-1.5 text-[10px] text-[var(--color-textMuted)] font-medium select-none pointer-events-none">
                           <FiLock size={10} />
                           <span>Private • Stored locally</span>
                         </div>
@@ -2985,7 +3038,12 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
                     <button
                       disabled={isCreating}
                       onClick={handleCreateOrgAndWorkspace}
-                      className="w-fit mx-auto px-10 flex items-center justify-center gap-2 py-2.5 ob-fluid-feature-text font-bold text-white rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 transition-all active:scale-[0.98] shadow-lg shadow-purple-600/20 disabled:opacity-75 cursor-pointer mt-1"
+                      className="w-fit mx-auto px-6 flex items-center justify-center gap-2 py-2 ob-fluid-feature-text font-bold text-white rounded-xl transition-all active:scale-[0.98] shadow-lg disabled:opacity-75 cursor-pointer mt-1"
+                      style={{
+                        backgroundImage:
+                          'linear-gradient(to right, var(--color-tutorialTextGradientStart), var(--color-tutorialTextGradientEnd))',
+                        boxShadow: '0 10px 28px var(--color-tutorialAccentMuted)',
+                      }}
                     >
                       {isCreating ? (
                         <>
@@ -2999,44 +3057,45 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
                     </button>
 
                     {/* Trust Badges - aligned bottom under the form layout inside the card */}
-                    <div className="grid grid-cols-3 gap-0 mt-2 select-none w-full pt-5 border-t border-white/5 divide-x divide-white/10">
+                    <div className="grid grid-cols-3 gap-0 mt-2 select-none w-full pt-5 border-t border-[var(--color-borderDefault)] divide-x divide-[var(--color-borderDefault)]">
                       
                       {/* Column 1 */}
                       <div className="flex items-start gap-2.5 px-4">
-                        <div className="w-7 h-7 rounded-full bg-neutral-800/40 text-neutral-400 flex items-center justify-center shrink-0 mt-0.5 border border-white/5">
+                        <div className="w-7 h-7 rounded-full bg-[var(--color-tutorialAccentMuted)] text-[var(--color-tutorialAccent)] flex items-center justify-center shrink-0 mt-0.5 border border-[var(--color-borderDefault)]">
                           <FaShieldHalved size={11} />
                         </div>
                         <div className="flex flex-col text-left">
-                          <strong className="text-neutral-200 font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Local-first</strong>
-                          <span className="text-[9.5px] md:text-[10.5px] text-neutral-500 mt-0.5">Stored on this device</span>
-                          <span className="text-[9.5px] md:text-[10.5px] text-neutral-500">Private • Stored locally</span>
+                          <strong className="text-[var(--color-tutorialTextTitle)] font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Local-first</strong>
+                          <span className="text-[9.5px] md:text-[10.5px] text-[var(--color-tutorialTextDescription)] mt-0.5">
+                            All your data is stored <span className="text-[var(--color-tutorialTextTitle)] font-medium">locally on your device.</span>
+                          </span>
                         </div>
                       </div>
 
                       {/* Column 2 */}
                       <div className="flex items-start gap-2.5 px-4">
-                        <div className="w-7 h-7 rounded-full bg-neutral-800/40 text-neutral-400 flex items-center justify-center shrink-0 mt-0.5 border border-white/5">
+                        <div className="w-7 h-7 rounded-full bg-[var(--color-tutorialAccentMuted)] text-[var(--color-tutorialAccent)] flex items-center justify-center shrink-0 mt-0.5 border border-[var(--color-borderDefault)]">
                           <FiCloud size={12} />
                         </div>
                         <div className="flex flex-col text-left">
-                          <strong className="text-neutral-200 font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Optional backup</strong>
-                          <span className="text-[9.5px] md:text-[10.5px] text-neutral-500 mt-0.5">Connect Drive anytime</span>
+                          <strong className="text-[var(--color-tutorialTextTitle)] font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Optional backup</strong>
+                          <span className="text-[9.5px] md:text-[10.5px] text-[var(--color-tutorialTextDescription)] font-medium mt-0.5">Connect to Drive anytime</span>
                         </div>
                       </div>
 
                       {/* Column 3 */}
                       <div className="flex items-start gap-2.5 px-4">
-                        <div className="w-7 h-7 rounded-full bg-neutral-800/40 text-neutral-400 flex items-center justify-center shrink-0 mt-0.5 border border-white/5">
+                        <div className="w-7 h-7 rounded-full bg-[var(--color-tutorialAccentMuted)] text-[var(--color-tutorialAccent)] flex items-center justify-center shrink-0 mt-0.5 border border-[var(--color-borderDefault)]">
                           <FiCode size={12} />
                         </div>
                         <div className="flex flex-col text-left">
-                          <strong className="text-neutral-200 font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Open source</strong>
-                          <span className="text-[9.5px] md:text-[10.5px] text-neutral-500 mt-0.5">Built with community love ❤️</span>
+                          <strong className="text-[var(--color-tutorialTextTitle)] font-semibold text-[10.5px] md:text-[11.5px] tracking-wide">Open source</strong>
+                          <span className="text-[9.5px] md:text-[10.5px] text-[var(--color-tutorialTextDescription)] mt-0.5">Built with community love ❤️</span>
                           <a 
                             href="https://github.com/cmdOS-App/cmdOS" 
                             target="_blank" 
                             rel="noopener noreferrer"
-                            className="text-neutral-400 hover:text-neutral-300 font-medium flex items-center justify-start gap-1.5 mt-1 transition-colors cursor-pointer text-[9.5px]"
+                            className="text-[var(--color-tutorialAccent)] hover:text-[var(--color-tutorialTextTitle)] font-medium flex items-center justify-start gap-1.5 mt-1 transition-colors cursor-pointer text-[9.5px]"
                           >
                             <FaGithub size={10} className="mb-[0.5px] opacity-80" /> Explore source code <FiArrowUpRight size={9} />
                           </a>
@@ -3101,4 +3160,3 @@ const OnboardingCards = React.forwardRef<HTMLDivElement, OnboardingCardsProps>((
 });
 
 export default OnboardingCards;
-

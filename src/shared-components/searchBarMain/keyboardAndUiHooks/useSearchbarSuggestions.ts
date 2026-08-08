@@ -30,7 +30,8 @@ import { isBookmarksCommand, trimQuery } from '../utilityFunctions/promptHelpers
 import { getUrlsFromQuery } from '../utilityFunctions/urlHelpers';
 import type { HistoryItem } from '../searchLogicAndAlgorithms/historyAlgo';
 import type { CommonCommandEntry } from '../searchLogicAndAlgorithms/commonResults';
-import { DEFAULT_OMNIBOX_PREFIXES } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
+import { buildShortcutPrefixRegistry, getCommandSpacePrefix } from '../../../shared-components/triggers';
+import { PAGE_ACTION_ITEMS } from '../../../pages/AltS_search_websites/src/commands/pageActions';
 
 interface UseSearchbarSuggestionsProps {
   value: string;
@@ -62,6 +63,8 @@ interface UseSearchbarSuggestionsProps {
   userDbShortcuts?: any[];
   userDbHotkeys?: any[];
   customPrefixes?: any;
+  isEmbedded?: boolean;
+  contextUrl?: string;
 }
 const isSameSnippetIdentity = (left: any, right: any): boolean => {
   const leftId = String(left ?? '').trim().toLowerCase();
@@ -102,6 +105,8 @@ export function useSearchbarSuggestions({
   userDbShortcuts,
   userDbHotkeys,
   customPrefixes,
+  isEmbedded,
+  contextUrl,
 }: UseSearchbarSuggestionsProps) {
   // History cache state
   const [historyItems, setHistoryItems] = useState<HistoryItem[] | null>(null);
@@ -114,7 +119,7 @@ export function useSearchbarSuggestions({
   // Effect to prefetch history when search focus is enabled
   useEffect(() => {
     if (!isSearchFocusEnabled) {
-      setHistoryItems(null);
+      setHistoryItems(prev => (prev !== null ? null : prev));
       isFetchingHistoryRef.current = false;
       return;
     }
@@ -169,7 +174,7 @@ export function useSearchbarSuggestions({
   const commandSuggestions = useMemo<CommandSuggestionItem[]>(() => {
     if (lockedLocalDef || isBookmarksCommand(lockedCommand)) return [];
 
-    const safeCommandKey = (commandKey || customPrefixes?.command || 'c').trim().toLowerCase() || 'c';
+    const safeCommandKey = getCommandSpacePrefix(commandKey || customPrefixes);
     const safeSystemKey = (customPrefixes?.system_command || 'sc').trim().toLowerCase();
     const valLower = value.toLowerCase();
 
@@ -208,8 +213,6 @@ export function useSearchbarSuggestions({
     if (isCommandTrigger) {
       // All prefixes come from centralized storage (customSearchPrefixesForOmniboxStorage).
       // Defaults are defined there — never hardcode fallbacks here.
-      const prefixes = { ...DEFAULT_OMNIBOX_PREFIXES, ...(customPrefixes || {}) };
-
       const matchPrefix = (prefix: string | undefined): boolean => {
         if (!prefix) return false;
         return queryAfterCmd === prefix || queryAfterCmd.startsWith(`${prefix} `);
@@ -219,22 +222,10 @@ export function useSearchbarSuggestions({
         return queryAfterCmd === prefix ? '' : queryAfterCmd.slice(prefix.length).trim();
       };
 
-      const rawCategoryPrefixes: Array<{ prefix: string | undefined; filter: CategoryFilter }> = [
-        { prefix: prefixes.system_command, filter: 'system_command' },
-        { prefix: prefixes.automation, filter: 'automation' },
-        { prefix: prefixes.snippet, filter: 'snippet' },
-        { prefix: prefixes.bookmark, filter: 'bookmark' },
-        { prefix: prefixes.session, filter: 'session' },
-        { prefix: prefixes.note, filter: 'note' },
-        { prefix: prefixes.link, filter: 'link' },
-        { prefix: prefixes.agent, filter: 'agent' },
-        { prefix: prefixes.todo, filter: 'todo' },
-        { prefix: prefixes.command, filter: 'command' },
-      ];
-
-      const categoryPrefixes: Array<{ prefix: string; filter: CategoryFilter }> = rawCategoryPrefixes
-        .map(entry => ({ filter: entry.filter, prefix: String(entry.prefix || '').trim().toLowerCase() }))
-        .filter(entry => entry.prefix.length > 0)
+      const categoryPrefixes: Array<{ prefix: string; filter: CategoryFilter }> = Object.entries(
+        buildShortcutPrefixRegistry(customPrefixes),
+      )
+        .map(([prefix, filter]) => ({ filter: filter as CategoryFilter, prefix }))
         .sort((a, b) => b.prefix.length - a.prefix.length);
 
       const matchedCategory = categoryPrefixes.find(entry => matchPrefix(entry.prefix));
@@ -372,6 +363,7 @@ export function useSearchbarSuggestions({
           if (commandMatch) {
              userEntities.push({
                kind: commandMatch.kind,
+               _userShortcutRecord: !isHotkey ? record : undefined,
                definition: commandMatch.definition,
                score: 1000 - rank,
                matchedTokens: []
@@ -423,9 +415,11 @@ export function useSearchbarSuggestions({
 
                 const nativeItem: any = {
                   _kind: 'workspace_item',
+                  _userShortcutRecord: !isHotkey ? record : undefined,
                   item: {
                     ...entity,
                     category: normalizedCategory,
+                    _userShortcutRecord: !isHotkey ? record : undefined,
                   },
                   workspace: { id: entity.workspaceId, workspace_id: entity.workspaceId },
                   folder: entity.folderId ? { id: entity.folderId, folder_id: entity.folderId } : null,
@@ -445,19 +439,21 @@ export function useSearchbarSuggestions({
                  addedUserEntities.add(entity.id);
                }
              } else {
-               userEntities.push({
-                 _kind: 'command', // Map it as a command so it appears in the commands column
-                 commandType: 'proxy', // Indicate it's a proxy for native rendering
-                 id: `proxy_${referenceId}`,
-                 label: entity.title || entity.name || 'Untitled',
+                userEntities.push({
+                  _kind: 'command', // Map it as a command so it appears in the commands column
+                  _userShortcutRecord: !isHotkey ? record : undefined,
+                  commandType: 'proxy', // Indicate it's a proxy for native rendering
+                  id: `proxy_${referenceId}`,
+                  label: entity.title || entity.name || 'Untitled',
                  score: 1000 - rank, // Massive score boost for user assigned, minus rank so closer match is higher
                  matchedTokens: [],
-                 proxyEntity: {
-                   ...entity,
-                   _kind: 'snippet',
-                   snippet: { ...entity, category: referenceType }, // Native rendering expects this
-                 }
-               });
+                  proxyEntity: {
+                    ...entity,
+                    _kind: 'snippet',
+                    _userShortcutRecord: !isHotkey ? record : undefined,
+                    snippet: { ...entity, category: referenceType }, // Native rendering expects this
+                  }
+                });
              }
           }
         }
@@ -496,6 +492,7 @@ export function useSearchbarSuggestions({
         if (e._kind === 'workspace_item') {
           return {
             _kind: 'command' as const,
+            _userShortcutRecord: e._userShortcutRecord || e.item?._userShortcutRecord,
             commandType: 'proxy',
             id: `proxy_${e.id || e.item?.id}`,
             label: e.item?.title || e.item?.name || 'Untitled',
@@ -505,6 +502,7 @@ export function useSearchbarSuggestions({
             // icon rendering, click, and double-click based on category (note/link/snippet etc.)
             proxyEntity: {
               _kind: 'workspace_item',
+              _userShortcutRecord: e._userShortcutRecord || e.item?._userShortcutRecord,
               item: e.item,
               workspace: e.workspace,
               folder: e.folder || null,
@@ -515,6 +513,20 @@ export function useSearchbarSuggestions({
       });
     }
     results.push(...filteredUserEntities);
+
+    if (isEmbedded && (!activeCategoryFilter || activeCategoryFilter === 'command')) {
+      const filteredPageActions = PAGE_ACTION_ITEMS.filter(item => {
+        if (!actualQuery) return true;
+        const q = actualQuery.toLowerCase();
+        return item.name.toLowerCase().includes(q) || item.prefix.toLowerCase().includes(q) || item.keywords.some(k => k.toLowerCase().includes(q));
+      }).map(item => ({
+        kind: 'remote',
+        definition: item,
+        score: rankByQuery(item.name, actualQuery) !== null ? 10 - rankByQuery(item.name, actualQuery)! + 500 : 500,
+        matchedTokens: []
+      }));
+      results.push(...filteredPageActions);
+    }
 
     if (value === `${safeCommandKey} ` || isBroadCommandSectionRequest || (!queryAfterCmd && !activeCategoryFilter)) {
       const baseCmds = searchCommands(commandIndex, '').filter(cmd => {
@@ -721,7 +733,20 @@ export function useSearchbarSuggestions({
           ...converted,
         ]
       : converted;
-  }, [commandQuery, lockedCommand, lockedLocalDef, value, commandIndex]);
+  }, [
+    commandQuery,
+    lockedCommand,
+    lockedLocalDef,
+    value,
+    commandIndex,
+    commandKey,
+    customPrefixes,
+    userDbShortcuts,
+    userDbHotkeys,
+    automationSuggestions,
+    agentCollectionSuggestions,
+    moduleSuggestions,
+  ]);
 
   const historySuggestions = useMemo<HistorySuggestionItem[]>(() => {
     if (
@@ -821,7 +846,7 @@ export function useSearchbarSuggestions({
           (lockedCommand !== 'calendar' && !value.trim() && selectedImages.length === 0);
 
     if (shouldSkip) {
-      setDebouncedFuseResults([]);
+      setDebouncedFuseResults(prev => (prev.length > 0 ? [] : prev));
       return;
     }
 
@@ -979,7 +1004,7 @@ export function useSearchbarSuggestions({
 
       // De-duplicate snippets and inject shortcuts
       const snippetIds = new Set();
-      const safeCommandKey = (commandKey || 'c').trim();
+      const safeCommandKey = getCommandSpacePrefix(commandKey || customPrefixes);
 
       const finalResults = converted.filter(item => {
         if (item._kind === 'workspace_item') {
@@ -1047,6 +1072,9 @@ export function useSearchbarSuggestions({
     moduleSuggestions,
     isInitialAltSFocus,
     isFocused,
+    commandKey,
+    customPrefixes,
+    userDbShortcuts,
   ]);
 
   const openUrlSuggestion = useMemo<OpenUrlSuggestionItem | null>(() => {
@@ -1094,7 +1122,7 @@ export function useSearchbarSuggestions({
         return commonCommandSuggestions.filter(s => AI_GROUP.members.includes(s.id as CommandId) || s.id === 'ai');
       }
 
-      const safeKey = (commandKey || 'c').trim().toLowerCase();
+      const safeKey = getCommandSpacePrefix(commandKey || customPrefixes);
       const safeSystemKey = (customPrefixes?.system_command || 'sc').trim().toLowerCase();
       const valLower = value.toLowerCase();
 
@@ -1134,6 +1162,8 @@ export function useSearchbarSuggestions({
     showAIHistoryPanel,
     isInitialAltSFocus,
     activeCollection,
+    commandKey,
+    customPrefixes,
   ]);
 
   return {

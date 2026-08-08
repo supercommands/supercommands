@@ -24,7 +24,7 @@ const getOS = () => {
 const Popup = () => {
   const theme = useStorage(exampleThemeStorage);
   const isLight = theme === 'light';
-  const logo = 'popup/tasklabs_logo.png';
+  const logo = 'popup/cmdOS_logo.png';
   const gotoWebsite = () => chrome.tabs.create({ url: CMDOS_REDIRECT_URL });
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);

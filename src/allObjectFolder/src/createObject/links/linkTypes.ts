@@ -22,6 +22,17 @@ export interface LinkItem {
 
 export type SelectedLink = LinkItem;
 
+import type { StructuredVersionHistory } from '../../../../shared-components/versionHistory/structuredVersionHistory';
+
+export interface LinkSnapshot {
+  title: string;
+  urls: LinkItem[];
+  workspaceId: string;
+  folderId: string | null;
+  tagIds: string[];
+  shortcut?: string;
+}
+
 export interface LinkRecord {
   id: string;
   workspaceId: string;
@@ -30,10 +41,13 @@ export interface LinkRecord {
   title: string;
   urls: LinkItem[];
   tagIds: string[];
+  shortcut?: string;
 
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;
+
+  versionHistory?: StructuredVersionHistory<LinkSnapshot>;
 }
 
 export interface CreateLinkInput {
@@ -43,6 +57,7 @@ export interface CreateLinkInput {
   title: string;
   urls: LinkItem[];
   tagIds?: string[];
+  shortcut?: string;
 }
 
 export interface UpdateLinkInput {
@@ -51,6 +66,7 @@ export interface UpdateLinkInput {
   workspaceId?: string;
   folderId?: string | null;
   tagIds?: string[];
+  shortcut?: string;
   expectedUpdatedAt?: number;
 }
 

@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useUIStore } from '../../shared-components/uiStateManager';
 import { useDbStore } from '../../storage/store/useDbStore';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -463,10 +464,10 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                         <div className="flex items-center gap-1.5 pr-2 min-w-0">
                           {ws.storageMode === 'cloud' ? <FiCloud className="w-4 h-4 text-blue-400 shrink-0" /> : <LocalFolderIcon />}
                           <div className="flex flex-col min-w-0">
-                            <span className="font-medium text-neutral-200 truncate">
+                            <span className="font-medium text-[var(--color-textPrimary)] truncate">
                               {ws.storageMode === 'cloud' ? 'Cloud' : 'Local Drive'}
                             </span>
-                            <span className="text-[10px] text-neutral-500 truncate font-mono mt-0.5">
+                            <span className="text-[10px] text-[var(--color-textMuted)] truncate font-mono mt-0.5">
                               {ws.path}
                             </span>
                           </div>
@@ -479,8 +480,8 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                           disabled={workspacesList.length <= 1}
                           className={`absolute right-3.5 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-lg transition-all ${
                             workspacesList.length <= 1
-                              ? 'text-neutral-600 opacity-40 cursor-not-allowed'
-                              : 'text-neutral-400 hover:text-red-400 hover:bg-red-500/10 active:scale-95 cursor-pointer'
+                              ? 'text-[var(--color-textDisabled)] opacity-50 cursor-not-allowed'
+                              : 'text-[var(--color-iconDefault)] hover:text-red-400 hover:bg-red-500/10 active:scale-95 cursor-pointer'
                           }`}
                           title={workspacesList.length <= 1 ? 'Cannot delete the only remaining workspace' : 'Delete Workspace'}
                         >
@@ -502,75 +503,75 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                               {/* Top Content Row */}
                               <div className="grid grid-cols-2 gap-6">
                                 {/* 1. Included Items */}
-                                <div className="space-y-4 border-r border-white/5 pr-4">
-                                  <h4 className="font-bold text-neutral-400 uppercase tracking-wider text-[10px]">
+                                <div className="space-y-4 border-r border-[var(--color-borderDefault)] pr-4">
+                                  <h4 className="font-bold text-[var(--color-textMuted)] uppercase tracking-wider text-[10px]">
                                     Included Items
                                   </h4>
                                   <div className="space-y-2.5">
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <BsCalendarCheck size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Todos</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.todosCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.todosCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <NotesIcon size={14} className="shrink-0 text-neutral-500" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <NotesIcon size={14} className="shrink-0 text-[var(--color-iconDefault)]" />
                                         <span>Notes</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.notesCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.notesCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FaLink size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FaLink size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Links</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.linksCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.linksCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <CUnderscoreIcon size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <CUnderscoreIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Text Expander</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.snippetsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.snippetsCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiZap size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FiZap size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Automations</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.automationsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.automationsCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <SessionGridIcon size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <SessionGridIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Tab Sessions</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.sessionsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.sessionsCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FaRobot size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Chat Agents</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.chatAgentsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.chatAgentsCount}</span>
                                     </div>
                                   </div>
                                 </div>
 
                                 {/* 2. Location / Source */}
-                                <div className="space-y-4 border-r border-white/5 pr-4">
-                                  <h4 className="font-bold text-neutral-400 uppercase tracking-wider text-[10px]">
+                                <div className="space-y-4 border-r border-[var(--color-borderDefault)] pr-4">
+                                  <h4 className="font-bold text-[var(--color-textMuted)] uppercase tracking-wider text-[10px]">
                                     Location / Source
                                   </h4>
-                                  <div className="space-y-3 text-neutral-300">
+                                  <div className="space-y-3 text-[var(--color-textPrimary)]">
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Folder</span>
+                                      <span className="text-[10px] text-[var(--color-textMuted)] uppercase tracking-wider font-semibold">Folder</span>
                                       <span className="font-mono break-all">{ws.path}</span>
                                     </div>
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Type</span>
+                                      <span className="text-[10px] text-[var(--color-textMuted)] uppercase tracking-wider font-semibold">Type</span>
                                       <span>{ws.storageMode === 'cloud' ? 'Cloud' : 'Local Drive'}</span>
                                     </div>
                                   </div>
@@ -594,10 +595,10 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
           <div className="w-full flex justify-center pt-2">
             <button
               onClick={() => setShowCreateOrg(true)}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-200 hover:text-white transition-all shadow-sm active:scale-95 cursor-pointer"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] transition-all shadow-sm active:scale-95 cursor-pointer"
             >
-              <FiPlus size={14} className="text-indigo-400" />
-              <span>Create Organization</span>
+              <FiPlus size={14} className="text-[var(--color-accent)]" />
+              <span className="text-[var(--color-textPrimary)]">Create Organization</span>
             </button>
           </div>
 
@@ -816,10 +817,10 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                         <div className="flex items-center gap-1.5 pr-2 min-w-0">
                           {ws.storageMode === 'cloud' ? <FiCloud className="w-4 h-4 text-blue-400 shrink-0" /> : <LocalFolderIcon />}
                           <div className="flex flex-col min-w-0">
-                            <span className="font-medium text-neutral-200 truncate">
+                            <span className="font-medium text-[var(--color-textPrimary)] truncate">
                               {ws.storageMode === 'cloud' ? 'Cloud' : 'Local Drive'}
                             </span>
-                            <span className="text-[10px] text-neutral-500 truncate font-mono mt-0.5">
+                            <span className="text-[10px] text-[var(--color-textMuted)] truncate font-mono mt-0.5">
                               {ws.path}
                             </span>
                           </div>
@@ -832,8 +833,8 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                           disabled={workspacesList.length <= 1}
                           className={`absolute right-3.5 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-lg transition-all ${
                             workspacesList.length <= 1
-                              ? 'text-neutral-600 opacity-40 cursor-not-allowed'
-                              : 'text-neutral-400 hover:text-red-400 hover:bg-red-500/10 active:scale-95 cursor-pointer'
+                              ? 'text-[var(--color-textDisabled)] opacity-50 cursor-not-allowed'
+                              : 'text-[var(--color-iconDefault)] hover:text-red-400 hover:bg-red-500/10 active:scale-95 cursor-pointer'
                           }`}
                           title={workspacesList.length <= 1 ? 'Cannot delete the only remaining workspace' : 'Delete Workspace'}
                         >
@@ -855,75 +856,75 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                               {/* Top Content Row */}
                               <div className="grid grid-cols-2 gap-6">
                                 {/* 1. Included Items */}
-                                <div className="space-y-4 border-r border-white/5 pr-4">
-                                  <h4 className="font-bold text-neutral-400 uppercase tracking-wider text-[10px]">
+                                <div className="space-y-4 border-r border-[var(--color-borderDefault)] pr-4">
+                                  <h4 className="font-bold text-[var(--color-textMuted)] uppercase tracking-wider text-[10px]">
                                     Included Items
                                   </h4>
                                   <div className="space-y-2.5">
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <BsCalendarCheck size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Todos</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.todosCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.todosCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <NotesIcon size={14} className="shrink-0 text-neutral-500" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <NotesIcon size={14} className="shrink-0 text-[var(--color-iconDefault)]" />
                                         <span>Notes</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.notesCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.notesCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FaLink size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FaLink size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Links</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.linksCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.linksCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <CUnderscoreIcon size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <CUnderscoreIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Text Expander</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.snippetsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.snippetsCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FiZap size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FiZap size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Automations</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.automationsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.automationsCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <SessionGridIcon size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <SessionGridIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Tab Sessions</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.sessionsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.sessionsCount}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 text-neutral-200">
-                                        <FaRobot size={14} className="text-neutral-500 shrink-0" />
+                                      <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
+                                        <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Chat Agents</span>
                                       </div>
-                                      <span className="font-mono text-neutral-400">{ws.chatAgentsCount}</span>
+                                      <span className="font-mono text-[var(--color-textSecondary)]">{ws.chatAgentsCount}</span>
                                     </div>
                                   </div>
                                 </div>
 
                                 {/* 2. Location / Source */}
-                                <div className="space-y-4 border-r border-white/5 pr-4">
-                                  <h4 className="font-bold text-neutral-400 uppercase tracking-wider text-[10px]">
+                                <div className="space-y-4 border-r border-[var(--color-borderDefault)] pr-4">
+                                  <h4 className="font-bold text-[var(--color-textMuted)] uppercase tracking-wider text-[10px]">
                                     Location / Source
                                   </h4>
-                                  <div className="space-y-3 text-neutral-300">
+                                  <div className="space-y-3 text-[var(--color-textPrimary)]">
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Folder</span>
+                                      <span className="text-[10px] text-[var(--color-textMuted)] uppercase tracking-wider font-semibold">Folder</span>
                                       <span className="font-mono break-all">{ws.path}</span>
                                     </div>
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Type</span>
+                                      <span className="text-[10px] text-[var(--color-textMuted)] uppercase tracking-wider font-semibold">Type</span>
                                       <span>{ws.storageMode === 'cloud' ? 'Cloud' : 'Local Drive'}</span>
                                     </div>
                                   </div>
@@ -947,10 +948,10 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
           <div className="w-full flex justify-center pt-2">
             <button
               onClick={() => setShowCreateOrg(true)}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-200 hover:text-white transition-all shadow-sm active:scale-95 cursor-pointer"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] transition-all shadow-sm active:scale-95 cursor-pointer"
             >
-              <FiPlus size={14} className="text-indigo-400" />
-              <span>Create Organization</span>
+              <FiPlus size={14} className="text-[var(--color-accent)]" />
+              <span className="text-[var(--color-textPrimary)]">Create Organization</span>
             </button>
           </div>
 

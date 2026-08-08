@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { WebsiteSnippetInjector } from './website-snippet-injection/ListenForSnippetSlashCommand';
 import { ImageDownloader } from './ImageDownloader';
@@ -1027,6 +1027,9 @@ class GlobalHotkeyController {
       if (request.action === 'RELOAD_HOTKEYS') {
         this.loadHotkeys();
       }
+      if (request.action === 'db_changed' && request.table === 'hotkeysMap') {
+        this.loadHotkeys();
+      }
     });
   }
 
@@ -1102,6 +1105,16 @@ class GlobalHotkeyController {
       action: 'trigger_hotkey',
       type,
       id,
+      triggerUsage: {
+        triggerKind: 'user_hotkey',
+        triggerValue: normalizeHotkeyString(buildHotkeyString(event, navigator.userAgent.indexOf('Mac OS X') !== -1) || ''),
+        triggerSource: 'hotkey',
+        surface: 'content_script',
+        referenceId: id,
+        referenceType: type,
+        url: window.location.href,
+        correlationId: `hotkey_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      },
     });
   }
 }

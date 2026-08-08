@@ -1,4 +1,5 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import * as React from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppearance } from '@extension/ui';
 import { FiFolder, FiTrash2, FiEdit2, FiCheck, FiX } from 'react-icons/fi';
@@ -272,7 +273,7 @@ const FavoriteCategoryManager = ({
                   }
                 }}
                 placeholder="Search or create a category"
-                className="w-full bg-transparent px-3 py-2 text-xs outline-none text-neutral-900 dark:text-white placeholder-[var(--color-textPlaceholder)]"
+                className="w-full bg-transparent px-3 py-2 text-xs outline-none text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)]"
               />
             </form>
           </div>
@@ -293,7 +294,7 @@ const FavoriteCategoryManager = ({
 
           <div className="p-2 flex flex-col gap-1 max-h-[140px] overflow-y-auto no-scrollbar">
             {!normalizedQuery && filteredCategories.length === 0 && (
-              <div className="px-2 py-2 rounded-lg text-[12px] text-neutral-500 dark:text-neutral-400">
+              <div className="px-2 py-2 rounded-lg text-[12px] text-[var(--color-textSecondary)]">
                 No favorite categories yet
               </div>
             )}
@@ -343,7 +344,7 @@ const FavoriteCategoryManager = ({
                   onBlur={() => {
                     void handleSaveEdit();
                   }}
-                  className="w-full bg-transparent outline-none text-[12px] text-neutral-900 dark:text-white"
+                  className="w-full bg-transparent outline-none text-[12px] text-[var(--color-textPrimary)]"
                 />
                 <button
                   type="button"
@@ -369,8 +370,8 @@ const FavoriteCategoryManager = ({
                 <div
                   className={`group flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs transition-colors cursor-pointer ${
                     isHighlighted || isSelected
-                      ? 'bg-black/5 dark:bg-white/10 text-neutral-900 dark:text-white font-medium'
-                      : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-white'
+                      ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-medium'
+                      : 'text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                   }`}
                   role="button"
                   tabIndex={0}

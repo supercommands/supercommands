@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import * as React from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaPlay, FaCheck, FaExclamationTriangle, FaTimes, FaStop } from 'react-icons/fa';
 

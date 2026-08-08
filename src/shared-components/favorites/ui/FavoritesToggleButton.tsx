@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useState } from 'react';
 import { BsStar, BsStarFill } from 'react-icons/bs';
 import { useUIStore } from '../../uiStateManager';

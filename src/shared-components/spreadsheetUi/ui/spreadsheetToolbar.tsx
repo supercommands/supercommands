@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { useSpreadsheetStore } from '../logic/spreadsheetStateStore';
 import { useDbStore } from '../../../storage/store/useDbStore';
@@ -178,7 +178,7 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
     // Categories
     { type: 'category' as const, id: 'all', label: 'All', icon: <FaFilter className="text-[10px]" /> },
     { type: 'category' as const, id: 'note', label: 'All Notes', icon: <NotesIcon size={14} /> },
-    { type: 'category' as const, id: 'snippet', label: 'Snippets', icon: <FaCode className="text-[var(--color-iconDefault)]" size={14} /> },
+    { type: 'category' as const, id: 'snippet', label: 'Text Expanders', icon: <FaCode className="text-[var(--color-iconDefault)]" size={14} /> },
     { type: 'category' as const, id: 'todo', label: 'Todos', icon: <BsCalendarCheck className="text-[var(--color-iconDefault)]" size={14} /> },
     { type: 'category' as const, id: 'link', label: 'Smart Links', icon: <FaLink className="text-[var(--color-iconDefault)]" size={14} /> },
     { type: 'category' as const, id: 'general_commands', label: 'System Commands', icon: <FaTerminal className="text-blue-400" size={14} /> },
@@ -329,7 +329,7 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
                 showHotkeysOnly ||
                 showShortcutsOnly
                 ? 'bg-blue-900/30 text-blue-400 border-blue-800'
-                : 'bg-transparent border-transparent text-neutral-400 hover:text-white hover:bg-white/5'
+                : 'bg-transparent border-transparent text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
             )}
             title="Filter Options"
           >
@@ -345,7 +345,7 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
                   {/* Space Column */}
                   <div className="flex-[1.1] px-1.5">
                     <div className={clsx(
-                      "px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5", "text-neutral-500 border-white/5"
+                      "px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5", "text-[var(--color-textMuted)] border-[var(--color-borderDefault)]"
                     )}>
                       Spaces
                     </div>
@@ -361,15 +361,15 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
                               className={clsx(
                                 'flex items-center gap-2 w-full px-1.5 py-1 text-[12px] rounded-md transition-all group relative cursor-pointer',
                                 active
-                                  ? 'bg-blue-900/20 text-blue-400 font-semibold'
-                                  : 'text-neutral-400 hover:bg-neutral-900 hover:text-white',
+                                  ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
+                                  : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
                               )}>
                               <div
                                 className={clsx(
                                   'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all duration-200',
                                   active
-                                    ? 'bg-blue-600 border-blue-600'
-                                    : 'border-neutral-700 bg-neutral-900 group-hover:border-neutral-600',
+                                    ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
+                                    : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] group-hover:border-[var(--color-borderActive)]',
                                 )}>
                                 {active && <FaCheck className="text-white text-[7px]" />}
                               </div>
@@ -456,7 +456,7 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
                   {/* Visibility Column */}
                   <div className="flex-[1.1] px-1.5">
                     <div className={clsx(
-                      "px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5", "text-neutral-500 border-white/5"
+                      "px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5", "text-[var(--color-textMuted)] border-[var(--color-borderDefault)]"
                     )}>
                       Visibility
                     </div>
@@ -472,15 +472,15 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
                               className={clsx(
                                 'flex items-center gap-2 w-full px-1.5 py-1 text-[12px] rounded-md transition-all group relative cursor-pointer',
                                 active
-                                  ? 'bg-blue-900/20 text-blue-400 font-semibold'
-                                  : 'text-neutral-400 hover:bg-neutral-900 hover:text-white',
+                                  ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
+                                  : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
                               )}>
                               <div
                                 className={clsx(
                                   'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all duration-200',
                                   active
-                                    ? 'bg-blue-600 border-blue-600'
-                                    : 'border-neutral-700 bg-neutral-900 group-hover:border-neutral-600',
+                                    ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
+                                    : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] group-hover:border-[var(--color-borderActive)]',
                                 )}>
                                 {active && <FaCheck className="text-white text-[7px]" />}
                               </div>
@@ -503,7 +503,7 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
                   {/* Quick Filters Column */}
                   <div className="flex-[1.2] px-1.5 relative">
                     <div className={clsx(
-                      "px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5 flex items-center justify-between", "text-neutral-500 border-white/5"
+                      "px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5 flex items-center justify-between", "text-[var(--color-textMuted)] border-[var(--color-borderDefault)]"
                     )}>
                       <span>Quick Filters</span>
                     </div>
@@ -519,15 +519,15 @@ const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
                               className={clsx(
                                 'flex items-center gap-2 w-full px-1.5 py-1 text-[12px] rounded-md transition-all group relative cursor-pointer',
                                 active
-                                  ? 'bg-blue-900/20 text-blue-400 font-semibold'
-                                  : 'text-neutral-400 hover:bg-neutral-900 hover:text-white',
+                                  ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
+                                  : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
                               )}>
                               <div
                                 className={clsx(
                                   'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all duration-200',
                                   active
-                                    ? 'bg-blue-500 border-blue-500'
-                                    : 'border-neutral-700 bg-neutral-900 group-hover:border-neutral-600',
+                                    ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
+                                    : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] group-hover:border-[var(--color-borderActive)]',
                                 )}>
                                 {active && <FaCheck className="text-white text-[7px]" />}
                               </div>

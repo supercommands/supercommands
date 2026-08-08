@@ -3,6 +3,11 @@ import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import { extractSnippetIdFromCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { getUserHotkeyByCombination } from '../../../../../shared-components/hotkeys/core/hotkeyDbData';
+import { recordAssignedTriggerUsage } from '../../../../../shared-components/triggers';
+import {
+  hasRunnableAiPrompt,
+  runAiPrompt,
+} from '../../../../../allObjectFolder/src/createObject/aiPrompt/runAiPrompt';
 
 interface UseKeyboardShortcutsProps {
   setIsViewDropdownOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -20,6 +25,9 @@ export const useKeyboardShortcuts = ({
   const dbNotes = useDbStore(state => state.notes);
   const dbLinks = useDbStore(state => state.links);
   const dbSnippets = useDbStore(state => state.snippets);
+  const dbAutomations = useDbStore(state => state.automations);
+  const dbAiPrompts = useDbStore(state => state.aiPrompts);
+  const dbTodos = useDbStore(state => state.todos);
   const dbWorkspaces = useDbStore(state => state.workspaces);
   const dbFolders = useDbStore(state => state.folders);
   // Helper function to check if any modal/popup is open
@@ -64,6 +72,34 @@ export const useKeyboardShortcuts = ({
       return dbFolders.find(folder => String(folder.id) === String(folderId)) ?? null;
     },
     [dbFolders],
+  );
+
+  const recordNewtabHotkeyUsage = useCallback(
+    (hotkey: string, referenceId: string, referenceType: string, success = true, errorCode?: string) => {
+      const allRecords = [
+        ...dbNotes,
+        ...dbLinks,
+        ...dbSnippets,
+        ...dbAutomations,
+        ...dbAiPrompts,
+        ...dbTodos,
+      ] as any[];
+      const actualId = extractSnippetIdFromCompoundId(referenceId);
+      const entity = allRecords.find(record => String(record?.id || record?.snippet_id || '') === actualId);
+      recordAssignedTriggerUsage({
+        triggerKind: 'user_hotkey',
+        triggerValue: hotkey,
+        triggerSource: 'hotkey',
+        referenceId,
+        referenceType,
+        surface: 'newtab',
+        success,
+        errorCode,
+        targetLabelSnapshot: entity?.title || entity?.name || entity?.key || referenceId,
+        triggerLabelSnapshot: hotkey,
+      }).catch(err => console.warn('[useKeyboardShortcuts] Failed to record hotkey usage:', err));
+    },
+    [dbAiPrompts, dbAutomations, dbLinks, dbNotes, dbSnippets, dbTodos],
   );
 
   const openSnippetRecord = useCallback(
@@ -154,16 +190,23 @@ export const useKeyboardShortcuts = ({
             if (referenceId === 'create') {
               setIsViewDropdownOpen(true);
               setIsGlobalCreateMenuOpen(true);
+              recordNewtabHotkeyUsage(pressedHotkey, referenceId, referenceType);
               return;
             }
             if (searchbarRef.current) {
               searchbarRef.current.executeCommand(referenceId as any, { mode: 'lock' });
               searchbarRef.current.focus();
+              recordNewtabHotkeyUsage(pressedHotkey, referenceId, referenceType);
             }
             return;
           }
 
-          if (referenceType === 'note' || referenceType === 'snippet' || (referenceType as string) === 'prompt') {
+          const normalizedReferenceType = String(referenceType || '').toLowerCase();
+          if (
+            referenceType === 'note' ||
+            referenceType === 'snippet' ||
+            ['prompt', 'aiprompt', 'ai_prompt'].includes(normalizedReferenceType)
+          ) {
             e.preventDefault();
             e.stopPropagation();
 
@@ -172,11 +215,21 @@ export const useKeyboardShortcuts = ({
 
             if (referenceType === 'snippet') {
               useUIStore.getState().openEditor({ type: 'note', id: actualId, props: { category: 'snippet' } });
-            } else if ((referenceType as string) === 'prompt') {
-              useUIStore.getState().openEditor({ type: 'aiPrompt', id: actualId });
+            } else if (['prompt', 'aiprompt', 'ai_prompt'].includes(normalizedReferenceType)) {
+              const promptRecord = dbAiPrompts.find(prompt => String(prompt.id) === String(actualId));
+              if (promptRecord && hasRunnableAiPrompt(promptRecord)) {
+                try {
+                  await runAiPrompt(promptRecord);
+                } catch (error) {
+                  console.error('[useKeyboardShortcuts] Failed to run AI prompt:', error);
+                }
+              } else {
+                useUIStore.getState().openEditor({ type: 'aiPrompt', id: actualId });
+              }
             } else {
               useUIStore.getState().openEditor({ type: 'note', id: actualId, props: { category: 'note' } });
             }
+            recordNewtabHotkeyUsage(pressedHotkey, referenceId, referenceType);
             return;
           }
 
@@ -191,6 +244,15 @@ export const useKeyboardShortcuts = ({
               action: 'trigger_hotkey',
               type: referenceType,
               id: actualId,
+              triggerUsage: {
+                triggerKind: 'user_hotkey',
+                triggerValue: pressedHotkey,
+                triggerSource: 'hotkey',
+                surface: 'newtab',
+                referenceId,
+                referenceType,
+                correlationId: `newtab_hotkey_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+              },
             });
             return;
           }
@@ -202,6 +264,7 @@ export const useKeyboardShortcuts = ({
               // Pass the reference directly, no need to aggressively filter and cache automations
               searchbarRef.current.activateAutomation({ id: referenceId });
               searchbarRef.current.focus();
+              recordNewtabHotkeyUsage(pressedHotkey, referenceId, referenceType);
             }
             return;
           }
@@ -212,6 +275,7 @@ export const useKeyboardShortcuts = ({
             if (searchbarRef.current) {
               searchbarRef.current.executeModule(referenceId);
               searchbarRef.current.focus();
+              recordNewtabHotkeyUsage(pressedHotkey, referenceId, referenceType);
             }
             return;
           }

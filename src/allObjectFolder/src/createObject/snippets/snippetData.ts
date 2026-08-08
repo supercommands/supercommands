@@ -12,10 +12,27 @@
 
 import Dexie from 'dexie';
 
-import type { SnippetRecord, CreateSnippetInput, UpdateSnippetInput } from './snippetTypes';
+import type { SnippetRecord, CreateSnippetInput, UpdateSnippetInput, SnippetSnapshot } from './snippetTypes';
 import { generateEntityId } from '../../../../shared-components/utils';
 import { db } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
+import {
+  createInitialHistory,
+  normalizeHistory,
+  upsertVersionForChange,
+  deepCloneSnapshot,
+} from '../../../../shared-components/versionHistory/structuredVersionHistory';
+
+function extractSnippetSnapshot(snippet: SnippetRecord): SnippetSnapshot {
+  return {
+    title: snippet.title,
+    config: deepCloneSnapshot(snippet.config),
+    workspaceId: snippet.workspaceId,
+    folderId: snippet.folderId,
+    tagIds: snippet.tagIds || [],
+    shortcut: snippet.shortcut || '',
+  };
+}
 
 /**
  * Creates a new snippet record.
@@ -42,11 +59,16 @@ export async function createSnippet(input: CreateSnippetInput): Promise<SnippetR
     title: input.title.trim() || 'Untitled Snippet',
     config: input.config,
     tagIds: input.tagIds ?? [],
+    shortcut: input.shortcut || '',
 
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
+    versionHistory: undefined as any,
   };
+
+  const initialSnapshot = extractSnippetSnapshot(snippet);
+  snippet.versionHistory = createInitialHistory<SnippetSnapshot>(initialSnapshot, now);
 
   try {
     await db.snippets.add(snippet);
@@ -62,8 +84,9 @@ export async function createSnippet(input: CreateSnippetInput): Promise<SnippetR
  * Updates an existing snippet record.
  */
 export async function updateSnippet(snippetId: string, input: UpdateSnippetInput): Promise<SnippetRecord> {
+  const now = Date.now();
   const changes: Partial<SnippetRecord> = {
-    updatedAt: Date.now(),
+    updatedAt: now,
   };
 
   if (input.title !== undefined) {
@@ -86,18 +109,37 @@ export async function updateSnippet(snippetId: string, input: UpdateSnippetInput
     changes.tagIds = input.tagIds;
   }
 
+  if (input.shortcut !== undefined) {
+    changes.shortcut = input.shortcut;
+  }
+
   try {
-    const existing = await db.snippets.get(snippetId);
-    if (!existing) {
-      throw new Error('Snippet not found.');
-    }
+    return await db.transaction('rw', db.snippets, async () => {
+      const existing = await db.snippets.get(snippetId);
+      if (!existing) {
+        throw new Error('Snippet not found.');
+      }
 
-    const updatedCount = await db.snippets.update(snippetId, changes);
-    if (updatedCount === 0) {
-      throw new Error('Snippet could not be updated.');
-    }
+      const nextRecord: SnippetRecord = {
+        ...existing,
+        ...changes,
+        updatedAt: now,
+      };
 
-    return (await db.snippets.get(snippetId)) as SnippetRecord;
+      const prevSnapshot = extractSnippetSnapshot(existing);
+      const nextSnapshot = extractSnippetSnapshot(nextRecord);
+
+      const { history: nextHistory } = upsertVersionForChange<SnippetSnapshot>(
+        existing.versionHistory,
+        prevSnapshot,
+        nextSnapshot,
+        now
+      );
+
+      nextRecord.versionHistory = nextHistory;
+      await db.snippets.put(nextRecord);
+      return nextRecord;
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';
     console.error('[snippetData.updateSnippet] Failed:', message);

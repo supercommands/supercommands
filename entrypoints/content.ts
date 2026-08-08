@@ -3,6 +3,9 @@ import { startContentScript } from '../src/pages/contentScript/src/startContentS
 
 export default defineContentScript({
   matches: ['<all_urls>'],
+  allFrames: true,
+  matchAboutBlank: true,
+  matchOriginAsFallback: true,
   main() {
     startContentScript();
   }

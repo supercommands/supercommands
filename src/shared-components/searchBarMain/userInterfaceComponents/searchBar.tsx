@@ -1,4 +1,4 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useAppearance } from '@extension/ui';
 import {
   type SavedAutomation,
@@ -38,6 +38,7 @@ import { TbSparkles } from 'react-icons/tb';
 
 import { createEventUrlFromText } from '../utilityFunctions/eventParser';
 import type { WorkspaceItem } from '../../../allObjectFolder/src/createObject/workspaceItemTypes';
+import { hasRunnableAiPrompt, runAiPrompt } from '../../../allObjectFolder/src/createObject/aiPrompt';
 export type Snippet = WorkspaceItem & { category?: string; sessionOpenSettings?: any; };
 
 
@@ -52,6 +53,12 @@ import {
 } from '../commandConfigurations/localCommands';
 import { useUserShortcuts } from '../../../shared-components/shortcuts';
 import { useUserHotkeys } from '../../../shared-components/hotkeys/hooks/useUserHotkeys';
+import {
+  getCommandSpacePrefix,
+  matchesShortcutCategory,
+  parseShortcutInvocation,
+  recordAssignedTriggerUsage,
+} from '../../../shared-components/triggers';
 import { FaArrowLeft, FaArrowUp } from 'react-icons/fa';
 import { buildCommonCommandEntries } from '../searchLogicAndAlgorithms/commonResults';
 import CmdIcon from '../../../shared-components/icons/cmdIcon';
@@ -242,6 +249,10 @@ const stripHtml = (html: string) => {
 export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
   (
     {
+      isEmbedded,
+      contextUrl,
+      containerClassName,
+      inputWrapperClassName,
       onSuggestionStateChange,
       onCommandExecute,
       onSnippetSelect,
@@ -366,7 +377,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       const meta = {
         a: { label: 'All' },
         [nKey]: { label: 'Notes' },
-        [snKey]: { label: 'Snippets' },
+        [snKey]: { label: 'Text Expanders' },
         [pKey]: { label: 'Prompts' },
         [lKey]: { label: 'Links' },
         [cKey]: { label: 'Commands' },
@@ -402,7 +413,21 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     const parseSlashFilter = useCallback(
       (input: string): { alias: string; label: string; prefixLength: number } | null => {
         const normalized = input.replace(/\u00A0/g, ' ');
-        const normalizedCommandKey = String(commandKey || customOmniboxPrefixes?.command || 'c').trim().toLowerCase() || 'c';
+        const normalizedCommandKey = getCommandSpacePrefix(commandKey || customOmniboxPrefixes);
+        
+        const colonMatch = normalized.match(/^([a-zA-Z0-9_-]+):\s/);
+        if (colonMatch && colonMatch[0]) {
+          const colonAlias = colonMatch[1].toLowerCase();
+          
+          if (slashFilterMeta[colonAlias]) {
+            return {
+              alias: colonAlias,
+              label: slashFilterMeta[colonAlias].label,
+              prefixLength: colonMatch[0].length
+            };
+          }
+        }
+
         const isSlashFormat = normalized.startsWith('/');
         const isCommandFormat = normalized.toLowerCase().startsWith(`${normalizedCommandKey} `);
         if (!isSlashFormat && !isCommandFormat) return null;
@@ -576,7 +601,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         let fullValue = normalized;
 
         if (activeSlashFilterRef.current) {
-          const normalizedCommandKey = String(commandKey || customOmniboxPrefixes?.command || 'c').trim().toLowerCase() || 'c';
+          const normalizedCommandKey = getCommandSpacePrefix(commandKey || customOmniboxPrefixes);
           const normalizedFilter = String(activeSlashFilterRef.current || '').trim().toLowerCase();
           const filterLabel = String(slashFilterMeta[normalizedFilter]?.label || '').trim().toLowerCase();
           const typedQuery = String(normalized || '').trimStart();
@@ -635,11 +660,13 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     // Start as false — Board View should only open after explicit user interaction (typing/click)
     // NOT auto-render just because isBoardViewEnabled is true
     const [keepBoardViewOpen, setKeepBoardViewOpen] = useState(false);
+    const [showEmptySlashDropdown, setShowEmptySlashDropdown] = useState(false);
 
     useEffect(() => {
       if (value.trim().length > 0) {
         // User typed something while in Board View mode — keep it open
         setKeepBoardViewOpen(true);
+        setShowEmptySlashDropdown(false);
       } else if (value.trim().length === 0) {
         // Search cleared — reset so Board View doesn't persist without interaction
         setKeepBoardViewOpen(false);
@@ -2313,14 +2340,14 @@ await saveRecentCommand(commandId);
       // 4. No @ command is selected
       const isAllowedEmpty = isInitialAltSFocus && !trimmed;
       if (
-        value.trim() === `c` ||
-        value.startsWith(`c `) ||
+        value.trim().toLowerCase() === `c` ||
+        value.toLowerCase().startsWith(`c `) ||
         (!isAllowedEmpty && (!trimmed || trimmed.length < 2 || trimmed.length > 17)) ||
         lockedCommand ||
         selectedAtCommand
       ) {
         bookmarkSearchRef.current++; // Invalidate any pending async responses
-        if (!isInitialAltSFocus || value.trim() === `c`) {
+        if (!isInitialAltSFocus || value.trim().toLowerCase() === `c`) {
           setBookmarkSuggestions([]);
         }
         return;
@@ -3355,6 +3382,41 @@ if (items && Array.isArray(items)) {
       [onSnippetSelect, value, lockedCommand],
     );
 
+    const recordSelectedShortcutUsage = useCallback(
+      (selection: any, success = true, errorCode?: string) => {
+        const shortcut = selection?._userShortcutRecord || selection?.item?._userShortcutRecord || selection?.proxyEntity?._userShortcutRecord;
+        if (!shortcut?.trigger || !shortcut?.referenceId) return;
+
+        const currentValue = valueRef.current?.trim() || value.trim();
+        const parsedShortcut = parseShortcutInvocation(
+          currentValue,
+          customOmniboxPrefixesRef.current || customOmniboxPrefixes,
+        );
+        const item = selection?.item || selection?.proxyEntity || selection;
+        const targetLabel =
+          item?.title ||
+          item?.name ||
+          item?.label ||
+          item?.key ||
+          selection?.label ||
+          shortcut.referenceId;
+
+        recordAssignedTriggerUsage({
+          triggerKind: 'user_shortcut',
+          triggerValue: shortcut.trigger,
+          triggerSource: parsedShortcut.triggerSource,
+          referenceId: shortcut.referenceId,
+          referenceType: shortcut.referenceType,
+          surface: 'main_search',
+          success,
+          errorCode,
+          targetLabelSnapshot: targetLabel,
+          triggerLabelSnapshot: shortcut.trigger,
+        }).catch((err: any) => console.warn('[Searchbar] Failed to record selected shortcut usage:', err));
+      },
+      [customOmniboxPrefixes, value],
+    );
+
     const handleSnippetDelete = useCallback(
       (selection: WorkspaceItemSuggestion | null | undefined) => {
         if (!selection || !activeSnippetCommandId) return;
@@ -3376,9 +3438,10 @@ if (items && Array.isArray(items)) {
     );
 
     const searchbarSuggestionValue = (() => {
+      if (showEmptySlashDropdown && !value) return '/';
       if (!activeSlashFilter) return value;
 
-      const normalizedCommandKey = String(commandKey || customOmniboxPrefixes?.command || 'c').trim().toLowerCase() || 'c';
+      const normalizedCommandKey = getCommandSpacePrefix(commandKey || customOmniboxPrefixes);
       const normalizedFilter = String(activeSlashFilter || '').trim().toLowerCase();
       const filterLabel = String(slashFilterMeta[normalizedFilter]?.label || '').trim().toLowerCase();
       const typedQuery = String(value || '').trimStart();
@@ -3426,17 +3489,28 @@ if (items && Array.isArray(items)) {
       userDbShortcuts,
       userDbHotkeys,
       customPrefixes: customOmniboxPrefixesRef.current,
+      isEmbedded,
+      contextUrl,
     });
 
     useEffect(() => {
-      // Only adjust highlightIndex when allSuggestions changes, not when highlightIndex changes
-      setHighlightIndex(prevIdx => {
-        if (allSuggestions.length > 0) {
-          return Math.min(prevIdx, allSuggestions.length - 1);
-        }
-        return 0;
-      });
-    }, [allSuggestions]);
+      const maxIndex = allSuggestions.length - 1;
+      if (allSuggestions.length > 0 && highlightIndex > maxIndex) {
+        setHighlightIndex(maxIndex);
+      } else if (allSuggestions.length === 0 && highlightIndex !== 0) {
+        setHighlightIndex(0);
+      }
+    }, [allSuggestions.length, highlightIndex]);
+
+    useEffect(() => {
+      onSuggestionStateChange?.({
+        value,
+        suggestions: allSuggestions,
+        isVisible: !isSuggestionsHidden,
+        highlightIndex,
+        mode: 'mixed',
+      } as any);
+    }, [value, allSuggestions, isSuggestionsHidden, highlightIndex, onSuggestionStateChange]);
 
     const handleRequestOpenUrls = useCallback(
       (urls: string[], title?: string) => {
@@ -4228,7 +4302,7 @@ const updatedModels: string[] = [];
                     autoSubmit: typeof baseLink === 'string' ? undefined : baseLink.autoSubmit,
                     modelId: id,
                     targetTabId: existingTabId || undefined,
-                    forceNewTab: !existingTabId,
+                    forceNewTab: false,
                   });
                 }
               });
@@ -4268,7 +4342,7 @@ const updatedModels: string[] = [];
                   },
                   modelId: custom.id,
                   targetTabId: existingTabId || undefined,
-                  forceNewTab: !existingTabId,
+                  forceNewTab: false,
                 });
               });
 
@@ -4699,6 +4773,7 @@ const updatedModels: string[] = [];
     const activateWorkspaceItemSuggestion = useCallback(
       (selection: WorkspaceItemSuggestion | null | undefined) => {
         if (!selection) return;
+        recordSelectedShortcutUsage(selection);
         const snippet = selection.item as any;
         const category = (snippet.category || '').toLowerCase();
         let urls: string[] = [];
@@ -4742,7 +4817,7 @@ const updatedModels: string[] = [];
 
         handleSnippetSelect(selection);
       },
-      [handleRequestOpenUrls, handleSnippetSelect],
+      [handleRequestOpenUrls, handleSnippetSelect, recordSelectedShortcutUsage],
     );
 
     const executeCommonCommand = useCallback(
@@ -5261,6 +5336,7 @@ if (pendingQueryUrls && pendingQueryUrls.length > 0) {
                           isMac={typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0}
                           savedAgents={savedAiAgents}
                           onSaveAgent={onSaveAgent || (() => { })}
+                          compact={!theme.isDark}
                         />
                       </div>
                     </div>
@@ -5274,7 +5350,13 @@ if (pendingQueryUrls && pendingQueryUrls.length > 0) {
                   e.stopPropagation();
                   exitCommandMode();
                 }}
-                className={`text-red-300 hover:text-red-400 ml-1 cursor-pointer transition-opacity ${id === 'ai' ? 'opacity-0 group-hover:opacity-100' : ''}`}>
+                className={
+                  !theme.isDark
+                    ? 'ml-1 flex h-5 w-5 items-center justify-center rounded-full opacity-100 text-[var(--color-accent)] hover:text-[var(--color-accentHover)] hover:bg-[var(--color-hoverBg)] transition-colors cursor-pointer'
+                    : `text-red-300 hover:text-red-400 ml-1 cursor-pointer transition-opacity ${id === 'ai' ? 'opacity-0 group-hover:opacity-100' : ''}`
+                }
+                aria-label="Exit AI models mode"
+                title="Exit AI models mode">
                 <LuX size={12} strokeWidth={2.5} />
               </button>
             </div>
@@ -5309,7 +5391,13 @@ if (pendingQueryUrls && pendingQueryUrls.length > 0) {
                   e.stopPropagation();
                   exitCommandMode();
                 }}
-                className={`text-red-400 hover:text-red-500 ml-1 cursor-pointer transition-opacity opacity-0 group-hover:opacity-100 flex items-center justify-center w-4 h-4 rounded-full hover:bg-red-500/10`}>
+                className={
+                  !theme.isDark
+                    ? 'ml-1 flex h-5 w-5 items-center justify-center rounded-full opacity-100 text-[var(--color-accent)] hover:text-[var(--color-accentHover)] hover:bg-[var(--color-hoverBg)] transition-colors cursor-pointer'
+                    : `text-red-400 hover:text-red-500 ml-1 cursor-pointer transition-opacity opacity-0 group-hover:opacity-100 flex items-center justify-center w-4 h-4 rounded-full hover:bg-red-500/10`
+                }
+                aria-label="Exit AI models mode"
+                title="Exit AI models mode">
                 <LuX size={12} strokeWidth={2.5} />
               </button>
             </div>
@@ -5483,7 +5571,7 @@ if (isLocalCommandId(id as string)) {
             if (cmdId === 'google') {
               return (
                 <div ref={prefixRef} className="w-5 h-5 flex items-center justify-start">
-                  <FaSearch size={14} className="text-black dark:text-white" />
+                  <FaSearch size={14} className="text-[var(--color-iconDefault)]" />
                 </div>
               );
             }
@@ -5589,7 +5677,7 @@ if (isLocalCommandId(id as string)) {
 
       return (
         <div ref={prefixRef} className="w-5 h-5 flex items-center justify-start">
-          <FaSearch size={14} className="text-black dark:text-white" />
+          <FaSearch size={14} className="text-[var(--color-iconDefault)]" />
         </div>
       );
     };
@@ -6004,7 +6092,6 @@ const selectedLocalLabel = useMemo(() => {
       const hasOpenUrl = openUrlSuggestion !== null;
 
       if (lockedCommand) {
-        console.log('[searchBar.renderMode] lockedCommand is set, returning null');
         return null;
       }
 
@@ -6012,18 +6099,6 @@ const selectedLocalLabel = useMemo(() => {
 
       const hasMultipleTypes =
         [hasCommands, hasWorkspaceItems, hasHistory, hasBookmarks, hasCommon, hasOpenUrl].filter(Boolean).length > 1;
-
-      console.log('[searchBar.renderMode] DEBUG:', {
-        hasCommands,
-        hasWorkspaceItems,
-        hasHistory,
-        hasBookmarks,
-        hasCommon,
-        hasOpenUrl,
-        hasMultipleTypes,
-        commandSuggestionsLength: commandSuggestions.length,
-        commandSuggestionsKinds: commandSuggestions.map((c: any) => c._kind)
-      });
 
       if (hasMultipleTypes) return 'mixed';
 
@@ -6084,7 +6159,7 @@ const selectedLocalLabel = useMemo(() => {
       // showAIHistoryPanel is now rendered as a popup internal to Searchbar to ensure visibility
       // return showAIHistoryPanel ? true : ...
 
-      return (value.trim().length > 0 || selectedImages.length > 0 || isInitialAltSFocus || keepBoardViewOpen) && !inlineComposerActive;
+      return (value.trim().length > 0 || selectedImages.length > 0 || isInitialAltSFocus || keepBoardViewOpen || showEmptySlashDropdown) && !inlineComposerActive;
     }, [
       value,
       isFocused,
@@ -6098,6 +6173,7 @@ const selectedLocalLabel = useMemo(() => {
       activeCollection,
       showAIHistoryPanel,
       isInitialAltSFocus,
+      showEmptySlashDropdown,
     ]);
 
     useEffect(() => {
@@ -6107,9 +6183,9 @@ const selectedLocalLabel = useMemo(() => {
           selectionSourceRef.current = null;
           setSelectedCommand(null);
         }
-        setContextualMatches([]);
-        setIsContextualPopupOpen(false);
-        setContextualPopupIndex(-1);
+        setContextualMatches(prev => (prev.length > 0 ? [] : prev));
+        setIsContextualPopupOpen(prev => (prev ? false : prev));
+        setContextualPopupIndex(prev => (prev !== -1 ? -1 : prev));
         return;
       }
 
@@ -6159,7 +6235,7 @@ const selectedLocalLabel = useMemo(() => {
       const nextPopupOpen = allMatches.length > 0;
       setIsContextualPopupOpen(prev => (prev === nextPopupOpen ? prev : nextPopupOpen));
       if (!nextPopupOpen) {
-        setContextualPopupIndex(-1);
+        setContextualPopupIndex(prev => (prev !== -1 ? -1 : prev));
       }
     }, [
       value,
@@ -6181,33 +6257,118 @@ const selectedLocalLabel = useMemo(() => {
         const selected =
           allSuggestions.length > 0 ? allSuggestions[Math.min(highlightIndex, allSuggestions.length - 1)] : null;
 
-        // Check database-defined custom shortcuts first
-        if (trimmedValue.startsWith('/')) {
-          const firstSpaceIndex = trimmedValue.indexOf(' ');
-          const typedShortcut = firstSpaceIndex !== -1 ? trimmedValue.substring(0, firstSpaceIndex).toLowerCase() : trimmedValue.toLowerCase();
-          const remainingPrompt = firstSpaceIndex !== -1 ? trimmedValue.substring(firstSpaceIndex + 1).trim() : '';
-
+        // Check database-defined custom shortcuts first. This intentionally treats
+        // `recording`, `/recording`, and `c recording` as the same assigned trigger.
+        const parsedShortcut = parseShortcutInvocation(
+          trimmedValue,
+          customOmniboxPrefixesRef.current || customOmniboxPrefixes,
+        );
+        if (parsedShortcut.trigger) {
           const matchedDbShortcut = userDbShortcuts?.find(
-            (s: any) => s.trigger.toLowerCase() === typedShortcut
+            (s: any) =>
+              String(s.trigger || '').toLowerCase() === parsedShortcut.trigger &&
+              matchesShortcutCategory(String(s.referenceType || ''), parsedShortcut.categoryFilter),
           );
 
           if (matchedDbShortcut) {
 
             const { referenceId, referenceType } = matchedDbShortcut;
+            const resolveShortcutTargetLabel = () => {
+              const refId = String(referenceId);
+              const shortcutAny = matchedDbShortcut as any;
+              const shortcutLabel =
+                shortcutAny.targetLabelSnapshot ||
+                shortcutAny.targetLabel ||
+                shortcutAny.referenceLabel ||
+                shortcutAny.label ||
+                shortcutAny.title ||
+                shortcutAny.name;
+              if (shortcutLabel && String(shortcutLabel) !== refId) return String(shortcutLabel);
+
+              if (referenceType === 'command') {
+                const command = getCommandById(refId) as any;
+                return command?.label || command?.title || command?.name || refId;
+              }
+
+              if (referenceType === 'automation') {
+                const automation: any = automationSuggestions.find((a: any) => String(a.id) === refId);
+                return automation?.title || automation?.name || automation?.label || refId;
+              }
+
+              if (referenceType === 'module') {
+                const rawId = refId;
+                const normalizedId = rawId.includes(':') ? rawId.split(':')[1] : rawId.replace(/^module-/, '');
+                const moduleFromState: any = moduleSuggestions.find(m => String(m.module_id) === normalizedId);
+                return moduleFromState?.title || moduleFromState?.name || moduleFromState?.displayName || moduleFromState?.module_id || refId;
+              }
+
+              const suggestion: any = allSuggestions.find((item: any) => {
+                const itemId = item?.id || item?.item?.id || item?.item?.snippet_id || item?.snippet_id;
+                return String(itemId || '') === refId;
+              });
+              const suggestionItem = suggestion?.item || suggestion;
+              return suggestionItem?.title || suggestionItem?.name || suggestionItem?.label || suggestionItem?.key || refId;
+            };
+            const recordShortcutUse = (success = true, errorCode?: string) => {
+              recordAssignedTriggerUsage({
+                triggerKind: 'user_shortcut',
+                triggerValue: matchedDbShortcut.trigger,
+                triggerSource: parsedShortcut.triggerSource,
+                referenceId,
+                referenceType,
+                surface: 'main_search',
+                success,
+                errorCode,
+                targetLabelSnapshot: resolveShortcutTargetLabel(),
+                triggerLabelSnapshot: matchedDbShortcut.trigger,
+              }).catch((err: any) => console.warn('[Searchbar] Failed to record shortcut usage:', err));
+            };
+            const runOrEditMatchedAiPrompt = async (promptRecord: any) => {
+              resetAfterCommandExecution();
+              if (!hasRunnableAiPrompt(promptRecord)) {
+                useUIStore.getState().openEditor({ type: 'aiPrompt', id: String(promptRecord.id) });
+                recordShortcutUse();
+                return;
+              }
+
+              try {
+                await runAiPrompt(promptRecord);
+                recordShortcutUse();
+              } catch (error) {
+                console.error('[Searchbar] Failed to run AI prompt shortcut:', error);
+                recordShortcutUse(false, 'execution_failed');
+              }
+            };
+            const normalizedShortcutReferenceType = String(referenceType || '').toLowerCase();
 
             if (referenceType === 'command') {
               resetAfterCommandExecution();
               if (referenceId === 'create') {
                 handleLocalCommandExecute('create' as any);
+                recordShortcutUse();
                 return;
               }
-              activateCommandById(referenceId as AnyCommandId, remainingPrompt);
+              activateCommandById(referenceId as AnyCommandId, parsedShortcut.remainingInput);
+              recordShortcutUse();
               return;
             }
 
             if (referenceType === 'note' || referenceType === 'snippet' || referenceType === 'link') {
               resetAfterCommandExecution();
               useUIStore.getState().openEditor({ type: referenceType as any, id: referenceId });
+              recordShortcutUse();
+              return;
+            }
+
+            if (['aiprompt', 'ai_prompt', 'prompt'].includes(normalizedShortcutReferenceType)) {
+              const promptRecord = useDbStore
+                .getState()
+                .aiPrompts.find((prompt: any) => String(prompt.id) === String(referenceId));
+              if (promptRecord) {
+                await runOrEditMatchedAiPrompt(promptRecord);
+              } else {
+                recordShortcutUse(false, 'entity_not_found');
+              }
               return;
             }
 
@@ -6216,8 +6377,20 @@ const selectedLocalLabel = useMemo(() => {
               if (automation) {
                 resetAfterCommandExecution();
                 handleAutomationSelect(automation);
+                recordShortcutUse();
                 return;
               }
+
+              // Older Board-created AI Prompt shortcuts were stored as "automation".
+              const legacyPromptRecord = useDbStore
+                .getState()
+                .aiPrompts.find((prompt: any) => String(prompt.id) === String(referenceId));
+              if (legacyPromptRecord) {
+                await runOrEditMatchedAiPrompt(legacyPromptRecord);
+                return;
+              }
+              recordShortcutUse(false, 'entity_not_found');
+              return;
             }
 
             if (referenceType === 'module') {
@@ -6227,6 +6400,7 @@ const selectedLocalLabel = useMemo(() => {
               const moduleFromState = moduleSuggestions.find(m => String(m.module_id) === normalizedId);
               if (moduleFromState) {
                 handleAutomationSelect(buildAutomationFromModule(moduleFromState));
+                recordShortcutUse();
                 return;
               }
               const chromeAny = (window as any)?.chrome;
@@ -6236,6 +6410,7 @@ const selectedLocalLabel = useMemo(() => {
                   const match = modules.find((m: any) => String(m?.module_id) === normalizedId);
                   if (match) {
                     handleAutomationSelect(buildAutomationFromModule(match));
+                    recordShortcutUse();
                   }
                 });
               }
@@ -6570,7 +6745,13 @@ if (trimmedValue || trimmedPrompt || lockedCommand || selected || selectedComman
             return;
           }
 
+          if (selected._kind === 'command' && (selected as any).commandType === 'proxy' && (selected as any).proxyEntity) {
+            activateWorkspaceItemSuggestion((selected as any).proxyEntity);
+            return;
+          }
+
           if (selected._kind === 'command' && selected.commandType === 'local') {
+            recordSelectedShortcutUsage(selected);
             const def = selected.command;
             if (def.behavior === 'instant') {
               // Special case: Calendar command requires input
@@ -6591,6 +6772,7 @@ if (trimmedValue || trimmedPrompt || lockedCommand || selected || selectedComman
             selected._kind === 'command' &&
             (selected.commandType === 'remote' || selected.commandType === 'aggregate')
           ) {
+            recordSelectedShortcutUsage(selected);
             // Check for instant browser commands
             if (selected.commandType === 'remote' && selected.command) {
               const isBrowserInstant =
@@ -6945,15 +7127,22 @@ if (!cmdToken) {
         value,
         commandPrompt,
         allSuggestions,
+        automationSuggestions,
+        customOmniboxPrefixes,
+        getCommandById,
         highlightIndex,
+        handleAutomationSelect,
         selectedCommand,
         lockedCommand,
+        moduleSuggestions,
+        userDbShortcuts,
         selectedAtCommand,
         commands,
         expandPrompts,
         runRemoteCommand,
         runAggregateCommand,
         resetAfterCommandExecution,
+        recordSelectedShortcutUsage,
         bookmarkSuggestions,
         lockedLocalDef,
         inlineComposerActive,
@@ -7218,6 +7407,46 @@ if (!cmdToken) {
       return unregister;
     }, [showAtCommandMenu]);
 
+    const dismissSlashDropdown = useCallback(
+      (options?: { clearQuery?: boolean; blur?: boolean }) => {
+        setShowEmptySlashDropdown(false);
+        setKeepBoardViewOpen(false);
+
+        if (options?.clearQuery) {
+          setValueRaw('');
+          setActiveSlashFilter(null);
+          if (inputRef.current) {
+            try {
+              inputRef.current.innerHTML = '';
+              inputRef.current.innerText = '';
+            } catch (e) {
+              console.error('[SearchBar] Error clearing contentEditable in dismissSlashDropdown:', e);
+            }
+          }
+          onQueryChange?.('');
+        }
+
+        if (options?.blur) {
+          inputRef.current?.blur();
+        }
+      },
+      [onQueryChange],
+    );
+
+    useEffect(() => {
+      const isSlashActive = Boolean(showEmptySlashDropdown || (value && value.startsWith('/')));
+      if (!isSlashActive) return;
+
+      const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
+        if (isInitialAltSFocus && onInitialAltSFocusChange) {
+          onInitialAltSFocusChange(false);
+        }
+        dismissSlashDropdown({ clearQuery: true, blur: false });
+        return true;
+      });
+      return unregister;
+    }, [showEmptySlashDropdown, value, isInitialAltSFocus, onInitialAltSFocusChange, dismissSlashDropdown]);
+
     useEffect(() => {
       if (!lockedCommand && !isInitialAltSFocus) return;
       const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
@@ -7319,10 +7548,25 @@ if (!cmdToken) {
 
       const newState: SuggestionState = {
         isVisible: isSuggestionVisible,
+        showEmptySlashDropdown: Boolean(showEmptySlashDropdown && !value.trim()),
+        onDismissSlashDropdown: dismissSlashDropdown,
+        onSlashSuggestionSelect: (actionId: 'ai' | 'collections') => {
+          dismissSlashDropdown({ clearQuery: true, blur: false });
+          setValue('');
+          setHighlightIndex(-1);
+          if (actionId === 'ai') {
+            setLockedCommand('ai');
+            requestAnimationFrame(() => {
+              inputRef.current?.focus();
+            });
+          } else if (actionId === 'collections') {
+            onCommandExecute?.('collections' as any);
+          }
+        },
         suggestions: allSuggestions,
         highlightIndex,
         mode: suggestionMode,
-        value: inlineComposerActive && lockedCommand !== 'ai' ? commandPrompt : searchbarSuggestionValue,
+        value: inlineComposerActive && lockedCommand !== 'ai' ? commandPrompt : (showEmptySlashDropdown ? value : searchbarSuggestionValue),
         lockedCommand,
         onCommandMouseDown: handleCommandMouseDown,
         onHighlightIndexChange: handleHighlightIndexChange,
@@ -7459,8 +7703,9 @@ if (!cmdToken) {
     useEffect(() => {
       // Notify parent of the full query state (either the main value or the command prompt if locked)
       // This ensures the parent's searchValue is always in sync, especially for clearing.
-      onQueryChange?.(inlineComposerActive ? commandPrompt : searchbarSuggestionValue);
-    }, [searchbarSuggestionValue, commandPrompt, lockedCommand, inlineComposerActive, onQueryChange]);
+      const queryToEmit = inlineComposerActive ? commandPrompt : (showEmptySlashDropdown ? value : searchbarSuggestionValue);
+      onQueryChange?.(queryToEmit);
+    }, [searchbarSuggestionValue, value, showEmptySlashDropdown, commandPrompt, lockedCommand, inlineComposerActive, onQueryChange]);
 
     useEffect(() => {
       return () => {
@@ -7593,6 +7838,9 @@ if (!cmdToken) {
                     setSelectedCommand(null);
                   }
                   setValue(nextValue);
+                  if (nextValue.trim().length > 1) {
+                    onSearchbarFocus?.(true);
+                  }
                   setIsSuggestionsHidden(false);
                   setTimeout(updateCursorPosition, 0);
 
@@ -7641,6 +7889,7 @@ document.documentElement.classList.add('is-searchbar-focused');
                     if (document.activeElement !== inputRef.current) {
                       setKeepBoardViewOpen(false);
                       setIsFocused(false);
+                      setShowEmptySlashDropdown(false);
                       document.documentElement.classList.remove('is-searchbar-focused');
                     }
                   }, 150)
@@ -7648,18 +7897,14 @@ document.documentElement.classList.add('is-searchbar-focused');
                 onScroll={syncScroll}
                 onSelect={updateCursorPosition}
                 onClick={() => {
-
                   updateCursorPosition();
-
-                  const isUserInitiated = pendingUserFocusRef.current || isInitialAltSFocus;
                   if (pendingUserFocusRef.current) {
-                    onSearchbarFocus?.(true);
                     pendingUserFocusRef.current = false;
-                  } else if (!value.trim()) {
-                    onSearchbarFocus?.(true);
                   }
-
-}}
+                  if (!value.trim()) {
+                    setShowEmptySlashDropdown(prev => !prev);
+                  }
+                }}
                 onKeyUp={updateCursorPosition}
                 onKeyDown={handleKeyDown}
                 data-placeholder={inputPlaceholder}
@@ -7670,7 +7915,7 @@ document.documentElement.classList.add('is-searchbar-focused');
                 data-suggestion-visible={isSuggestionVisible}
                 id="searchbar-input"
                 data-searchbar-input="true"
-                className={`${activeCollection ? 'opacity-0 w-[1px] h-[1px] overflow-hidden absolute -z-10' : ''} w-full ${inputRightPadding} py-3 rounded-t-xl bg-[var(--color-inputBg)] border border-[#aeaeae] dark:border-white/10 text-neutral-200 caret-auto focus:ring-0 focus:outline-none shadow-none backdrop-blur-xl resize-none overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-400/50 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-600/50 [&::-webkit-scrollbar-track]:bg-transparent text-[16px] min-[1680px]:text-[18px] min-[1880px]:text-[20px] min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px] empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--color-textPlaceholder)] empty:before:absolute empty:before:pointer-events-none`}
+                className={`${activeCollection ? 'opacity-0 w-[1px] h-[1px] overflow-hidden absolute -z-10' : ''} w-full ${inputRightPadding} py-3 rounded-t-xl bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] caret-auto focus:ring-0 focus:outline-none shadow-none backdrop-blur-xl resize-none overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-400/50 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-600/50 [&::-webkit-scrollbar-track]:bg-transparent text-[16px] min-[1680px]:text-[18px] min-[1880px]:text-[20px] min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px] empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--color-textPlaceholder)] empty:before:absolute empty:before:pointer-events-none`}
                 style={{
                   paddingLeft: inputLeftPaddingPx,
                   ['--placeholder-padding-left' as any]: `${inputLeftPaddingPx}px`,
@@ -7730,8 +7975,8 @@ document.documentElement.classList.add('is-searchbar-focused');
                   return null;
                 })()}
                 {!isInitialAltSFocus ? (
-                  <div className="flex items-center justify-center px-1.5 py-0.5 rounded border border-neutral-500 dark:border-neutral-400 bg-transparent opacity-30 pointer-events-none">
-                    <span className="text-[9px] font-black text-neutral-600 dark:text-neutral-300 tracking-widest uppercase">
+                  <div className="flex items-center justify-center px-1.5 py-0.5 rounded border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] pointer-events-none">
+                    <span className="text-[9px] font-bold text-[var(--color-textSecondary)] tracking-widest uppercase">
                       ALT + S
                     </span>
                   </div>
@@ -7745,8 +7990,7 @@ document.documentElement.classList.add('is-searchbar-focused');
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const newVal = !autoTriggerDropdown;
-                        setAutoTriggerDropdown(newVal);
+                        setShowEmptySlashDropdown(prev => !prev);
                       }}
                       className="relative w-7 h-7 flex items-center justify-center rounded-md bg-[#073642]/5 dark:bg-white/5 border border-neutral-300 dark:border-white/10 hover:bg-[#073642]/10 dark:hover:bg-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all text-xs font-semibold focus:outline-none cursor-pointer"
                     >
@@ -7861,11 +8105,11 @@ document.documentElement.classList.add('is-searchbar-focused');
                 left: '0px',
                 width: '100%',
               }}>
-              <div className="p-2 border-b border-[#eee8d5] dark:border-white/10 flex items-center justify-between">
-                <span className="text-xs font-semibold text-[#657b83] dark:text-neutral-400 px-2">
+              <div className="p-2 border-b border-[var(--color-borderDefault)] flex items-center justify-between">
+                <span className="text-xs font-semibold text-[var(--color-textSecondary)] px-2">
                   Matching All AI Chat Agents
                 </span>
-                <span className="text-[10px] bg-[#eee8d5]/50 dark:bg-white/5 text-[#657b83]/70 dark:text-neutral-400 px-1.5 py-0.5 rounded">
+                <span className="text-[10px] bg-[var(--color-inputBg)] text-[var(--color-textMuted)] px-1.5 py-0.5 rounded">
                   {savedAgentSuggestions.length} found
                 </span>
               </div>
@@ -7875,19 +8119,19 @@ document.documentElement.classList.add('is-searchbar-focused');
                   return (
                     <div
                       key={agent.id}
-                      className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-all cursor-pointer group ${isHighlighted ? 'bg-[#eee8d5] dark:bg-white/10' : 'hover:bg-[#eee8d5]/70 dark:hover:bg-white/5'
+                      className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-all cursor-pointer group ${isHighlighted ? 'bg-[var(--color-selectedBg)]' : 'hover:bg-[var(--color-hoverBg)]'
                         }`}
                       onClick={() => handleSavedAgentSelection(agent)}
                       onMouseEnter={() => setSavedAgentHighlightIndex(index)}>
                       <span
                         className={`text-[12px] truncate flex-1 ${isHighlighted
-                          ? 'text-[#073642] font-bold dark:text-white'
-                          : 'text-[#657b83] group-hover:text-[#073642] dark:text-white/60 dark:group-hover:text-white'
+                          ? 'text-[var(--color-textPrimary)] font-bold'
+                          : 'text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)]'
                           }`}>
                         {agent.name}
                       </span>
                       {isHighlighted && (
-                        <span className="text-[10px] opacity-60 font-normal text-[#073642] dark:text-white">
+                        <span className="text-[10px] opacity-60 font-normal text-[var(--color-textPrimary)]">
                           Press Enter
                         </span>
                       )}

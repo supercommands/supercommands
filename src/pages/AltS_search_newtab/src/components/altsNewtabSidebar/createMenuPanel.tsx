@@ -1,12 +1,18 @@
-import type React from 'react';
+import type * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
 import { useAppearance } from '@extension/ui';
 import { FiChevronUp, FiChevronDown, FiZap, FiFolder, FiBriefcase } from 'react-icons/fi';
-import { FaCode, FaLink, FaRobot } from 'react-icons/fa';
+import { FaCaretDown, FaCaretRight, FaCode, FaLink, FaRobot } from 'react-icons/fa';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { getSidebarStorageData, setSidebarStorageData } from '../../../../../storage/localStorage/sidebarCustomizationStorage';
+import {
+  CREATE_SECTION_COLLAPSED_STORAGE_KEY,
+  getCreateSectionCollapsed,
+  setCreateSectionCollapsed,
+} from '../../../../../storage/localStorage/createSectionCollapseStorage';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
 import ReactDOM from 'react-dom';
+import { SidebarDashboardViewsSection } from './sidebarDashboardViewsSection';
 
 import {
   DndContext,
@@ -83,7 +89,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
   const isDark = theme.isDark;
 
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
-  const [isCreateExpanded, setIsCreateExpanded] = useState<boolean>(false);
+  const [isCreateExpanded, setIsCreateExpanded] = useState<boolean>(true);
   const [visibleCreateItems, setVisibleCreateItems] = useState<Record<string, boolean>>({
     createnotes: true,
     createlinks: true,
@@ -92,12 +98,9 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
     ai: true,
     createsnippet: true,
     agent: true,
-    createfolder: false,
-    createworkspace: false,
     'header-knowledge': true,
     'header-workflows': true,
     'header-automations': true,
-    'header-workspace': true,
   });
   const [createItemsOrder, setCreateItemsOrder] = useState<string[]>([
     'header-knowledge',
@@ -110,9 +113,6 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
     'header-automations',
     'createsnippet',
     'agent',
-    'header-workspace',
-    'createfolder',
-    'createworkspace',
   ]);
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -184,14 +184,14 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
     { id: 'header-automations' },
     { id: 'createsnippet' },
     { id: 'agent' },
-    { id: 'header-workspace' },
-    { id: 'createfolder' },
-    { id: 'createworkspace' },
   ];
 
   // Load preferences from local storage and listen to changes
   useEffect(() => {
     const loadPreferences = async () => {
+      const isCreateCollapsed = await getCreateSectionCollapsed();
+      setIsCreateExpanded(!isCreateCollapsed);
+
       const result = await getSidebarStorageData([
         'favorites_create_visible_items',
         'favorites_create_items_order',
@@ -211,49 +211,12 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
           ai: stored.ai ?? true,
           createsnippet: stored.createsnippet ?? true,
           agent: stored.agent ?? true,
-          createfolder: stored.createfolder ?? false,
-          createworkspace: stored.createworkspace ?? false,
         }));
       }
 
       if (result.favorites_create_items_order) {
         let order: string[] = result.favorites_create_items_order;
-        if (order.includes('header-others')) {
-          order = order.map(id => id === 'header-others' ? 'header-workspace' : id);
-        }
-        if (!order.includes('header-knowledge')) {
-          const notesIdx = order.indexOf('createnotes');
-          if (notesIdx >= 0) {
-            order.splice(notesIdx, 0, 'header-knowledge');
-          } else {
-            order = ['header-knowledge', ...order];
-          }
-        }
-        if (!order.includes('header-automations')) {
-          const snippetIdx = order.indexOf('createsnippet');
-          if (snippetIdx >= 0) {
-            order.splice(snippetIdx, 0, 'header-automations');
-          } else {
-            order.push('header-automations');
-          }
-        }
-        if (!order.includes('header-workflows')) {
-          const sessionIdx = order.indexOf('createsession');
-          if (sessionIdx >= 0) {
-            order.splice(sessionIdx, 0, 'header-workflows');
-          } else {
-            order.push('header-workflows');
-          }
-        }
-        if (!order.includes('header-workspace')) {
-          const folderIdx = order.indexOf('createfolder');
-          if (folderIdx >= 0) {
-            order.splice(folderIdx, 0, 'header-workspace');
-          } else {
-            order.push('header-workspace');
-          }
-        }
-        order = order.filter(id => id !== 'header-others' && id !== 'header-shortcuts');
+        order = order.filter(id => id !== 'header-others' && id !== 'header-shortcuts' && id !== 'header-workspace' && id !== 'createfolder' && id !== 'createworkspace');
         
         const defaultAllIds = [
           'header-knowledge',
@@ -266,9 +229,6 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
           'header-automations',
           'createsnippet',
           'agent',
-          'header-workspace',
-          'createfolder',
-          'createworkspace',
         ];
         const missing = defaultAllIds.filter(id => !order.includes(id));
         if (missing.length > 0) {
@@ -292,7 +252,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
 
     loadPreferences();
 
-    const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+    const handleStorageChange = (changes: { [key: string]: any }) => {
       if (changes.favorites_create_visible_items) {
         const stored = changes.favorites_create_visible_items.newValue || {};
         setVisibleCreateItems(prev => ({
@@ -305,12 +265,12 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
           ai: stored.ai ?? true,
           createsnippet: stored.createsnippet ?? true,
           agent: stored.agent ?? true,
-          createfolder: stored.createfolder ?? false,
-          createworkspace: stored.createworkspace ?? false,
         }));
       }
       if (changes.favorites_create_items_order) {
-        let order: string[] = changes.favorites_create_items_order.newValue || [];
+        let order: string[] = (changes.favorites_create_items_order.newValue || []).filter(
+          (id: string) => id !== 'header-workspace' && id !== 'createfolder' && id !== 'createworkspace'
+        );
         const defaultAllIds = [
           'createtodo',
           'createlinks',
@@ -319,8 +279,6 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
           'agent',
           'createsession',
           'createnotes',
-          'createfolder',
-          'createworkspace',
         ];
         const missing = defaultAllIds.filter(id => !order.includes(id));
         if (missing.length > 0) {
@@ -330,6 +288,9 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
       }
       if (changes.customGroupNames) {
         setCustomGroupNames(changes.customGroupNames.newValue || {});
+      }
+      if (changes[CREATE_SECTION_COLLAPSED_STORAGE_KEY]) {
+        setIsCreateExpanded(changes[CREATE_SECTION_COLLAPSED_STORAGE_KEY].newValue !== true);
       }
     };
 
@@ -347,14 +308,26 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
     return createItemsOrder.filter(id => !visibleCreateItems[id]);
   }, [createItemsOrder, visibleCreateItems]);
 
+  const handleToggleCreateExpanded = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    setIsCreateExpanded(prev => {
+      const next = !prev;
+      setCreateSectionCollapsed(!next);
+      return next;
+    });
+  };
+
   const renderCreateItem = (id: string, isIndented: boolean = false) => {
     const paddingClass = isIndented ? 'pl-[28px]' : 'pl-[12px]';
+    const itemClass = `flex items-center cursor-pointer group py-[4px] pr-[8px] ${paddingClass} gap-2.5 rounded-md hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] transition-colors duration-150`;
+    const labelClass = `text-[12px] font-semibold tracking-tight transition-colors duration-150 text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)]`;
+
     switch (id) {
       case 'createlinks':
         return (
           <div
             key="createlinks"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('createlinks');
@@ -362,12 +335,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
               <FaLink size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
+            <span className={labelClass}>
               Link
             </span>
           </div>
@@ -376,7 +344,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
         return (
           <div
             key="createsession"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('createsession');
@@ -384,13 +352,8 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
               <SessionGridIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
-              Tab Session
+            <span className={labelClass}>
+              Session
             </span>
           </div>
         );
@@ -398,20 +361,15 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
         return (
           <div
             key="createnotes"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('createnotes');
             }}>
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
-              <NotesIcon size={14} className="shrink-0 text-[var(--color-iconDefault)]" />
+              <NotesIcon size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
+            <span className={labelClass}>
               Note
             </span>
           </div>
@@ -420,7 +378,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
         return (
           <div
             key="ai"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('ai');
@@ -428,13 +386,8 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
               <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
-              Chat Agent
+            <span className={labelClass}>
+              AI Prompt
             </span>
           </div>
         );
@@ -442,7 +395,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
         return (
           <div
             key="createtodo"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('createtodo');
@@ -450,12 +403,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
               <BsCalendarCheck size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
+            <span className={labelClass}>
               Todo
             </span>
           </div>
@@ -464,7 +412,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
         return (
           <div
             key="agent"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('agent');
@@ -472,12 +420,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
               <FiZap size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
+            <span className={labelClass}>
               Automation (Beta)
             </span>
           </div>
@@ -486,7 +429,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
         return (
           <div
             key="createsnippet"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('createsnippet');
@@ -494,12 +437,7 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
               <FaCode size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
+            <span className={labelClass}>
               Text Expander
             </span>
           </div>
@@ -508,20 +446,15 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
         return (
           <div
             key="createfolder"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('createfolder');
             }}>
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
-              <FiFolder size={14} className="text-gray-400 shrink-0" />
+              <FiFolder size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
+            <span className={labelClass}>
               Folder
             </span>
           </div>
@@ -530,20 +463,15 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
         return (
           <div
             key="createworkspace"
-            className={`flex items-center cursor-pointer group py-[4px] ${paddingClass} gap-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors duration-150`}
+            className={itemClass}
             onClick={e => {
               e.stopPropagation();
               onCommandSelect('createworkspace');
             }}>
             <div className="w-4 h-4 flex items-center justify-center shrink-0">
-              <FiBriefcase size={14} className="text-gray-400 shrink-0" />
+              <FiBriefcase size={14} className="text-[var(--color-iconDefault)] shrink-0" />
             </div>
-            <span
-              className={`text-[12px] font-semibold tracking-tight transition-colors duration-150 ${
-                isDark
-                  ? 'text-neutral-400 group-hover:text-neutral-200'
-                  : 'text-neutral-500 group-hover:text-neutral-800'
-              }`}>
+            <span className={labelClass}>
               Organization
             </span>
           </div>
@@ -555,103 +483,106 @@ export const CreateMenuPanel: React.FC<CreateMenuPanelProps> = ({ onCommandSelec
 
   return (
     <div className="flex flex-col select-none">
-      <div className="px-3 pt-2.5 pb-1">
-        <div className="flex items-center gap-1.5 px-1 py-1 rounded-lg">
-          <span className="text-[11px] font-bold tracking-wider capitalize text-neutral-500 dark:text-neutral-400">
+      <div className={`px-3 pt-2 ${isCreateExpanded ? 'pb-1' : 'pb-0'}`}>
+        <button
+          type="button"
+          aria-label={isCreateExpanded ? 'Collapse Create' : 'Expand Create'}
+          aria-expanded={isCreateExpanded}
+          onClick={handleToggleCreateExpanded}
+          className="w-full flex items-center gap-1.5 px-1 py-1 rounded-lg hover:bg-[var(--color-hoverBg)] transition-colors text-left">
+          <span className="text-[11px] font-bold tracking-wider capitalize text-[var(--color-textMuted)]">
             Create
           </span>
-          <span className="text-neutral-500 dark:text-neutral-400 text-[14px] font-semibold select-none leading-none flex items-center justify-center">
-            +
+          <span className="w-4 h-4 flex items-center justify-center text-[var(--color-textMuted)]">
+            {isCreateExpanded ? <FaCaretDown size={12} /> : <FaCaretRight size={12} />}
           </span>
-        </div>
+        </button>
       </div>
 
-      <div className="flex flex-col px-3 pt-0.5 pb-2">
-        <DndContext
-          sensors={sensors}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext items={createItemsOrder.filter(id => id !== 'agent')} strategy={verticalListSortingStrategy}>
-            {(() => {
-              let hasSeenHeader = false;
-              const filteredOrder = createItemsOrder.filter(id => id !== 'agent');
-              return filteredOrder.map((id, index) => {
-                if (id.startsWith('header-')) {
-                  // A header is visible if any of its children are visible (defaulting to true if not explicitly false)
-                  let isVisible = false;
-                  for (let i = index + 1; i < filteredOrder.length; i++) {
-                    if (filteredOrder[i].startsWith('header-')) break;
-                    const itemVisible = visibleCreateItems[filteredOrder[i]] !== false;
-                    if (itemVisible || isExpanded) {
-                      isVisible = true;
-                      break;
+      {isCreateExpanded && (
+        <div className="flex flex-col px-3 pt-0.5 pb-2">
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}>
+            <SortableContext items={createItemsOrder.filter(id => id !== 'agent')} strategy={verticalListSortingStrategy}>
+              {(() => {
+                let hasSeenHeader = false;
+                const filteredOrder = createItemsOrder.filter(id => id !== 'agent');
+                return filteredOrder.map((id, index) => {
+                  if (id.startsWith('header-')) {
+                    // A header is visible if any of its children are visible (defaulting to true if not explicitly false)
+                    let isVisible = false;
+                    for (let i = index + 1; i < filteredOrder.length; i++) {
+                      if (filteredOrder[i].startsWith('header-')) break;
+                      const itemVisible = visibleCreateItems[filteredOrder[i]] !== false;
+                      if (itemVisible || isExpanded) {
+                        isVisible = true;
+                        break;
+                      }
                     }
-                  }
 
-                  if (isVisible) {
-                    hasSeenHeader = true; // Any items after this visible header will be indented
-                    const groupId = id.replace('header-', '');
-                    const defaultTitles: Record<string, string> = {
-                      knowledge: 'Knowledge',
-                      workflows: 'Workflows',
-                      automations: 'Automations',
-                      workspace: 'Workspace',
-                    };
-                    const title = customGroupNames[groupId] || defaultTitles[groupId] || groupId;
+                    if (isVisible) {
+                      hasSeenHeader = true; // Any items after this visible header will be indented
+                      const groupId = id.replace('header-', '');
+                      const defaultTitles: Record<string, string> = {
+                        knowledge: 'Knowledge',
+                        workflows: 'Workflows',
+                        automations: 'Automations',
+                        workspace: 'Workspace',
+                      };
+                      const title = customGroupNames[groupId] || defaultTitles[groupId] || groupId;
+                      return (
+                        <SortableHeader key={id} id={id}>
+                          <div className="flex items-center gap-2 mt-2 mb-1 px-1.5 select-none">
+                            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                            <span className="text-[11px] font-bold tracking-wider capitalize text-[var(--color-textMuted)]">
+                              {title}
+                            </span>
+                          </div>
+                        </SortableHeader>
+                      );
+                    }
+                    return null;
+                  } else {
+                    const isVisible = visibleCreateItems[id] !== false;
+                    if (!isVisible && !isExpanded) return null;
                     return (
-                      <SortableHeader key={id} id={id}>
-                        <div className="flex items-center gap-2 mt-2 mb-1 px-1.5 select-none">
-                          <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                          <span
-                            className={`text-[11px] font-bold tracking-wider capitalize ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}
-                          >
-                            {title}
-                          </span>
-                        </div>
-                      </SortableHeader>
+                      <SortableCreateItem key={id} id={id}>
+                        {renderCreateItem(id, hasSeenHeader)}
+                      </SortableCreateItem>
                     );
                   }
-                  return null;
-                } else {
-                  const isVisible = visibleCreateItems[id] !== false;
-                  if (!isVisible && !isExpanded) return null;
-                  return (
-                    <SortableCreateItem key={id} id={id}>
-                      {renderCreateItem(id, hasSeenHeader)}
-                    </SortableCreateItem>
-                  );
-                }
-              });
-            })()}
-          </SortableContext>
-          <DragOverlay>
-            {activeDragId ? (
-              <div className="scale-105 opacity-80 shadow-md rounded-md p-1 bg-[var(--color-sidebarBg)] border border-white/10 pointer-events-none w-[140px]">
-                {activeDragId.startsWith('header-') ? null : renderCreateItem(activeDragId, false)}
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+                });
+              })()}
+            </SortableContext>
+            <DragOverlay>
+              {activeDragId ? (
+                <div className="scale-105 opacity-80 shadow-md rounded-md p-1 bg-[var(--color-sidebarBg)] border border-white/10 pointer-events-none w-[140px]">
+                  {activeDragId.startsWith('header-') ? null : renderCreateItem(activeDragId, false)}
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
 
-        {createItemsOrder.some(id => {
-          if (id.startsWith('header-')) return false;
-          return visibleCreateItems[id] === false;
-        }) && (
-          <div className="flex justify-center mt-1">
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                setIsExpanded(!isExpanded);
-              }}
-              className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${isDark ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'}`}
-            >
-              {isExpanded ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
-            </button>
-          </div>
-        )}
-      </div>
+          {createItemsOrder.some(id => {
+            if (id.startsWith('header-')) return false;
+            return visibleCreateItems[id] === false;
+          }) && (
+            <div className="flex justify-center mt-1">
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  setIsExpanded(!isExpanded);
+                }}
+                className={`p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${isDark ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'}`}>
+                {isExpanded ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

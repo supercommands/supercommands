@@ -12,10 +12,34 @@
 
 import Dexie from 'dexie';
 
-import type { SessionRecord, CreateSessionInput, UpdateSessionInput } from './sessionTypes';
+import type { SessionRecord, CreateSessionInput, UpdateSessionInput, SessionSnapshot } from './sessionTypes';
 import { generateEntityId } from '../../../../shared-components/utils';
 import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
+import {
+  createInitialHistory,
+  normalizeHistory,
+  upsertVersionForChange,
+} from '../../../../shared-components/versionHistory/structuredVersionHistory';
+
+import { getSessionTabTitle } from './sessionHelpers';
+
+function extractSessionSnapshot(session: SessionRecord): SessionSnapshot {
+  return {
+    title: session.title,
+    description: session.description || '',
+    urls: (session.urls || []).map(u => ({
+      ...u,
+      title: getSessionTabTitle(u),
+    })),
+    workspaceId: session.workspaceId,
+    folderId: session.folderId,
+    tagIds: [...(session.tagIds || [])],
+    sessionOpenSettings: session.sessionOpenSettings ? { ...session.sessionOpenSettings } : undefined,
+    windowId: session.windowId,
+    shortcut: session.shortcut || '',
+  };
+}
 
 /**
  * Creates a new session record.
@@ -40,14 +64,23 @@ export async function createSession(input: CreateSessionInput): Promise<SessionR
     folderId,
 
     title: input.title.trim() || 'Untitled Tab Session',
-    urls: input.urls ?? [],
+    description: input.description?.trim() || '',
+    urls: (input.urls ?? []).map(u => ({
+      ...u,
+      title: getSessionTabTitle(u),
+    })),
     tagIds: input.tagIds ?? [],
     sessionOpenSettings: input.sessionOpenSettings,
+    windowId: input.windowId,
+    shortcut: input.shortcut || '',
 
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
+    versionHistory: undefined as any,
   };
+
+  session.versionHistory = createInitialHistory<SessionSnapshot>(extractSessionSnapshot(session), now);
 
   try {
     await db.sessions.add(session);
@@ -73,22 +106,32 @@ export class ConflictError extends Error {
  * Updates an existing session record.
  */
 export async function updateSession(sessionId: string, input: UpdateSessionInput): Promise<SessionRecord> {
+  const now = Date.now();
   const changes: Partial<SessionRecord> = {
-    updatedAt: Date.now(),
+    updatedAt: now,
   };
 
   if (input.title !== undefined) {
     changes.title = input.title.trim() || 'Untitled Tab Session';
   }
 
+  if (input.description !== undefined) {
+    changes.description = input.description.trim();
+  }
+
   if (input.urls !== undefined) {
-    changes.urls = input.urls;
+    changes.urls = input.urls.map(u => ({
+      ...u,
+      title: getSessionTabTitle(u),
+    }));
   }
 
   if (input.workspaceId !== undefined) changes.workspaceId = input.workspaceId;
   if (input.folderId !== undefined) changes.folderId = input.folderId;
   if (input.tagIds !== undefined) changes.tagIds = input.tagIds;
   if (input.sessionOpenSettings !== undefined) changes.sessionOpenSettings = input.sessionOpenSettings;
+  if (input.windowId !== undefined) changes.windowId = input.windowId;
+  if (input.shortcut !== undefined) changes.shortcut = input.shortcut;
 
   try {
     return await db.transaction('rw', db.sessions, async () => {
@@ -101,8 +144,25 @@ export async function updateSession(sessionId: string, input: UpdateSessionInput
         throw new ConflictError('Session was modified in another tab.', existing);
       }
 
-      await db.sessions.update(sessionId, changes);
-      return { ...existing, ...changes } as SessionRecord;
+      const nextRecord: SessionRecord = {
+        ...existing,
+        ...changes,
+        updatedAt: now,
+      };
+
+      const prevSnapshot = extractSessionSnapshot(existing);
+      const nextSnapshot = extractSessionSnapshot(nextRecord);
+
+      const { history: nextHistory } = upsertVersionForChange<SessionSnapshot>(
+        existing.versionHistory,
+        prevSnapshot,
+        nextSnapshot,
+        now
+      );
+
+      nextRecord.versionHistory = nextHistory;
+      await db.sessions.put(nextRecord);
+      return nextRecord;
     });
   } catch (error: unknown) {
     if (error instanceof ConflictError) throw error;

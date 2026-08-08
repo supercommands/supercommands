@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import * as React from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { FaFolder, FaTimes, FaCheckCircle, FaStar, FaKeyboard } from 'react-icons/fa';
@@ -36,6 +37,7 @@ import { useFavorites } from '../../../../shared-components/favorites/favoriteHo
 import { getItemCompoundId } from '../../../../shared-components/utils/idGenerator';
 import { readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { ExistingItemsTable } from '../../../../shared-components/editorContainer/ExistingItemsTable';
+import { RightSideItemsPanel } from '../../../../shared-components/editorContainer/RightSideItemsPanel';
 import { WorkspaceEditorLayout } from '../../../../shared-components/editorContainer/WorkspaceEditorLayout';
 import { EditorTitleShortcutInput } from '../../../../shared-components/editorContainer/EditorTitleShortcutInput';
 import { EditorContentWorkspace } from '../../../../shared-components/editorContainer/EditorContentWorkspace';
@@ -180,6 +182,10 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     loadSnippet,
     isInitialized,
     isShortcutInitialized,
+    versionHistoryItems,
+    selectedVersionId,
+    setSelectedVersionId,
+    isViewingHistory,
   } = useSnippetEditor({
     snippetId: selectedSnippet?.id || (selectedSnippet as any)?.snippet_id,
     onBack,
@@ -196,6 +202,8 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   }, [snippets]);
 
   const [showToolbar, setShowToolbar] = useState(true);
+  const [isRightPanelExpanded, setIsRightPanelExpanded] = useState(false);
+  const rightSideSearchInputRef = useRef<HTMLInputElement | null>(null);
   const isUserKeyManuallySetRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null); // Quill instance ref
@@ -861,11 +869,25 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
         <SharedPropertiesToolbar
           key={activeSnippetId || 'new-snippet'}
           initialSnippet={initialProperties}
+          currentSnapshot={{
+            entityType: 'snippet',
+            title: snippetTitle || 'Untitled',
+            config: snippetConfig,
+            shortcut: snippetShortcut,
+            workspaceId,
+            folderId,
+            tagIds: [...(tagIds || [])],
+          }}
           compoundId={snippetCompoundId}
           defaultName={snippetTitle || 'Untitled'}
           showShortcut={false}
           showTodo={false}
           layout="horizontal"
+          versionHistoryItems={versionHistoryItems}
+          versionHistory={snippets.find(s => s.id === activeSnippetId)?.versionHistory}
+          selectedVersionId={selectedVersionId}
+          onSelectVersion={setSelectedVersionId}
+          entityType="snippet"
           onChange={handlePropertiesChange}
           openPopupsToBottom={true}
         />
@@ -878,6 +900,55 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
         // Discard draft or reset local states if required
       }}
       onCloseCallback={onBack}
+      isRightSiblingExpanded={isRightPanelExpanded}
+      rightSiblingPanel={
+        <RightSideItemsPanel<SnippetRecord>
+          items={filteredSnippets}
+          activeItemId={activeSnippetId}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder="Search snippets..."
+          getItemTitle={snip => snip.title || 'Untitled Snippet'}
+          getItemPreview={snip => astToPlainText(typeof snip.config === 'string' ? snip.config : JSON.stringify(snip.config))}
+          getItemCompoundId={snip =>
+            getItemCompoundId({
+              snippet: snip,
+              workspace: snip.workspaceId ? ({ workspace_id: snip.workspaceId } as any) : null,
+              folder: snip.folderId ? ({ folder_id: snip.folderId } as any) : null,
+            })
+          }
+          getItemType={() => 'snippet'}
+          getItemWorkspaceId={snip => snip.workspaceId || null}
+          getItemFolderId={snip => snip.folderId || null}
+          getItemTagIds={snip => snip.tagIds || []}
+          shortcutPrefix="s"
+          shortcutsMap={shortcutsMap}
+          hotkeysMap={hotkeysMap}
+          workspaceNamesMap={workspaceNamesMap}
+          folderNamesMap={folderNamesMap}
+          tagNamesMap={tagNamesMap}
+          onLoadItem={loadSnippet}
+          onDeleteItem={id => {
+            setSnippetToDeleteId(id);
+            setIsDeleteDialogOpen(true);
+          }}
+          onUpdateShortcut={async (id, val) => {
+            await handleUpdateItemField(id, 'shortcut', val);
+          }}
+          onUpdateTitle={async (id, val) => {
+            await handleUpdateItemField(id, 'title', val);
+          }}
+          onUpdateTags={async (id, tagText) => {
+            await handleUpdateItemField(id, 'tags', tagText);
+          }}
+          isFavorite={isFavorite}
+          toggleFavorite={toggleFavorite}
+          isExpanded={isRightPanelExpanded}
+          onExpandChange={setIsRightPanelExpanded}
+          searchInputRef={rightSideSearchInputRef}
+          emptyStateMessage="No text expanders found"
+        />
+      }
       deleteModalProps={{
         isOpen: isDeleteDialogOpen,
         onClose: () => {
@@ -887,14 +958,18 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
         onConfirm: async () => {
           if (snippetToDeleteId) {
             try {
-              const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
-              const fldObj = folderId ? { folder_id: folderId } : null;
+              const targetSnip = snippets.find(s => s.id === snippetToDeleteId);
+              const wsObj = targetSnip?.workspaceId ? { workspace_id: targetSnip.workspaceId } : (workspaceId ? { workspace_id: workspaceId } : null);
+              const fldObj = targetSnip?.folderId ? { folder_id: targetSnip.folderId } : (folderId ? { folder_id: folderId } : null);
               const compoundId = getItemCompoundId({ snippet: { id: snippetToDeleteId }, workspace: wsObj, folder: fldObj });
               await clearShortcut(snippetToDeleteId, compoundId, 'snippet');
               const { deleteSnippet } = await import('./snippetData');
               await deleteSnippet(snippetToDeleteId);
-              if (snippetToDeleteId === activeSnippetId) {
+              if (snippetToDeleteId === activeSnippetId || snippetToDeleteId === (selectedSnippet as any)?.id) {
                 loadSnippet(null);
+                setSnippetTitle('');
+                setSnippetConfig('');
+                setSnippetShortcut('');
               }
             } catch (err) {
               console.error('Delete failed:', err);
@@ -903,8 +978,8 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
           setIsDeleteDialogOpen(false);
           setSnippetToDeleteId(null);
         },
-        title: snippetToDeleteId && filteredSnippets.find(s => s.id === snippetToDeleteId)?.title ? `Delete "${filteredSnippets.find(s => s.id === snippetToDeleteId)?.title}"?` : 'Delete this snippet?',
-        description: "Are you sure you want to delete this snippet? This action cannot be undone."
+        title: snippetToDeleteId && filteredSnippets.find(s => s.id === snippetToDeleteId)?.title ? `Delete "${filteredSnippets.find(s => s.id === snippetToDeleteId)?.title}"?` : 'Delete this text expander?',
+        description: "Are you sure you want to delete this text expander? This action cannot be undone."
       }}
       rightColumnContent={
         category === 'snippet' ? (
@@ -921,38 +996,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
       }
       searchQuery={searchQuery}
       setSearchQuery={setSearchQuery}
-      searchPlaceholder="Search snippets..."
-      bottomListContent={
-        <ExistingItemsTable
-          items={filteredSnippets}
-          activeItemId={activeSnippetId}
-          onLoadItem={loadSnippet}
-          getItemTitle={(snip) => snip.title || ''}
-          getItemPreview={(snip) => astToPlainText(typeof snip.config === 'string' ? snip.config : JSON.stringify(snip.config))}
-          getItemCompoundId={(snip) => getItemCompoundId({
-            snippet: snip,
-            workspace: snip.workspaceId ? { workspace_id: snip.workspaceId } : null,
-            folder: snip.folderId ? { folder_id: snip.folderId } : null
-          })}
-          getItemType={() => 'snippet'}
-          shortcutsMap={shortcutsMap}
-          hotkeysMap={hotkeysMap}
-          isFavorite={isFavorite}
-          toggleFavorite={toggleFavorite}
-          onDeleteClick={(id) => {
-            setSnippetToDeleteId(id);
-            setIsDeleteDialogOpen(true);
-          }}
-          onFavoriteToggled={fetchAllShortcuts}
-          onUpdateItemField={handleUpdateItemField}
-          folderNamesMap={folderNamesMap}
-          workspaceNamesMap={workspaceNamesMap}
-          tagNamesMap={tagNamesMap}
-          emptyStateMessage="No snippets found. Type above to create your first snippet!"
-          isFullScreenMode={isFullScreenMode}
-          title=""
-        />
-      }
+      searchPlaceholder="Search text expanders..."
     >
       {/* Center Column: Snippet content */}
       <div className="flex-1 flex flex-col min-h-0 relative">
@@ -988,8 +1032,6 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
             onTitleEnter={async (shiftKey, e) => {
               if (e?.ctrlKey || e?.metaKey) {
                 void handleCreateNew();
-              } else if (shiftKey) {
-                handleCopyTitleToShortcut();
               } else {
                 if (!snippetTitle.trim()) {
                   setTitleError('Enter the title');

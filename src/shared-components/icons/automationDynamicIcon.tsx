@@ -1,4 +1,4 @@
-import React from 'react';
+import * as React from 'react';
 import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 
 type IconMode = 'single_link' | 'multi_link' | 'all_ai' | 'fallback';

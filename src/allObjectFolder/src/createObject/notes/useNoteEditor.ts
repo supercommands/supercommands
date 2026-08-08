@@ -2,7 +2,7 @@
  * @file useNoteEditor.ts
  * @description A custom React hook containing state management and logic for the Note editor,
  * including debounced autosaving, Quill editor instance handling, tag sync, deletion, and conflict checks.
- * 
+ *
  * @usage
  * ```tsx
  * import { useNoteEditor } from './useNoteEditor';
@@ -10,16 +10,19 @@
  * ```
  */
 
+export const baseVersionHistory = {
+  lastSavedText: '',
+  historyBuffer: [],
+  lastCheckpointAt: Date.now(),
+};
+
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import { createNote, updateNote, deleteNote } from './noteData';
 import type { NoteRecord, CreateNoteInput, UpdateNoteInput } from './noteTypes';
 import type { NoteEditorViewProps } from './ui/NoteEditorView';
 import type { SharedProperties } from '../../../../shared-components/editorToolbar/types';
-import {
-  normalizeNoteBody,
-  extractTextFromHTML,
-} from './noteHelpers';
+import { normalizeNoteBody, extractTextFromHTML, extractAssetIdsFromHtml } from './noteHelpers';
 import { getNote } from './noteData';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
@@ -45,12 +48,7 @@ const sameString = (a: string | null | undefined, b: string | null | undefined) 
 const sameTagList = sameTagIds;
 
 export function useNoteEditor(props: NoteEditorViewProps) {
-  const {
-    noteId,
-    onBack,
-    initialDraftKey,
-    initialDraftContent,
-  } = props;
+  const { noteId, onBack, initialDraftKey, initialDraftContent } = props;
   const resolvedNoteId = noteId && noteId !== 'new' ? noteId : null;
 
   noteEditorLog('render', {
@@ -75,6 +73,7 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   // We use this ref to synchronously track ID creation inside save locks
   const activeNoteIdRef = useRef<string | null>(resolvedNoteId);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(resolvedNoteId);
+  const [noteVersionIndex, setNoteVersionIndex] = useState<number>(0);
 
   const [noteTitle, setNoteTitle] = useState<string>(initialDraftKey || '');
   const [noteBody, setNoteBody] = useState<string>(initialDraftContent || '');
@@ -100,6 +99,24 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   const [conflictNote, setConflictNote] = useState<NoteRecord | null>(null);
   const hasConflictRef = useRef(false);
 
+  // Save Lock for local images
+  const [isSavingImage, setIsSavingImage] = useState(false);
+  const activeImageSavesRef = useRef(0);
+
+  const onImageSaveStart = useCallback(() => {
+    activeImageSavesRef.current += 1;
+    setIsSavingImage(true);
+  }, []);
+
+  const onImageSaveEnd = useCallback(() => {
+    activeImageSavesRef.current = Math.max(0, activeImageSavesRef.current - 1);
+    if (activeImageSavesRef.current === 0) {
+      setIsSavingImage(false);
+      // Auto-trigger save when image finishes uploading if needed
+      scheduleAutosaveRef.current();
+    }
+  }, []);
+
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState<boolean>(false);
   const [isUnsavedChangesDialogOpen, setIsUnsavedChangesDialogOpen] = useState<boolean>(false);
 
@@ -111,10 +128,17 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   const handleSaveRef = useRef<any>(null);
 
   // Keep track of latest inputs for retry to avoid stale closures!
-  const currentInputsRef = useRef({ noteTitle, noteBody: noteBodyRef.current, workspaceId, folderId, tagIds, isInitialized });
+  const currentInputsRef = useRef({
+    noteTitle,
+    noteBody: noteBodyRef.current,
+    workspaceId,
+    folderId,
+    tagIds,
+    isInitialized,
+  });
   currentInputsRef.current = { noteTitle, noteBody: noteBodyRef.current, workspaceId, folderId, tagIds, isInitialized };
 
-  const scheduleAutosaveRef = useRef<() => void>(() => { });
+  const scheduleAutosaveRef = useRef<() => void>(() => {});
 
   const clearAutosaveTimer = useCallback(() => {
     if (autosaveTimerRef.current) {
@@ -136,8 +160,8 @@ export function useNoteEditor(props: NoteEditorViewProps) {
 
     if (resolvedNoteId) {
       noteEditorLog('init existing note', { resolvedNoteId });
-      const existingNoteTitle = '';
-      const existingNoteBody = '';
+      const existingNoteTitle = initialDraftKey || '';
+      const existingNoteBody = initialDraftContent || '';
       activeNoteIdRef.current = resolvedNoteId;
       setActiveNoteId(resolvedNoteId);
       setIsInitialized(false);
@@ -149,8 +173,8 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       // Reset dirty status and refs so loading a new note starts fresh
       isDirtyRef.current = false;
       setIsDirty(false);
-      lastSavedTitleRef.current = '';
-      lastSavedBodyRef.current = '';
+      lastSavedTitleRef.current = existingNoteTitle;
+      lastSavedBodyRef.current = existingNoteBody;
       lastSavedWorkspaceIdRef.current = null;
       lastSavedFolderIdRef.current = null;
       lastSavedTagIdsRef.current = [];
@@ -233,11 +257,18 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   const rawLiveNote = useDbStore(state => {
     if (!activeNoteId) return undefined;
     const cleanId = extractSnippetIdFromCompoundId(activeNoteId);
-    return (
-      state.notes.find(n => n.id === activeNoteId || n.id === cleanId) ||
-      state.snippets.find(s => s.id === activeNoteId || s.id === cleanId) ||
-      state.todos.find(t => t.id === activeNoteId || t.id === cleanId)
-    );
+    const matchesId = (item: any) => {
+      if (!item) return false;
+      const itemId = String(item.id || item.snippet_id || item.note_id || item.todo_id || '');
+      const itemCleanId = extractSnippetIdFromCompoundId(itemId);
+      return (
+        itemId === activeNoteId ||
+        itemId === cleanId ||
+        itemCleanId === activeNoteId ||
+        (cleanId !== '' && itemCleanId === cleanId)
+      );
+    };
+    return state.notes.find(matchesId) || state.snippets.find(matchesId) || state.todos.find(matchesId);
   });
 
   const liveNote = useMemo(() => {
@@ -252,22 +283,27 @@ export function useNoteEditor(props: NoteEditorViewProps) {
         body: note.body || note.description || note.content || note.value || '',
         workspaceId: note.workspaceId || note.workspace_id || null,
         folderId: note.folderId || note.folder_id || null,
-        tagIds: note.tagIds || (Array.isArray(note.tags) ? note.tags.map((t: any) => typeof t === 'string' ? t : t.id) : []),
+        tagIds:
+          note.tagIds ||
+          (Array.isArray(note.tags) ? note.tags.map((t: any) => (typeof t === 'string' ? t : t.id)) : []),
         updatedAt: note.updatedAt || Date.now(),
         createdAt: note.createdAt || Date.now(),
       } as any;
     }
 
     // Check if it's a Snippet record
-    if ('config' in note) {
-      const configStr = typeof note.config === 'string' ? note.config : JSON.stringify(note.config || '');
+    if ('config' in note || 'value' in note) {
+      const configVal = note.config !== undefined ? note.config : note.value;
+      const configStr = typeof configVal === 'string' ? configVal : configVal ? JSON.stringify(configVal) : '';
       return {
         ...note,
         title: note.title || note.name || note.key || '',
-        body: note.body || configStr || note.content || note.value || '',
+        body: note.body || note.content || configStr || '',
         workspaceId: note.workspaceId || note.workspace_id || null,
         folderId: note.folderId || note.folder_id || null,
-        tagIds: note.tagIds || (Array.isArray(note.tags) ? note.tags.map((t: any) => typeof t === 'string' ? t : t.id) : []),
+        tagIds:
+          note.tagIds ||
+          (Array.isArray(note.tags) ? note.tags.map((t: any) => (typeof t === 'string' ? t : t.id)) : []),
         updatedAt: note.updatedAt || Date.now(),
         createdAt: note.createdAt || Date.now(),
       } as any;
@@ -279,111 +315,381 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       body: note.body || note.content || note.value || '',
       workspaceId: note.workspaceId || note.workspace_id || null,
       folderId: note.folderId || note.folder_id || null,
-      tagIds: note.tagIds || (Array.isArray(note.tags) ? note.tags.map((t: any) => typeof t === 'string' ? t : t.id) : []),
+      tagIds:
+        note.tagIds || (Array.isArray(note.tags) ? note.tags.map((t: any) => (typeof t === 'string' ? t : t.id)) : []),
       updatedAt: note.updatedAt || Date.now(),
       createdAt: note.createdAt || Date.now(),
     } as NoteRecord;
   }, [rawLiveNote]);
 
-  const handleSave = useCallback(async (silent: boolean = false, overrideProps?: SharedProperties | null): Promise<boolean> => {
-    noteEditorLog('handleSave called', {
-      silent,
-      overrideProps,
-      activeNoteId: activeNoteIdRef.current,
-      conflict: hasConflictRef.current,
-      saveInProgress: saveInProgressRef.current,
-      savePending: Boolean(savePromiseRef.current),
-      currentInputs: {
-        noteTitle: currentInputsRef.current.noteTitle,
-        noteBody: summarizeHtml(currentInputsRef.current.noteBody),
-        workspaceId: currentInputsRef.current.workspaceId,
-        folderId: currentInputsRef.current.folderId,
-        tagIds: currentInputsRef.current.tagIds,
-        isInitialized: currentInputsRef.current.isInitialized,
-      },
-    });
+  const handleSave = useCallback(
+    async (silent: boolean = false, overrideProps?: SharedProperties | null): Promise<boolean> => {
+      noteEditorLog('handleSave called', {
+        silent,
+        overrideProps,
+        activeNoteId: activeNoteIdRef.current,
+        conflict: hasConflictRef.current,
+        saveInProgress: saveInProgressRef.current,
+        savePending: Boolean(savePromiseRef.current),
+        currentInputs: {
+          noteTitle: currentInputsRef.current.noteTitle,
+          noteBody: summarizeHtml(currentInputsRef.current.noteBody),
+          workspaceId: currentInputsRef.current.workspaceId,
+          folderId: currentInputsRef.current.folderId,
+          tagIds: currentInputsRef.current.tagIds,
+          isInitialized: currentInputsRef.current.isInitialized,
+        },
+      });
 
-    if (hasConflictRef.current) {
-      noteEditorLog('handleSave blocked by conflict');
-      return false;
-    }
-    clearAutosaveTimer();
-    const {
-      noteTitle: currentTitle,
-      noteBody: currentBody,
-      workspaceId: currentWsId,
-      folderId: currentFId,
-      tagIds: currentTIds,
-      isInitialized: currentIsInit,
-    } = currentInputsRef.current;
+      if (hasConflictRef.current) {
+        noteEditorLog('handleSave blocked by conflict');
+        return false;
+      }
+      clearAutosaveTimer();
+      const {
+        noteTitle: currentTitle,
+        noteBody: currentBody,
+        workspaceId: currentWsId,
+        folderId: currentFId,
+        tagIds: currentTIds,
+        isInitialized: currentIsInit,
+      } = currentInputsRef.current;
 
-    const hasTitle = currentTitle.trim().length > 0;
-    const hasBody = normalizeNoteBody(currentBody).trim().length > 0;
-    const currentNoteId = activeNoteIdRef.current;
-    const savingNoteId = currentNoteId;
+      const hasTitle = currentTitle.trim().length > 0;
+      const hasBody = normalizeNoteBody(currentBody).trim().length > 0;
+      const currentNoteId = activeNoteIdRef.current;
+      const savingNoteId = currentNoteId;
 
-    noteEditorLog('handleSave snapshot', {
-      currentNoteId,
-      hasTitle,
-      hasBody,
-      currentIsInit,
-      noteTitle,
-      noteBody: summarizeHtml(currentBody),
-      workspaceId: currentWsId,
-      folderId: currentFId,
-      tagIds: currentTIds,
-    });
+      noteEditorLog('handleSave snapshot', {
+        currentNoteId,
+        hasTitle,
+        hasBody,
+        currentIsInit,
+        noteTitle,
+        noteBody: summarizeHtml(currentBody),
+        workspaceId: currentWsId,
+        folderId: currentFId,
+        tagIds: currentTIds,
+      });
 
-    if (currentNoteId && !currentIsInit) {
-      noteEditorLog('handleSave deferred until init completes', { currentNoteId });
-      if (!silent) setSaveStatus('saving');
-      saveAgainRef.current = true;
-      return false;
-    }
+      if (currentNoteId && !currentIsInit) {
+        noteEditorLog('handleSave deferred until init completes', { currentNoteId });
+        if (!silent) setSaveStatus('saving');
+        saveAgainRef.current = true;
+        return false;
+      }
 
-    if (!currentNoteId && !hasTitle && !hasBody) {
-      noteEditorLog('handleSave skipped for empty draft');
-      setSaveStatus('idle');
-      return false;
-    }
+      if (activeImageSavesRef.current > 0) {
+        noteEditorLog('handleSave deferred because image is actively saving');
+        if (!silent) setSaveStatus('saving');
+        saveAgainRef.current = true;
+        return false;
+      }
 
-    if (currentNoteId && !hasTitle && !hasBody) {
-      noteEditorLog('handleSave deleting empty note', { currentNoteId });
+      if (!currentNoteId && !hasTitle && !hasBody) {
+        noteEditorLog('handleSave skipped for empty draft');
+        setSaveStatus('idle');
+        return false;
+      }
+
+      if (currentNoteId && !hasTitle && !hasBody) {
+        noteEditorLog('handleSave deleting empty note', { currentNoteId });
+        if (savePromiseRef.current) {
+          saveAgainRef.current = true;
+          return savePromiseRef.current;
+        }
+
+        const performDelete = async (): Promise<boolean> => {
+          saveInProgressRef.current = true;
+          try {
+            await deleteNote(currentNoteId);
+            noteEditorLog('auto delete success', { currentNoteId });
+            if (activeNoteIdRef.current === savingNoteId) {
+              activeNoteIdRef.current = null;
+              setActiveNoteId(null);
+              setIsNoteDeleted(false);
+              lastSavedTitleRef.current = '';
+              lastSavedBodyRef.current = '';
+              lastSavedWorkspaceIdRef.current = null;
+              lastSavedFolderIdRef.current = null;
+              lastSavedTagIdsRef.current = [];
+              lastSavedUpdatedAtRef.current = null;
+              clearAutosaveTimer();
+              setSaveStatus('idle');
+              setLastSavedAt(null);
+              isDirtyRef.current = false;
+              setIsDirty(false);
+            }
+            return true;
+          } catch (err) {
+            console.error('[useNoteEditor] Auto-delete failed:', err);
+            noteEditorLog('auto delete failed', { currentNoteId, err });
+            setSaveStatus('error');
+            return false;
+          } finally {
+            saveInProgressRef.current = false;
+            savePromiseRef.current = null;
+            if (saveAgainRef.current && !hasConflictRef.current) {
+              saveAgainRef.current = false;
+              scheduleAutosaveRef.current();
+            }
+          }
+        };
+
+        savePromiseRef.current = performDelete();
+        return savePromiseRef.current;
+      }
+
       if (savePromiseRef.current) {
+        noteEditorLog('handleSave reusing in-flight promise');
         saveAgainRef.current = true;
         return savePromiseRef.current;
       }
 
-      const performDelete = async (): Promise<boolean> => {
+      const performSave = async (): Promise<boolean> => {
+        noteEditorLog('performSave start', {
+          currentNoteId,
+          savingNoteId,
+          silent,
+          overrideProps,
+        });
         saveInProgressRef.current = true;
+        if (!silent) setSaveStatus('saving');
+
+        let activeWorkspaceId = currentWsId;
+        let activeFolderId = currentFId;
+        let activeTagIds = currentTIds;
+
+        if (overrideProps) {
+          if (overrideProps.workspaceId !== undefined) activeWorkspaceId = overrideProps.workspaceId;
+          if (overrideProps.folderId !== undefined) activeFolderId = overrideProps.folderId;
+          if (overrideProps.selectedTags) activeTagIds = overrideProps.selectedTags.map(t => t.id);
+        }
+
+        const currentTagIdsKey = [...activeTagIds].sort().join(',');
+
         try {
-          await deleteNote(currentNoteId);
-          noteEditorLog('auto delete success', { currentNoteId });
-          if (activeNoteIdRef.current === savingNoteId) {
-            activeNoteIdRef.current = null;
-            setActiveNoteId(null);
-            setIsNoteDeleted(false);
-            lastSavedTitleRef.current = '';
-            lastSavedBodyRef.current = '';
-            lastSavedWorkspaceIdRef.current = null;
-            lastSavedFolderIdRef.current = null;
-            lastSavedTagIdsRef.current = [];
-            lastSavedUpdatedAtRef.current = null;
-            clearAutosaveTimer();
-            setSaveStatus('idle');
-            setLastSavedAt(null);
+          let savedNote: NoteRecord;
+          if (!currentNoteId) {
+            const input: CreateNoteInput = {
+              workspaceId: activeWorkspaceId || undefined,
+              folderId: activeFolderId,
+              title: currentTitle,
+              body: currentBody,
+              tagIds: activeTagIds,
+              assetIds: extractAssetIdsFromHtml(currentBody),
+            };
+            noteEditorLog('creating note', {
+              input: {
+                ...input,
+                body: summarizeHtml(input.body),
+              },
+            });
+            savedNote = await createNote(input);
+            noteEditorLog('createNote success', {
+              savedId: savedNote.id,
+              updatedAt: savedNote.updatedAt,
+            });
+          } else {
+            const input: UpdateNoteInput = {
+              expectedUpdatedAt: lastSavedUpdatedAtRef.current ?? undefined,
+            };
+            if (currentTitle !== lastSavedTitleRef.current) input.title = currentTitle;
+            if (normalizeNoteBody(currentBody) !== normalizeNoteBody(lastSavedBodyRef.current)) {
+              input.body = currentBody;
+              input.assetIds = extractAssetIdsFromHtml(currentBody);
+            }
+            if (activeWorkspaceId !== lastSavedWorkspaceIdRef.current)
+              input.workspaceId = activeWorkspaceId || undefined;
+            if (activeFolderId !== lastSavedFolderIdRef.current) input.folderId = activeFolderId;
+            if (!sameTagIds(activeTagIds, lastSavedTagIdsRef.current)) input.tagIds = activeTagIds;
+
+            if (Object.keys(input).length <= 1) {
+              noteEditorLog('update skipped, no field changes', {
+                currentNoteId,
+                lastSavedUpdatedAt: lastSavedUpdatedAtRef.current,
+              });
+              hasConflictRef.current = false;
+              setConflictNote(null);
+              isDirtyRef.current = false;
+              setIsDirty(false);
+              if (!silent) {
+                setSaveStatus('saved');
+                if (lastSavedUpdatedAtRef.current !== null) {
+                  setLastSavedAt(new Date(lastSavedUpdatedAtRef.current));
+                }
+              }
+              return true;
+            }
+
+            noteEditorLog('updating note', {
+              noteId: currentNoteId,
+              input: {
+                ...input,
+                body: input.body ? summarizeHtml(input.body) : undefined,
+              },
+            });
+            const oldCompoundId = getItemCompoundId({
+              id: currentNoteId,
+              workspace_id: lastSavedWorkspaceIdRef.current,
+              folder_id: lastSavedFolderIdRef.current,
+              category: 'note',
+            });
+
+            savedNote = await updateNote(currentNoteId, input);
+
+            const newCompoundId = getItemCompoundId({
+              id: savedNote.id,
+              workspace_id: savedNote.workspaceId,
+              folder_id: savedNote.folderId,
+              category: 'note',
+            });
+
+            if (oldCompoundId && newCompoundId && oldCompoundId !== newCompoundId) {
+              await migrateItemCompoundId(oldCompoundId, newCompoundId, 'note');
+            }
+
+            noteEditorLog('updateNote success', {
+              savedId: savedNote.id,
+              updatedAt: savedNote.updatedAt,
+            });
+          }
+
+          if (activeNoteIdRef.current !== savingNoteId) {
+            noteEditorLog('save result ignored because active note changed', {
+              savingNoteId,
+              activeNow: activeNoteIdRef.current,
+            });
+            return true;
+          }
+
+          if (!currentNoteId) {
+            activeNoteIdRef.current = savedNote.id;
+            setActiveNoteId(savedNote.id);
+            hasLoadedLiveNoteRef.current = false;
+            noteEditorLog('switched draft to saved note id', { savedId: savedNote.id });
+          }
+
+          const currentTagIdsKey = [...currentInputsRef.current.tagIds].sort().join(',');
+          const snapshotMatches = {
+            title: currentInputsRef.current.noteTitle === currentTitle,
+            body: currentInputsRef.current.noteBody === currentBody,
+            workspace: currentInputsRef.current.workspaceId === activeWorkspaceId,
+            folder: currentInputsRef.current.folderId === activeFolderId,
+            init: currentInputsRef.current.isInitialized === currentIsInit,
+            tags: currentTagIdsKey === [...activeTagIds].sort().join(','),
+          };
+          const stillMatchesSnapshot = Object.values(snapshotMatches).every(Boolean);
+
+          if (currentInputsRef.current.workspaceId === activeWorkspaceId) {
+            setWorkspaceId(savedNote.workspaceId);
+            currentInputsRef.current = {
+              ...currentInputsRef.current,
+              workspaceId: savedNote.workspaceId,
+            };
+          }
+          if (currentInputsRef.current.folderId === activeFolderId) {
+            setFolderId(savedNote.folderId);
+            currentInputsRef.current = {
+              ...currentInputsRef.current,
+              folderId: savedNote.folderId,
+            };
+          }
+          if (sameTagIds(currentInputsRef.current.tagIds, activeTagIds)) {
+            setTagIds(savedNote.tagIds);
+            currentInputsRef.current = {
+              ...currentInputsRef.current,
+              tagIds: savedNote.tagIds,
+            };
+          }
+          if (currentInputsRef.current.noteTitle === currentTitle) {
+            if (currentInputsRef.current.noteTitle.trim() !== savedNote.title.trim()) {
+              setNoteTitle(savedNote.title);
+              currentInputsRef.current = {
+                ...currentInputsRef.current,
+                noteTitle: savedNote.title,
+              };
+            }
+          }
+          if (currentInputsRef.current.noteBody === currentBody) {
+            if (normalizeNoteBody(currentInputsRef.current.noteBody) !== savedNote.body) {
+              const editorHasFocus = Boolean(editorRef.current?.hasFocus?.());
+              if (!editorHasFocus) {
+                noteBodyRef.current = savedNote.body;
+                setNoteBody(savedNote.body);
+                currentInputsRef.current = {
+                  ...currentInputsRef.current,
+                  noteBody: savedNote.body,
+                };
+              }
+            }
+          }
+
+          lastSavedTitleRef.current = savedNote.title;
+          lastSavedBodyRef.current = savedNote.body;
+          lastSavedWorkspaceIdRef.current = savedNote.workspaceId;
+          lastSavedFolderIdRef.current = savedNote.folderId;
+          lastSavedTagIdsRef.current = savedNote.tagIds;
+          lastSavedUpdatedAtRef.current = savedNote.updatedAt;
+          hasConflictRef.current = false;
+          noteEditorLog('save canonical refs updated', {
+            savedId: savedNote.id,
+            lastSavedUpdatedAt: savedNote.updatedAt,
+            workspaceId: savedNote.workspaceId,
+            folderId: savedNote.folderId,
+            tagCount: savedNote.tagIds.length,
+          });
+
+          if (savedNote.workspaceId) StorageManager.setItem('lastUsedWorkspaceId', savedNote.workspaceId);
+          if (savedNote.folderId) StorageManager.setItem('lastUsedFolderId', savedNote.folderId);
+          else StorageManager.removeItem('lastUsedFolderId');
+
+          setLastSavedAt(new Date(savedNote.updatedAt));
+          setConflictNote(null);
+
+          if (stillMatchesSnapshot) {
+            noteEditorLog('save completed and snapshot matched');
             isDirtyRef.current = false;
             setIsDirty(false);
+            setSaveStatus(silent ? 'idle' : 'saved');
+          } else {
+            noteEditorLog('save completed but snapshot moved, scheduling another autosave');
+            isDirtyRef.current = true;
+            setIsDirty(true);
+            setSaveStatus('saving');
+            scheduleAutosaveRef.current();
           }
+
           return true;
-        } catch (err) {
-          console.error('[useNoteEditor] Auto-delete failed:', err);
-          noteEditorLog('auto delete failed', { currentNoteId, err });
+        } catch (err: any) {
+          if (err.name === 'ConflictError') {
+            console.warn('Conflict detected:', err.message);
+            noteEditorLog('conflict detected', {
+              message: err.message,
+              remoteUpdatedAt: err.remoteNote?.updatedAt,
+              remoteId: err.remoteNote?.id,
+            });
+            hasConflictRef.current = true;
+            clearAutosaveTimer();
+            setSaveStatus('conflict');
+            setConflictNote(err.remoteNote ?? liveNote ?? null);
+            isDirtyRef.current = true;
+            setIsDirty(true);
+            return false;
+          }
+          console.error('Save failed:', err);
+          noteEditorLog('save failed', { err });
           setSaveStatus('error');
           return false;
         } finally {
           saveInProgressRef.current = false;
           savePromiseRef.current = null;
+          noteEditorLog('performSave finished', {
+            activeNoteId: activeNoteIdRef.current,
+            saveAgain: saveAgainRef.current,
+            hasConflict: hasConflictRef.current,
+          });
+
           if (saveAgainRef.current && !hasConflictRef.current) {
             saveAgainRef.current = false;
             scheduleAutosaveRef.current();
@@ -391,266 +697,11 @@ export function useNoteEditor(props: NoteEditorViewProps) {
         }
       };
 
-      savePromiseRef.current = performDelete();
+      savePromiseRef.current = performSave();
       return savePromiseRef.current;
-    }
-
-    if (savePromiseRef.current) {
-      noteEditorLog('handleSave reusing in-flight promise');
-      saveAgainRef.current = true;
-      return savePromiseRef.current;
-    }
-
-    const performSave = async (): Promise<boolean> => {
-
-      noteEditorLog('performSave start', {
-        currentNoteId,
-        savingNoteId,
-        silent,
-        overrideProps,
-      });
-      saveInProgressRef.current = true;
-      if (!silent) setSaveStatus('saving');
-
-      let activeWorkspaceId = currentWsId;
-      let activeFolderId = currentFId;
-      let activeTagIds = currentTIds;
-
-      if (overrideProps) {
-        if (overrideProps.workspaceId !== undefined) activeWorkspaceId = overrideProps.workspaceId;
-        if (overrideProps.folderId !== undefined) activeFolderId = overrideProps.folderId;
-        if (overrideProps.selectedTags) activeTagIds = overrideProps.selectedTags.map(t => t.id);
-      }
-
-      const currentTagIdsKey = [...activeTagIds].sort().join(',');
-
-      try {
-        let savedNote: NoteRecord;
-        if (!currentNoteId) {
-          const input: CreateNoteInput = {
-            workspaceId: activeWorkspaceId || undefined,
-            folderId: activeFolderId,
-            title: currentTitle,
-            body: currentBody,
-            tagIds: activeTagIds,
-          };
-          noteEditorLog('creating note', {
-            input: {
-              ...input,
-              body: summarizeHtml(input.body),
-            },
-          });
-          savedNote = await createNote(input);
-          noteEditorLog('createNote success', {
-            savedId: savedNote.id,
-            updatedAt: savedNote.updatedAt,
-          });
-        } else {
-          const input: UpdateNoteInput = {
-            expectedUpdatedAt: lastSavedUpdatedAtRef.current ?? undefined,
-          };
-          if (currentTitle !== lastSavedTitleRef.current) input.title = currentTitle;
-          if (normalizeNoteBody(currentBody) !== normalizeNoteBody(lastSavedBodyRef.current)) input.body = currentBody;
-          if (activeWorkspaceId !== lastSavedWorkspaceIdRef.current) input.workspaceId = activeWorkspaceId || undefined;
-          if (activeFolderId !== lastSavedFolderIdRef.current) input.folderId = activeFolderId;
-          if (!sameTagIds(activeTagIds, lastSavedTagIdsRef.current)) input.tagIds = activeTagIds;
-
-          if (Object.keys(input).length <= 1) {
-            noteEditorLog('update skipped, no field changes', {
-              currentNoteId,
-              lastSavedUpdatedAt: lastSavedUpdatedAtRef.current,
-            });
-            hasConflictRef.current = false;
-            setConflictNote(null);
-            isDirtyRef.current = false;
-            setIsDirty(false);
-            if (!silent) {
-              setSaveStatus('saved');
-              if (lastSavedUpdatedAtRef.current !== null) {
-                setLastSavedAt(new Date(lastSavedUpdatedAtRef.current));
-              }
-            }
-            return true;
-          }
-
-          noteEditorLog('updating note', {
-            noteId: currentNoteId,
-            input: {
-              ...input,
-              body: input.body ? summarizeHtml(input.body) : undefined,
-            },
-          });
-          const oldCompoundId = getItemCompoundId({
-            id: currentNoteId,
-            workspace_id: lastSavedWorkspaceIdRef.current,
-            folder_id: lastSavedFolderIdRef.current,
-            category: 'note',
-          });
-          
-          savedNote = await updateNote(currentNoteId, input);
-          
-          const newCompoundId = getItemCompoundId({
-            id: savedNote.id,
-            workspace_id: savedNote.workspaceId,
-            folder_id: savedNote.folderId,
-            category: 'note',
-          });
-
-          if (oldCompoundId && newCompoundId && oldCompoundId !== newCompoundId) {
-            await migrateItemCompoundId(oldCompoundId, newCompoundId, 'note');
-          }
-
-          noteEditorLog('updateNote success', {
-            savedId: savedNote.id,
-            updatedAt: savedNote.updatedAt,
-          });
-        }
-
-        if (activeNoteIdRef.current !== savingNoteId) {
-          noteEditorLog('save result ignored because active note changed', {
-            savingNoteId,
-            activeNow: activeNoteIdRef.current,
-          });
-          return true;
-        }
-
-        if (!currentNoteId) {
-          activeNoteIdRef.current = savedNote.id;
-          setActiveNoteId(savedNote.id);
-          hasLoadedLiveNoteRef.current = false;
-          noteEditorLog('switched draft to saved note id', { savedId: savedNote.id });
-        }
-
-        const currentTagIdsKey = [...currentInputsRef.current.tagIds].sort().join(',');
-        const snapshotMatches = {
-          title: currentInputsRef.current.noteTitle === currentTitle,
-          body: currentInputsRef.current.noteBody === currentBody,
-          workspace: currentInputsRef.current.workspaceId === activeWorkspaceId,
-          folder: currentInputsRef.current.folderId === activeFolderId,
-          init: currentInputsRef.current.isInitialized === currentIsInit,
-          tags: currentTagIdsKey === [...activeTagIds].sort().join(','),
-        };
-        const stillMatchesSnapshot = Object.values(snapshotMatches).every(Boolean);
-
-        if (currentInputsRef.current.workspaceId === activeWorkspaceId) {
-          setWorkspaceId(savedNote.workspaceId);
-          currentInputsRef.current = {
-            ...currentInputsRef.current,
-            workspaceId: savedNote.workspaceId,
-          };
-        }
-        if (currentInputsRef.current.folderId === activeFolderId) {
-          setFolderId(savedNote.folderId);
-          currentInputsRef.current = {
-            ...currentInputsRef.current,
-            folderId: savedNote.folderId,
-          };
-        }
-        if (sameTagIds(currentInputsRef.current.tagIds, activeTagIds)) {
-          setTagIds(savedNote.tagIds);
-          currentInputsRef.current = {
-            ...currentInputsRef.current,
-            tagIds: savedNote.tagIds,
-          };
-        }
-        if (currentInputsRef.current.noteTitle === currentTitle) {
-          if (currentInputsRef.current.noteTitle.trim() !== savedNote.title.trim()) {
-            setNoteTitle(savedNote.title);
-            currentInputsRef.current = {
-              ...currentInputsRef.current,
-              noteTitle: savedNote.title,
-            };
-          }
-        }
-        if (currentInputsRef.current.noteBody === currentBody) {
-          if (normalizeNoteBody(currentInputsRef.current.noteBody) !== savedNote.body) {
-            const editorHasFocus = Boolean(editorRef.current?.hasFocus?.());
-            if (!editorHasFocus) {
-              noteBodyRef.current = savedNote.body;
-              setNoteBody(savedNote.body);
-              currentInputsRef.current = {
-                ...currentInputsRef.current,
-                noteBody: savedNote.body,
-              };
-            }
-          }
-        }
-
-        lastSavedTitleRef.current = savedNote.title;
-        lastSavedBodyRef.current = savedNote.body;
-        lastSavedWorkspaceIdRef.current = savedNote.workspaceId;
-        lastSavedFolderIdRef.current = savedNote.folderId;
-        lastSavedTagIdsRef.current = savedNote.tagIds;
-        lastSavedUpdatedAtRef.current = savedNote.updatedAt;
-        hasConflictRef.current = false;
-        noteEditorLog('save canonical refs updated', {
-          savedId: savedNote.id,
-          lastSavedUpdatedAt: savedNote.updatedAt,
-          workspaceId: savedNote.workspaceId,
-          folderId: savedNote.folderId,
-          tagCount: savedNote.tagIds.length,
-        });
-
-        if (savedNote.workspaceId) StorageManager.setItem('lastUsedWorkspaceId', savedNote.workspaceId);
-        if (savedNote.folderId) StorageManager.setItem('lastUsedFolderId', savedNote.folderId);
-        else StorageManager.removeItem('lastUsedFolderId');
-
-        setLastSavedAt(new Date(savedNote.updatedAt));
-        setConflictNote(null);
-
-        if (stillMatchesSnapshot) {
-          noteEditorLog('save completed and snapshot matched');
-          isDirtyRef.current = false;
-          setIsDirty(false);
-          setSaveStatus(silent ? 'idle' : 'saved');
-        } else {
-          noteEditorLog('save completed but snapshot moved, scheduling another autosave');
-          isDirtyRef.current = true;
-          setIsDirty(true);
-          setSaveStatus('saving');
-          scheduleAutosaveRef.current();
-        }
-
-        return true;
-      } catch (err: any) {
-        if (err.name === 'ConflictError') {
-          console.warn('Conflict detected:', err.message);
-          noteEditorLog('conflict detected', {
-            message: err.message,
-            remoteUpdatedAt: err.remoteNote?.updatedAt,
-            remoteId: err.remoteNote?.id,
-          });
-          hasConflictRef.current = true;
-          clearAutosaveTimer();
-          setSaveStatus('conflict');
-          setConflictNote(err.remoteNote ?? liveNote ?? null);
-          isDirtyRef.current = true;
-          setIsDirty(true);
-          return false;
-        }
-        console.error('Save failed:', err);
-        noteEditorLog('save failed', { err });
-        setSaveStatus('error');
-        return false;
-      } finally {
-        saveInProgressRef.current = false;
-        savePromiseRef.current = null;
-        noteEditorLog('performSave finished', {
-          activeNoteId: activeNoteIdRef.current,
-          saveAgain: saveAgainRef.current,
-          hasConflict: hasConflictRef.current,
-        });
-
-        if (saveAgainRef.current && !hasConflictRef.current) {
-          saveAgainRef.current = false;
-          scheduleAutosaveRef.current();
-        }
-      }
-    };
-
-    savePromiseRef.current = performSave();
-    return savePromiseRef.current;
-  }, []);
+    },
+    [],
+  );
 
   const scheduleAutosave = useCallback(() => {
     if (hasConflictRef.current) return;
@@ -677,46 +728,52 @@ export function useNoteEditor(props: NoteEditorViewProps) {
 
   useEffect(() => clearAutosaveTimer, [clearAutosaveTimer]);
 
-  const handleBodyChange = useCallback((html: string) => {
-    // If the content is effectively empty in both previous and new state, ignore it
-    const isNewEmpty = extractTextFromHTML(html) === '';
-    const isPrevEmpty = extractTextFromHTML(noteBodyRef.current) === '';
-    if (isNewEmpty && isPrevEmpty) {
-      return;
-    }
+  const handleBodyChange = useCallback(
+    (html: string) => {
+      // If the content is effectively empty in both previous and new state, ignore it
+      const isNewEmpty = extractTextFromHTML(html) === '' && !html.includes('<img');
+      const isPrevEmpty = extractTextFromHTML(noteBodyRef.current) === '' && !noteBodyRef.current.includes('<img');
+      if (isNewEmpty && isPrevEmpty) {
+        return;
+      }
 
-    if (sameString(normalizeNoteBody(noteBodyRef.current), normalizeNoteBody(html))) {
-      return;
-    }
-    noteEditorLog('body change', {
-      activeNoteId: activeNoteIdRef.current,
-      body: summarizeHtml(html),
-    });
-    setNoteBody(html);
-    noteBodyRef.current = html;
-    currentInputsRef.current.noteBody = html;
-    isDirtyRef.current = true;
-    setIsDirty(true);
-    setSaveStatus('saving');
-    if (!hasConflictRef.current) scheduleAutosave();
-  }, [scheduleAutosave]);
+      if (sameString(normalizeNoteBody(noteBodyRef.current), normalizeNoteBody(html))) {
+        return;
+      }
+      noteEditorLog('body change', {
+        activeNoteId: activeNoteIdRef.current,
+        body: summarizeHtml(html),
+      });
+      setNoteBody(html);
+      noteBodyRef.current = html;
+      currentInputsRef.current.noteBody = html;
+      isDirtyRef.current = true;
+      setIsDirty(true);
+      setSaveStatus('saving');
+      if (!hasConflictRef.current) scheduleAutosave();
+    },
+    [scheduleAutosave],
+  );
 
-  const handleTitleChange = useCallback((title: string) => {
-    if (sameString(noteTitle, title)) return;
-    noteEditorLog('title change', {
-      activeNoteId: activeNoteIdRef.current,
-      title,
-    });
-    setNoteTitle(title);
-    currentInputsRef.current = {
-      ...currentInputsRef.current,
-      noteTitle: title,
-    };
-    isDirtyRef.current = true;
-    setIsDirty(true);
-    setSaveStatus('saving');
-    if (!hasConflictRef.current) scheduleAutosave();
-  }, [scheduleAutosave, noteTitle]);
+  const handleTitleChange = useCallback(
+    (title: string) => {
+      if (sameString(noteTitle, title)) return;
+      noteEditorLog('title change', {
+        activeNoteId: activeNoteIdRef.current,
+        title,
+      });
+      setNoteTitle(title);
+      currentInputsRef.current = {
+        ...currentInputsRef.current,
+        noteTitle: title,
+      };
+      isDirtyRef.current = true;
+      setIsDirty(true);
+      setSaveStatus('saving');
+      if (!hasConflictRef.current) scheduleAutosave();
+    },
+    [scheduleAutosave, noteTitle],
+  );
 
   handleSaveRef.current = handleSave;
 
@@ -784,7 +841,11 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       initialized: isInitialized,
     });
 
-    if (isInitialized && lastSavedUpdatedAtRef.current !== null && liveNote.updatedAt <= lastSavedUpdatedAtRef.current) {
+    if (
+      isInitialized &&
+      lastSavedUpdatedAtRef.current !== null &&
+      liveNote.updatedAt <= lastSavedUpdatedAtRef.current
+    ) {
       noteEditorLog('live note ignored because it is not newer than last saved', {
         liveUpdatedAt: liveNote.updatedAt,
         lastSavedUpdatedAt: lastSavedUpdatedAtRef.current,
@@ -793,21 +854,28 @@ export function useNoteEditor(props: NoteEditorViewProps) {
       return;
     }
 
-    if (isDirtyRef.current && lastSavedUpdatedAtRef.current !== null && liveNote.updatedAt > lastSavedUpdatedAtRef.current) {
+    if (
+      isDirtyRef.current &&
+      lastSavedUpdatedAtRef.current !== null &&
+      liveNote.updatedAt > lastSavedUpdatedAtRef.current
+    ) {
       noteEditorLog('live note arrived while dirty, checking field-level merge');
       const localTitleChanged = currentInputsRef.current.noteTitle !== lastSavedTitleRef.current;
       const localBodyChanged = currentInputsRef.current.noteBody !== lastSavedBodyRef.current;
       const localWsChanged = currentInputsRef.current.workspaceId !== lastSavedWorkspaceIdRef.current;
       const localFolderChanged = currentInputsRef.current.folderId !== lastSavedFolderIdRef.current;
-      const localTagsChanged = [...currentInputsRef.current.tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
+      const localTagsChanged =
+        [...currentInputsRef.current.tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
 
       const remoteTitleChanged = liveNote.title !== lastSavedTitleRef.current;
       const remoteBodyChanged = normalizeNoteBody(liveNote.body) !== normalizeNoteBody(lastSavedBodyRef.current);
       const remoteWsChanged = liveNote.workspaceId !== lastSavedWorkspaceIdRef.current;
       const remoteFolderChanged = liveNote.folderId !== lastSavedFolderIdRef.current;
-      const remoteTagsChanged = [...liveNote.tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
+      const remoteTagsChanged =
+        [...liveNote.tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
 
-      const hasAnyConflict = (localTitleChanged && remoteTitleChanged) ||
+      const hasAnyConflict =
+        (localTitleChanged && remoteTitleChanged) ||
         (localBodyChanged && remoteBodyChanged) ||
         (localWsChanged && remoteWsChanged) ||
         (localFolderChanged && remoteFolderChanged) ||
@@ -977,64 +1045,67 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     setIsNoteDeleted(false);
   }, [activeNoteId, clearAutosaveTimer, isInitialized, liveNote]);
 
-  const handlePropertiesChange = useCallback((newProps: SharedProperties) => {
-    noteEditorLog('properties change', {
-      activeNoteId: activeNoteIdRef.current,
-      workspaceId: newProps.workspaceId,
-      folderId: newProps.folderId,
-      selectedTagsCount: newProps.selectedTags?.length ?? 0,
-    });
-    const prevWsId = currentInputsRef.current.workspaceId;
-    const prevFId = currentInputsRef.current.folderId;
+  const handlePropertiesChange = useCallback(
+    (newProps: SharedProperties) => {
+      noteEditorLog('properties change', {
+        activeNoteId: activeNoteIdRef.current,
+        workspaceId: newProps.workspaceId,
+        folderId: newProps.folderId,
+        selectedTagsCount: newProps.selectedTags?.length ?? 0,
+      });
+      const prevWsId = currentInputsRef.current.workspaceId;
+      const prevFId = currentInputsRef.current.folderId;
 
-    let wId = prevWsId;
-    let fId = prevFId;
-    let tIds = currentInputsRef.current.tagIds;
+      let wId = prevWsId;
+      let fId = prevFId;
+      let tIds = currentInputsRef.current.tagIds;
 
-    if (newProps.workspaceId !== undefined) wId = newProps.workspaceId;
-    if (newProps.folderId !== undefined) fId = newProps.folderId;
-    if (newProps.selectedTags) tIds = newProps.selectedTags.map((t: any) => t.id);
+      if (newProps.workspaceId !== undefined) wId = newProps.workspaceId;
+      if (newProps.folderId !== undefined) fId = newProps.folderId;
+      if (newProps.selectedTags) tIds = newProps.selectedTags.map((t: any) => t.id);
 
-    const tagsChanged = !sameTagList(tIds, currentInputsRef.current.tagIds);
-    const workspaceChanged = !sameString(wId, prevWsId);
-    const folderChanged = !sameString(fId, prevFId);
-    const locationChanged = workspaceChanged || folderChanged;
-    const propertiesChanged = tagsChanged || locationChanged;
+      const tagsChanged = !sameTagList(tIds, currentInputsRef.current.tagIds);
+      const workspaceChanged = !sameString(wId, prevWsId);
+      const folderChanged = !sameString(fId, prevFId);
+      const locationChanged = workspaceChanged || folderChanged;
+      const propertiesChanged = tagsChanged || locationChanged;
 
-    if (!propertiesChanged) {
-      return;
-    }
+      if (!propertiesChanged) {
+        return;
+      }
 
-    setWorkspaceId(wId);
-    setFolderId(fId);
-    setTagIds(tIds);
+      setWorkspaceId(wId);
+      setFolderId(fId);
+      setTagIds(tIds);
 
-    if (!isDirtyRef.current) {
-      isDirtyRef.current = true;
-      setIsDirty(true);
-    }
+      if (!isDirtyRef.current) {
+        isDirtyRef.current = true;
+        setIsDirty(true);
+      }
 
-    currentInputsRef.current = {
-      ...currentInputsRef.current,
-      workspaceId: wId,
-      folderId: fId,
-      tagIds: tIds,
-    };
+      currentInputsRef.current = {
+        ...currentInputsRef.current,
+        workspaceId: wId,
+        folderId: fId,
+        tagIds: tIds,
+      };
 
-    // Persist changes to StorageManager for defaults
-    if (wId) StorageManager.setItem('lastUsedWorkspaceId', wId);
-    if (fId) StorageManager.setItem('lastUsedFolderId', fId);
-    else StorageManager.removeItem('lastUsedFolderId');
+      // Persist changes to StorageManager for defaults
+      if (wId) StorageManager.setItem('lastUsedWorkspaceId', wId);
+      if (fId) StorageManager.setItem('lastUsedFolderId', fId);
+      else StorageManager.removeItem('lastUsedFolderId');
 
-    noteEditorLog('properties persisted locally', {
-      workspaceId: wId,
-      folderId: fId,
-      tagIds: tIds,
-    });
+      noteEditorLog('properties persisted locally', {
+        workspaceId: wId,
+        folderId: fId,
+        tagIds: tIds,
+      });
 
-    setSaveStatus('saving');
-    if (!hasConflictRef.current) scheduleAutosave();
-  }, [scheduleAutosave]);
+      setSaveStatus('saving');
+      if (!hasConflictRef.current) scheduleAutosave();
+    },
+    [scheduleAutosave],
+  );
 
   const resolveConflictWithRemote = useCallback(() => {
     if (!conflictNote) return;
@@ -1156,6 +1227,8 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   const syncRevision = liveNote?.updatedAt ?? 0;
 
   return {
+    setNoteVersionIndex,
+    noteVersionIndex,
     noteTitle,
     noteBody,
     activeNoteId,
@@ -1186,5 +1259,8 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     resolveConflictWithRemote,
     keepLocalVersion,
     resetEditor,
+    onImageSaveStart,
+    onImageSaveEnd,
+    isSavingImage,
   };
 }

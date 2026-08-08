@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import * as React from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { FaUser,
   FaRegCalendarAlt,
@@ -33,16 +34,18 @@ import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/ut
 import useNotification from '../../../../../shared-components/notifications/useNotification';
 import { useAppearance } from '@extension/ui';
 import { EditorContainer } from '../../../../../shared-components/editorContainer/EditorContainer';
+import { EditorHeader } from '../../../../../shared-components/editorContainer/EditorHeader';
 import { WorkspaceEditorLayout } from '../../../../../shared-components/editorContainer/WorkspaceEditorLayout';
 import { EditorTitleShortcutInput } from '../../../../../shared-components/editorContainer/EditorTitleShortcutInput';
 import { ExistingItemsTable } from '../../../../../shared-components/editorContainer/ExistingItemsTable';
+import { RightSideItemsPanel } from '../../../../../shared-components/editorContainer/RightSideItemsPanel';
 import { useFavorites } from '../../../../../shared-components/favorites/favoriteHooks';
 import { getItemCompoundId, readAllShortcuts } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { HotkeyAssignButton } from '../../../../../shared-components/hotkeys';
 import { SharedPropertiesToolbar } from '../../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
 import { useShortcutValidation, saveShortcut, clearShortcut } from '../../../../../shared-components/shortcuts';
 import type { TodoRecord } from '../todoTypes';
-import { updateTodoContent } from '../todoData';
+import { updateTodoContent, deleteTodo } from '../todoData';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
 import StackedLinkIcon from '../../../../../shared-components/icons/stackedLinkIcon';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
@@ -282,7 +285,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
   return (
     <div
       ref={popupRef}
-      className="custom-time-picker-popup absolute left-0 bottom-full mb-2 w-[180px] bg-[#1c1d27]/95 backdrop-blur-md border border-white/10 rounded-xl p-1 shadow-2xl z-[150] flex flex-col gap-1 text-[var(--color-textMain)] font-sans"
+      className="custom-time-picker-popup absolute left-0 bottom-full mb-2 w-[180px] bg-[#1c1d27]/95 backdrop-blur-md border border-white/10 rounded-xl p-1 shadow-2xl z-[150] flex flex-col gap-1 text-[var(--color-textPrimary)] font-sans"
       onClick={e => e.stopPropagation()}
       onKeyDown={e => e.stopPropagation()}>
       {/* Anytime */}
@@ -298,7 +301,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
           <FiClock size={12} />
         </div>
         <span
-          className={`font-medium text-[13px] ${isAnytime ? 'text-blue-600 dark:text-blue-400' : 'text-[var(--color-textMain)]'}`}>
+          className={`font-medium text-[13px] ${isAnytime ? 'text-blue-600 dark:text-blue-400' : 'text-[var(--color-textPrimary)]'}`}>
           Anytime
         </span>
       </div>
@@ -317,7 +320,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
             <FiClock size={12} />
           </div>
           <span
-            className={`font-medium text-[13px] ${!isAnytime ? 'text-blue-600 dark:text-blue-400' : 'text-[var(--color-textMain)]'}`}>
+            className={`font-medium text-[13px] ${!isAnytime ? 'text-blue-600 dark:text-blue-400' : 'text-[var(--color-textPrimary)]'}`}>
             Specific time
           </span>
         </div>
@@ -347,9 +350,9 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
                   minInputRef.current?.select();
                 }
               }}
-              className="w-8 h-7 bg-transparent border border-[var(--color-borderDefault)] rounded-[5px] text-center text-[12px] font-medium text-[var(--color-textMain)] focus:border-blue-500 focus:bg-blue-50 dark:focus:bg-blue-500/10 outline-none transition-all"
+              className="w-8 h-7 bg-transparent border border-[var(--color-borderDefault)] rounded-[5px] text-center text-[12px] font-medium text-[var(--color-textPrimary)] focus:border-blue-500 focus:bg-blue-50 dark:focus:bg-blue-500/10 outline-none transition-all"
             />
-            <span className="text-[var(--color-textMain)] font-bold text-xs mb-0.5">:</span>
+            <span className="text-[var(--color-textPrimary)] font-bold text-xs mb-0.5">:</span>
             <input
               ref={minInputRef}
               type="text"
@@ -376,7 +379,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
                   hourInputRef.current?.select();
                 }
               }}
-              className="w-8 h-7 bg-transparent border border-[var(--color-borderDefault)] rounded-[5px] text-center text-[12px] font-medium text-[var(--color-textMain)] focus:border-blue-500 focus:bg-blue-50 dark:focus:bg-blue-500/10 outline-none transition-all"
+              className="w-8 h-7 bg-transparent border border-[var(--color-borderDefault)] rounded-[5px] text-center text-[12px] font-medium text-[var(--color-textPrimary)] focus:border-blue-500 focus:bg-blue-50 dark:focus:bg-blue-500/10 outline-none transition-all"
             />
 
             <div className="flex items-center ml-1 gap-1">
@@ -396,7 +399,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
                     minInputRef.current?.select();
                   }
                 }}
-                className={`px-1.5 py-1 text-[11px] font-bold transition-colors focus:ring-1 focus:ring-blue-500 rounded outline-none ${!isPM ? 'text-blue-500' : 'text-[var(--color-textMuted)] hover:text-[var(--color-textMain)]'}`}>
+                className={`px-1.5 py-1 text-[11px] font-bold transition-colors focus:ring-1 focus:ring-blue-500 rounded outline-none ${!isPM ? 'text-blue-500' : 'text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)]'}`}>
                 AM
               </button>
               <button
@@ -411,7 +414,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
                     amBtnRef.current?.focus();
                   }
                 }}
-                className={`px-1.5 py-1 text-[11px] font-bold transition-colors focus:ring-1 focus:ring-blue-500 rounded outline-none ${isPM ? 'text-blue-500' : 'text-[var(--color-textMuted)] hover:text-[var(--color-textMain)]'}`}>
+                className={`px-1.5 py-1 text-[11px] font-bold transition-colors focus:ring-1 focus:ring-blue-500 rounded outline-none ${isPM ? 'text-blue-500' : 'text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)]'}`}>
                 PM
               </button>
             </div>
@@ -516,6 +519,10 @@ const getSecondaryText = (item: ConvertibleItem): string => {
     return 'Automation';
   }
 
+  if (['prompt', 'aiprompt', 'ai_prompt'].includes(cat)) {
+    return data.description || data.prompt || data.promptBody || 'AI Prompt';
+  }
+
   if (['agent', 'chat_agent', 'ai', 'assistant', 'chat'].includes(cat) || data.type === 'agent') {
     return data.description || 'Chat Agent';
   }
@@ -526,6 +533,10 @@ const getSecondaryText = (item: ConvertibleItem): string => {
 const getItemIcon = (item: ConvertibleItem) => {
   const cat = (item.category || '').toLowerCase();
   const data = item.data || {};
+
+  if (['prompt', 'aiprompt', 'ai_prompt'].includes(cat)) {
+    return <LuSparkles size={11} className="text-[var(--color-iconDefault)] shrink-0" />;
+  }
 
   if (['agent', 'chat_agent', 'ai', 'assistant', 'chat'].includes(cat) || data.type === 'agent') {
     const meta = resolveAutomationIconMeta(data.automation || data);
@@ -623,6 +634,7 @@ const validCategories = [
   'link group',
   'prompt',
   'aiprompt',
+  'ai_prompt',
 ];
 const isValidCategory = (item: ConvertibleItem) => {
   const cat = (item.category || '').toLowerCase();
@@ -723,6 +735,12 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     handleSave,
     activeTodoId: liveTodoId,
     resetEditor,
+    liveTodo,
+    versionHistory,
+    versionHistoryItems,
+    selectedVersionId,
+    setSelectedVersionId,
+    isViewingHistory,
   } = useTodoEditor({
     todoId: activeTodoId || initialItem?.todo_id || initialItem?.id || undefined,
     initialTitle: initialItem?.name || '',
@@ -774,6 +792,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
   const [shortcutsMap, setShortcutsMap] = useState<Record<string, string>>({});
   const [tableSearchQuery, setTableSearchQuery] = useState('');
+  const [isRightPanelExpanded, setIsRightPanelExpanded] = useState(false);
+  const rightSideSearchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const seededShortcuts = (existingTodos ?? []).reduce<Record<string, string>>((acc, todo) => {
       const shortcut = String(todo?.shortcut || '').trim();
@@ -791,10 +811,14 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       .catch(() => {});
   }, [existingTodos]);
 
+  const hasInitialShortcutBeenSetRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!isEditMode || !initialItem) return;
+    if (!isEditMode || !initialItem || selectedVersionId) return;
     const todoId = initialItem.todo_id || initialItem.id;
     if (!todoId) return;
+
+    if (hasInitialShortcutBeenSetRef.current === todoId) return;
 
     const itemWsId = initialItem.workspaceId || initialItem.workspace_id || null;
     const itemFId = initialItem.folderId || initialItem.folder_id || null;
@@ -812,9 +836,14 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       '';
 
     if (foundShortcut) {
+      hasInitialShortcutBeenSetRef.current = todoId;
       setTodoShortcut(foundShortcut);
     }
-  }, [initialItem, isEditMode, shortcutsMap]);
+  }, [initialItem, isEditMode, shortcutsMap, selectedVersionId, setTodoShortcut]);
+
+  // Note: useTodoEditor already returns display* values (displayTitle, displayShortcut, etc.)
+  // that switch automatically between the historical snapshot and the live value based on
+  // selectedVersionId. No extra sync effects are needed here.
 
   useEffect(() => {
     let active = true;
@@ -897,7 +926,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
   const [selectedType, setSelectedType] = useState('custom');
   const [selectedCategory, setSelectedCategory] = useState<
-    'all' | 'note' | 'snippet' | 'link' | 'tabgroup' | 'automation' | 'agent'
+    'all' | 'note' | 'snippet' | 'link' | 'tabgroup' | 'automation' | 'agent' | 'aiPrompt'
   >('all');
   const [hasSelectedTypeInitially, setHasSelectedTypeInitially] = useState(() => {
     return isEditMode;
@@ -1250,9 +1279,9 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     return opts;
   }, [scheduleType]);
 
-  const slots: ('title' | 'description' | 'mode' | 'date' | 'time' | 'resource' | 'submit' | 'shortcut')[] =
+  const slots: ('title' | 'shortcut' | 'description' | 'mode' | 'date' | 'time' | 'resource' | 'submit')[] =
     useMemo(() => {
-      return ['title', 'description', 'mode', 'date', 'time', 'resource', 'submit', 'shortcut'];
+      return ['title', 'shortcut', 'description', 'mode', 'date', 'time', 'resource', 'submit'];
     }, []);
 
   const hideNativeIconsStyle = `
@@ -1510,21 +1539,47 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
         const stripTodoReferencePrefix = (id: unknown) =>
           String(id).replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
-        const isSameTodoReference = (availableId: unknown, savedId: unknown) => {
-          const availableIdStr = String(availableId);
+        const getAvailableReferenceIds = (availableItem: any) => {
+          const data = availableItem?.data || {};
+          return [
+            availableItem?.id,
+            data?.id,
+            data?.snippet_id,
+            data?.todo_id,
+            data?.automation_id,
+            data?.command_id,
+            data?.session_id,
+            data?.value,
+          ].filter(id => id !== undefined && id !== null && String(id).length > 0);
+        };
+        const isSameTodoReference = (availableItem: any, savedId: unknown) => {
           const savedIdStr = String(savedId);
-          return (
-            availableIdStr === savedIdStr ||
-            stripTodoReferencePrefix(availableIdStr) === stripTodoReferencePrefix(savedIdStr)
-          );
+          return getAvailableReferenceIds(availableItem).some(availableId => {
+            const availableIdStr = String(availableId);
+            return (
+              availableIdStr === savedIdStr ||
+              stripTodoReferencePrefix(availableIdStr) === stripTodoReferencePrefix(savedIdStr)
+            );
+          });
         };
 
         if (allReferenceIds.length > 0) {
-          matchedItems = (items || []).filter(availableItem =>
-            allReferenceIds.some(cid => {
-              return isSameTodoReference(availableItem.id, cid);
-            }),
-          );
+          const referenceLookup = Array.isArray(item.references) ? item.references : [];
+          matchedItems = allReferenceIds
+            .map(cid => {
+              const matched = (items || []).find(availableItem => isSameTodoReference(availableItem, cid));
+              if (matched) return matched;
+
+              const savedReference = referenceLookup.find((ref: any) => String(ref.id) === String(cid));
+              if (!savedReference) return null;
+              return {
+                id: String(savedReference.id),
+                name: savedReference.name || savedReference.title || savedReference.key || 'Saved item',
+                category: savedReference.type || savedReference.category || 'note',
+                data: savedReference,
+              };
+            })
+            .filter(Boolean) as ConvertibleItem[];
         }
 
         if (matchedItems.length === 0) {
@@ -1532,7 +1587,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           if (singleId) {
             const singleIdStr = String(singleId);
             const matched = (items || []).find(availableItem => {
-              return isSameTodoReference(availableItem.id, singleIdStr);
+              return isSameTodoReference(availableItem, singleIdStr);
             });
             if (matched) {
               matchedItems = [matched];
@@ -1681,6 +1736,9 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       case 'title':
         titleInputRef.current?.focus();
         break;
+      case 'shortcut':
+        shortcutInputRef.current?.focus();
+        break;
       case 'description':
         descriptionRef.current?.focus();
         break;
@@ -1769,6 +1827,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       tabgroup: [] as ConvertibleItem[],
       automation: [] as ConvertibleItem[],
       agent: [] as ConvertibleItem[],
+      aiPrompt: [] as ConvertibleItem[],
     };
 
     items.forEach(item => {
@@ -1781,8 +1840,9 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       else if (cat === 'snippet') categories.snippet.push(item);
       else if (cat === 'tabgroup' || cat === 'Tab Session' || cat === 'link group') categories.tabgroup.push(item);
       else if (['link'].includes(cat)) categories.link.push(item);
+      else if (['aiprompt', 'ai_prompt', 'prompt'].includes(cat)) categories.aiPrompt.push(item);
       else if (
-        ['agent', 'chat_agent', 'ai', 'assistant', 'chat', 'prompt', 'aiprompt'].includes(cat) ||
+        ['agent', 'chat_agent', 'ai', 'assistant', 'chat'].includes(cat) ||
         item.data?.type === 'agent'
       )
         categories.agent.push(item);
@@ -2050,7 +2110,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           return;
         }
 
-        if (isInput && (activeSlot === 'resource' || activeSlot === 'description' || activeSlot === 'time')) {
+        if (isInput && (activeSlot === 'title' || activeSlot === 'shortcut' || activeSlot === 'resource' || activeSlot === 'description' || activeSlot === 'time')) {
           const target = e.target as HTMLInputElement | HTMLTextAreaElement;
           const isAtStart = target.selectionStart === 0 && target.selectionEnd === 0;
           const isAtEnd = target.selectionStart === target.value.length && target.selectionEnd === target.value.length;
@@ -2216,12 +2276,6 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           }
           e.preventDefault();
           if (activeSlot === 'title') {
-            if (e.shiftKey) {
-              e.preventDefault();
-              e.stopPropagation();
-              handleCopyTitleToShortcut();
-              return;
-            }
             setActiveSlot('description');
             setIsEditing(true);
           } else if (activeSlot === 'resource') {
@@ -2365,232 +2419,84 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   return (
     <>
       <style>{hideNativeIconsStyle}</style>
-      <WorkspaceEditorLayout
-        title={isEditMode ? 'Edit task' : 'Create a task'}
-        isDirty={isDirty}
-        saveStatus={saveStatus as any}
-        lastSavedAt={lastSavedAt}
-        activeId={liveTodoId || null}
-        hideRightColumnBorder={selectedItems.length === 0}
-        isFocusMode={isFocusMode}
-        onSave={async () => {
-          const result = await handleSave();
-          scheduleSavedTodoAlarm(result);
-          return true;
-        }}
-        onDiscard={() => {}}
-        deleteModalProps={{
-          isOpen: pendingDeleteId !== null,
-          onClose: () => setPendingDeleteId(null),
-          onConfirm: async () => {
-            if (pendingDeleteId) {
-              const deletedId = pendingDeleteId;
-              const currentActiveId = liveTodoId || initialItem?.todo_id || initialItem?.id || activeTodoId;
-              const isDeletingCurrent =
-                String(deletedId) === String(currentActiveId) ||
-                String(deletedId) === String(initialItem?.id) ||
-                String(deletedId) === String(initialItem?.todo_id);
-
-              await onDeleteTodo?.(deletedId);
-
-              if (isDeletingCurrent) {
-                resetEditor();
-                const now = new Date();
-                setTime(format(now, 'HH:mm'));
-                setDate(format(now, 'yyyy-MM-dd'));
-                setIsAnytime(false);
-                setTodoHotkey('');
-                setSelectedItem(null);
-                setSelectedItems([]);
-                setSelectedTags([]);
-                setEditorTagIds([]);
-                setTodoShortcut('');
-                setShortcutError(null);
-                setIsFavoriteState(false);
-                setActiveSlot('title');
-                useUIStore.getState().setTodoCreatePrefill(null);
-                useUIStore.getState().openEditor({ type: 'todo', id: 'new' });
-              }
-            }
-            setPendingDeleteId(null);
-          },
-          title: 'Delete task?',
-          description: 'This task will be permanently removed. This action cannot be undone.',
-        }}
-        searchQuery={tableSearchQuery}
-        setSearchQuery={setTableSearchQuery}
-        searchPlaceholder="Search todos…"
-        headerActions={
-          <SharedPropertiesToolbar
-            key={liveTodoId || 'new-todo'}
-            initialSnippet={toolbarInitialSnippet}
-            compoundId={
-              liveTodoId
-                ? getItemCompoundId({
-                    id: liveTodoId,
-                    workspace_id: workspaceId || null,
-                    folder_id: folderId || null,
-                    snippet: { id: liveTodoId, category: 'todo' },
-                  })
-                : 'new'
-            }
-            defaultName={title}
-            showTodo={false}
-            showLocationPicker={false}
-            onChange={props => {
-              if (props.isFav !== undefined) setIsFavoriteState(props.isFav);
-              if (props.pendingHotkey !== undefined) setTodoHotkey(props.pendingHotkey);
-              if (props.pendingShortcut !== undefined) setTodoShortcut(props.pendingShortcut);
-              if (props.workspaceId !== undefined) setWorkspaceId(props.workspaceId);
-              if (props.folderId !== undefined) setFolderId(props.folderId ?? null);
-              if (props.selectedTags !== undefined) {
-                const newTIds = props.selectedTags.map(t => t.id);
-                const currentTIds = [...(editorTagIds || [])].sort().join(',');
-                const nextTIds = [...newTIds].sort().join(',');
-                if (currentTIds !== nextTIds) {
-                  setSelectedTags(props.selectedTags);
-                  setEditorTagIds(newTIds);
-                  void handleSave(true, { tagIds: newTIds });
-                }
-              }
-            }}
-            layout="horizontal"
-            showShortcut={false}
-            openPopupsToLeft={true}
-            openPopupsToBottom={true}
-          />
-        }
-        rightColumnContent={
-          selectedItems.length > 0 ? (
-            <div className="flex flex-col bg-transparent overflow-visible w-full">
-              <div className="flex flex-col gap-4 mt-2">
-
-                {/* Attached Saved — only shown when items are selected */}
-                <div className="mt-4 px-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40 mb-2">
-                    Attached Saved
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedItems.map(item => (
-                      <span
-                        key={item.id}
-                        className="flex items-center gap-1 text-[10px] font-medium text-blue-300 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-md cursor-pointer hover:bg-red-500/10 hover:border-red-500/20 hover:text-red-300 transition-colors"
-                        title="Click to remove"
-                        onClick={() => setSelectedItems(prev => prev.filter(s => s.id !== item.id))}>
-                        <span className="truncate max-w-[120px]">{getSingleItemName(item) || 'Untitled'}</span>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="w-2.5 h-2.5 shrink-0 opacity-60"
-                          viewBox="0 0 20 20"
-                          fill="currentColor">
-                          <path
-                            fillRule="evenodd"
-                            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : undefined
-        }
-        bottomListContent={
-          existingTodos && existingTodos.length >= 0 ? (
-            <ExistingItemsTable<TodoRecord>
-              items={sortedTodos}
-              activeItemId={liveTodoId ?? null}
-              onLoadItem={id => {
-                const todo = (existingTodos ?? []).find(t => t.id === id);
-                if (todo && onLoadTodo) onLoadTodo(todo);
-              }}
-              onUpdateItemField={async (itemId: string, field: 'title' | 'shortcut' | 'tags', value: any) => {
-                if (onUpdateItemField) {
-                  await onUpdateItemField(itemId, field, value);
-                }
-
-                if (field === 'title') {
-                  await updateTodoContent(itemId, { name: value });
-                } else if (field === 'shortcut') {
-                  const record = existingTodos?.find(p => p.id === itemId);
-                  if (record) {
-                    const compoundId = getItemCompoundId({
-                      id: record.id,
-                      workspace_id: record.workspaceId || null,
-                      folder_id: record.folderId || null,
-                      snippet: { id: record.id, category: 'todo' }
-                    });
-                    if (value) {
-                      await saveShortcut(itemId, compoundId, value.toLowerCase().replace(/[^a-z0-9]/g, ''), record.name || 'Untitled', 'todo');
-                    } else {
-                      await clearShortcut(itemId, compoundId, 'todo');
-                    }
+      <EditorContainer
+        className="w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4"
+        innerClassName="flex flex-col relative bg-[var(--color-editorBg)] mx-auto rounded-xl min-h-[450px] h-auto max-h-[860px] max-h-[90vh] overflow-hidden border border-black/5 dark:border-white/10 w-[calc(100%-20px)] max-w-[1800px]"
+      >
+        <div className="flex-1 flex flex-row items-stretch min-h-0 relative w-full overflow-hidden">
+          {/* Left Column Workspace */}
+          <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+            <EditorHeader
+              title={isEditMode ? 'Edit task' : 'Create a task'}
+              isDirty={isDirty}
+              saveStatus={saveStatus as any}
+              lastSavedAt={lastSavedAt}
+              activeId={liveTodoId || null}
+              onCloseClick={onClose}
+              showCloseButton={false}
+              headerActions={
+                <SharedPropertiesToolbar
+                  key={liveTodoId || 'new-todo'}
+                  initialSnippet={toolbarInitialSnippet}
+                  currentSnapshot={{
+                    entityType: 'todo',
+                    name: title,
+                    description: description,
+                    isDone: liveTodo?.isDone ?? false,
+                    scheduleTime: scheduleTime,
+                    scheduleType: scheduleType,
+                    recurringType: recurringCycle,
+                    shortcut: todoShortcut,
+                    references: (selectedItems || []).map((i: any) => ({ ...i })),
+                    tagIds: [...(editorTagIds || [])],
+                    workspaceId,
+                    folderId,
+                  }}
+                  versionHistory={versionHistory}
+                  compoundId={
+                    liveTodoId
+                      ? getItemCompoundId({
+                          id: liveTodoId,
+                          workspace_id: workspaceId || null,
+                          folder_id: folderId || null,
+                          snippet: { id: liveTodoId, category: 'todo' },
+                        })
+                      : 'new'
                   }
-                } else if (field === 'tags') {
-                  const tagNames = value.split(',').map((t: string) => t.trim()).filter(Boolean);
-                  const resolvedTags: any[] = [];
-                  const allTags = useDbStore.getState().tags;
-                  for (const name of tagNames) {
-                    const matchedTag = allTags.find((t: any) => t.name.toLowerCase() === name.toLowerCase());
-                    if (matchedTag) {
-                      resolvedTags.push(matchedTag);
-                    } else {
-                      const record = existingTodos?.find(p => p.id === itemId);
-                      const workspaces = useDbStore.getState().workspaces;
-                      const smartWs = record?.workspaceId || workspaces[0]?.id;
-                      if (smartWs) {
-                        const newTag = await createTag(name, smartWs);
-                        resolvedTags.push(newTag);
+                  defaultName={title}
+                  showTodo={false}
+                  showLocationPicker={false}
+                  versionHistoryItems={versionHistoryItems}
+                  selectedVersionId={selectedVersionId}
+                  onSelectVersion={setSelectedVersionId}
+                  entityType="todo"
+                  onChange={props => {
+                    if (props.isFav !== undefined) setIsFavoriteState(props.isFav);
+                    if (props.pendingHotkey !== undefined) setTodoHotkey(props.pendingHotkey);
+                    if (props.pendingShortcut !== undefined) setTodoShortcut(props.pendingShortcut);
+                    if (props.workspaceId !== undefined) setWorkspaceId(props.workspaceId);
+                    if (props.folderId !== undefined) setFolderId(props.folderId ?? null);
+                    if (props.selectedTags !== undefined) {
+                      const newTIds = props.selectedTags.map(t => t.id);
+                      const currentTIds = [...(editorTagIds || [])].sort().join(',');
+                      const nextTIds = [...newTIds].sort().join(',');
+                      if (currentTIds !== nextTIds) {
+                        setSelectedTags(props.selectedTags);
+                        setEditorTagIds(newTIds);
+                        void handleSave(true, { tagIds: newTIds });
                       }
                     }
-                  }
-                  await updateTodoContent(itemId, { tagIds: resolvedTags.map((t: any) => t.id) });
-                }
-
-                const currentActiveId = liveTodoId || initialItem?.todo_id || initialItem?.id || activeTodoId;
-                if (String(itemId) === String(currentActiveId)) {
-                  if (field === 'title') {
-                    setTitle(value);
-                    if (lastSavedTitleRef) lastSavedTitleRef.current = value;
-                  } else if (field === 'shortcut') {
-                    setTodoShortcut(value);
-                    if (lastSavedShortcutRef) lastSavedShortcutRef.current = value;
-                  }
-                  if (setSaveStatus) setSaveStatus('saved');
-                  if (setLastSavedAt) setLastSavedAt(new Date());
-                }
-              }}
-              getItemTitle={item => item.name || 'Untitled'}
-              getItemPreview={item => item.description || ''}
-              getItemCompoundId={item =>
-                getItemCompoundId({
-                  id: item.id,
-                  workspace_id: item.workspaceId || null,
-                  folder_id: item.folderId || null,
-                  snippet: { id: item.id, category: 'todo' },
-                })
+                  }}
+                  layout="horizontal"
+                  showShortcut={false}
+                  openPopupsToLeft={true}
+                  openPopupsToBottom={true}
+                />
               }
-              getItemType={() => 'todo'}
-              shortcutsMap={shortcutsMap}
-              hotkeysMap={hotkeysMap}
-              isFavorite={isFavorite}
-              toggleFavorite={toggleFavorite}
-              onDeleteClick={id => {
-                setPendingDeleteId(id);
-              }}
-              emptyStateMessage="No tasks yet. Create your first task above!"
-              title=""
-              tagNamesMap={todoTagNamesMap}
             />
-          ) : null
-        }
-        headerRightPaddingClass={selectedItems.length > 0 ? "pr-[220px]" : "pr-6"}
-        containerMaxWidthClass={selectedItems.length > 0 ? "max-w-[1200px]" : "max-w-[940px]"}
-      >
-        <div className="flex-1 flex flex-col min-h-0 relative">
-          <div ref={workspaceRef} className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2">
+
+            <div className="flex-1 flex flex-col min-h-0 relative">
+              <div ref={workspaceRef} className="w-full flex-1 flex flex-col min-h-0 px-6 pt-1 pb-4">
             {/* Left Column: Input Fields & Description */}
             <div className="flex-1 flex flex-col relative min-h-0">
               {/* Title & Shortcut block */}
@@ -2618,8 +2524,6 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                   onTitleEnter={(shiftKey, e) => {
                     if (e?.ctrlKey || e?.metaKey) {
                       handleCreate({ overrideCreateMore: true });
-                    } else if (shiftKey) {
-                      handleCopyTitleToShortcut();
                     } else {
                       if (!title.trim()) {
                         setTitleError(true);
@@ -2634,11 +2538,11 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
               {/* Description Field */}
               <div className="flex-1 flex flex-col gap-1.5 relative min-h-[120px] mt-4">
-                <label className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 px-3.5 flex items-center gap-1">
+                <label className="text-xs font-semibold text-[var(--color-textSecondary)] px-3.5 flex items-center gap-1">
                   Description <span className="text-red-500">*</span>
                 </label>
                 <div
-                  className={`flex-1 min-h-[160px] relative rounded-xl border transition-all duration-200 ${descriptionError ? 'border-red-500 ring-1 ring-red-500 bg-red-500/5' : 'border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02]'} overflow-visible px-3.5 py-2 flex flex-col gap-3`}>
+                  className={`flex-1 min-h-[160px] relative rounded-xl border transition-all duration-200 ${descriptionError ? 'border-red-500 ring-1 ring-red-500 bg-red-500/5' : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm'} overflow-visible px-3.5 py-2 flex flex-col gap-3`}>
                   <div className="flex-1 flex flex-col relative min-h-[80px]">
                     <textarea
                       ref={descriptionRef as any}
@@ -2649,13 +2553,13 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                         setActiveSlot('description');
                         setIsEditing(true);
                       }}
-                      className="w-full flex-1 bg-transparent outline-none border-none shadow-none focus:ring-0 resize-none text-sm font-medium font-sans text-neutral-700 dark:text-neutral-300 placeholder-black/35 dark:placeholder-white/35 custom-scrollbar"
+                      className="w-full flex-1 bg-transparent outline-none border-none shadow-none focus:ring-0 resize-none text-sm font-semibold font-sans text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] custom-scrollbar"
                     />
 
                     {!description && (
-                      <div className="absolute left-1 bottom-1 text-neutral-500 text-[13px] pointer-events-none select-none flex items-center gap-1.5 opacity-60">
+                      <div className="absolute left-1 bottom-1 text-[var(--color-textMuted)] text-[13px] pointer-events-none select-none flex items-center gap-1.5 opacity-60">
                         Type{' '}
-                        <kbd className="px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-bold font-mono text-[var(--color-textMain)]">
+                        <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">
                           @
                         </kbd>{' '}
                         to attach
@@ -2678,8 +2582,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                             onClick={() => handleSelectMention(item)}
                             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
                               isSelected
-                                ? 'bg-[var(--color-bgMuted)] text-[var(--color-textMain)] font-medium'
-                                : 'text-[var(--color-textMuted)] hover:bg-[var(--color-bgHover)] hover:text-[var(--color-textMain)]'
+                                ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] font-medium'
+                                : 'text-[var(--color-textMuted)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]'
                             }`}>
                             <div className="shrink-0">{getItemIcon(item)}</div>
                             <span className="text-[12.5px] truncate flex-1">{getSingleItemName(item)}</span>
@@ -2708,8 +2612,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                           }}
                           className={`px-3 py-1.5 flex items-center gap-1.5 rounded-xl border transition-all text-[13px] font-medium cursor-pointer ${
                             activeSlot === 'mode'
-                              ? 'bg-white/[0.04] border-white text-white shadow-md ring-1 ring-white/20'
-                              : 'bg-white/[0.03] border-white/[0.05] text-neutral-300 hover:brightness-110'
+                              ? 'bg-[var(--color-hoverBg)] border-[var(--color-borderActive)] text-[var(--color-textPrimary)] shadow-md ring-1 ring-[var(--color-borderActive)]'
+                              : 'bg-[var(--color-inputBg)] border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                           }`}>
                           <FiRepeat size={14} className="text-[var(--color-iconDefault)]" />
                           <span>
@@ -2735,7 +2639,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                         </button>
 
                         {activeSlot === 'mode' && isEditing && (
-                          <div className="absolute bottom-full mb-2 left-0 w-[160px] rounded-xl shadow-2xl z-[99999] bg-[#1c1d27]/95 backdrop-blur-md border border-white/10 overflow-hidden">
+                          <div className="absolute bottom-full mb-2 left-0 w-[160px] rounded-xl shadow-2xl z-[99999] bg-[var(--color-contextMenuBg,#171821)] backdrop-blur-md border border-[var(--color-borderDefault)] overflow-hidden">
                             {[
                               { id: 'one-time', label: 'Once', icon: <FaRegClock size={12} /> },
                               { id: 'daily', label: 'Daily', icon: <FiRepeat size={12} /> },
@@ -2760,8 +2664,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                   }}
                                   className={`w-full flex items-center gap-2 px-3 py-2 text-left text-[12.5px] font-medium transition-colors cursor-pointer ${
                                     isFocused
-                                      ? 'bg-[var(--color-bgMuted)] text-white'
-                                      : 'text-neutral-300 hover:bg-white/5'
+                                      ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)]'
+                                      : 'text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                                   }`}>
                                   {opt.icon}
                                   <span>{opt.label}</span>
@@ -2785,8 +2689,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                           }}
                           className={`px-3 py-1.5 flex items-center gap-1.5 rounded-xl border transition-all text-[13px] font-medium cursor-pointer ${
                             activeSlot === 'date' && !isEditing
-                              ? 'bg-white/[0.04] border-white text-white shadow-md ring-1 ring-white/20'
-                              : 'bg-white/[0.03] border-white/[0.05] hover:brightness-110 text-neutral-200'
+                              ? 'bg-[var(--color-hoverBg)] border-[var(--color-borderActive)] text-[var(--color-textPrimary)] shadow-md ring-1 ring-[var(--color-borderActive)]'
+                              : 'bg-[var(--color-inputBg)] border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                           }`}>
                           <FaRegCalendarAlt size={14} className="text-[var(--color-iconDefault)]" />
                           <span>
@@ -2831,8 +2735,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                           }}
                           className={`px-3 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 font-medium text-[13px] cursor-pointer ${
                             activeSlot === 'resource'
-                              ? 'bg-white/[0.04] border-white text-white shadow-md ring-1 ring-white/20'
-                              : 'bg-white/[0.03] border-white/[0.05] text-neutral-300 hover:brightness-110'
+                              ? 'bg-[var(--color-hoverBg)] border-[var(--color-borderActive)] text-[var(--color-textPrimary)] shadow-md ring-1 ring-[var(--color-borderActive)]'
+                              : 'bg-[var(--color-inputBg)] border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                           }`}>
                           <FiLink
                             size={14}
@@ -2868,31 +2772,31 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                 top: `${resourceDropdownPos.top}px`,
                                 left: `${resourceDropdownPos.left}px`,
                               }}
-                              className="w-[600px] max-w-[80vw] rounded-2xl shadow-2xl z-[99999] bg-[#1c1d27]/95 backdrop-blur-md border border-white/10 overflow-hidden flex flex-col font-sans"
+                              className="w-[600px] max-w-[80vw] rounded-2xl shadow-2xl z-[99999] bg-[var(--color-contextMenuBg,#171821)] backdrop-blur-md border border-[var(--color-borderDefault)] overflow-hidden flex flex-col font-sans text-[var(--color-textPrimary)]"
                               onClick={e => e.stopPropagation()}>
                               {/* Search and Header */}
-                              <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.04] bg-white/[0.01]">
+                              <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-borderDefault)] bg-[var(--color-inputBg)]">
                                 <div className="flex items-center gap-2 flex-1">
-                                  <FiSearch size={14} className="text-neutral-400 shrink-0" />
+                                  <FiSearch size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                   <input
                                     id="resource-search-input"
                                     type="text"
                                     placeholder="Search and select files..."
                                     value={searchQuery}
                                     onChange={e => setSearchQuery(e.target.value)}
-                                    className="flex-1 bg-transparent border-none text-neutral-200 placeholder:text-neutral-500 focus:outline-none text-[13px] font-medium min-w-0 pl-1"
+                                    className="flex-1 bg-transparent border-none text-[var(--color-textPrimary)] placeholder:text-[var(--color-textPlaceholder)] focus:outline-none text-[13px] font-medium min-w-0 pl-1"
                                   />
                                   {searchQuery && (
                                     <button
                                       onClick={() => setSearchQuery('')}
-                                      className="text-neutral-500 hover:text-neutral-300 transition-colors shrink-0">
+                                      className="text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] transition-colors shrink-0">
                                       <FaTimes size={10} />
                                     </button>
                                   )}
                                 </div>
 
                                 {selectedItems.length > 0 && (
-                                  <div className="flex items-center gap-2 px-2.5 py-1 bg-white/[0.03] border border-white/[0.08] rounded-lg text-[11px] text-neutral-400 font-normal">
+                                  <div className="flex items-center gap-2 px-2.5 py-1 bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] rounded-lg text-[11px] text-[var(--color-textSecondary)] font-normal">
                                     <span className="shrink-0">{selectedItems.length} selected</span>
                                   </div>
                                 )}
@@ -2903,7 +2807,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                     setIsEditing(false);
                                     setActiveSlot(null);
                                   }}
-                                  className="p-1 text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer ml-1">
+                                  className="p-1 text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] transition-colors cursor-pointer ml-1">
                                   <FaTimes size={12} />
                                 </button>
                               </div>
@@ -2911,7 +2815,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                               {/* Columns Layout */}
                               <div className="flex h-[250px]">
                                 {/* Sidebar Categories */}
-                                <div className="w-[150px] shrink-0 flex flex-col gap-0.5 py-2 px-1.5 border-r border-white/[0.04] bg-white/[0.01] overflow-y-auto no-scrollbar">
+                                <div className="w-[150px] shrink-0 flex flex-col gap-0.5 py-2 px-1.5 border-r border-[var(--color-borderDefault)] bg-[var(--color-editorBg)] overflow-y-auto no-scrollbar">
                                   {[
                                     {
                                       key: 'all' as const,
@@ -2943,7 +2847,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                     },
                                     {
                                       key: 'snippet' as const,
-                                      label: 'Snippets',
+                                      label: 'Text Expanders',
                                       items: categoriesData.snippet,
                                       icon: <FiCode size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
                                     },
@@ -2968,6 +2872,12 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                       icon: <FiZap size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
                                     },
                                     {
+                                      key: 'aiPrompt' as const,
+                                      label: 'AI Prompts',
+                                      items: categoriesData.aiPrompt,
+                                      icon: <LuSparkles size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+                                    },
+                                    {
                                       key: 'agent' as const,
                                       label: 'Chat Agents',
                                       items: categoriesData.agent,
@@ -2982,14 +2892,14 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                         onClick={() => setSelectedCategory(col.key)}
                                         className={`flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-all ${
                                           isActive
-                                            ? 'bg-white/[0.06] text-white font-medium border border-white/10'
-                                            : 'text-neutral-400 hover:bg-white/[0.03] hover:text-white border border-transparent'
+                                            ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] font-semibold border border-[var(--color-borderActive)]'
+                                            : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)] border border-transparent'
                                         }`}>
                                         <div className="flex items-center gap-1.5 min-w-0">
                                           {col.icon}
                                           <span className="text-[12px] truncate font-normal">{col.label}</span>
                                         </div>
-                                        <span className="text-[9.5px] text-neutral-500 tabular-nums font-normal">
+                                        <span className="text-[9.5px] text-[var(--color-textSecondary)] tabular-nums font-normal">
                                           {col.items.length}
                                         </span>
                                       </button>
@@ -3003,7 +2913,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                     const activeCol = [
                                       { key: 'all' as const, label: 'All', items: categoriesData.all },
                                       { key: 'note' as const, label: 'Notes', items: categoriesData.note },
-                                      { key: 'snippet' as const, label: 'Snippets', items: categoriesData.snippet },
+                                      { key: 'snippet' as const, label: 'Text Expanders', items: categoriesData.snippet },
                                       { key: 'link' as const, label: 'Links', items: categoriesData.link },
                                       {
                                         key: 'tabgroup' as const,
@@ -3015,17 +2925,18 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                         label: 'Automations',
                                         items: categoriesData.automation,
                                       },
+                                      { key: 'aiPrompt' as const, label: 'AI Prompts', items: categoriesData.aiPrompt },
                                       { key: 'agent' as const, label: 'Chat Agents', items: categoriesData.agent },
                                     ].find(c => c.key === selectedCategory)!;
 
                                     return (
                                       <>
-                                        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-white/[0.04] bg-white/[0.01] shrink-0">
-                                          <span className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">
+                                        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shrink-0">
+                                          <span className="text-[10px] font-semibold text-[var(--color-textSecondary)] uppercase tracking-wider">
                                             {activeCol.label}
                                           </span>
-                                          <span className="text-neutral-700 font-normal">·</span>
-                                          <span className="text-[10px] text-neutral-500 tabular-nums font-normal">
+                                          <span className="text-[var(--color-textSecondary)] font-normal">·</span>
+                                          <span className="text-[10px] text-[var(--color-textSecondary)] tabular-nums font-normal">
                                             {activeCol.items.length} items
                                           </span>
                                         </div>
@@ -3034,7 +2945,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                           className="overflow-y-auto no-scrollbar flex flex-col flex-1">
                                           {activeCol.items.length === 0 ? (
                                             <div className="h-full flex items-center justify-center">
-                                              <span className="text-[12px] text-neutral-600 font-normal">
+                                              <span className="text-[12px] text-[var(--color-textSecondary)] font-normal">
                                                 Nothing here
                                               </span>
                                             </div>
@@ -3047,12 +2958,12 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                                   key={item.id}
                                                   data-idx={idx}
                                                   onClick={() => toggleSelection(item)}
-                                                  className={`flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.04] cursor-pointer transition-all ${
+                                                  className={`flex items-center gap-3 px-4 py-2.5 border-b border-[var(--color-borderDefault)] cursor-pointer transition-all ${
                                                     isSelected
-                                                      ? 'bg-white/[0.04] text-neutral-100'
+                                                      ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] font-medium'
                                                       : isFocused
-                                                        ? 'bg-white/[0.08] text-white font-medium'
-                                                        : 'text-neutral-300 hover:bg-white/[0.02] hover:text-white'
+                                                        ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] font-medium'
+                                                        : 'text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
                                                   }`}>
                                                   <div
                                                     className={`w-3.5 h-3.5 rounded-[4px] border flex items-center justify-center shrink-0 transition-all ${
@@ -3068,20 +2979,20 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                                       {getSingleItemName(item)}
                                                     </span>
                                                     {selectedCategory === 'all' && item.category && (
-                                                      <span className="text-[10px] text-neutral-500 font-normal shrink-0 ml-1.5 opacity-70">
+                                                      <span className="text-[10px] text-[var(--color-textSecondary)] font-normal shrink-0 ml-1.5 opacity-70">
                                                         {(() => {
                                                           const catLower = item.category.toLowerCase();
                                                           if (
                                                             catLower === 'agent' ||
-                                                            catLower === 'chat_agent' ||
-                                                            catLower === 'prompt' ||
-                                                            catLower === 'aiprompt'
+                                                            catLower === 'chat_agent'
                                                           )
                                                             return 'Chat Agent';
+                                                          if (catLower === 'prompt' || catLower === 'aiprompt' || catLower === 'ai_prompt')
+                                                            return 'AI Prompt';
                                                           if (catLower === 'tabgroup' || catLower === 'Tab Session')
                                                             return 'Tab Session';
                                                           if (catLower === 'note') return 'Note';
-                                                          if (catLower === 'snippet') return 'Snippet';
+                                                          if (catLower === 'snippet') return 'Text Expander';
                                                           if (catLower === 'link') return 'Link';
                                                           if (catLower === 'automation') return 'Automation';
                                                           return catLower.charAt(0).toUpperCase() + catLower.slice(1);
@@ -3130,7 +3041,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                         className={`px-3 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 font-semibold text-xs ${
                           explicitSaveStatus === 'saving'
                             ? 'bg-white/[0.03] border-white/[0.05] text-white/60 opacity-70 cursor-not-allowed'
-                            : 'bg-black/10 dark:bg-white/10 hover:bg-black/15 dark:hover:bg-white/15 text-neutral-800 dark:text-neutral-200 border-black/10 dark:border-white/10 cursor-pointer'
+                            : 'bg-[var(--color-inputBg)] border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] cursor-pointer shadow-sm'
                         }`}>
                         {explicitSaveStatus === 'saving' ? (
                           <>
@@ -3203,8 +3114,154 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
             </div>
           </div>
         </div>
-      </WorkspaceEditorLayout>
+      </div>
+
+          {/* Right Column: Full-Height Sibling Column (Top Edge to Bottom Edge) */}
+          <RightSideItemsPanel<TodoRecord>
+            items={sortedTodos}
+            activeItemId={liveTodoId ?? null}
+            searchQuery={tableSearchQuery}
+            onSearchChange={setTableSearchQuery}
+            onCloseClick={onClose}
+            searchPlaceholder="Search todos..."
+            getItemTitle={item => item.name || 'Untitled Task'}
+            getItemPreview={item => item.description || ''}
+            getItemCompoundId={item =>
+              getItemCompoundId({
+                id: item.id,
+                workspace_id: item.workspaceId || null,
+                folder_id: item.folderId || null,
+                snippet: { id: item.id, category: 'todo' },
+              })
+            }
+            getItemType={() => 'todo'}
+            getItemWorkspaceId={item => item.workspaceId || null}
+            getItemFolderId={item => item.folderId || null}
+            getItemTagIds={item => item.tagIds || []}
+            shortcutPrefix="t"
+            showFolderColumn={false}
+            shortcutsMap={shortcutsMap}
+            hotkeysMap={hotkeysMap}
+            tagNamesMap={todoTagNamesMap}
+            onLoadItem={id => {
+              const todo = (existingTodos ?? []).find(t => t.id === id);
+              if (todo && onLoadTodo) onLoadTodo(todo);
+            }}
+            onDeleteItem={id => setPendingDeleteId(id)}
+            onUpdateShortcut={async (id, val) => {
+              const record = existingTodos?.find(p => p.id === id);
+              if (record) {
+                const compoundId = getItemCompoundId({
+                  id: record.id,
+                  workspace_id: record.workspaceId || null,
+                  folder_id: record.folderId || null,
+                  snippet: { id: record.id, category: 'todo' },
+                });
+                if (val) {
+                  await saveShortcut(id, compoundId, val.toLowerCase().replace(/[^a-z0-9]/g, ''), record.name || 'Untitled', 'todo');
+                } else {
+                  await clearShortcut(id, compoundId, 'todo');
+                }
+              }
+            }}
+            onUpdateTitle={async (id, val) => {
+              await updateTodoContent(id, { name: val });
+            }}
+            onUpdateTags={async (id, tagText) => {
+              const tagNames = tagText.split(',').map((t: string) => t.trim()).filter(Boolean);
+              const resolvedTags: any[] = [];
+              const allTags = useDbStore.getState().tags;
+              for (const name of tagNames) {
+                const matchedTag = allTags.find((t: any) => t.name.toLowerCase() === name.toLowerCase());
+                if (matchedTag) {
+                  resolvedTags.push(matchedTag);
+                } else {
+                  const record = existingTodos?.find(p => p.id === id);
+                  const workspaces = useDbStore.getState().workspaces;
+                  const smartWs = record?.workspaceId || workspaces[0]?.id;
+                  if (smartWs) {
+                    const newTag = await createTag(name, smartWs);
+                    resolvedTags.push(newTag);
+                  }
+                }
+              }
+              await updateTodoContent(id, { tagIds: resolvedTags.map((t: any) => t.id) });
+            }}
+            isFavorite={isFavorite}
+            toggleFavorite={toggleFavorite}
+            isExpanded={isRightPanelExpanded}
+            onExpandChange={setIsRightPanelExpanded}
+            searchInputRef={rightSideSearchInputRef}
+            emptyStateMessage="No tasks found"
+          />
+        </div>
+      </EditorContainer>
       <button id="trigger-save-internal" type="button" onClick={handleCreate} className="hidden" />
+
+      <DeleteConfirmation
+        isOpen={!!pendingDeleteId}
+        onClose={() => setPendingDeleteId(null)}
+        onConfirm={async () => {
+          if (pendingDeleteId) {
+            try {
+              const record = existingTodos?.find(p => p.id === pendingDeleteId);
+              if (record) {
+                const compoundId = getItemCompoundId({
+                  id: record.id,
+                  workspace_id: record.workspaceId || null,
+                  folder_id: record.folderId || null,
+                  snippet: { id: record.id, category: 'todo' },
+                });
+                await clearShortcut(pendingDeleteId, compoundId, 'todo');
+              }
+              await deleteTodo(pendingDeleteId);
+              const delIdStr = String(pendingDeleteId);
+              const activeIdStr = String(activeTodoId || liveTodoId || (initialItem as any)?.id || (initialItem as any)?.todo_id || '');
+              const isCurrentItem =
+                !pendingDeleteId ||
+                delIdStr === activeIdStr ||
+                pendingDeleteId === liveTodoId ||
+                pendingDeleteId === activeTodoId ||
+                pendingDeleteId === (initialItem as any)?.id ||
+                pendingDeleteId === (initialItem as any)?.todo_id ||
+                delIdStr === String((initialItem as any)?.id || '') ||
+                delIdStr === String((initialItem as any)?.todo_id || '') ||
+                delIdStr === String(liveTodoId || '');
+
+              if (isCurrentItem) {
+                resetEditor();
+                setTitle('');
+                setDescription('');
+                setTodoShortcut('');
+                setTodoHotkey('');
+                setSelectedTags([]);
+                setIsFavoriteState(false);
+                setShortcutError(null);
+                setSelectedType('custom');
+                setSelectedItem(null);
+                setSelectedItems([]);
+                setScheduleType('one-time');
+                setIsAnytime(false);
+                setRecurringCycle(undefined);
+                const now = new Date();
+                setTime(format(now, 'HH:mm'));
+                setDate(format(now, 'yyyy-MM-dd'));
+                if (onLoadTodo) onLoadTodo(null as any);
+                readAllShortcuts().then(setShortcutsMap).catch(() => {});
+              }
+              if (onDeleteTodo) {
+                onDeleteTodo(pendingDeleteId);
+              }
+            } catch (err) {
+              console.error('Delete todo failed:', err);
+            }
+          }
+          setPendingDeleteId(null);
+        }}
+        title={pendingDeleteId && existingTodos?.find(t => t.id === pendingDeleteId)?.name ? `Delete "${existingTodos.find(t => t.id === pendingDeleteId)?.name}"?` : 'Delete this task?'}
+        description="Are you sure you want to delete this task? This action cannot be undone."
+        zIndex={100005}
+      />
     </>
   );
 };
