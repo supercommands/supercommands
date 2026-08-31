@@ -5,7 +5,6 @@ import { FaUser,
   FaRegCalendarAlt,
   FaRegClock,
   FaPlus,
-  FaRobot,
   FaBolt,
   FaTimes,
   FaCheck,
@@ -28,10 +27,10 @@ import {
   FiCopy,
 } from 'react-icons/fi';
 import { format, formatDistanceToNow, isToday, isTomorrow, addDays } from 'date-fns';
+import { clsx } from 'clsx';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { resolveAutomationIconMeta } from '../../../../../shared-components/icons/automationDynamicIcon';
 import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
-import useNotification from '../../../../../shared-components/notifications/useNotification';
 import { useAppearance } from '@extension/ui';
 import { EditorContainer } from '../../../../../shared-components/editorContainer/EditorContainer';
 import { EditorHeader } from '../../../../../shared-components/editorContainer/EditorHeader';
@@ -520,7 +519,7 @@ const getSecondaryText = (item: ConvertibleItem): string => {
   }
 
   if (['prompt', 'aiprompt', 'ai_prompt'].includes(cat)) {
-    return data.description || data.prompt || data.promptBody || 'AI Prompt';
+    return data.description || data.prompt || data.promptBody || 'Chat Agent';
   }
 
   if (['agent', 'chat_agent', 'ai', 'assistant', 'chat'].includes(cat) || data.type === 'agent') {
@@ -643,7 +642,7 @@ const isValidCategory = (item: ConvertibleItem) => {
 
 interface CreateTodoViewProps {
   items: ConvertibleItem[];
-  onCreateTodo: (data: any) => void;
+  onCreateTodo: (data: any) => void | Promise<any>;
   isDarkMode?: boolean;
   initialItem?: any;
   selectedIndex?: number;
@@ -652,6 +651,7 @@ interface CreateTodoViewProps {
   onSearchQueryChange?: (query: string) => void;
   scrollableRef?: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
+  onSavedClose?: () => void;
   isEditMode?: boolean;
   // Existing-items table props
   existingTodos?: TodoRecord[];
@@ -660,6 +660,13 @@ interface CreateTodoViewProps {
   onDeleteTodo?: (id: string) => void;
   hotkeysMap?: Record<string, string>;
   onUpdateItemField?: (itemId: string, field: string, value: any) => Promise<void>;
+  isFullScreenMode?: boolean;
+  isWidgetMode?: boolean;
+  isOverlay?: boolean;
+  hideRightPanel?: boolean;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
+  propertyPersistenceAdapter?: React.ComponentProps<typeof SharedPropertiesToolbar>['propertyPersistenceAdapter'];
 }
 
 const CreateTodoView: React.FC<CreateTodoViewProps> = ({
@@ -673,6 +680,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   onSearchQueryChange: setExternalSearchQuery,
   scrollableRef,
   onClose,
+  onSavedClose,
   isEditMode = false,
   existingTodos,
   activeTodoId,
@@ -680,7 +688,41 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   onDeleteTodo,
   hotkeysMap = {},
   onUpdateItemField,
+  isFullScreenMode = false,
+  isWidgetMode = false,
+  isOverlay: propIsOverlay,
+  hideRightPanel = false,
+  appearanceScope = 'default',
+  appearanceTokens,
+  propertyPersistenceAdapter,
 }) => {
+  const activeEditor = useUIStore(s => s.activeEditor);
+  const isFocusMode = useUIStore(s => s.isFocusMode);
+  const isOverlay = Boolean(propIsOverlay || activeEditor?.props?.isOverlay);
+  const isNormalTodoMode = !isWidgetMode && !isFullScreenMode && !isOverlay && !isFocusMode;
+  const isAltSOverlay = appearanceScope === 'alts';
+  const altSAppearanceStyle = isAltSOverlay
+    ? ({
+        ...appearanceTokens,
+        '--color-editorBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+        '--color-modalBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+        '--color-popupBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+        '--color-contextMenuBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+        '--color-inputBg': 'var(--alts-search-bg, var(--color-altsSearchBg))',
+        '--color-containerBg': 'color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 12%, var(--alts-popup-bg, var(--color-altsPopupBg)))',
+        '--color-hoverBg': 'color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 16%, var(--alts-popup-bg, var(--color-altsPopupBg)))',
+        '--color-selectedBg': 'color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 20%, var(--alts-popup-bg, var(--color-altsPopupBg)))',
+        '--color-borderDefault': 'color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 30%, transparent)',
+        '--color-borderActive': 'color-mix(in srgb, var(--alts-icon-tile-action-bg, var(--color-altsIconTileActionBg)) 44%, var(--alts-border-color, var(--color-altsBorderColor)))',
+        '--color-textPrimary': 'var(--alts-text-primary, var(--color-altsTextPrimary))',
+        '--color-textSecondary': 'var(--alts-text-secondary, var(--color-altsTextSecondary))',
+        '--color-textMuted': 'var(--alts-text-placeholder, var(--color-altsTextPlaceholder))',
+        '--color-textPlaceholder': 'var(--alts-text-placeholder, var(--color-altsTextPlaceholder))',
+        '--color-iconDefault': 'var(--alts-text-secondary, var(--color-altsTextSecondary))',
+        '--color-focusRing': 'color-mix(in srgb, var(--alts-focus-color, var(--color-altsFocusColor)) 18%, transparent)',
+      } as React.CSSProperties & Record<`--${string}`, string>)
+    : appearanceTokens;
+
   const { theme } = useAppearance();
   const dbTags = useDbStore(state => state.tags) || [];
   const todoTagNamesMap = useMemo(() => {
@@ -693,9 +735,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const isDarkMode = propIsDarkMode ?? (theme.isDark || document.documentElement.classList.contains('dark'));
   const isEmbedded =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
-  const isFocusMode = useUIStore((s: any) => s.isFocusMode);
 
-  const triggerNotification = useNotification();
   const initialScheduleTime = useMemo(() => {
     if (typeof initialItem?.scheduleTime === 'number' && Number.isFinite(initialItem.scheduleTime)) {
       return initialItem.scheduleTime;
@@ -726,13 +766,13 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     setTodoShortcut,
     saveStatus,
     setSaveStatus,
-    saveError,
     lastSavedAt,
     setLastSavedAt,
     lastSavedTitleRef,
     lastSavedShortcutRef,
     isDirty,
     handleSave,
+    bindExternalSavedTodo,
     activeTodoId: liveTodoId,
     resetEditor,
     liveTodo,
@@ -742,7 +782,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     setSelectedVersionId,
     isViewingHistory,
   } = useTodoEditor({
-    todoId: activeTodoId || initialItem?.todo_id || initialItem?.id || undefined,
+    todoId: activeTodoId || initialItem?.todo_id || (!isAltSOverlay ? initialItem?.id : undefined) || undefined,
     initialTitle: initialItem?.name || '',
     initialDescription: initialItem?.description || '',
     initialScheduleType: initialItem?.scheduleType || 'one-time',
@@ -759,7 +799,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   }, [resetEditor]);
 
   // ── Existing items table state ──
-  const { isFavorite, toggleFavorite } = useFavorites();
+  const { isFavorite, toggleFavorite, addFavorite } = useFavorites();
   const [tagPopupOpen, setTagPopupOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [selectedTags, setSelectedTags] = useState<{ id: string; name: string }[]>([]);
@@ -785,6 +825,25 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const [todoHotkey, setTodoHotkey] = useState('');
   const shortcutInputRef = useRef<HTMLInputElement | null>(null);
 
+  const adjustDescriptionHeight = useCallback(() => {
+    const el = descriptionRef.current as HTMLTextAreaElement | null;
+    if (el) {
+      if (isAltSOverlay) {
+        el.style.height = '100%';
+        return;
+      }
+      el.style.height = 'auto';
+      // Responsive max: 35% of viewport height, clamped between 280px and 400px
+      const maxH = Math.min(400, Math.max(280, Math.round(window.innerHeight * 0.35)));
+      const newH = Math.min(Math.max(220, el.scrollHeight), maxH);
+      el.style.height = `${newH}px`;
+    }
+  }, [isAltSOverlay]);
+
+  React.useLayoutEffect(() => {
+    adjustDescriptionHeight();
+  }, [description, adjustDescriptionHeight]);
+
   const { validateShortcut } = useShortcutValidation();
   const [shortcutError, setShortcutError] = useState<string | null>(null);
   const [isShortcutOverrideable, setIsShortcutOverrideable] = useState<boolean>(false);
@@ -795,6 +854,11 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const [isRightPanelExpanded, setIsRightPanelExpanded] = useState(false);
   const rightSideSearchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
+    if (isAltSOverlay || hideRightPanel) {
+      setShortcutsMap({});
+      return;
+    }
+
     const seededShortcuts = (existingTodos ?? []).reduce<Record<string, string>>((acc, todo) => {
       const shortcut = String(todo?.shortcut || '').trim();
       if (!shortcut) return acc;
@@ -809,13 +873,13 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         setShortcutsMap({ ...seededShortcuts, ...allShortcuts });
       })
       .catch(() => {});
-  }, [existingTodos]);
+  }, [existingTodos, hideRightPanel, isAltSOverlay]);
 
   const hasInitialShortcutBeenSetRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isEditMode || !initialItem || selectedVersionId) return;
-    const todoId = initialItem.todo_id || initialItem.id;
+    const todoId = initialItem.todo_id || (!isAltSOverlay ? initialItem.id : undefined);
     if (!todoId) return;
 
     if (hasInitialShortcutBeenSetRef.current === todoId) return;
@@ -839,7 +903,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       hasInitialShortcutBeenSetRef.current = todoId;
       setTodoShortcut(foundShortcut);
     }
-  }, [initialItem, isEditMode, shortcutsMap, selectedVersionId, setTodoShortcut]);
+  }, [initialItem, isEditMode, shortcutsMap, selectedVersionId, setTodoShortcut, isAltSOverlay]);
 
   // Note: useTodoEditor already returns display* values (displayTitle, displayShortcut, etc.)
   // that switch automatically between the historical snapshot and the live value based on
@@ -850,7 +914,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     const timer = setTimeout(() => {
       const checkShortcut = async () => {
         if (todoShortcut) {
-          const currentCompound = getItemCompoundId({ id: initialItem?.id || liveTodoId, _kind: 'todo' });
+          const validationTodoId = liveTodoId || (!isAltSOverlay ? initialItem?.id : undefined);
+          const currentCompound = getItemCompoundId({ id: validationTodoId || 'new', _kind: 'todo' });
           if (shortcutsMap && shortcutsMap[currentCompound] === todoShortcut) {
             if (active) {
               setShortcutError(null);
@@ -859,7 +924,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
             }
             return;
           }
-          const res = await validateShortcut(todoShortcut, initialItem?.id || liveTodoId || 'new');
+          const res = await validateShortcut(todoShortcut, validationTodoId || 'new');
           if (active) {
             if (!res.isValid) {
               setShortcutError(res.errorMessage || 'This shortcut is already taken.');
@@ -886,10 +951,11 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       active = false;
       clearTimeout(timer);
     };
-  }, [todoShortcut, initialItem, liveTodoId, shortcutsMap, validateShortcut]);
+  }, [todoShortcut, initialItem, liveTodoId, shortcutsMap, validateShortcut, isAltSOverlay]);
 
   const handleOverrideShortcut = useCallback(async () => {
     if (!todoShortcut) return;
+    if (isAltSOverlay) return;
     console.log('[ShortcutDebug][TodoEditor] Executing handleOverrideShortcut for todoShortcut:', todoShortcut);
     let targetId = initialItem?.id || liveTodoId;
     if (!targetId) {
@@ -913,16 +979,17 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     setIsShortcutOverrideable(false);
     setShortcutConflictId(null);
     await handleSave(true);
-  }, [todoShortcut, initialItem, liveTodoId, title, shortcutConflictId, handleSave]);
+  }, [todoShortcut, initialItem, liveTodoId, title, shortcutConflictId, handleSave, isAltSOverlay]);
 
   const tagPopupRef = useRef<HTMLDivElement | null>(null);
 
   const sortedTodos = useMemo(() => {
+    if (hideRightPanel) return [];
     const list = existingTodos ?? [];
     const q = tableSearchQuery.toLowerCase();
     const filtered = q ? list.filter(t => (t.name || '').toLowerCase().includes(q)) : list;
     return [...filtered].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-  }, [existingTodos, tableSearchQuery]);
+  }, [existingTodos, hideRightPanel, tableSearchQuery]);
 
   const [selectedType, setSelectedType] = useState('custom');
   const [selectedCategory, setSelectedCategory] = useState<
@@ -958,6 +1025,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const setSearchQuery = setExternalSearchQuery || setInternalSearchQuery;
 
   const [explicitSaveStatus, setExplicitSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [altSOverlayTodoId, setAltSOverlayTodoId] = useState<string | null>(null);
 
   const [titleError, setTitleError] = useState(false);
   const [descriptionError, setDescriptionError] = useState(false);
@@ -1072,12 +1140,21 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const resourceButtonRef = useRef<HTMLButtonElement | null>(null);
   const [resourceDropdownPos, setResourceDropdownPos] = useState({ top: 0, left: 0 });
   const portalTarget =
-    typeof document !== 'undefined' ? document.getElementById('todo-modal-portal-container') || document.body : null;
+    typeof document !== 'undefined'
+      ? isAltSOverlay
+        ? (window as any).__ALTS_MODAL_PORTAL_HOST__ ||
+          (window as any).__ALTQ_MODAL_PORTAL_HOST__ ||
+          (window as any).__ALTS_PORTAL_HOST__ ||
+          (window as any).__ALTQ_PORTAL_HOST__ ||
+          document.body
+        : document.getElementById('todo-modal-portal-container') || document.body
+      : null;
 
   const [focusedIndex, setFocusedIndex] = useState(0);
   const prevActiveSlotRef = useRef<string | null>(null);
   const shouldAutoOpenDateRef = useRef(false);
   const isSavingRef = useRef(false);
+  const lastAltSAutoSaveSignatureRef = useRef<string | null>(null);
   const lastInitialItemRef = useRef<any>(undefined);
   const lastItemsSignatureRef = useRef<string>('');
   const lastActiveTodoIdRef = useRef<any>(undefined);
@@ -1135,6 +1212,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
   // Auto-save logic (triggers for any task when both title & description are entered)
   useEffect(() => {
+    if (isAltSOverlay) return;
     if (!isDirty) return;
 
     // Strict autosave requirement: a todo must have both a title and a description
@@ -1154,11 +1232,12 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     handleSave,
     title,
     description,
-    selectedItems.length,
+    selectedItems,
     todoShortcut,
     todoHotkey,
     isFavoriteState,
     scheduleSavedTodoAlarm,
+    isAltSOverlay,
   ]);
 
   // Set global modal open state
@@ -1180,7 +1259,13 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           const dropdownHeight = 305;
           const viewportWidth = window.innerWidth;
           const viewportHeight = window.innerHeight;
-          const portalTarget = document.getElementById('todo-modal-portal-container') || document.body;
+          const portalTarget = isAltSOverlay
+            ? (window as any).__ALTS_MODAL_PORTAL_HOST__ ||
+              (window as any).__ALTQ_MODAL_PORTAL_HOST__ ||
+              (window as any).__ALTS_PORTAL_HOST__ ||
+              (window as any).__ALTQ_PORTAL_HOST__ ||
+              document.body
+            : document.getElementById('todo-modal-portal-container') || document.body;
           const portalRect = portalTarget?.getBoundingClientRect();
 
           // Check if there is enough space below the button (with a 20px padding)
@@ -1223,7 +1308,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       };
     }
     return () => {};
-  }, [activeSlot, isEditing]);
+  }, [activeSlot, isEditing, isAltSOverlay]);
 
   const formatTime12Hour = (timeStr: string) => {
     if (!timeStr) return 'Select Time';
@@ -1367,7 +1452,17 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   }, [focusedIndex, activeSlot]);
 
   React.useLayoutEffect(() => {
-    const currentActiveId = activeTodoId || liveTodoId || initialItem?.todo_id || initialItem?.id;
+    if (isAltSOverlay) {
+      setActiveSlot('title');
+      setIsEditing(true);
+      setTimeout(() => {
+        titleInputRef.current?.focus();
+      }, 80);
+      return;
+    }
+
+    const currentActiveId =
+      activeTodoId || liveTodoId || initialItem?.todo_id || (!isAltSOverlay ? initialItem?.id : undefined);
     const initialItemChanged = initialItem !== lastInitialItemRef.current;
     const itemsChanged = itemsSignature !== lastItemsSignatureRef.current;
     const activeIdChanged = currentActiveId !== lastActiveTodoIdRef.current;
@@ -1682,7 +1777,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       setOpenAutomatically(false);
       setActiveSlot('title');
     }
-  }, [initialItem, setExternalSearchQuery, items, itemsSignature, activeTodoId, liveTodoId, isEditMode]);
+  }, [initialItem, setExternalSearchQuery, items, itemsSignature, activeTodoId, liveTodoId, isEditMode, isAltSOverlay]);
 
   React.useEffect(() => {
     if (activeSlot === 'date' && !date) {
@@ -1863,7 +1958,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const handleCopyTitleToShortcut = React.useCallback(() => {
     const rawTitle =
       title.trim() || (selectedItems.length > 0 ? selectedItems[0]?.name || selectedItems[0]?.title || '' : '');
-    const formatted = rawTitle.toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
+    const formatted = rawTitle.toLowerCase().replace(/[^a-zA-Z0-9_]/g, '');
     setTodoShortcut(formatted);
     setTimeout(() => {
       shortcutInputRef.current?.focus();
@@ -1871,11 +1966,12 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   }, [title, selectedItems, setTodoShortcut]);
 
   const handleCreate = React.useCallback(
-    async (opts?: { overrideCreateMore?: boolean } | React.MouseEvent<HTMLButtonElement>) => {
+    async (opts?: { overrideCreateMore?: boolean; autoSave?: boolean } | React.MouseEvent<HTMLButtonElement>) => {
       const shouldCreateMore =
         opts && typeof opts === 'object' && 'overrideCreateMore' in opts
           ? (opts as any).overrideCreateMore
           : createMore;
+      const isAutoSave = Boolean(opts && typeof opts === 'object' && 'autoSave' in opts && (opts as any).autoSave);
       const isSavedFiles = selectedItems.length > 0;
       if (!isSavedFiles && !title.trim()) {
         setTitleError(true);
@@ -1883,7 +1979,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         setTimeout(() => setTitleError(false), 500);
         return;
       }
-      if (!description.trim()) {
+      if (!isAltSOverlay && !description.trim()) {
         setDescriptionError(true);
         (descriptionRef.current as any)?.focus();
         setTimeout(() => setDescriptionError(false), 500);
@@ -1921,7 +2017,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                 isFavorite: isFavoriteState,
                 workspaceId: workspaceId || null,
                 folderId: folderId || null,
-                todoId: liveTodoId || undefined,
+                todoId: altSOverlayTodoId || liveTodoId || undefined,
               }),
             ),
           );
@@ -1946,7 +2042,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                 isFavorite: isFavoriteState,
                 workspaceId: workspaceId || null,
                 folderId: folderId || null,
-                todoId: liveTodoId || undefined,
+                todoId: altSOverlayTodoId || liveTodoId || undefined,
               }),
             ),
           );
@@ -1954,7 +2050,12 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         if (!shouldCreateMore) {
           promises.push(new Promise(res => setTimeout(res, 600)));
         }
-        await Promise.all(promises);
+        const results = await Promise.all(promises);
+        const savedTodo = results.find(result => result && typeof result === 'object' && (result as any).id);
+        if (isAltSOverlay && savedTodo?.id) {
+          setAltSOverlayTodoId(String(savedTodo.id));
+          bindExternalSavedTodo(savedTodo as TodoRecord);
+        }
         // Refresh the shortcut map immediately; the table also falls back to item.shortcut.
         readAllShortcuts()
           .then(setShortcutsMap)
@@ -1981,11 +2082,17 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           lastInitialItemRef.current = null;
           lastActiveTodoIdRef.current = null;
           lastIsEditModeRef.current = false;
+          lastAltSAutoSaveSignatureRef.current = null;
+          if (isAltSOverlay) {
+            setAltSOverlayTodoId(null);
+          }
 
-          useUIStore.getState().setTodoCreatePrefill(null);
-          const currentProps = useUIStore.getState().activeEditor?.props || {};
-          const cleanProps = { ...currentProps, item: null, snippet: null, prefill: null };
-          useUIStore.getState().openEditor({ type: 'todo', id: 'new', props: cleanProps });
+          if (!isAltSOverlay) {
+            useUIStore.getState().setTodoCreatePrefill(null);
+            const currentProps = useUIStore.getState().activeEditor?.props || {};
+            const cleanProps = { ...currentProps, item: null, snippet: null, prefill: null };
+            useUIStore.getState().openEditor({ type: 'todo', id: 'new', props: cleanProps });
+          }
           titleInputRef.current?.focus();
           setExplicitSaveStatus('saved');
           isSavingRef.current = false;
@@ -1997,11 +2104,21 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           setTimeout(() => {
             setExplicitSaveStatus('idle');
             isSavingRef.current = false;
+            if (isAltSOverlay && !isAutoSave) {
+              (onSavedClose || onClose)();
+            }
           }, 1500);
         }
       } catch (error) {
+        console.error('[CreateTodoView] Failed to create todo:', error);
         setExplicitSaveStatus('error');
         isSavingRef.current = false;
+        if (isAltSOverlay) {
+          useUIStore.getState().queueNotification({
+            message: error instanceof Error ? error.message : 'Failed to save todo',
+            type: 'error',
+          });
+        }
         setTimeout(() => setExplicitSaveStatus('idle'), 2000);
       }
     },
@@ -2018,6 +2135,8 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       createMore,
       onCreateTodo,
       onClose,
+      onSavedClose,
+      altSOverlayTodoId,
       setTitleError,
       todoShortcut,
       todoHotkey,
@@ -2025,8 +2144,69 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       isFavoriteState,
       shortcutError,
       resetEditor,
+      bindExternalSavedTodo,
+      isAltSOverlay,
     ],
   );
+
+  React.useEffect(() => {
+    if (!isAltSOverlay) return;
+    if (isSavingRef.current) return;
+    const isAltSSubPopupActive =
+      isTimeEditing ||
+      mentionQuery !== null ||
+      (isEditing && activeSlot !== null && ['mode', 'date', 'time', 'resource'].includes(activeSlot));
+    if (isAltSSubPopupActive) return;
+
+    const hasValidContent = title.trim().length > 0 && description.trim().length > 0;
+    if (!hasValidContent) return;
+
+    const signature = JSON.stringify({
+      title: title.trim(),
+      description,
+      selectedItems: selectedItems.map(item => String(item.id || '')),
+      todoShortcut,
+      todoHotkey,
+      isFavoriteState,
+      scheduleType,
+      recurringCycle,
+      time,
+      date,
+      isAnytime,
+      workspaceId: workspaceId || null,
+      folderId: folderId || null,
+      todoId: altSOverlayTodoId || null,
+    });
+    if (lastAltSAutoSaveSignatureRef.current === signature) return;
+
+    const timer = setTimeout(() => {
+      lastAltSAutoSaveSignatureRef.current = signature;
+      void handleCreate({ overrideCreateMore: false, autoSave: true });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [
+    isAltSOverlay,
+    handleCreate,
+    title,
+    description,
+    selectedItems,
+    todoShortcut,
+    todoHotkey,
+    isFavoriteState,
+    scheduleType,
+    recurringCycle,
+    time,
+    date,
+    isAnytime,
+    workspaceId,
+    folderId,
+    altSOverlayTodoId,
+    isEditing,
+    activeSlot,
+    isTimeEditing,
+    mentionQuery,
+  ]);
 
   React.useEffect(() => {
     const handleSaveTrigger = () => {
@@ -2060,7 +2240,10 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           const now = Date.now();
           if (now - lastEnterTime.current < 150) return;
           lastEnterTime.current = now;
-          handleCreate({ overrideCreateMore: isSaveAndCreateNewShortcut });
+          handleCreate({
+            overrideCreateMore: isSaveAndCreateNewShortcut,
+            autoSave: isAltSOverlay && !isSaveAndCreateNewShortcut,
+          });
           return;
         }
       }
@@ -2382,6 +2565,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       hourText,
       minText,
       amPm,
+      isAltSOverlay,
     ],
   );
 
@@ -2419,21 +2603,93 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   return (
     <>
       <style>{hideNativeIconsStyle}</style>
+      {isAltSOverlay && (
+        <style>{`
+          .todo-editor-alts-overlay :where(.border, .border-t, .border-r, .border-b, .border-l) {
+            border-color: color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 30%, transparent) !important;
+          }
+          .todo-editor-alts-overlay [data-todo-editor-surface="alts"] {
+            background: transparent !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+          }
+          .todo-editor-alts-overlay :where(
+            [class*="text-neutral-900"],
+            [class*="text-neutral-800"],
+            [class*="dark:text-neutral-300"],
+            [class*="dark:text-neutral-200"],
+            [class*="dark:text-neutral-100"]
+          ) {
+            color: var(--color-textPrimary) !important;
+          }
+          .todo-editor-alts-overlay :where(
+            [class*="text-neutral-600"],
+            [class*="text-neutral-500"],
+            [class*="text-neutral-400"],
+            [class*="dark:text-neutral-500"],
+            [class*="dark:text-neutral-400"]
+          ) {
+            color: var(--color-textSecondary) !important;
+          }
+          .todo-editor-alts-overlay :where(
+            [class*="bg-[#1c1d27]"],
+            [class*="bg-[#1c1d27]/95"],
+            [class*="bg-white"][class*="dark:bg-neutral-900"]
+          ) {
+            background-color: var(--color-modalBg) !important;
+          }
+          .todo-editor-alts-overlay :where([class*="border-white/10"], [class*="border-black/5"], [class*="dark:border-neutral-700"]) {
+            border-color: var(--color-borderDefault) !important;
+          }
+          .todo-editor-alts-overlay .custom-time-picker-popup {
+            background-color: var(--color-modalBg) !important;
+            border-color: var(--color-borderDefault) !important;
+            color: var(--color-textPrimary) !important;
+          }
+        `}</style>
+      )}
       <EditorContainer
-        className="w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4"
-        innerClassName="flex flex-col relative bg-[var(--color-editorBg)] mx-auto rounded-xl min-h-[450px] h-auto max-h-[860px] max-h-[90vh] overflow-hidden border border-black/5 dark:border-white/10 w-[calc(100%-20px)] max-w-[1800px]"
+        style={altSAppearanceStyle}
+        className={clsx(
+          isAltSOverlay && 'todo-editor-alts-overlay',
+          isWidgetMode
+            ? 'w-full h-full flex flex-col text-left text-[var(--color-textPrimary)] bg-transparent overflow-hidden'
+            : isNormalTodoMode
+              ? 'w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-4 md:px-6 py-2'
+              : isAltSOverlay
+                ? 'w-full h-full min-h-0 max-h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent p-0 overflow-hidden'
+                : 'w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4',
+        )}
+        innerClassName={isWidgetMode
+          ? 'flex flex-col w-full h-full overflow-hidden bg-transparent'
+          : isNormalTodoMode
+            ? 'flex flex-row items-stretch gap-2 relative bg-transparent w-full h-auto min-h-[360px] max-h-[85vh] overflow-hidden border-none'
+            : isAltSOverlay
+              ? 'flex flex-col relative bg-transparent mx-auto min-h-0 h-full max-h-full overflow-hidden w-full'
+              : 'flex flex-row items-stretch gap-2 relative bg-transparent mx-auto min-h-[450px] h-auto max-h-[860px] max-h-[90vh] overflow-visible w-[calc(100%-20px)] max-w-[1800px]'
+        }
       >
-        <div className="flex-1 flex flex-row items-stretch min-h-0 relative w-full overflow-hidden">
-          {/* Left Column Workspace */}
-          <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-            <EditorHeader
+        {/* Left Editor Surface */}
+        <div
+          data-todo-editor-surface={isAltSOverlay ? 'alts' : undefined}
+          className={isWidgetMode
+            ? 'flex-1 min-w-0 flex flex-col h-full overflow-hidden bg-transparent border-none relative'
+            : isNormalTodoMode
+              ? 'flex-1 min-w-0 flex flex-col h-full overflow-hidden rounded-none border-none shadow-none bg-[var(--color-editorBg)] relative'
+              : isAltSOverlay
+                ? 'w-full min-w-0 flex flex-col h-full min-h-0 max-h-full overflow-hidden rounded-none border-none shadow-none bg-transparent relative'
+                : 'flex-1 min-w-0 flex flex-col h-full overflow-hidden rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-editorBg)] relative'
+          }>
+          <EditorHeader
+              hideBorder={isNormalTodoMode}
               title={isEditMode ? 'Edit task' : 'Create a task'}
+              titleClassName={isNormalTodoMode ? 'absolute left-1/2 top-1/2 w-full max-w-[740px] -translate-x-1/2 -translate-y-1/2 px-4 md:px-6 text-lg font-bold text-[var(--color-textPrimary)] truncate pointer-events-none' : undefined}
               isDirty={isDirty}
-              saveStatus={saveStatus as any}
+              saveStatus={(isAltSOverlay && explicitSaveStatus !== 'idle' ? explicitSaveStatus : saveStatus) as any}
               lastSavedAt={lastSavedAt}
               activeId={liveTodoId || null}
               onCloseClick={onClose}
-              showCloseButton={false}
+              showCloseButton={isAltSOverlay}
               headerActions={
                 <SharedPropertiesToolbar
                   key={liveTodoId || 'new-todo'}
@@ -2483,7 +2739,9 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                       if (currentTIds !== nextTIds) {
                         setSelectedTags(props.selectedTags);
                         setEditorTagIds(newTIds);
-                        void handleSave(true, { tagIds: newTIds });
+                        if (!isAltSOverlay) {
+                          void handleSave(true, { tagIds: newTIds });
+                        }
                       }
                     }
                   }}
@@ -2491,12 +2749,23 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                   showShortcut={false}
                   openPopupsToLeft={true}
                   openPopupsToBottom={true}
+                  appearanceScope={appearanceScope}
+                  appearanceTokens={altSAppearanceStyle}
+                  propertyPersistenceAdapter={propertyPersistenceAdapter}
                 />
               }
             />
 
-            <div className="flex-1 flex flex-col min-h-0 relative">
-              <div ref={workspaceRef} className="w-full flex-1 flex flex-col min-h-0 px-6 pt-1 pb-4">
+            <div className={clsx(isAltSOverlay ? 'flex-1 flex flex-col min-h-0 relative overflow-hidden' : 'flex-1 flex flex-col min-h-0 relative')}>
+              <div ref={workspaceRef} className={clsx(
+                isWidgetMode
+                  ? "w-full flex-1 flex flex-col min-h-0 px-3 py-2"
+                  : isNormalTodoMode
+                    ? "w-full max-w-[740px] mx-auto flex-1 flex flex-col min-h-0 px-4 md:px-6 pt-1 pb-4"
+                    : isAltSOverlay
+                      ? "w-full flex-1 flex flex-col min-h-0 overflow-hidden px-2 pt-1 pb-0"
+                      : "w-full flex-1 flex flex-col min-h-0 px-6 pt-1 pb-4"
+              )}>
             {/* Left Column: Input Fields & Description */}
             <div className="flex-1 flex flex-col relative min-h-0">
               {/* Title & Shortcut block */}
@@ -2523,7 +2792,10 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                   }}
                   onTitleEnter={(shiftKey, e) => {
                     if (e?.ctrlKey || e?.metaKey) {
-                      handleCreate({ overrideCreateMore: true });
+                      handleCreate({
+                        overrideCreateMore: shiftKey,
+                        autoSave: isAltSOverlay && !shiftKey,
+                      });
                     } else {
                       if (!title.trim()) {
                         setTitleError(true);
@@ -2537,23 +2809,44 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
               </div>
 
               {/* Description Field */}
-              <div className="flex-1 flex flex-col gap-1.5 relative min-h-[120px] mt-4">
+              <div className={clsx(isAltSOverlay ? 'flex-1 min-h-0 flex flex-col gap-1.5 relative mt-4' : 'flex-1 flex flex-col gap-1.5 relative min-h-[120px] mt-4')}>
                 <label className="text-xs font-semibold text-[var(--color-textSecondary)] px-3.5 flex items-center gap-1">
                   Description <span className="text-red-500">*</span>
                 </label>
                 <div
-                  className={`flex-1 min-h-[160px] relative rounded-xl border transition-all duration-200 ${descriptionError ? 'border-red-500 ring-1 ring-red-500 bg-red-500/5' : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm'} overflow-visible px-3.5 py-2 flex flex-col gap-3`}>
-                  <div className="flex-1 flex flex-col relative min-h-[80px]">
+                  className={clsx(
+                    'relative rounded-xl border transition-all duration-200 overflow-hidden px-3.5 py-2 flex flex-col gap-3 cursor-text',
+                    isAltSOverlay && 'flex-1 min-h-0',
+                    descriptionError ? 'border-red-500 ring-1 ring-red-500 bg-red-500/5' : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm',
+                  )}
+                  onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                      descriptionRef.current?.focus();
+                    }
+                  }}>
+                  <div className={clsx('flex flex-col relative', isAltSOverlay && 'flex-1 min-h-0')}>
                     <textarea
                       ref={descriptionRef as any}
                       placeholder="Add description..."
                       value={description}
-                      onChange={handleDescriptionChange}
+                      onChange={e => {
+                        handleDescriptionChange(e);
+                        adjustDescriptionHeight();
+                      }}
                       onFocus={() => {
                         setActiveSlot('description');
                         setIsEditing(true);
                       }}
-                      className="w-full flex-1 bg-transparent outline-none border-none shadow-none focus:ring-0 resize-none text-sm font-semibold font-sans text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] custom-scrollbar"
+                      style={{
+                        minHeight: isAltSOverlay ? '0' : '220px',
+                        maxHeight: isAltSOverlay ? 'none' : 'clamp(280px, 35vh, 400px)',
+                        overflow: 'auto',
+                        resize: 'none',
+                      }}
+                      className={clsx(
+                        'w-full bg-transparent outline-none border-none shadow-none focus:ring-0 resize-none text-sm font-semibold font-sans text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] custom-scrollbar',
+                        isAltSOverlay && 'flex-1 min-h-0',
+                      )}
                     />
 
                     {!description && (
@@ -2601,6 +2894,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                         <button
                           id="mode-button"
                           type="button"
+                          onMouseDown={(e) => e.stopPropagation()}
                           onClick={() => {
                             if (activeSlot !== 'mode') {
                               setActiveSlot('mode');
@@ -2678,6 +2972,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
                       <div className="relative shrink-0">
                         <button
+                          onMouseDown={(e) => e.stopPropagation()}
                           onClick={() => {
                             if (activeSlot !== 'date') {
                               setActiveSlot('date');
@@ -2695,7 +2990,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                           <FaRegCalendarAlt size={14} className="text-[var(--color-iconDefault)]" />
                           <span>
                             {date
-                              ? `${format(new Date(date), 'do MMM yyyy')} · ${!isAnytime && time ? formatTime12Hour(time) : 'Any time'}`
+                              ? `${format(new Date(`${date}T00:00:00`), 'do MMM yyyy')} · ${!isAnytime && time ? formatTime12Hour(time) : 'Any time'}`
                               : 'Date'}
                           </span>
                         </button>
@@ -2724,6 +3019,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                         <button
                           ref={resourceButtonRef}
                           type="button"
+                          onMouseDown={(e) => e.stopPropagation()}
                           onClick={() => {
                             if (activeSlot !== 'resource') {
                               setActiveSlot('resource');
@@ -2768,11 +3064,14 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                           ReactDOM.createPortal(
                             <div
                               style={{
+                                ...(isAltSOverlay ? altSAppearanceStyle : undefined),
                                 position: 'absolute',
+                                zIndex: 2147483647,
                                 top: `${resourceDropdownPos.top}px`,
                                 left: `${resourceDropdownPos.left}px`,
+                                pointerEvents: 'auto',
                               }}
-                              className="w-[600px] max-w-[80vw] rounded-2xl shadow-2xl z-[99999] bg-[var(--color-contextMenuBg,#171821)] backdrop-blur-md border border-[var(--color-borderDefault)] overflow-hidden flex flex-col font-sans text-[var(--color-textPrimary)]"
+                              className="w-[600px] max-w-[80vw] rounded-2xl shadow-2xl z-alts-subpopup bg-[var(--color-contextMenuBg,#171821)] backdrop-blur-md border border-[var(--color-borderDefault)] overflow-hidden flex flex-col font-sans text-[var(--color-textPrimary)]"
                               onClick={e => e.stopPropagation()}>
                               {/* Search and Header */}
                               <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-borderDefault)] bg-[var(--color-inputBg)]">
@@ -2873,7 +3172,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                     },
                                     {
                                       key: 'aiPrompt' as const,
-                                      label: 'AI Prompts',
+                                      label: 'Chat Agents',
                                       items: categoriesData.aiPrompt,
                                       icon: <LuSparkles size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
                                     },
@@ -2881,7 +3180,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                       key: 'agent' as const,
                                       label: 'Chat Agents',
                                       items: categoriesData.agent,
-                                      icon: <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+                                      icon: <LuSparkles size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
                                     },
                                   ].map(col => {
                                     const isActive = selectedCategory === col.key;
@@ -2988,7 +3287,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                                                           )
                                                             return 'Chat Agent';
                                                           if (catLower === 'prompt' || catLower === 'aiprompt' || catLower === 'ai_prompt')
-                                                            return 'AI Prompt';
+                                                            return 'Chat Agent';
                                                           if (catLower === 'tabgroup' || catLower === 'Tab Session')
                                                             return 'Tab Session';
                                                           if (catLower === 'note') return 'Note';
@@ -3027,7 +3326,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                       <button
                         id="final-save-button"
                         type="button"
-                        onClick={handleCreate}
+                        onClick={() => handleCreate({ overrideCreateMore: true })}
                         onMouseEnter={e => {
                           const rect = e.currentTarget.getBoundingClientRect();
                           setTooltipPos({
@@ -3067,35 +3366,40 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                         ReactDOM.createPortal(
                           <div
                             style={{
+                              ...(isAltSOverlay ? altSAppearanceStyle : undefined),
                               position: 'absolute',
                               top: `${tooltipPos.top}px`,
                               left: `${tooltipPos.left}px`,
+                              zIndex: 2147483647,
+                              color: 'var(--color-textPrimary)',
                             }}
-                            className="bg-[#1c1d27] border border-[#2f3142] rounded-xl p-3 shadow-[0_10px_40px_rgba(0,0,0,0.6)] z-[999999] flex flex-col gap-2.5 min-w-[320px] text-[12px] font-sans text-white pointer-events-none">
-                            <div className="flex items-center gap-3 text-neutral-300">
+                            className="rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-modalBg)] p-3 shadow-[0_10px_40px_rgba(0,0,0,0.6)] z-alts-subpopup flex flex-col gap-2.5 min-w-[320px] text-[12px] font-sans text-[var(--color-textPrimary)] pointer-events-none">
+                            <div className="flex items-center gap-3 text-[var(--color-textPrimary)]">
                               <div className="flex gap-1 min-w-[125px] shrink-0">
-                                <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">
+                                <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-hoverBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">
                                   {isMac ? 'Cmd' : 'Ctrl'}
                                 </kbd>
-                                <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">
+                                <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-hoverBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">
                                   Enter
                                 </kbd>
                               </div>
-                              <span className="text-neutral-400 text-left whitespace-nowrap">to save task</span>
+                              <span className="text-[var(--color-textSecondary)] text-left whitespace-nowrap">
+                                {isAltSOverlay ? 'autosaves after title and description' : 'to save task'}
+                              </span>
                             </div>
-                            <div className="flex items-center gap-3 text-neutral-300">
+                            <div className="flex items-center gap-3 text-[var(--color-textPrimary)]">
                               <div className="flex gap-1 min-w-[125px] shrink-0">
-                                <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">
+                                <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-hoverBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">
                                   {isMac ? 'Cmd' : 'Ctrl'}
                                 </kbd>
-                                <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-300">
+                                <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-hoverBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">
                                   Shift
                                 </kbd>
-                                <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">
+                                <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-hoverBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">
                                   Enter
                                 </kbd>
                               </div>
-                              <span className="text-neutral-400 text-left whitespace-nowrap">
+                              <span className="text-[var(--color-textSecondary)] text-left whitespace-nowrap">
                                 to save and create another
                               </span>
                             </div>
@@ -3116,8 +3420,10 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         </div>
       </div>
 
-          {/* Right Column: Full-Height Sibling Column (Top Edge to Bottom Edge) */}
-          <RightSideItemsPanel<TodoRecord>
+        {/* Right Column: Full-Height Sibling Column (Top Edge to Bottom Edge) */}
+        {!hideRightPanel && (
+        <RightSideItemsPanel<TodoRecord>
+            hideBorder={isNormalTodoMode}
             items={sortedTodos}
             activeItemId={liveTodoId ?? null}
             searchQuery={tableSearchQuery}
@@ -3147,7 +3453,59 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
               const todo = (existingTodos ?? []).find(t => t.id === id);
               if (todo && onLoadTodo) onLoadTodo(todo);
             }}
-            onDeleteItem={id => setPendingDeleteId(id)}
+            onDeleteItem={async id => {
+              try {
+                const record = existingTodos?.find(p => p.id === id);
+                if (record) {
+                  const compoundId = getItemCompoundId({
+                    id: record.id,
+                    workspace_id: record.workspaceId || null,
+                    folder_id: record.folderId || null,
+                    snippet: { id: record.id, category: 'todo' },
+                  });
+                  await clearShortcut(id, compoundId, 'todo');
+                }
+                await deleteTodo(id);
+                const delIdStr = String(id);
+                const activeIdStr = String(activeTodoId || liveTodoId || (initialItem as any)?.id || (initialItem as any)?.todo_id || '');
+                const isCurrentItem =
+                  delIdStr === activeIdStr ||
+                  id === liveTodoId ||
+                  id === activeTodoId ||
+                  id === (initialItem as any)?.id ||
+                  id === (initialItem as any)?.todo_id ||
+                  delIdStr === String((initialItem as any)?.id || '') ||
+                  delIdStr === String((initialItem as any)?.todo_id || '') ||
+                  delIdStr === String(liveTodoId || '');
+
+                if (isCurrentItem) {
+                  resetEditor();
+                  setTitle('');
+                  setDescription('');
+                  setTodoShortcut('');
+                  setTodoHotkey('');
+                  setSelectedTags([]);
+                  setIsFavoriteState(false);
+                  setShortcutError(null);
+                  setSelectedType('custom');
+                  setSelectedItem(null);
+                  setSelectedItems([]);
+                  setScheduleType('one-time');
+                  setIsAnytime(false);
+                  setRecurringCycle(undefined);
+                  const now = new Date();
+                  setTime(format(now, 'HH:mm'));
+                  setDate(format(now, 'yyyy-MM-dd'));
+                  if (onLoadTodo) onLoadTodo(null as any);
+                  readAllShortcuts().then(setShortcutsMap).catch(() => {});
+                }
+                if (onDeleteTodo) {
+                  onDeleteTodo(id);
+                }
+              } catch (err) {
+                console.error('Delete todo failed:', err);
+              }
+            }}
             onUpdateShortcut={async (id, val) => {
               const record = existingTodos?.find(p => p.id === id);
               if (record) {
@@ -3158,7 +3516,7 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                   snippet: { id: record.id, category: 'todo' },
                 });
                 if (val) {
-                  await saveShortcut(id, compoundId, val.toLowerCase().replace(/[^a-z0-9]/g, ''), record.name || 'Untitled', 'todo');
+                  await saveShortcut(id, compoundId, val.toLowerCase().replace(/[^a-z0-9_]/g, ''), record.name || 'Untitled', 'todo');
                 } else {
                   await clearShortcut(id, compoundId, 'todo');
                 }
@@ -3189,12 +3547,13 @@ const CreateTodoView: React.FC<CreateTodoViewProps> = ({
             }}
             isFavorite={isFavorite}
             toggleFavorite={toggleFavorite}
+            addFavorite={addFavorite}
             isExpanded={isRightPanelExpanded}
             onExpandChange={setIsRightPanelExpanded}
             searchInputRef={rightSideSearchInputRef}
             emptyStateMessage="No tasks found"
           />
-        </div>
+        )}
       </EditorContainer>
       <button id="trigger-save-internal" type="button" onClick={handleCreate} className="hidden" />
 

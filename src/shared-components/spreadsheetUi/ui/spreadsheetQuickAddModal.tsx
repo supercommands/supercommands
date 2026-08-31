@@ -14,12 +14,13 @@ import { useUIStore } from '../../../shared-components/uiStateManager';
 import { createNote } from '../../../allObjectFolder/src/createObject/notes/noteData';
 import { createLink } from '../../../allObjectFolder/src/createObject/links/linkData';
 import { createSnippet } from '../../../allObjectFolder/src/createObject/snippets/snippetData';
+import { generateEntityId } from '../../../shared-components/utils/idGenerator';
 
 import { useFavorites } from '../../../shared-components/favorites/favoriteHooks';
 import { useDbStore } from '../../../storage/store/useDbStore';
 import { db } from '../../../storage/indexDB/dbConfig';
 import { getUserId } from '../../../storage/API/core/api';
-import { FaStar, FaCode, FaTerminal, FaCheck, FaTimes, FaFolder, FaChevronDown, FaGlobe } from 'react-icons/fa';
+import { FaStar, FaCode, FaTerminal, FaCheck, FaTimes, FaChevronDown, FaGlobe } from 'react-icons/fa';
 import { FiStar, FiHelpCircle, FiZap, FiGlobe } from 'react-icons/fi';
 
 // Helper to resolve icon strings to emojis (matches SpreadsheetTable logic)
@@ -40,7 +41,6 @@ const SpreadsheetQuickAddModal: React.FC = () => {
   const { quickAddModal, setQuickAddModal } = useSpreadsheetStore();
   const { theme } = useAppearance();
   const workspaces = useDbStore(s => s.workspaces);
-  const folders = useDbStore(s => s.folders);
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -362,7 +362,7 @@ const SpreadsheetQuickAddModal: React.FC = () => {
       if (category === 'link') {
         const link = await createLink({
           title: title.trim(),
-          urls: [{ id: `url-${Date.now()}`, url: activeContent.trim(), title: title.trim() }],
+          urls: [{ id: generateEntityId('linkItem'), url: activeContent.trim(), title: title.trim() }],
           workspaceId: selectedLocation.workspaceId,
           folderId: selectedLocation.folderId || null,
         });
@@ -639,15 +639,14 @@ const SpreadsheetQuickAddModal: React.FC = () => {
                   className="flex items-center gap-2 w-full h-full group text-left outline-none hover:text-blue-500 transition-colors px-3">
                   {selectedLocation?.workspaceId ? (
                     <>
-                      <span className="shrink-0 group-hover:text-blue-400">
-                        <FaFolder size={11} className="text-[var(--color-iconDefault)]" />
+                      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[10px] font-bold leading-none text-[var(--color-iconDefault)] group-hover:text-blue-400">
+                        W
                       </span>
                       <span className={clsx('truncate whitespace-nowrap', "text-neutral-200", FONT_STYLE)}>
                         {(() => {
                           const ws = workspaces.find(w => w.id === selectedLocation.workspaceId);
-                          const folder = folders.find(f => f.id === selectedLocation.folderId);
                           if (!ws) return '';
-                          return folder ? `${ws.workspaceName} / ${folder.folderName}` : ws.workspaceName;
+                          return ws.workspaceName;
                         })()}
                       </span>
                     </>
@@ -731,5 +730,3 @@ const SpreadsheetQuickAddModal: React.FC = () => {
 };
 
 export default SpreadsheetQuickAddModal;
-
-

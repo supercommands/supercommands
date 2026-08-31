@@ -20,6 +20,7 @@ import { useDispatch } from 'react-redux';
 import { getFaviconUrl, stripCmdStatus } from '../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { useUIStore } from '../../../../shared-components/uiStateManager';
 import useNotification from '../../../../shared-components/notifications/useNotification';
+import { generateEntityId } from '../../../../shared-components/utils/idGenerator';
 import type { SuggestionState } from '../../../../shared-components/searchBarMain/userInterfaceComponents/searchBar';
 
 interface ModelSelectorProps {
@@ -561,7 +562,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
                       host = parsed.hostname || cleanUrl;
                     } catch (err) {}
 
-                    const customId = `custom-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                    const customId = generateEntityId('customModel');
                     const updatedModels = [
                       ...customModels,
                       { id: customId, name: newModelName.trim(), url: newModelUrl.trim(), host },

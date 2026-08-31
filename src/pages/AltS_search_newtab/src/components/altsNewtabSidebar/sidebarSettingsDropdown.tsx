@@ -1,33 +1,40 @@
 import * as React from 'react';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppearance } from '@extension/ui';
-import { Reorder, useDragControls } from 'framer-motion';
+import { Reorder, useDragControls, motion } from 'framer-motion';
 import {
   getSidebarStorageData,
   setSidebarStorageData,
 } from '../../../../../storage/localStorage/sidebarCustomizationStorage';
-import { FaCheck, FaRobot } from 'react-icons/fa';
+import { FaCheck } from 'react-icons/fa';
+import { LuSparkles } from 'react-icons/lu';
 import { FiMoreVertical, FiFileText, FiLink, FiCode, FiLayers, FiZap, FiPlus } from 'react-icons/fi';
 import { HiArrowsUpDown } from 'react-icons/hi2';
 
 import ReactDOM from 'react-dom';
+import { sanitizeAndMigrateCreateOrder } from './createMenuPanel';
 import { useFavorites, useUser } from '../../../../../shared-components/favorites/favoriteHooks';
 import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
-import { createFavoriteCategory } from '../../../../../allObjectFolder/src/createObject/favoriteCategory';
-import { loadWidgetDashboardStateAsync } from '../../../../../storage/localStorage/widgetDashboardStorage';
-import type { WidgetDashboardState } from '../widgets/widgetDashboard.types';
+import { useWidgetDashboardStore } from '../../../../../storage/store/useWidgetDashboardStore';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
+import {
+  loadWidgetDashboardViewsForWorkspaceAsync,
+  WIDGET_DASHBOARD_STORAGE_EVENT,
+} from '../../../../../storage/localStorage/widgetDashboardStorage';
+import { normalizeDashboardViewsOrder } from '../../../../../storage/localStorage/widgetDashboardGroupStorage';
 
 // ─── Drag Handle ────────────────────────────────────────────────────────────
 
-const DragHandleIcon = () => (
+const DragHandleIcon = ({ hidden = false }: { hidden?: boolean }) => (
   <svg
     width="8"
     height="12"
     viewBox="0 0 8 12"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
-    className="opacity-40 hover:opacity-100 transition-opacity">
+    aria-hidden="true"
+    className={hidden ? 'opacity-0' : 'opacity-40 hover:opacity-100 transition-opacity'}>
     <circle cx="2" cy="2" r="1" fill="currentColor" />
     <circle cx="2" cy="6" r="1" fill="currentColor" />
     <circle cx="2" cy="10" r="1" fill="currentColor" />
@@ -36,6 +43,15 @@ const DragHandleIcon = () => (
     <circle cx="6" cy="10" r="1" fill="currentColor" />
   </svg>
 );
+
+const shouldIgnoreSidebarSettingsDrag = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  Boolean(target.closest('button, input, textarea, select, [data-sidebar-settings-drag-ignore="true"]'));
+
+const startSidebarSettingsRowDrag = (dragControls: any, e: React.PointerEvent) => {
+  if (!dragControls || shouldIgnoreSidebarSettingsDrag(e.target)) return;
+  dragControls.start(e);
+};
 
 // ─── Toggle Switch ───────────────────────────────────────────────────────────
 
@@ -46,6 +62,7 @@ interface ToggleSwitchProps {
 
 const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ isOn, onToggle }) => (
   <div
+    data-sidebar-settings-drag-ignore="true"
     onClick={e => {
       e.stopPropagation();
       onToggle();
@@ -85,11 +102,11 @@ const DropdownReorderItem: React.FC<DropdownReorderItemProps> = ({
       dragListener={false}
       dragControls={dragControls}
       className={`${paddingClass} list-none`}>
-      <div className="flex items-center justify-between px-2 py-0.5 rounded-md text-[12px] transition-colors duration-150 select-none hover:bg-[var(--color-hoverBg)] text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] font-medium">
+      <div
+        className="flex items-center justify-between px-2 py-0.5 rounded-md text-[12px] transition-colors duration-150 select-none hover:bg-[var(--color-hoverBg)] text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] font-medium cursor-grab active:cursor-grabbing"
+        onPointerDown={e => startSidebarSettingsRowDrag(dragControls, e)}>
         <div className="flex items-center gap-1.5 flex-1">
-          <div
-            className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]"
-            onPointerDown={e => dragControls.start(e)}>
+          <div className="p-0.5 text-[var(--color-iconDefault)] shrink-0 pointer-events-none">
             <DragHandleIcon />
           </div>
           <span className="font-medium flex-1 py-0.5">{option.label}</span>
@@ -117,11 +134,11 @@ const FavoriteReorderItem: React.FC<FavoriteReorderItemProps> = ({ option, isInd
       dragListener={false}
       dragControls={dragControls}
       className={`${paddingClass} list-none`}>
-      <div className="flex items-center justify-between px-2 py-0.5 rounded-md text-[12px] transition-colors duration-150 select-none hover:bg-[var(--color-hoverBg)] text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] font-medium">
+      <div
+        className="flex items-center justify-between px-2 py-0.5 rounded-md text-[12px] transition-colors duration-150 select-none hover:bg-[var(--color-hoverBg)] text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] font-medium cursor-grab active:cursor-grabbing"
+        onPointerDown={e => startSidebarSettingsRowDrag(dragControls, e)}>
         <div className="flex items-center gap-1.5 flex-grow min-w-0">
-          <div
-            className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] shrink-0"
-            onPointerDown={e => dragControls.start(e)}>
+          <div className="p-0.5 text-[var(--color-iconDefault)] shrink-0 pointer-events-none">
             <DragHandleIcon />
           </div>
           {getFavoriteIcon(option.originalItem || option)}
@@ -146,6 +163,37 @@ interface SectionHeaderProps {
   autoFocusEdit?: boolean;
   onCancelEdit?: () => void;
 }
+
+const ENABLE_SIDEBAR_SETTINGS_PERF_LOGS = false;
+
+const sidebarSettingsPerf = (label: string, data?: Record<string, unknown>) => {
+  if (!ENABLE_SIDEBAR_SETTINGS_PERF_LOGS) return;
+  console.log('[SidebarPerf][SettingsDropdown]', label, JSON.stringify(data || {}));
+};
+
+const summarizeOrder = (order: readonly string[]) => ({
+  length: order.length,
+  headers: order.filter(id => id.startsWith('header-')).length,
+  items: order.filter(id => !id.startsWith('header-')).length,
+  firstItems: order.slice(0, 8),
+});
+
+const hasOnlyFastActiveViewPlaceholder = (views: readonly { settings?: Record<string, unknown> }[]) =>
+  views.length === 1 && views[0]?.settings?.__fastActiveViewPlaceholder === true;
+
+const getDashboardViewGroupTitle = (groupId: string, customGroupNames: Record<string, string>) => {
+  const defaultTitles: Record<string, string> = {
+    custom_work: 'Work',
+    custom_personal: 'Personal',
+    custom_college: 'College',
+    custom_default: 'Default',
+    work: 'Work',
+    personal: 'Personal',
+    college: 'College',
+  };
+
+  return (customGroupNames[groupId] || defaultTitles[groupId] || groupId.replace(/^custom_/, '')).trim();
+};
 
 const SectionHeader: React.FC<SectionHeaderProps> = ({
   id,
@@ -230,14 +278,11 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   }, [isEditing]);
 
   return (
-    <div className="flex items-center justify-between px-1 py-1 mb-1 relative group rounded-md hover:bg-[var(--color-hoverBg)] transition-colors select-none">
+    <div
+      className="flex items-center justify-between px-1 py-1 mb-1 relative group rounded-md hover:bg-[var(--color-hoverBg)] transition-colors select-none cursor-grab active:cursor-grabbing"
+      onPointerDown={e => startSidebarSettingsRowDrag(dragControls, e)}>
       <div className="flex items-center gap-1 flex-1 min-w-0">
-        <div
-          className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] shrink-0"
-          onPointerDown={e => {
-            if (dragControls) dragControls.start(e);
-            else e.stopPropagation();
-          }}>
+        <div className="p-0.5 text-[var(--color-iconDefault)] shrink-0 pointer-events-none">
           <DragHandleIcon />
         </div>
         {isEditing ? (
@@ -273,6 +318,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
           <ToggleSwitch isOn={isOn} onToggle={onToggle} />
         ) : (
           <div
+            data-sidebar-settings-drag-ignore="true"
             className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all duration-150 shrink-0 cursor-pointer ${isOn ? 'bg-[var(--color-accent)] border-[var(--color-accent)] text-white' : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)]'}`}
             onClick={e => {
               e.stopPropagation();
@@ -285,6 +331,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         {onRename && (
           <div
             ref={dotsRef}
+            data-sidebar-settings-drag-ignore="true"
             className="relative group/dots cursor-pointer text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]"
             onClick={handleDotsClick}>
             <FiMoreVertical size={12} />
@@ -397,6 +444,10 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
 }) => {
   const { theme } = useAppearance();
 
+  const workspaces = useDbStore(state => state.workspaces);
+  const isStoreInitialized = useDbStore(state => state.isInitialized);
+  const activeWorkspaceId = workspaces[0]?.id || 'default';
+
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -405,378 +456,214 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
   const [visibleCreateItems, setVisibleCreateItems] = useState<Record<string, boolean>>({
-    createtodo: true,
-    createsession: true,
-    createlinks: true,
     createnotes: true,
+    createlinks: true,
     ai: true,
     createsnippet: true,
-    agent: true,
-    'header-workflows': false,
-    'header-shortcuts': false,
+    createtodo: true,
   });
   const [createItemsOrder, setCreateItemsOrder] = useState<string[]>([
-    'createtodo',
-    'createsession',
-    'createlinks',
     'createnotes',
+    'createlinks',
     'ai',
     'createsnippet',
-    'agent',
-    'header-workflows',
-    'header-shortcuts',
+    'createtodo',
   ]);
 
   // ── View items state ──
-  const [visibleViewItems, setVisibleViewItems] = useState<Record<string, boolean>>({
-    all: true,
-    sessions: true,
-    notes: true,
-    todos: true,
-    links: true,
-    chat_agents: true,
-    snippets: true,
-    automations: true,
-    folders: true,
-    organizations: true,
-    all_shortcuts: true,
-    'header-workflows': false,
-    'header-shortcuts': false,
-    'header-others': false,
-  });
-  const [viewItemsOrder, setViewItemsOrder] = useState<string[]>([
-    'all',
-    'sessions',
-    'notes',
-    'todos',
-    'links',
-    'chat_agents',
-    'snippets',
-    'automations',
-    'folders',
-    'organizations',
-    'all_shortcuts',
-    'header-workflows',
-    'header-shortcuts',
-    'header-others',
-  ]);
+  const [visibleViewItems, setVisibleViewItems] = useState<Record<string, boolean>>({});
+  const [viewItemsOrder, setViewItemsOrder] = useState<string[]>([]);
+  const [customGroupNames, setCustomGroupNames] = useState<Record<string, string>>({});
+  const dashboardState = useWidgetDashboardStore(state => state.state);
+  const refreshDashboard = useWidgetDashboardStore(state => state.refresh);
 
   const [newlyCreatedGroupId, setNewlyCreatedGroupId] = useState<string | null>(null);
-
-  const { populatedFavorites, setFavoriteCategory } = useFavorites();
-  const userId = useUser();
-  const favoriteCategories = useDbStore(state => state.favoriteCategories);
-  const [favoriteCategoryOrder, setFavoriteCategoryOrder] = useState<string[]>([]);
-  const [draggedFavoriteId, setDraggedFavoriteId] = useState<string | null>(null);
-  const [dragOverCategoryId, setDragOverCategoryId] = useState<string | null>(null);
-  const [draftFavoriteCategoryId, setDraftFavoriteCategoryId] = useState<string | null>(null);
+  // Ref mirror avoids stale closures inside refreshCollectionConfiguration
+  const newlyCreatedGroupIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    newlyCreatedGroupIdRef.current = newlyCreatedGroupId;
+  }, [newlyCreatedGroupId]);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
-    const dbIds = favoriteCategories
-      .slice()
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-      .map(category => category.id);
-
-    setFavoriteCategoryOrder(prevOrder => {
-      const filteredPrev = prevOrder.filter(id => dbIds.includes(id));
-      const missing = dbIds.filter(id => !filteredPrev.includes(id));
-      return filteredPrev.length > 0 ? [...filteredPrev, ...missing] : dbIds;
-    });
-  }, [favoriteCategories]);
-
-  const favoriteGroups = useMemo(() => {
-    const groups: Array<{
-      id: string;
-      name: string;
-      items: Array<{ id: string; label: string; type?: string; originalItem?: any; favoriteCategoryId?: string | null }>;
-    }> = [];
-
-    const groupedItems = new Map<string, Array<{ id: string; label: string; type?: string; originalItem?: any; favoriteCategoryId?: string | null }>>();
-    populatedFavorites.forEach(fav => {
-      const item = {
-        id: fav.compoundId,
-        label: fav.label || (fav as any).key || (fav as any).name || 'Untitled',
-        type: (fav as any).type,
-        originalItem: fav,
-        favoriteCategoryId: (fav as any).favoriteCategoryId || null,
-      };
-      const categoryId = item.favoriteCategoryId;
-      if (categoryId) {
-        const existing = groupedItems.get(categoryId) || [];
-        existing.push(item);
-        groupedItems.set(categoryId, existing);
-      }
-    });
-
-    const orderedCategories = favoriteCategoryOrder.length
-      ? favoriteCategoryOrder
-      : favoriteCategories
-          .slice()
-          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-          .map(category => category.id);
-
-    orderedCategories.forEach(categoryId => {
-      const category = favoriteCategories.find(item => item.id === categoryId);
-      if (!category) return;
-      groups.push({
-        id: category.id,
-        name: category.name,
-        items: groupedItems.get(category.id) || [],
-      });
-    });
-
-    return groups;
-  }, [favoriteCategories, favoriteCategoryOrder, populatedFavorites]);
-
-  const ungroupedFavoriteItems = useMemo(() => {
-    return populatedFavorites
-      .filter(fav => !((fav as any).favoriteCategoryId || null))
-      .map(fav => ({
-        id: fav.compoundId,
-        label: fav.label || (fav as any).key || (fav as any).name || 'Untitled',
-        type: (fav as any).type,
-        originalItem: fav,
-        favoriteCategoryId: null,
-      }));
-  }, [populatedFavorites]);
-
-  const handleFavoriteDrop = async (categoryId: string | null) => {
-    if (!draggedFavoriteId) return;
-    const itemId = draggedFavoriteId;
-    setDraggedFavoriteId(null);
-    setDragOverCategoryId(null);
-    await setFavoriteCategory(itemId, categoryId);
-  };
-
-  const handleStartFavoriteCategoryCreate = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (draftFavoriteCategoryId) return;
-    setDraftFavoriteCategoryId(`draft-favorite-category-${Date.now()}`);
-  };
-
-  const handleCancelFavoriteCategoryCreate = () => {
-    setDraftFavoriteCategoryId(null);
-  };
-
-  const handleCreateFavoriteCategory = async (name: string) => {
-    const trimmedName = name.trim();
-    if (!trimmedName || !userId) {
-      handleCancelFavoriteCategoryCreate();
-      return;
-    }
-
-    const existingNames = new Set(favoriteCategories.map(category => category.name.trim().toLowerCase()));
-    if (existingNames.has(trimmedName.toLowerCase())) {
-      handleCancelFavoriteCategoryCreate();
-      return;
-    }
-
-    await createFavoriteCategory(trimmedName, userId);
-    handleCancelFavoriteCategoryCreate();
-  };
-
-  const renderedFavoriteGroups = useMemo(() => {
-    if (!draftFavoriteCategoryId) return favoriteGroups;
-    return [
-      ...favoriteGroups,
-      {
-        id: draftFavoriteCategoryId,
-        name: '',
-        items: [],
-        isDraft: true,
-      },
-    ];
-  }, [draftFavoriteCategoryId, favoriteGroups]);
-
-  useEffect(() => {
-    const handleStorageChange = (changes: any, areaName: string) => {
-      if (areaName === 'local') {
-        if (changes.favorites_create_items_order) {
-          setCreateItemsOrder(changes.favorites_create_items_order.newValue || []);
-        }
-        if (changes.favorites_create_visible_items) {
-          setVisibleCreateItems(changes.favorites_create_visible_items.newValue || {});
-        }
-      }
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
     };
-    chrome.storage.onChanged.addListener(handleStorageChange);
-    return () => chrome.storage.onChanged.removeListener(handleStorageChange);
-  }, []);
-
-  // ── Shared group naming for create/view sections ──
-  const [customGroupNames, setCustomGroupNames] = useState<Record<string, string>>({});
-  const [dashboardState, setDashboardState] = useState<WidgetDashboardState | null>(null);
-
-  useEffect(() => {
-    const loadState = async () => {
-      const result = await getSidebarStorageData(['customGroupNames']);
-      if (result.customGroupNames) {
-        setCustomGroupNames(result.customGroupNames);
-      }
-    };
-    loadState();
   }, []);
 
   const createSectionDrag = useDragControls();
   const viewSectionDrag = useDragControls();
   const favoritesSectionDrag = useDragControls();
 
-  // ── Load from storage ──
-  useEffect(() => {
-    const fetchStorage = async () => {
-      const result = await getSidebarStorageData([
-        'favorites_create_visible_items',
-        'favorites_create_items_order',
-        'sidebar_view_visible_items',
-        'sidebar_view_items_order',
-        'customGroupNames',
-      ]);
+  const refreshCollectionConfiguration = React.useCallback(
+    async (targetWorkspaceId: string) => {
+      const startedAt = performance.now();
+      try {
+        sidebarSettingsPerf('refresh-config:start', {
+          targetWorkspaceId,
+          hasDashboardState: Boolean(dashboardState),
+          willRefreshDashboard: !dashboardState,
+          newlyCreatedGroupId,
+        });
+        const dState = dashboardState ?? (await refreshDashboard(targetWorkspaceId, { activeViewOnly: true }));
 
-      const namesMap: Record<string, string> = result.customGroupNames || customGroupNames || {};
+        if (!isMountedRef.current) return;
 
-      let initialCreateOrder = result.favorites_create_items_order;
-      if (!initialCreateOrder) {
-        initialCreateOrder = [
-          'header-knowledge',
-          'createnotes',
-          'createlinks',
-          'header-workflows',
-          'createsession',
-          'createtodo',
-          'ai',
-          'header-automations',
-          'createsnippet',
-          'header-workspace',
-          'createfolder',
-          'createworkspace',
-        ];
-        setSidebarStorageData({ favorites_create_items_order: initialCreateOrder });
-      } else {
-        if (initialCreateOrder.includes('header-others')) {
-          initialCreateOrder = initialCreateOrder.map((id: string) => (id === 'header-others' ? 'header-workspace' : id));
+        const result = await getSidebarStorageData([
+          'favorites_create_visible_items',
+          'favorites_create_items_order',
+          'sidebar_view_visible_items',
+          'dashboard_views_items_order',
+          'customGroupNames',
+        ]);
+
+        if (!isMountedRef.current) return;
+
+        const namesMap: Record<string, string> = result.customGroupNames || {};
+        setCustomGroupNames(namesMap);
+
+        const migratedCreateOrder = sanitizeAndMigrateCreateOrder(result.favorites_create_items_order);
+        setCreateItemsOrder(migratedCreateOrder);
+        if (JSON.stringify(result.favorites_create_items_order || []) !== JSON.stringify(migratedCreateOrder)) {
+          setSidebarStorageData({ favorites_create_items_order: migratedCreateOrder });
         }
-        if (!initialCreateOrder.includes('header-knowledge')) {
-          const notesIdx = initialCreateOrder.indexOf('createnotes');
-          if (notesIdx >= 0) {
-            initialCreateOrder.splice(notesIdx, 0, 'header-knowledge');
-          } else {
-            initialCreateOrder = ['header-knowledge', ...initialCreateOrder];
-          }
-        }
-        if (!initialCreateOrder.includes('header-automations')) {
-          const snippetIdx = initialCreateOrder.indexOf('createsnippet');
-          if (snippetIdx >= 0) {
-            initialCreateOrder.splice(snippetIdx, 0, 'header-automations');
-          } else {
-            initialCreateOrder.push('header-automations');
-          }
-        }
-        if (!initialCreateOrder.includes('createsnippet')) {
-          const authIdx = initialCreateOrder.indexOf('header-automations');
-          if (authIdx >= 0) {
-            initialCreateOrder.splice(authIdx + 1, 0, 'createsnippet');
-          } else {
-            initialCreateOrder.push('createsnippet');
-          }
-        }
-        if (!initialCreateOrder.includes('header-workflows')) {
-          const sessionIdx = initialCreateOrder.indexOf('createsession');
-          if (sessionIdx >= 0) {
-            initialCreateOrder.splice(sessionIdx, 0, 'header-workflows');
-          } else {
-            initialCreateOrder.push('header-workflows');
-          }
-        }
-        initialCreateOrder = initialCreateOrder.filter((id: string) => id !== 'header-others' && id !== 'header-shortcuts' && id !== 'agent' && id !== 'header-workspace' && id !== 'createfolder' && id !== 'createworkspace');
 
-        const defaultAllIds = [
-          'header-knowledge',
-          'createnotes',
-          'createlinks',
-          'header-workflows',
-          'createsession',
-          'createtodo',
-          'ai',
-          'header-automations',
-          'createsnippet',
-        ];
-        const missing = defaultAllIds.filter(id => !initialCreateOrder.includes(id));
-        if (missing.length > 0) {
-          initialCreateOrder = [...initialCreateOrder, ...missing];
+        if (result.favorites_create_visible_items) {
+          const stored = result.favorites_create_visible_items;
+          const merged = {
+            ...stored,
+          };
+          delete merged['createsession'];
+          delete merged['header-shortcuts'];
+          delete merged['header-automations'];
+          delete merged['header-workspace'];
+          delete merged['createfolder'];
+          delete merged['createworkspace'];
+          delete merged['header-knowledge'];
+          delete merged['header-workflows'];
+          setVisibleCreateItems(merged);
+        } else {
+          const defaultVisible = {
+            createnotes: true,
+            createlinks: true,
+            ai: true,
+            createsnippet: true,
+            createtodo: true,
+          };
+          setVisibleCreateItems(defaultVisible);
         }
-        const firstHeaderIdx = initialCreateOrder.findIndex((id: string) => id.startsWith('header-'));
-        if (firstHeaderIdx > 0) {
-          const headerId = initialCreateOrder.splice(firstHeaderIdx, 1)[0];
-          initialCreateOrder.unshift(headerId);
-        } else if (firstHeaderIdx === -1) {
-          initialCreateOrder.unshift('header-knowledge');
+
+        const activeViews = hasOnlyFastActiveViewPlaceholder(dState?.views || [])
+          ? await loadWidgetDashboardViewsForWorkspaceAsync(targetWorkspaceId)
+          : dState?.views || [];
+        if (!isMountedRef.current) return;
+        let storedOrder: string[] = result.dashboard_views_items_order || [];
+        const normalizedViewsOrder = normalizeDashboardViewsOrder({
+          workspaceId: targetWorkspaceId,
+          views: activeViews,
+          currentOrder: storedOrder,
+          customGroupNames: namesMap,
+          visibleItems: result.sidebar_view_visible_items || {},
+        });
+        let sanitizedViewOrder = normalizedViewsOrder.order;
+
+        if (newlyCreatedGroupIdRef.current && !sanitizedViewOrder.includes(newlyCreatedGroupIdRef.current)) {
+          sanitizedViewOrder = [...sanitizedViewOrder, newlyCreatedGroupIdRef.current];
         }
-        setSidebarStorageData({ favorites_create_items_order: initialCreateOrder });
-      }
-      setCreateItemsOrder(initialCreateOrder);
 
-      if (result.favorites_create_visible_items) {
-        const stored = result.favorites_create_visible_items;
-        const merged = {
-          'header-knowledge': stored['header-knowledge'] ?? true,
-          'header-workflows': stored['header-workflows'] ?? true,
-          'header-automations': stored['header-automations'] ?? true,
-          ...stored,
-        };
-        delete merged['header-workspace'];
-        delete merged['createfolder'];
-        delete merged['createworkspace'];
-        setVisibleCreateItems(merged);
-      } else {
-        const defaultVisible = {
-          createnotes: true,
-          createlinks: true,
-          createsession: true,
-          createtodo: true,
-          ai: true,
-          createsnippet: true,
-          'header-knowledge': true,
-          'header-workflows': true,
-          'header-automations': true,
-        };
-        setVisibleCreateItems(defaultVisible);
-        setSidebarStorageData({ favorites_create_visible_items: defaultVisible });
-      }
+        setViewItemsOrder(sanitizedViewOrder);
+        setCustomGroupNames(normalizedViewsOrder.customGroupNames);
+        setVisibleViewItems(normalizedViewsOrder.visibleItems);
+        sidebarSettingsPerf('refresh-config:done', {
+          durationMs: Math.round(performance.now() - startedAt),
+          targetWorkspaceId,
+          viewCount: activeViews.length,
+          order: summarizeOrder(sanitizedViewOrder),
+          storageKeys: Object.keys(result),
+        });
 
-      // Load real Dashboard Views state
-      loadWidgetDashboardStateAsync()
-        .then(dState => {
-          setDashboardState(dState);
-          const activeViews = dState?.views || [];
-          const validViewIds = new Set(activeViews.map(v => v.id));
-
-          let storedOrder: string[] = result.sidebar_view_items_order || result.dashboard_views_items_order || [];
-          // Filter out legacy filter strings & un-named custom headers
-          let sanitizedViewOrder = storedOrder.filter((id: string) => {
-            if (id.startsWith('header-custom_')) {
-              const groupId = id.replace('header-', '');
-              return Boolean(namesMap[groupId] && namesMap[groupId].trim());
-            }
-            return validViewIds.has(id);
-          });
-
-          // Ensure all active dashboard views are present in viewItemsOrder
-          activeViews.forEach(v => {
-            if (!sanitizedViewOrder.includes(v.id)) {
-              sanitizedViewOrder.push(v.id);
-            }
-          });
-
-          setViewItemsOrder(sanitizedViewOrder);
+        if (normalizedViewsOrder.isChanged) {
           setSidebarStorageData({
-            sidebar_view_items_order: sanitizedViewOrder,
             dashboard_views_items_order: sanitizedViewOrder,
+            sidebar_view_visible_items: normalizedViewsOrder.visibleItems,
+            customGroupNames: normalizedViewsOrder.customGroupNames,
           });
-        })
-        .catch(() => undefined);
+        }
+      } catch (err) {
+        sidebarSettingsPerf('refresh-config:error', {
+          durationMs: Math.round(performance.now() - startedAt),
+          message: err instanceof Error ? err.message : String(err),
+        });
+        console.error('[sidebarSettingsDropdown] Failed to refresh collection configuration:', err);
+      }
+    },
+    [dashboardState, refreshDashboard],
+  );
+
+  // Refresh configuration whenever the dropdown opens
+  useEffect(() => {
+    if (isOpen && isStoreInitialized && workspaces.length > 0) {
+      sidebarSettingsPerf('dropdown-open:refresh-config', {
+        activeWorkspaceId,
+        hasDashboardState: Boolean(dashboardState),
+      });
+      void refreshCollectionConfiguration(activeWorkspaceId);
+    }
+  }, [isOpen, isStoreInitialized, activeWorkspaceId, dashboardState, refreshCollectionConfiguration, workspaces.length]);
+
+  // Listen to chrome storage changes and WIDGET_DASHBOARD_STORAGE_EVENT
+  useEffect(() => {
+    const handleStorageChange = (changes: { [key: string]: any }, areaName: string) => {
+      if (!isOpen) return;
+      if (!isStoreInitialized) return;
+      if (workspaces.length === 0) return;
+      const keys = Object.keys(changes);
+      sidebarSettingsPerf('chrome-storage:changed', {
+        areaName,
+        keys,
+        relevantKeys: keys.filter(key =>
+          key === 'favorites_create_items_order' ||
+          key === 'favorites_create_visible_items' ||
+          key === 'sidebar_view_items_order' ||
+          key === 'dashboard_views_items_order' ||
+          key === 'sidebar_view_visible_items' ||
+          key === 'customGroupNames'
+        ),
+      });
+      if (areaName === 'local') {
+        if (
+          changes.favorites_create_items_order ||
+          changes.favorites_create_visible_items ||
+          changes.sidebar_view_items_order ||
+          changes.dashboard_views_items_order ||
+          changes.sidebar_view_visible_items ||
+          changes.customGroupNames
+        ) {
+          void refreshCollectionConfiguration(activeWorkspaceId);
+        }
+      }
     };
-    fetchStorage();
-  }, []);
+
+    const handleDashboardChange = () => {
+      if (!isOpen) return;
+      if (!isStoreInitialized) return;
+      if (workspaces.length === 0) return;
+      sidebarSettingsPerf('dashboard-event:received', {
+        event: WIDGET_DASHBOARD_STORAGE_EVENT,
+        activeWorkspaceId,
+      });
+      void refreshCollectionConfiguration(activeWorkspaceId);
+    };
+
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    window.addEventListener(WIDGET_DASHBOARD_STORAGE_EVENT, handleDashboardChange);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(handleStorageChange);
+      window.removeEventListener(WIDGET_DASHBOARD_STORAGE_EVENT, handleDashboardChange);
+    };
+  }, [activeWorkspaceId, isOpen, isStoreInitialized, refreshCollectionConfiguration, workspaces.length]);
 
   // ── Close on outside click ──
   useEffect(() => {
@@ -799,33 +686,41 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
   // ── Handlers ──
   const toggleCreateItem = (id: string) => {
     const updated = { ...visibleCreateItems, [id]: !visibleCreateItems[id] };
+    sidebarSettingsPerf('create-visible:toggle', {
+      id,
+      nextValue: updated[id],
+    });
     setVisibleCreateItems(updated);
     setSidebarStorageData({ favorites_create_visible_items: updated });
   };
 
   const reorderCreateItems = (newOrder: string[]) => {
-    let sanitizedOrder = [...newOrder];
-    const firstHeaderIdx = sanitizedOrder.findIndex(id => id.startsWith('header-'));
-    if (firstHeaderIdx > 0) {
-      const headerId = sanitizedOrder.splice(firstHeaderIdx, 1)[0];
-      sanitizedOrder.unshift(headerId);
-    } else if (firstHeaderIdx === -1) {
-      sanitizedOrder.unshift('header-knowledge');
-    }
+    const sanitizedOrder = sanitizeAndMigrateCreateOrder(newOrder);
 
     setCreateItemsOrder(sanitizedOrder);
+    sidebarSettingsPerf('create-order:save', {
+      order: summarizeOrder(sanitizedOrder),
+    });
     setSidebarStorageData({ favorites_create_items_order: sanitizedOrder });
   };
 
   const toggleViewItem = (id: string) => {
     const updated = { ...visibleViewItems, [id]: !visibleViewItems[id] };
+    sidebarSettingsPerf('view-visible:toggle', {
+      id,
+      nextValue: updated[id],
+    });
     setVisibleViewItems(updated);
     setSidebarStorageData({ sidebar_view_visible_items: updated });
   };
 
   const reorderViewItems = (newOrder: string[]) => {
+    sidebarSettingsPerf('view-order:save', {
+      previous: summarizeOrder(viewItemsOrder),
+      next: summarizeOrder(newOrder),
+    });
     setViewItemsOrder(newOrder);
-    setSidebarStorageData({ sidebar_view_items_order: newOrder });
+    setSidebarStorageData({ dashboard_views_items_order: newOrder });
   };
 
   const toggleGroup = (
@@ -851,6 +746,12 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
     });
 
     setVisible(newVisible);
+    sidebarSettingsPerf('group:toggle', {
+      headerId,
+      storageKey,
+      itemCount: itemsInGroup.length,
+      nextValue: !isAnyChecked,
+    });
     setSidebarStorageData({ [storageKey]: newVisible });
   };
 
@@ -878,30 +779,44 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
     const newNames = { ...customGroupNames };
     delete newNames[groupId];
     setCustomGroupNames(newNames);
+    const isNewUnnamedGroup = newlyCreatedGroupId === headerId;
 
     if (newlyCreatedGroupId === headerId) {
       setNewlyCreatedGroupId(null);
     }
 
     if (isViewGroup) {
+      sidebarSettingsPerf('view-group:delete', {
+        headerId,
+        itemCount: itemsInGroup.length,
+        nextOrder: summarizeOrder(newOrder),
+      });
       setViewItemsOrder(newOrder);
       setVisibleViewItems(newVisible);
-      setSidebarStorageData({
-        sidebar_view_items_order: newOrder,
-        dashboard_views_items_order: newOrder,
-        sidebar_view_visible_items: newVisible,
-        customGroupNames: newNames,
-      });
+      if (!isNewUnnamedGroup) {
+        setSidebarStorageData({
+          dashboard_views_items_order: newOrder,
+          sidebar_view_visible_items: newVisible,
+          customGroupNames: newNames,
+        });
+      }
       return;
     }
 
+    sidebarSettingsPerf('create-group:delete', {
+      headerId,
+      itemCount: itemsInGroup.length,
+      nextOrder: summarizeOrder(newOrder),
+    });
     setCreateItemsOrder(newOrder);
     setVisibleCreateItems(newVisible);
-    setSidebarStorageData({
-      favorites_create_items_order: newOrder,
-      favorites_create_visible_items: newVisible,
-      customGroupNames: newNames,
-    });
+    if (!isNewUnnamedGroup) {
+      setSidebarStorageData({
+        favorites_create_items_order: newOrder,
+        favorites_create_visible_items: newVisible,
+        customGroupNames: newNames,
+      });
+    }
   };
 
   const getFavoriteIcon = (item: any) => {
@@ -927,7 +842,7 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
         return <FiLayers size={12} className="text-neutral-500 shrink-0" />;
       case 'chat_agent':
       case 'agent':
-        return <FaRobot size={12} className="text-neutral-500 shrink-0" />;
+        return <LuSparkles size={12} className="text-neutral-500 shrink-0" />;
       case 'automation':
         return <FiZap size={12} className="text-neutral-500 shrink-0" />;
       default:
@@ -939,14 +854,10 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
   const createOptions = useMemo(() => {
     const map: Record<string, { id: string; label: string }> = {
       createlinks: { id: 'createlinks', label: 'Link' },
-      createsession: { id: 'createsession', label: 'Tab Session' },
       createnotes: { id: 'createnotes', label: 'Note' },
       ai: { id: 'ai', label: 'Chat Agent' },
       createtodo: { id: 'createtodo', label: 'Todo' },
       createsnippet: { id: 'createsnippet', label: 'Text Expander' },
-      'header-knowledge': { id: 'header-knowledge', label: customGroupNames['knowledge'] || 'Knowledge' },
-      'header-workflows': { id: 'header-workflows', label: customGroupNames['workflows'] || 'Workflows' },
-      'header-automations': { id: 'header-automations', label: customGroupNames['automations'] || 'Automations' },
     };
     createItemsOrder.forEach(id => {
       if (id.startsWith('header-') && !map[id]) {
@@ -965,7 +876,7 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
     viewItemsOrder.forEach(id => {
       if (id.startsWith('header-') && !map[id]) {
         const groupId = id.replace('header-', '');
-        const customTitle = customGroupNames[groupId];
+        const customTitle = getDashboardViewGroupTitle(groupId, customGroupNames);
         if (customTitle && customTitle.trim()) {
           map[id] = { id, label: customTitle.trim() };
         }
@@ -1006,298 +917,280 @@ export const SidebarSettingsDropdown: React.FC<SidebarSettingsDropdownProps> = (
       {/* Dropdown panel */}
       {isOpen &&
         ReactDOM.createPortal(
-          <div
+          <motion.div
+            layoutScroll
             data-portal="true"
             data-prevent-searchbar-capture="true"
-            className="fixed z-[9999] w-52 p-2 rounded-lg border shadow-xl flex flex-col select-none overflow-y-auto max-h-[80vh] custom-scrollbar bg-[var(--color-popupBg)] backdrop-blur-md border-[var(--color-borderDefault)] text-[var(--color-textSecondary)] shadow-xl"
+            className="fixed z-[9999] w-64 p-3 rounded-xl border flex flex-col select-none overflow-y-auto max-h-[85vh] custom-scrollbar bg-[var(--color-popupBg,#141416)] backdrop-blur-xl border-[var(--color-borderDefault)] text-[var(--color-textSecondary)] shadow-2xl"
             style={{ top: `${coords.top}px`, left: `${coords.left}px` }}>
-            <div className="flex flex-col pb-2">
-              <Reorder.Group
-                axis="y"
-                values={normalizedOrder}
-                onReorder={onSectionsReorder}
-                className="flex flex-col gap-1 pb-1">
-                {normalizedOrder.map(sectionId => {
-                  if (sectionId === 'view' && normalizedOrder[0] === 'view') {
-                    return (
-                      <Reorder.Item key="view" value="view" className="list-none mb-1">
-                        <div className="flex items-center justify-between px-1 py-1 select-none">
-                          <div className="flex items-center gap-1.5">
-                            <div className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]">
-                              <DragHandleIcon />
-                            </div>
-                            <span className="text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase">Workspace Views</span>
-                          </div>
-                        </div>
-                      </Reorder.Item>
-                    );
-                  }
-                  if (sectionId === 'create') {
-                    return (
-                      <Reorder.Item key="create" value="create" className="list-none">
-                        <div className="flex items-center justify-between px-1 py-1 select-none">
-                          <div className="flex items-center gap-1.5">
-                            <div className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]">
-                              <DragHandleIcon />
-                            </div>
-                            <span className="text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase">Create</span>
-                          </div>
-                        </div>
-                      </Reorder.Item>
-                    );
-                  }
-                  return null;
-                })}
-              </Reorder.Group>
+            {/* Top Title & Subtitle Header */}
+            <div className="flex flex-col gap-0.5 px-1 pb-2.5 mb-2.5 border-b border-white/10 dark:border-white/10 shrink-0">
+              <h3 className="text-sm font-bold text-[var(--color-textPrimary)] tracking-tight">Grouping</h3>
+              <p className="text-[11px] text-[var(--color-textMuted)] leading-snug">Group items in Create and Collections.</p>
+            </div>
 
-              <div className="my-1 border-t border-[var(--color-borderDefault)]" />
+            <div className="flex flex-col gap-3">
+              {/* BOX 1: CREATE SECTION */}
+              <div className="rounded-xl border border-white/10 dark:border-white/10 bg-white/[0.02] dark:bg-white/[0.03] p-2.5 flex flex-col gap-1">
+                {/* Header & Subtitle */}
+                <div className="flex flex-col gap-0.5 pb-2 mb-1 border-b border-white/10 dark:border-white/10">
+                  <span className="text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase">CREATE</span>
+                  <span className="text-[10px] text-[var(--color-textMuted)] opacity-80">Organize items in the Create menu.</span>
+                </div>
 
-              {/* Sub-items list for CREATE section */}
-              <Reorder.Group
-                axis="y"
-                values={createItemsOrder}
-                onReorder={reorderCreateItems}
-                className="flex flex-col gap-0">
-                {(() => {
-                  let hasSeenHeader = false;
-                  const optionsMap = new Map(createOptions.map(opt => [opt.id, opt]));
+                {/* Sub-items list for CREATE section */}
+                <Reorder.Group
+                  axis="y"
+                  values={createItemsOrder}
+                  onReorder={reorderCreateItems}
+                  className="flex flex-col gap-0">
+                  {(() => {
+                    let hasSeenHeader = false;
+                    const optionsMap = new Map(createOptions.map(opt => [opt.id, opt]));
 
-                  return createItemsOrder.map(id => {
-                    if (id.startsWith('header-')) {
-                      hasSeenHeader = true;
-                      const groupId = id.replace('header-', '');
-                      const defaultTitles: Record<string, string> = {
-                        knowledge: 'Knowledge',
-                        workflows: 'Workflows',
-                        automations: 'Automations',
-                        workspace: 'Workspace',
-                      };
-                      const title = customGroupNames[groupId] || defaultTitles[groupId] || groupId;
+                    return createItemsOrder.map(id => {
+                      if (id.startsWith('header-')) {
+                        hasSeenHeader = true;
+                        const groupId = id.replace('header-', '');
+                        const defaultTitles: Record<string, string> = {
+                          shortcuts: 'Shortcuts',
+                          automations: 'Automations',
+                          knowledge: 'Knowledge',
+                          workflows: 'Workflows',
+                          workspace: 'Workspace',
+                        };
+                        const title = customGroupNames[groupId] || defaultTitles[groupId] || groupId;
 
-                      const headerIndex = createItemsOrder.indexOf(id);
-                      let isOn = visibleCreateItems[id] ?? false;
-                      for (let i = headerIndex + 1; i < createItemsOrder.length; i++) {
-                        if (createItemsOrder[i].startsWith('header-')) break;
-                        if (visibleCreateItems[createItemsOrder[i]]) {
-                          isOn = true;
-                          break;
+                        const headerIndex = createItemsOrder.indexOf(id);
+                        let isOn = visibleCreateItems[id] ?? false;
+                        for (let i = headerIndex + 1; i < createItemsOrder.length; i++) {
+                          if (createItemsOrder[i].startsWith('header-')) break;
+                          if (visibleCreateItems[createItemsOrder[i]]) {
+                            isOn = true;
+                            break;
+                          }
                         }
+
+                        return (
+                          <GroupHeaderItem
+                            key={id}
+                            id={id}
+                            title={title}
+                            isOn={isOn}
+                            onToggle={() =>
+                              toggleGroup(
+                                id,
+                                createItemsOrder,
+                                visibleCreateItems,
+                                setVisibleCreateItems,
+                                'favorites_create_visible_items',
+                              )
+                            }
+                            onRename={newName => {
+                              const newNames = { ...customGroupNames, [groupId]: newName };
+                              sidebarSettingsPerf('create-group:rename', {
+                                headerId: id,
+                                groupId,
+                                newName,
+                              });
+                              setCustomGroupNames(newNames);
+                              if (newlyCreatedGroupId === id) {
+                                setNewlyCreatedGroupId(null);
+                                setSidebarStorageData({
+                                  favorites_create_items_order: createItemsOrder,
+                                  favorites_create_visible_items: visibleCreateItems,
+                                  customGroupNames: newNames,
+                                });
+                              } else {
+                                setSidebarStorageData({ customGroupNames: newNames });
+                              }
+                            }}
+                            onDelete={
+                              id.startsWith('header-custom_')
+                                ? () => handleDeleteGroup(id)
+                                : undefined
+                            }
+                            autoFocusEdit={newlyCreatedGroupId === id}
+                            onCancelEdit={() => {
+                              if (newlyCreatedGroupId === id) {
+                                handleDeleteGroup(id);
+                              }
+                            }}
+                          />
+                        );
+                      } else {
+                        const option = optionsMap.get(id);
+                        if (!option) return null;
+                        return (
+                          <DropdownReorderItem
+                            key={option.id}
+                            option={option}
+                            visibleItems={visibleCreateItems}
+                            toggleItemVisibility={toggleCreateItem}
+                            isIndented={hasSeenHeader}
+                          />
+                        );
                       }
-
-                      return (
-                        <GroupHeaderItem
-                          key={id}
-                          id={id}
-                          title={title}
-                          isOn={isOn}
-                          onToggle={() =>
-                            toggleGroup(
-                              id,
-                              createItemsOrder,
-                              visibleCreateItems,
-                              setVisibleCreateItems,
-                              'favorites_create_visible_items',
-                            )
-                          }
-                          onRename={newName => {
-                            const newNames = { ...customGroupNames, [groupId]: newName };
-                            setCustomGroupNames(newNames);
-                            setSidebarStorageData({ customGroupNames: newNames });
-                            if (newlyCreatedGroupId === id) {
-                              setNewlyCreatedGroupId(null);
-                            }
-                          }}
-                          onDelete={
-                            id.startsWith('header-custom_')
-                              ? () => handleDeleteGroup(id)
-                              : undefined
-                          }
-                          autoFocusEdit={newlyCreatedGroupId === id}
-                          onCancelEdit={() => {
-                            if (newlyCreatedGroupId === id) {
-                              handleDeleteGroup(id);
-                            }
-                          }}
-                        />
-                      );
-                    } else {
-                      const option = optionsMap.get(id);
-                      if (!option) return null;
-                      return (
-                        <DropdownReorderItem
-                          key={option.id}
-                          option={option}
-                          visibleItems={visibleCreateItems}
-                          toggleItemVisibility={toggleCreateItem}
-                          isIndented={hasSeenHeader}
-                        />
-                      );
-                    }
-                  });
-                })()}
-              </Reorder.Group>
-
-              {/* Add Custom Group Button for Create Section */}
-              <div className="flex justify-start px-1 mt-1">
-                <button
-                  type="button"
-                  onClick={e => {
-                    e.stopPropagation();
-                    const newId = `header-custom_${Date.now()}`;
-                    const newOrder = [...createItemsOrder, newId];
-                    setCreateItemsOrder(newOrder);
-
-                    const newVisible = { ...visibleCreateItems, [newId]: true };
-                    setVisibleCreateItems(newVisible);
-
-                    const newNames = { ...customGroupNames, [newId.replace('header-', '')]: '' };
-                    setCustomGroupNames(newNames);
-
-                    setNewlyCreatedGroupId(newId);
-
-                    setSidebarStorageData({
-                      favorites_create_items_order: newOrder,
-                      favorites_create_visible_items: newVisible,
-                      customGroupNames: newNames,
                     });
-                  }}
-                  className="py-1 px-1 flex items-center justify-center gap-1.5 text-[11px] font-medium text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)] transition-colors cursor-pointer bg-transparent border-none outline-none w-full"
-                  title="Add Create Group">
-                  <FiPlus size={13} />
-                  <span>Add Group</span>
-                </button>
+                  })()}
+                </Reorder.Group>
+
+                {/* Add Custom Group Button for Create Section */}
+                <div className="flex justify-start px-1 mt-1 pt-1 border-t border-white/10 dark:border-white/10">
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      const newId = `header-${generateEntityId('customSidebarGroup')}`;
+                      const newOrder = [...createItemsOrder, newId];
+                      sidebarSettingsPerf('create-group:add', {
+                        headerId: newId,
+                        nextOrder: summarizeOrder(newOrder),
+                      });
+                      setCreateItemsOrder(newOrder);
+
+                      const newVisible = { ...visibleCreateItems, [newId]: true };
+                      setVisibleCreateItems(newVisible);
+
+                      const newNames = { ...customGroupNames, [newId.replace('header-', '')]: '' };
+                      setCustomGroupNames(newNames);
+
+                      setNewlyCreatedGroupId(newId);
+                    }}
+                    className="py-1 px-1.5 flex items-center justify-start gap-1.5 text-[11px] font-medium text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)] transition-colors cursor-pointer bg-transparent border-none outline-none w-full rounded hover:bg-[var(--color-hoverBg)]"
+                    title="Add Create Group">
+                    <FiPlus size={13} />
+                    <span>Add Group</span>
+                  </button>
+                </div>
               </div>
 
-              {/* If DASHBOARD VIEWS is ordered after CREATE, render it at the very bottom after CREATE sub-items */}
-              {normalizedOrder[normalizedOrder.length - 1] === 'view' && (
-                <div className="mt-2.5 pt-2 border-t border-[var(--color-borderDefault)] flex flex-col gap-1.5">
-                  <Reorder.Group
-                    axis="y"
-                    values={normalizedOrder}
-                    onReorder={onSectionsReorder}>
-                    <Reorder.Item key="view" value="view" className="list-none">
-                      <div className="flex items-center justify-between px-1 py-1 select-none">
-                        <div className="flex items-center gap-1.5">
-                          <div className="cursor-grab active:cursor-grabbing p-0.5 text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]">
-                            <DragHandleIcon />
-                          </div>
-                          <span className="text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase">Workspace Views</span>
-                        </div>
-                      </div>
-                    </Reorder.Item>
-                  </Reorder.Group>
-
-                  {/* Sub-items list for DASHBOARD VIEWS section */}
-                  <Reorder.Group
-                    axis="y"
-                    values={viewItemsOrder}
-                    onReorder={reorderViewItems}
-                    className="flex flex-col gap-0">
-                    {(() => {
-                      let hasSeenHeader = false;
-                      const optionsMap = new Map(viewOptions.map(opt => [opt.id, opt]));
-
-                      return viewItemsOrder.map(id => {
-                        if (id.startsWith('header-')) {
-                          if (!id.startsWith('header-custom_')) return null;
-                          hasSeenHeader = true;
-                          const groupId = id.replace('header-', '');
-                          const title = customGroupNames[groupId] || '';
-                          if (!title.trim() && newlyCreatedGroupId !== id) return null;
-
-                          const headerIndex = viewItemsOrder.indexOf(id);
-                          let isOn = visibleViewItems[id] ?? false;
-                          for (let i = headerIndex + 1; i < viewItemsOrder.length; i++) {
-                            if (viewItemsOrder[i].startsWith('header-')) break;
-                            if (visibleViewItems[viewItemsOrder[i]]) {
-                              isOn = true;
-                              break;
-                            }
-                          }
-
-                          return (
-                            <GroupHeaderItem
-                              key={id}
-                              id={id}
-                              title={title}
-                              isOn={isOn}
-                              onToggle={() =>
-                                toggleGroup(
-                                  id,
-                                  viewItemsOrder,
-                                  visibleViewItems,
-                                  setVisibleViewItems,
-                                  'sidebar_view_visible_items',
-                                )
-                              }
-                              onRename={newName => {
-                                const newNames = { ...customGroupNames, [groupId]: newName };
-                                setCustomGroupNames(newNames);
-                                setSidebarStorageData({ customGroupNames: newNames });
-                                if (newlyCreatedGroupId === id) {
-                                  setNewlyCreatedGroupId(null);
-                                }
-                              }}
-                              onDelete={() => handleDeleteGroup(id)}
-                              autoFocusEdit={newlyCreatedGroupId === id}
-                              onCancelEdit={() => {
-                                if (newlyCreatedGroupId === id) {
-                                  handleDeleteGroup(id);
-                                }
-                              }}
-                            />
-                          );
-                        } else {
-                          const option = optionsMap.get(id);
-                          if (!option) return null;
-                          return (
-                            <DropdownReorderItem
-                              key={option.id}
-                              option={option}
-                              visibleItems={visibleViewItems}
-                              toggleItemVisibility={toggleViewItem}
-                              isIndented={hasSeenHeader}
-                            />
-                          );
-                        }
-                      });
-                    })()}
-                  </Reorder.Group>
-
-                  {/* Add Custom Group Button for Dashboard Views */}
-                  <div className="flex justify-start px-1 mt-0.5">
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        const newId = `header-custom_${Date.now()}`;
-                        const newOrder = [...viewItemsOrder, newId];
-                        setViewItemsOrder(newOrder);
-
-                        const newVisible = { ...visibleViewItems, [newId]: true };
-                        setVisibleViewItems(newVisible);
-
-                        const newNames = { ...customGroupNames, [newId.replace('header-', '')]: '' };
-                        setCustomGroupNames(newNames);
-
-                        setNewlyCreatedGroupId(newId);
-
-                        setSidebarStorageData({
-                          sidebar_view_items_order: newOrder,
-                          sidebar_view_visible_items: newVisible,
-                          customGroupNames: newNames,
-                        });
-                      }}
-                      className="py-1 px-1 flex items-center justify-center gap-1.5 text-[11px] font-medium text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)] transition-colors cursor-pointer bg-transparent border-none outline-none w-full"
-                      title="Add View Group">
-                      <FiPlus size={13} />
-                      <span>Add Group</span>
-                    </button>
-                  </div>
+              {/* BOX 2: COLLECTIONS SECTION */}
+              <div className="rounded-xl border border-white/10 dark:border-white/10 bg-white/[0.02] dark:bg-white/[0.03] p-2.5 flex flex-col gap-1">
+                {/* Header & Subtitle */}
+                <div className="flex flex-col gap-0.5 pb-2 mb-1 border-b border-white/10 dark:border-white/10">
+                  <span className="text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase">COLLECTIONS</span>
+                  <span className="text-[10px] text-[var(--color-textMuted)] opacity-80">Organize your collections items</span>
                 </div>
-              )}
+
+                {/* Sub-items list for COLLECTIONS section */}
+                <Reorder.Group
+                  axis="y"
+                  values={viewItemsOrder}
+                  onReorder={reorderViewItems}
+                  className="flex flex-col gap-0">
+                  {(() => {
+                    let hasSeenHeader = false;
+                    const optionsMap = new Map(viewOptions.map(opt => [opt.id, opt]));
+
+                    return viewItemsOrder.map(id => {
+                      if (id.startsWith('header-')) {
+                        hasSeenHeader = true;
+                        const groupId = id.replace('header-', '');
+                        const title = getDashboardViewGroupTitle(groupId, customGroupNames);
+                        if (!title.trim() && newlyCreatedGroupId !== id) return null;
+
+                        const headerIndex = viewItemsOrder.indexOf(id);
+                        let isOn = visibleViewItems[id] ?? false;
+                        for (let i = headerIndex + 1; i < viewItemsOrder.length; i++) {
+                          if (viewItemsOrder[i].startsWith('header-')) break;
+                          if (visibleViewItems[viewItemsOrder[i]]) {
+                            isOn = true;
+                            break;
+                          }
+                        }
+
+                        return (
+                          <GroupHeaderItem
+                            key={id}
+                            id={id}
+                            title={title}
+                            isOn={isOn}
+                            onToggle={() =>
+                              toggleGroup(
+                                id,
+                                viewItemsOrder,
+                                visibleViewItems,
+                                setVisibleViewItems,
+                                'sidebar_view_visible_items',
+                              )
+                            }
+                            onRename={newName => {
+                              const newNames = { ...customGroupNames, [groupId]: newName };
+                              sidebarSettingsPerf('view-group:rename', {
+                                headerId: id,
+                                groupId,
+                                newName,
+                              });
+                              setCustomGroupNames(newNames);
+                              if (newlyCreatedGroupId === id) {
+                                setNewlyCreatedGroupId(null);
+                                setSidebarStorageData({
+                                  dashboard_views_items_order: viewItemsOrder,
+                                  sidebar_view_visible_items: visibleViewItems,
+                                  customGroupNames: newNames,
+                                });
+                              } else {
+                                setSidebarStorageData({ customGroupNames: newNames });
+                              }
+                            }}
+                            onDelete={() => handleDeleteGroup(id)}
+                            autoFocusEdit={newlyCreatedGroupId === id}
+                            onCancelEdit={() => {
+                              if (newlyCreatedGroupId === id) {
+                                handleDeleteGroup(id);
+                              }
+                            }}
+                          />
+                        );
+                      } else {
+                        const option = optionsMap.get(id);
+                        if (!option) return null;
+                        return (
+                          <DropdownReorderItem
+                            key={option.id}
+                            option={option}
+                            visibleItems={visibleViewItems}
+                            toggleItemVisibility={toggleViewItem}
+                            isIndented={hasSeenHeader}
+                          />
+                        );
+                      }
+                    });
+                  })()}
+                </Reorder.Group>
+
+                {/* Add Custom Group Button for COLLECTIONS Section */}
+                <div className="flex justify-start px-1 mt-1 pt-1 border-t border-white/10 dark:border-white/10">
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      const newId = `header-${generateEntityId('customSidebarGroup')}`;
+                      const newOrder = [...viewItemsOrder, newId];
+                      sidebarSettingsPerf('view-group:add', {
+                        headerId: newId,
+                        nextOrder: summarizeOrder(newOrder),
+                      });
+                      setViewItemsOrder(newOrder);
+
+                      const newVisible = { ...visibleViewItems, [newId]: true };
+                      setVisibleViewItems(newVisible);
+
+                      const newNames = { ...customGroupNames, [newId.replace('header-', '')]: '' };
+                      setCustomGroupNames(newNames);
+
+                      setNewlyCreatedGroupId(newId);
+                    }}
+                    className="py-1 px-1.5 flex items-center justify-start gap-1.5 text-[11px] font-medium text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)] transition-colors cursor-pointer bg-transparent border-none outline-none w-full rounded hover:bg-[var(--color-hoverBg)]"
+                    title="Add View Group">
+                    <FiPlus size={13} />
+                    <span>Add Group</span>
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>,
+          </motion.div>,
           document.body,
         )}
     </div>

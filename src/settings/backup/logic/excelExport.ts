@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { BackupData } from './extractData';
+import { ASSET_BLOB_BACKUP_FIELD, ASSET_FILE_BACKUP_FIELD } from './assetBackupPayload';
 
 // Helper to strip HTML tags from a string
 const stripHtml = (html: string | null | undefined): string => {
@@ -46,7 +47,7 @@ export const generateExcelBackup = async (dbData: BackupData): Promise<Blob> => 
         Object.keys(record).forEach(k => headerSet.add(k));
       }
     });
-    const headers = Array.from(headerSet);
+    const headers = Array.from(headerSet).filter(header => header !== ASSET_BLOB_BACKUP_FIELD && header !== ASSET_FILE_BACKUP_FIELD);
 
     // Build data rows
     const dataRows = tableRecords.map((record: any) => {

@@ -37,6 +37,8 @@ import { readAllHotkeys, readAllShortcuts, getItemCompoundId } from '../../hotke
 import { useFavorites, useUser } from '../favoriteHooks';
 import { useDbStore } from '../../../storage/store/useDbStore';
 import { resolveEntityById } from '../../utils/entityResolver';
+import { generateEntityId } from '../../utils/idGenerator';
+import { launchSessionSmart } from '../../sessions/launchSessionSmart';
 
 type Snippet = SnippetRecord & {
   key?: string;
@@ -123,9 +125,11 @@ export interface FavoritesPanelProps {
   onNavigateToListView?: (type: 'notes' | 'links' | 'commands', section?: string) => void;
   onRequestEditLink?: (suggestion: { snippet: any; workspace: any; folder: any }) => void;
   isSidebar?: boolean;
+  widthMode?: string;
   forceMode?: 'favorites' | 'notes' | 'links' | 'snippets';
   openSpreadsheetView?: (section?: string) => void;
   hideCreatePanelItems?: boolean;
+  isCollapsed?: boolean;
 }
 
 const FavoritesPanel = ({
@@ -138,9 +142,11 @@ const FavoritesPanel = ({
   onNavigateToListView,
   onRequestEditLink,
   isSidebar = false,
+  widthMode,
   forceMode = 'favorites',
   openSpreadsheetView,
   hideCreatePanelItems = false,
+  isCollapsed = false,
 }: FavoritesPanelProps) => {
   const { theme } = useAppearance();
   const isDark = theme.isDark;
@@ -239,45 +245,42 @@ const FavoritesPanel = ({
         });
       });
 
-      chrome.runtime.sendMessage(
-        {
-          action: 'start_session',
-          sessionId,
-          sessionName,
-          workspaceId,
-          folderId: folderId || null,
-          teamId: 'local',
-          storageMode: 'local',
-          initialUrls,
-          initialNames,
-          openSettings,
-          isInlineCreation: true,
-          ...activeTabContext,
-        },
-        response => {
-          if (response?.ok && openSettings?.openMode === 'same_window') {
-            if (response?.reused || response?.reusedCurrentTab) {
-              return;
-            }
-            const encodedName = encodeURIComponent(sessionName);
-            window.history.replaceState(
-              null,
-              '',
-              `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`,
-            );
-            useUIStore.getState().openEditor({
-              type: 'session',
+      const response = await launchSessionSmart({
+        sessionId,
+        sessionName,
+        workspaceId,
+        folderId: folderId || null,
+        teamId: 'local',
+        storageMode: 'local',
+        initialUrls,
+        initialNames,
+        openSettings,
+        isInlineCreation: true,
+        context: activeTabContext,
+        source: 'favorite',
+      });
+
+      if (response?.ok && openSettings?.openMode === 'same_window' && openSettings?.openInNewTab !== true && !response?.openedInNewTab) {
+        if (response?.reused || response?.reusedCurrentTab || response?.skipped) {
+          return;
+        }
+        const encodedName = encodeURIComponent(sessionName);
+        window.history.replaceState(
+          null,
+          '',
+          `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`,
+        );
+        useUIStore.getState().openEditor({
+          type: 'session',
+          id: sessionId,
+          props: {
+            session: {
               id: sessionId,
-              props: {
-                session: {
-                  id: sessionId,
-                  title: sessionName,
-                },
-              },
-            });
-          }
-        },
-      );
+              title: sessionName,
+            },
+          },
+        });
+      }
     },
     [],
   );
@@ -618,7 +621,7 @@ const FavoritesPanel = ({
       }
 
       const currentUrls = Array.isArray(linkRecord.urls) ? [...linkRecord.urls] : [];
-      currentUrls.push({ id: Date.now().toString(), url: normalizedUrl, title: newHostName });
+      currentUrls.push({ id: generateEntityId('linkItem'), url: normalizedUrl, title: newHostName });
 
       await updateLink(linkId, { urls: currentUrls });
 
@@ -1020,8 +1023,8 @@ const FavoritesPanel = ({
             ...(showFavoritesTutorial ? { borderColor: '#22c55e' } : {}),
           }}>
           {/* Settings — rendered ONCE at top-right of the entire panel, never inside sections, to prevent unmounting */}
-          {!hideCreatePanelItems && (
-            <div className="absolute top-[14px] right-4 z-50 flex items-center gap-0.5">
+          {!hideCreatePanelItems && !isCollapsed && (
+            <div className="absolute top-[6px] right-4 z-50 flex items-center gap-0.5">
               <SidebarSettingsDropdown
                 showFavoritesSection={showFavoritesSection}
                 onToggleFavoritesSection={handleToggleFavoritesSection}
@@ -1041,7 +1044,7 @@ const FavoritesPanel = ({
               axis="y"
               values={sectionsOrder}
               onReorder={handleSectionsReorder}
-              className={`flex flex-col gap-0 w-full ${isSidebar ? 'overflow-y-auto clean-scrollbar h-full pb-12 pr-1' : ''}`}>
+              className={`flex flex-col gap-0 w-full ${isSidebar ? 'overflow-y-auto clean-scrollbar h-full pb-20 pr-1' : ''}`}>
               {sectionsOrder.map(sectionId => {
                 if (sectionId === 'create') {
                   return (
@@ -1051,8 +1054,8 @@ const FavoritesPanel = ({
                       className="list-none"
                       dragListener={false}
                       dragControls={createDragControls}
-                      transition={{ type: 'just', duration: 0 }}>
-                      <CreateMenuPanel onCommandSelect={onCommandSelect} />
+                      transition={{ type: 'tween', duration: 0 }}>
+                      <CreateMenuPanel onCommandSelect={onCommandSelect} isCollapsed={isCollapsed} />
                     </Reorder.Item>
                   );
                 }
@@ -1068,33 +1071,8 @@ const FavoritesPanel = ({
                       className="list-none"
                       dragListener={false}
                       dragControls={viewDragControls}
-                      transition={{ type: 'just', duration: 0 }}>
-                      {(() => {
-                        let effectiveEditor = activeEditor;
-                        if (!effectiveEditor && activeView) {
-                          if (activeView.type === 'createFolder' || activeView.type === 'sharedFolderCreation') {
-                            effectiveEditor = { type: 'folder', id: '' } as any;
-                          } else if (
-                            activeView.type === 'createWorkspace' ||
-                            activeView.type === 'organizationSettings'
-                          ) {
-                            effectiveEditor = { type: 'workspace', id: '' } as any;
-                          }
-                        }
-
-                        // Render the related items panel for ALL editor types (nodes, links, etc.)
-                        return effectiveEditor ? (
-                          <EditorItemsPanel
-                            activeEditor={effectiveEditor}
-                            onOpenUrls={onOpenUrls}
-                            onRequestEditLink={onRequestEditLink}
-                            onStartExistingSession={handleStartExistingSession as any}
-                            searchbarRef={searchbarRef}
-                            openSpreadsheetView={openSpreadsheetView}
-                          />
-                        ) : null;
-                      })()}
-                      <SidebarDashboardViewsSection />
+                      transition={{ type: 'tween', duration: 0 }}>
+                      <SidebarDashboardViewsSection widthMode={widthMode} isCollapsed={isCollapsed} />
                     </Reorder.Item>
                   );
                 }

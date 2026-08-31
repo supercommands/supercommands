@@ -278,40 +278,35 @@
   border: none !important;
 }
 
-/* CUSTOM SCROLLBAR for Quill Editor Container */
+/* CUSTOM SCROLLBAR for Quill Editor Container (Sleek & Subtle) */
 .quill-wrapper-internal .ql-container::-webkit-scrollbar {
-  width: 10px;
-  /* Wide enough to see clearly */
-  height: 10px;
-  display: block !important;
+  width: 6px !important;
+  height: 6px !important;
 }
 
 .quill-wrapper-internal .ql-container::-webkit-scrollbar-track {
-  background: transparent;
+  background: transparent !important;
 }
 
-/* Light mode thumb - High Contrast */
 .quill-wrapper-internal .ql-container::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.4);
-  /* Visible gray/black */
-  border-radius: 5px;
-  border: 2px solid transparent;
-  /* Padding around thumb */
-  background-clip: content-box;
+  background-color: rgba(0, 0, 0, 0.15) !important;
+  border-radius: 9999px !important;
+  transition: background-color 0.2s ease-in-out !important;
 }
 
 .quill-wrapper-internal .ql-container::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 0, 0, 0.6);
+  background-color: rgba(0, 0, 0, 0.5) !important;
 }
 
-/* Dark mode thumb - High Contrast */
-.dark .quill-wrapper-internal .ql-container::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.4);
-  /* Visible white */
+/* Dark mode sleek thumb */
+.dark .quill-wrapper-internal .ql-container::-webkit-scrollbar-thumb,
+.quill-wrapper-internal .ql-container::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.18) !important;
 }
 
-.dark .quill-wrapper-internal .ql-container::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.6);
+.dark .quill-wrapper-internal .ql-container::-webkit-scrollbar-thumb:hover,
+.quill-wrapper-internal .ql-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.55) !important;
 }
 
 .quill-wrapper-internal .ql-editor {

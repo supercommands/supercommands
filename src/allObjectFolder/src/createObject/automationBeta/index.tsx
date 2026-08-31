@@ -30,7 +30,7 @@ import { runAutomation } from './utilities/automation';
 import { useAutomationEditor } from './useAutomationEditor';
 import { SharedPropertiesToolbar } from '../../../../shared-components/editorToolbar/SharedPropertiesToolbar';
 import { getItemCompoundId } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
-import { useRelativeSavedTime } from '../../../../shared-components/utils';
+import { generateEntityId, useRelativeSavedTime } from '../../../../shared-components/utils';
 
 interface AutomationBuilderProps {
   onClose: () => void;
@@ -83,7 +83,7 @@ const AutomationBuilder = forwardRef<AutomationBuilderRef, AutomationBuilderProp
 
     const handleAddModule = (module: (typeof MODULES)[0]) => {
       const newStep: AutomationStep = {
-        id: `step-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: generateEntityId('automationStep'),
         moduleId: module.id,
         config: {},
       };

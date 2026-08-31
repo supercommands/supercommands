@@ -1,7 +1,6 @@
 import * as React from 'react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState, useRef, useLayoutEffect, useCallback } from 'react';
 import { useAppearance } from '@extension/ui';
-import { useState } from 'react';
 import { FaSearch,
   FaTimes,
   FaFilter,
@@ -9,22 +8,17 @@ import { FaSearch,
   FaLink,
   FaBookmark,
   FaTerminal,
-  FaRobot,
   FaGlobe,
   FaLock,
   FaUsers,
   FaCheck,
-  FaRegStar,
-  FaPuzzlePiece } from 'react-icons/fa';
-import { FiFilter, FiSettings, FiZap, FiChevronLeft, FiChevronRight, FiCommand, FiX } from 'react-icons/fi';
-import { BsStarFill, BsKeyboard, BsCalendarCheck } from 'react-icons/bs';
+  FaRegStar } from 'react-icons/fa';
+import { FiFilter, FiSettings, FiZap, FiChevronDown, FiX, FiHelpCircle } from 'react-icons/fi';
+import { BsStarFill, BsCalendarCheck } from 'react-icons/bs';
 import { MdOutlineShortcut } from 'react-icons/md';
-import { LuArrowRightLeft } from 'react-icons/lu';
+import { LuSparkles } from 'react-icons/lu';
 import { CustomSearchPrefixesForOmniboxStorage, CustomOmniboxPrefixes } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
-import { VisualKeyDisplay } from '../../../shared-components/hotkeys/ui/VisualKeyDisplay';
-import { EditablePrefixKey } from '../../../shared-components/shortcuts/ui/EditablePrefixKey';
 import NotesIcon from '../../../shared-components/icons/notesIcon';
-import StackedLinkIcon from '../../../shared-components/icons/stackedLinkIcon';
 import clsx from 'clsx';
 import SpreadsheetTable from './spreadsheetTable';
 import { useSpreadsheetStore } from '../logic/spreadsheetStateStore';
@@ -66,9 +60,9 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
   isEmbedded = false,
 }) => {
   const syncRealNotes = useSpreadsheetStore(state => state.syncRealNotes);
-  const { isPickerOpen, pickerRowIndex, closePicker, updateRowLocation, openPicker, searchTerm, setSearchTerm, setSelectedCell, isCompactMode, toggleCompactMode } = useSpreadsheetStore();
-    const { theme } = useAppearance();
-    const [bookmarks, setBookmarks] = React.useState<any[]>([]);
+  const { isPickerOpen, pickerRowIndex, closePicker, updateRowLocation, openPicker, searchTerm, setSearchTerm, setSelectedCell } = useSpreadsheetStore();
+  const { theme } = useAppearance();
+  const [bookmarks, setBookmarks] = React.useState<any[]>([]);
   const [tutorialStep, setTutorialStep] = React.useState<number | null>(null);
   const [cardPos, setCardPos] = React.useState<{ top: number; left: number; right?: number } | null>(null);
   const [omniboxPrefixes, setOmniboxPrefixes] = useState<CustomOmniboxPrefixes | null>(null);
@@ -152,8 +146,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
     };
   }, [tutorialStep]);
 
-    const userId = useUser();
-    // removed local hotkeys and shortcuts state
+  const userId = useUser();
 
   const notes = useDbStore(state => state.notes);
   const links = useDbStore(state => state.links);
@@ -164,17 +157,10 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
   const hotkeysMap = useDbStore(state => state.hotkeysMap);
   const shortcutsMap = useDbStore(state => state.shortcutsMap);
 
-
-  
-  // 1. Initial Load of Favorites, Hotkeys and Shortcuts
+  // Initial Load of Favorites, Hotkeys and Shortcuts
   useEffect(() => {
-    
-    // Moved loadKeys to a separate useEffect that depends on isLoggedIn
-
-    // Fetch Bookmarks
     const flattenBookmarks = (nodes: any, result: any[] = []) => {
       if (!nodes) return result;
-      // If the response is wrapped in an object like { tree: [...] }
       if (!Array.isArray(nodes) && Array.isArray(nodes.tree)) {
         nodes = nodes.tree;
       }
@@ -201,7 +187,6 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       } else if (chromeAny?.runtime?.sendMessage) {
         chromeAny.runtime.sendMessage({ action: 'bookmarks_get_tree' }, (response: any) => {
           if (!chromeAny.runtime.lastError && response?.ok && Array.isArray(response.results)) {
-            // response.results is already flattened from the background script
             setBookmarks(response.results);
           }
         });
@@ -216,10 +201,13 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       chrome.bookmarks.onChanged.addListener(loadBookmarks);
     }
 
-    // 🚀 Handle click outside to clear all focus/selection
     const handleOutsideClick = (e: MouseEvent) => {
-      // If an overlay editor is currently open, do not intercept clicks or blur elements
       if (useUIStore.getState().activeEditor) {
+        return;
+      }
+
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('[data-ignore-grid-nav="true"]')) {
         return;
       }
 
@@ -229,19 +217,18 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
         store.setSelectedCell(null);
         store.setEditingCell(null);
 
-        // Force blur any active elements to ensure focus is truly gone
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur();
         }
       }
     };
-    window.addEventListener('mousedown', handleOutsideClick, true); // Use capture phase
+    window.addEventListener('mousedown', handleOutsideClick, true);
     return () => {
       window.removeEventListener('mousedown', handleOutsideClick, true);
     };
   }, []);
 
-  // 3. Sync Logic
+  // Sync Logic
   useEffect(() => {
     syncRealNotes(
       notes,
@@ -250,8 +237,8 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       workspaces,
       folders,
       userId || 'local_user',
-        favorites,
-        hotkeysMap,
+      favorites,
+      hotkeysMap,
       shortcutsMap,
       savedAutomations,
       savedAgents,
@@ -264,8 +251,8 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
     workspaces,
     folders,
     userId,
-      favorites,
-      hotkeysMap,
+    favorites,
+    hotkeysMap,
     shortcutsMap,
     syncRealNotes,
     savedAutomations,
@@ -273,26 +260,9 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
     bookmarks,
   ]);
 
-  const pickerRow = pickerRowIndex !== null ? useSpreadsheetStore.getState().tableData[pickerRowIndex] : null;
-
   const handleOpenTutorial = async () => {
     window.dispatchEvent(new CustomEvent('openTutorial'));
   };
-
-  const handleCloseTutorial = () => {
-    setTutorialStep(null);
-  };
-
-  const handleNextStep = (step: number) => {
-    if (step < 2) {
-      setTutorialStep(step + 1);
-    } else {
-      handleCloseTutorial();
-    }
-  };
-
-  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = React.useState(false);
-  const [swapMenuOpen, setSwapMenuOpen] = React.useState<string | null>(null);
 
   const {
     categoryFilter,
@@ -323,31 +293,31 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       },
       // Categories
       { type: 'category' as const, id: 'all', label: 'All', icon: (
-        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg className="w-4 h-4 shrink-0 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <rect x="3" y="3" width="7" height="7" rx="1" />
           <rect x="14" y="3" width="7" height="7" rx="1" />
           <rect x="14" y="14" width="7" height="7" rx="1" />
           <rect x="3" y="14" width="7" height="7" rx="1" />
         </svg>
       )},
-      { type: 'category' as const, id: 'note', label: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
-      { type: 'category' as const, id: 'snippet', label: 'Text Expanders', icon: <FaCode className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
-      { type: 'category' as const, id: 'todo', label: 'Todos', icon: <BsCalendarCheck className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
-      { type: 'category' as const, id: 'link', label: 'Links', icon: <FaLink className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
-      { type: 'category' as const, id: 'session', label: 'Tab Sessions', icon: <SessionGridIcon className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
-      { type: 'category' as const, id: 'general_commands', label: 'System Commands', icon: <FaTerminal className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
-      { type: 'category' as const, id: 'commands', label: 'Browser Commands', icon: <FaTerminal className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" /> },
+      { type: 'category' as const, id: 'note', label: 'Notes', icon: <NotesIcon className="w-4 h-4 shrink-0 text-white" /> },
+      { type: 'category' as const, id: 'snippet', label: 'Text Expanders', icon: <FaCode className="w-4 h-4 shrink-0 text-white" /> },
+      { type: 'category' as const, id: 'todo', label: 'Todos', icon: <BsCalendarCheck className="w-4 h-4 shrink-0 text-white" /> },
+      { type: 'category' as const, id: 'link', label: 'Links', icon: <FaLink className="w-4 h-4 shrink-0 text-white" /> },
+      { type: 'category' as const, id: 'session', label: 'Collections', icon: <SessionGridIcon className="w-4 h-4 shrink-0 text-white" /> },
+      { type: 'category' as const, id: 'general_commands', label: 'System Commands', icon: <FaTerminal className="w-4 h-4 shrink-0 text-white" /> },
+      { type: 'category' as const, id: 'commands', label: 'Browser Commands', icon: <FaTerminal className="w-4 h-4 shrink-0 text-white" /> },
       {
         type: 'category' as const,
         id: 'automation',
         label: 'Automations',
-        icon: <FiZap className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />,
+        icon: <FiZap className="w-4 h-4 shrink-0 text-white" />,
       },
       {
         type: 'category' as const,
         id: 'agent',
         label: 'Chat Agents',
-        icon: <FaRobot className="w-4 h-4 shrink-0 text-[var(--color-iconDefault)]" />,
+        icon: <LuSparkles className="w-4 h-4 shrink-0 text-white" />,
       },
       // Visibility
       { type: 'visibility' as const, id: 'all', label: 'All Scopes', icon: <FaGlobe className="text-[10px]" /> },
@@ -366,7 +336,7 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
         type: 'feature' as const,
         id: 'hotkeys',
         label: 'Hotkeys',
-        icon: <BsKeyboard className="text-[11px]" />,
+        icon: <BsCalendarCheck className="text-[11px]" />,
       },
       {
         type: 'feature' as const,
@@ -377,7 +347,6 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
     ];
 
     if (isEmbedded) {
-      // Filter out categories not supported or not desired in the embedded website context
       return allOptions.filter(opt => {
         if (opt.type === 'category' && (opt.id === 'commands' || opt.id === 'general_commands')) {
           return false;
@@ -389,7 +358,9 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
     return allOptions;
   }, [isEmbedded]);
 
-  const isSelected = (opt: any) => {
+  const sidebarCategories = useMemo(() => filterOptions.filter(o => o.type === 'category'), [filterOptions]);
+
+  const isSelected = useCallback((opt: any) => {
     if (opt.type === 'space') return spaceFilter.includes(opt.id!);
     if (opt.type === 'category') return categoryFilter.includes(opt.id!);
     if (opt.type === 'visibility') return visibilityFilter.includes(opt.id!);
@@ -399,62 +370,97 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
       if (opt.id === 'shortcuts') return showShortcutsOnly;
     }
     return false;
-  };
+  }, [categoryFilter, spaceFilter, visibilityFilter, showFavoritesOnly, showHotkeysOnly, showShortcutsOnly]);
 
-  const handleSelect = (opt: any) => {
-    if (opt.type === 'space') {
-      if (opt.id === 'all') setSpaceFilter(['all']);
-      else {
-        let next = spaceFilter.filter(x => x !== 'all');
-        if (next.includes(opt.id!)) {
-          next = next.filter(x => x !== opt.id);
-          if (next.length === 0) next = ['all'];
+  // Responsive Overflow Calculation for Horizontal Category Navigation
+  const categoryNavRef = useRef<HTMLDivElement>(null);
+  const measuringRef = useRef<HTMLDivElement>(null);
+  const moreRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState<number>(sidebarCategories.length);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+
+  const calculateOverflow = useCallback(() => {
+    if (!categoryNavRef.current || !measuringRef.current) return;
+
+    const availableWidth = categoryNavRef.current.clientWidth;
+    const itemNodes = Array.from(measuringRef.current.children) as HTMLElement[];
+    if (itemNodes.length === 0) return;
+
+    const MORE_BTN_ESTIMATED_WIDTH = 85;
+    const widths = itemNodes.map(node => node.offsetWidth + 8); // 8px gap
+
+    const totalWidth = widths.reduce((acc, w) => acc + w, 0);
+
+    if (totalWidth <= availableWidth) {
+      setVisibleCount(sidebarCategories.length);
+    } else {
+      let currentWidth = 0;
+      let count = 0;
+      for (let i = 0; i < widths.length; i++) {
+        if (currentWidth + widths[i] + MORE_BTN_ESTIMATED_WIDTH <= availableWidth) {
+          currentWidth += widths[i];
+          count++;
         } else {
-          next.push(opt.id!);
+          break;
         }
-        setSpaceFilter(next);
       }
-    } else if (opt.type === 'category') {
-      if (opt.id === 'all') setCategoryFilter(['all']);
-      else {
-        let next = categoryFilter.filter(x => x !== 'all');
-        if (next.includes(opt.id!)) {
-          next = next.filter(x => x !== opt.id);
-          if (next.length === 0) next = ['all'];
-        } else {
-          next.push(opt.id!);
-        }
-        setCategoryFilter(next);
-      }
-    } else if (opt.type === 'visibility') {
-      if (opt.id === 'all') setVisibilityFilter(['all']);
-      else {
-        let next = visibilityFilter.filter(x => x !== 'all');
-        if (next.includes(opt.id!)) {
-          next = next.filter(x => x !== opt.id);
-          if (next.length === 0) next = ['all'];
-        } else {
-          next.push(opt.id!);
-        }
-        setVisibilityFilter(next);
-      }
-    } else if (opt.type === 'feature') {
-      if (opt.id === 'favorites') setShowFavoritesOnly(!showFavoritesOnly);
-      if (opt.id === 'hotkeys') setShowHotkeysOnly(!showHotkeysOnly);
-      if (opt.id === 'shortcuts') setShowShortcutsOnly(!showShortcutsOnly);
+      setVisibleCount(Math.max(1, count));
     }
-  };
+  }, [sidebarCategories.length]);
 
-  const handleClearAll = () => {
-    setCategoryFilter(['all']);
-    setVisibilityFilter(['all']);
-    setSpaceFilter(['all']);
-    setShowFavoritesOnly(false);
-    setShowHotkeysOnly(false);
-    setShowShortcutsOnly(false);
-  };
+  useLayoutEffect(() => {
+    calculateOverflow();
+  }, [calculateOverflow, sidebarCategories]);
 
-  const sidebarCategories = filterOptions.filter(o => o.type === 'category');
+  useEffect(() => {
+    const navEl = categoryNavRef.current;
+    if (!navEl) return;
+    const observer = new ResizeObserver(() => {
+      calculateOverflow();
+    });
+    observer.observe(navEl);
+    return () => {
+      observer.disconnect();
+    };
+  }, [calculateOverflow]);
+
+  // Escape Key & Click-Outside Handlers for More Dropdown
+  useEffect(() => {
+    if (!isMoreOpen) return;
+
+    const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
+      setIsMoreOpen(false);
+      return true;
+    });
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setIsMoreOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      unregister();
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isMoreOpen]);
+
+  // Auto-focus search input and select Title cell of 1st item on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const searchInput = document.getElementById('sheet-search-name') as HTMLInputElement;
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.select();
+      }
+    }, 50);
+
+    // Select Title cell (colIndex 2) of 1st row (rowIndex 0)
+    useSpreadsheetStore.getState().setSelectedCell({ rowIndex: 0, colIndex: 2 });
+
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <div
@@ -473,72 +479,24 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
         WebkitBackdropFilter: 'none',
       } : {}}>
 
-      {/* Top Header Row */}
+      {/* Row 1: Top Header Row */}
       <div className="w-full flex items-center justify-between px-6 pt-3 pb-2 shrink-0 z-[200] gap-4">
         {/* Left: Branding */}
-        <div className="flex items-center shrink-0 w-[200px]">
+        <div className="flex items-center shrink-0">
           <Branding textColor="text-[var(--color-textPrimary)] font-bold tracking-wide" />
         </div>
 
-        {/* Center: Search Bar */}
-        <div className="flex-1 flex justify-center">
-          <div className="w-full max-w-[420px]">
-            <div
-              id="sheet-search-wrapper"
-              className={clsx(
-                "w-full flex flex-start px-3 gap-2.5 rounded-lg border shadow-sm transition-all items-center",
-                "min-h-[36px] min-[1680px]:min-h-[40px] min-[1880px]:min-h-[44px]",
-                tutorialStep === 0
-                  ? "border-[#22c55e]"
-                  : "border-[var(--color-borderDefault)] focus-within:border-[var(--color-borderActive)] focus-within:bg-[var(--color-popupBg)]",
-                "bg-[var(--color-inputBg)] backdrop-blur-xl text-[var(--color-textPrimary)]"
-              )}
-            >
-              <div className="flex items-center justify-center shrink-0">
-                <FaSearch size={13} className="text-[var(--color-iconDefault)]" />
-              </div>
-              <input
-                id="sheet-search-name"
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search "
-                className={clsx(
-                  "flex-1 bg-transparent font-medium outline-none border-none",
-                  "text-[14px] min-[1680px]:text-[15px] min-[1880px]:text-[16px]",
-                  "text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)]"
-                )}
-              />
-              {searchTerm && (
-                <button
-                  onClick={() => setSearchTerm('')}
-                  className={clsx(
-                    "p-1 rounded-md transition-colors",
-                    "text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]"
-                  )}
-                  title="Clear search"
-                >
-                  <FaTimes size={14} />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Toolbar & Close Button */}
-        <div className="flex items-center justify-end shrink-0 w-[200px] gap-2">
-          <SpreadsheetToolbar
-            onCreateOrganization={onCreateOrganization}
-            onOrganizationSettings={onOrganizationSettings}
-            onCreateWorkspace={onCreateWorkspace}
-            onOpenTutorial={handleOpenTutorial}
-            tutorialStep={tutorialStep}
-            setTutorialStep={setTutorialStep}
-            isLoggedIn={isLoggedIn}
-            onRequireLogin={onRequireLogin}
-            onBoardViewRedirect={onBoardViewRedirect}
-            isEmbedded={isEmbedded}
-          />
+        {/* Right: Help & Close Button */}
+        <div className="flex items-center justify-end shrink-0 gap-1.5">
+          {!isEmbedded && (
+            <button
+              onClick={handleOpenTutorial}
+              className="p-1.5 rounded-md transition-colors focus:outline-none flex items-center justify-center text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] cursor-pointer"
+              aria-label="Help"
+              title="Open Tutorial">
+              <FiHelpCircle size={17} />
+            </button>
+          )}
           {onClose && (
             <button
               onClick={onClose}
@@ -551,126 +509,175 @@ const SpreadsheetMainContainer: React.FC<SheetUIProps> = ({
         </div>
       </div>
 
-      {/* Combined Card Wrapper to allow overflow of the toggle button */}
-      <div 
-        className="flex-1 w-full flex flex-col relative z-0 min-h-0 transition-all duration-300"
-      >
-        <div className="w-full h-full overflow-hidden flex flex-row border-t border-[var(--color-borderDefault)] min-h-0 relative">
-        
+      {/* Row 2: Horizontal Search, Category Navigation, and Filter */}
+      <div className="w-full flex items-center px-6 py-2 shrink-0 z-[150] gap-3 border-b border-[var(--color-borderDefault)] relative overflow-visible">
+        {/* Search Field */}
+        <div className="shrink-0 w-[240px] min-[1680px]:w-[280px]">
+          <div
+            id="sheet-search-wrapper"
+            className={clsx(
+              "w-full flex flex-start px-3 gap-2.5 rounded-lg border shadow-sm transition-all items-center",
+              "min-h-[34px] min-[1680px]:min-h-[38px]",
+              tutorialStep === 0
+                ? "border-[#22c55e]"
+                : "border-[var(--color-borderDefault)] focus-within:border-[var(--color-borderActive)] focus-within:bg-[var(--color-popupBg)]",
+              "bg-[var(--color-inputBg)] backdrop-blur-xl text-[var(--color-textPrimary)]"
+            )}
+          >
+            <div className="flex items-center justify-center shrink-0">
+              <FaSearch size={13} className="text-[var(--color-iconDefault)]" />
+            </div>
+            <input
+              id="sheet-search-name"
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search "
+              className={clsx(
+                "flex-1 bg-transparent font-medium outline-none border-none",
+                "text-[13px] min-[1680px]:text-[14px]",
+                "text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)]"
+              )}
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className={clsx(
+                  "p-1 rounded-md transition-colors",
+                  "text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]"
+                )}
+                title="Clear search"
+              >
+                <FaTimes size={13} />
+              </button>
+            )}
+          </div>
+        </div>
 
-        
-        {/* LEFT SIDEBAR (Inside Card) */}
-        <div className="w-[175px] shrink-0 flex flex-col relative overflow-visible bg-transparent group/sidebar">
-          {/* Categories List Scrollable */}
-          <div className="flex-1 overflow-y-auto hover-scrollbar px-3 py-4 flex flex-col justify-center gap-0.5">
-            {sidebarCategories.map(opt => {
+        {/* Category Navigation Wrapper: Inner overflow-hidden container for category buttons, unclipped for More button */}
+        <div ref={categoryNavRef} className="flex-1 flex items-center gap-2 min-w-0 relative overflow-visible">
+          {/* Visible Category Buttons (clipped inside inner container) */}
+          <div className="flex items-center gap-2 overflow-hidden min-w-0">
+            {sidebarCategories.slice(0, visibleCount).map(opt => {
               const active = isSelected(opt);
               return (
                 <button
                   key={`${opt.type}-${opt.id}`}
                   onClick={() => {
-                    // Sidebar category acts as a single-selection filter
                     setCategoryFilter([opt.id!]);
                   }}
                   className={clsx(
-                    "flex items-center gap-2.5 px-2.5 py-2 text-[11px] font-medium rounded-lg transition-all cursor-pointer text-left w-full group border",
+                    "flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium rounded-lg transition-all cursor-pointer border whitespace-nowrap shrink-0",
                     active
-                      ? "bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] border-[var(--color-borderActive)] shadow-sm font-bold"
-                      : "text-[var(--color-textSecondary)] border-transparent hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]"
+                      ? "bg-transparent text-[var(--color-textPrimary)] border-[var(--color-borderActive)]"
+                      : "bg-transparent text-[var(--color-textSecondary)] border-[var(--color-borderDefault)] hover:text-[var(--color-textPrimary)] hover:border-[var(--color-borderActive)]"
                   )}
                 >
-                  <span className={clsx("w-4 flex justify-center shrink-0 text-[14px] transition-colors", active ? "text-[var(--color-textPrimary)]" : "text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]")}>
+                  <span className={clsx("flex justify-center shrink-0 text-[13px]", active ? "text-[var(--color-textPrimary)] [&_svg]:text-[var(--color-textPrimary)]" : "text-[var(--color-iconDefault)] [&_svg]:text-[var(--color-iconDefault)]")}>
                     {opt.icon}
                   </span>
-                  <span className={clsx("flex-1 truncate leading-tight tracking-[0.01em]", active ? "text-[var(--color-textPrimary)] font-bold" : "text-[var(--color-textSecondary)] group-hover:text-[var(--color-textPrimary)]")}>
-                    {opt.label}
-                  </span>
-                  {omniboxPrefixes && (opt.id === 'note' || opt.id === 'snippet' || opt.id === 'todo' || opt.id === 'link' || opt.id === 'session' || opt.id === 'general_commands' || opt.id === 'commands' || opt.id === 'automation' || opt.id === 'agent') && (
-                    <span className="ml-2 hidden items-center gap-1 group-hover/sidebar:flex focus-within:flex">
-                      <EditablePrefixKey 
-                        category={
-                          opt.id === 'note' ? 'note' :
-                          opt.id === 'snippet' ? 'snippet' :
-                          opt.id === 'todo' ? 'todo' :
-                          opt.id === 'link' ? 'link' :
-                          opt.id === 'session' ? 'session' :
-                          opt.id === 'automation' ? 'automation' :
-                          opt.id === 'agent' ? 'agent' :
-                          opt.id === 'commands' ? 'command' :
-                          opt.id === 'general_commands' ? 'system_command' : 'link'
-                        }
-                        currentValue={
-                          opt.id === 'note' ? (omniboxPrefixes.note || '') :
-                          opt.id === 'snippet' ? (omniboxPrefixes.snippet || '') :
-                          opt.id === 'todo' ? (omniboxPrefixes.todo || 't') :
-                          opt.id === 'link' ? (omniboxPrefixes.link || '') :
-                          opt.id === 'session' ? (omniboxPrefixes.session || '') :
-                          opt.id === 'automation' ? (omniboxPrefixes.automation || '') :
-                          opt.id === 'agent' ? (omniboxPrefixes.agent || '') :
-                          opt.id === 'commands' ? (omniboxPrefixes.command || '') :
-                          opt.id === 'general_commands' ? (omniboxPrefixes.system_command || '') : ''
-                        }
-                      />
-                    </span>
-                  )}
+                  <span className="leading-none">{opt.label}</span>
                 </button>
               );
             })}
           </div>
-          <div className="pt-2 mt-auto flex items-center gap-2 px-3 pb-3 select-none shrink-0">
-             <button
-                onClick={(e) => {
-                   e.stopPropagation();
-                   useUIStore.getState().closeEditor();
-                   useUIStore.getState().closeSheet();
-                   if (onBoardViewRedirect) onBoardViewRedirect();
-                   const chromeAny = (window as any)?.chrome;
-                   if (chromeAny?.storage?.local) {
-                     chromeAny.storage.local.set({ new_tab_is_board_view_enabled: true });
-                   }
-                }}
-                className="w-[24px] h-[24px] rounded-lg flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] hover:border-[var(--color-borderActive)] focus:outline-none"
-                title="Board (Kanban)"
-             >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" strokeWidth="2" fill="none" />
-                  <line x1="9" y1="2" x2="9" y2="22" stroke="currentColor" strokeWidth="1.5" />
-                  <line x1="15" y1="2" x2="15" y2="22" stroke="currentColor" strokeWidth="1.5" />
-                  <rect x="4" y="5" width="3" height="4" rx="0.5" fill="currentColor" />
-                  <rect x="4" y="11" width="3" height="6" rx="0.5" fill="currentColor" />
-                  <rect x="10" y="5" width="3" height="7" rx="0.5" fill="currentColor" />
-                  <rect x="10" y="14" width="3" height="5" rx="0.5" fill="currentColor" />
-                  <rect x="17" y="5" width="3" height="5" rx="0.5" fill="currentColor" />
-                  <rect x="17" y="12" width="3" height="4" rx="0.5" fill="currentColor" />
-                </svg>
-             </button>
-          </div>
+
+          {/* More Overflow Button: Unclipped overflow-visible container positioned directly inline beside category buttons */}
+          {visibleCount < sidebarCategories.length && (
+            <div ref={moreRef} className="relative shrink-0 overflow-visible z-[600]">
+              <button
+                onClick={() => setIsMoreOpen(!isMoreOpen)}
+                className={clsx(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-lg transition-all cursor-pointer border whitespace-nowrap",
+                  isMoreOpen || sidebarCategories.slice(visibleCount).some(opt => isSelected(opt))
+                    ? "bg-transparent text-[var(--color-textPrimary)] border-[var(--color-borderActive)]"
+                    : "bg-transparent text-[var(--color-textSecondary)] border-[var(--color-borderDefault)] hover:text-[var(--color-textPrimary)] hover:border-[var(--color-borderActive)]"
+                )}
+              >
+                <span>More</span>
+                <FiChevronDown size={14} className={clsx("transition-transform duration-150", isMoreOpen && "rotate-180")} />
+              </button>
+
+              {/* More Dropdown Menu */}
+              {isMoreOpen && (
+                <div className="absolute left-0 top-full mt-1.5 w-[220px] py-1.5 px-1 rounded-lg border shadow-2xl z-[9999] bg-[var(--color-popupBg)] border-[var(--color-borderDefault)] flex flex-col gap-0.5 animate-in fade-in slide-in-from-top-1 duration-100">
+                  {sidebarCategories.slice(visibleCount).map(opt => {
+                    const active = isSelected(opt);
+                    return (
+                      <button
+                        key={`more-${opt.type}-${opt.id}`}
+                        onClick={() => {
+                          setCategoryFilter([opt.id!]);
+                          setIsMoreOpen(false);
+                        }}
+                        className={clsx(
+                          "flex items-center gap-2.5 px-2.5 py-2 text-[12px] font-medium rounded-md border transition-all cursor-pointer text-left w-full",
+                          active
+                            ? "bg-[var(--color-popupBg)] text-[var(--color-textPrimary)] border-[var(--color-borderActive)]"
+                            : "bg-[var(--color-popupBg)] text-[var(--color-textSecondary)] border-transparent hover:text-[var(--color-textPrimary)] hover:border-[var(--color-borderDefault)]"
+                        )}
+                      >
+                        <span className={clsx("w-4 flex justify-center shrink-0 text-[13px]", active ? "text-[var(--color-textPrimary)] [&_svg]:text-[var(--color-textPrimary)]" : "text-[var(--color-iconDefault)] [&_svg]:text-[var(--color-iconDefault)]")}>
+                          {opt.icon}
+                        </span>
+                        <span className="flex-1 whitespace-nowrap">{opt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* SPREADSHEET TABLE AREA */}
-        <div className="flex-1 overflow-auto custom-scrollbar dark-scrollbar relative">
-          <SpreadsheetTable
-            onClose={onClose}
+        {/* Far Right: Filter Toolbar Button */}
+        <div className="shrink-0">
+          <SpreadsheetToolbar
+            hideHelp={true}
+            onCreateOrganization={onCreateOrganization}
+            onOrganizationSettings={onOrganizationSettings}
+            onCreateWorkspace={onCreateWorkspace}
+            onOpenTutorial={handleOpenTutorial}
             tutorialStep={tutorialStep}
             setTutorialStep={setTutorialStep}
+            isLoggedIn={isLoggedIn}
+            onRequireLogin={onRequireLogin}
+            onBoardViewRedirect={onBoardViewRedirect}
             isEmbedded={isEmbedded}
           />
         </div>
+
+        {/* Off-screen Measuring Container */}
+        <div
+          ref={measuringRef}
+          aria-hidden="true"
+          className="absolute top-[-9999px] left-[-9999px] visibility-hidden flex gap-2 pointer-events-none"
+        >
+          {sidebarCategories.map(opt => (
+            <div
+              key={`measure-${opt.type}-${opt.id}`}
+              className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium border whitespace-nowrap"
+            >
+              <span>icon</span>
+              <span>{opt.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Row 3: Spreadsheet Table Area (Full Width) */}
+      <div className="flex-1 w-full flex flex-col relative z-0 min-h-0 overflow-hidden">
+        <div className="w-full h-full overflow-hidden flex flex-row min-h-0 relative">
+          <div className="flex-1 overflow-auto custom-scrollbar dark-scrollbar relative">
+            <SpreadsheetTable
+              onClose={onClose}
+              tutorialStep={tutorialStep}
+              setTutorialStep={setTutorialStep}
+              isEmbedded={isEmbedded}
+            />
+          </div>
         </div>
 
-        {/* Floating Collapse / Expand Edge Button - HIDDEN AS REQUESTED */}
-        {false && (
-          <button
-            onClick={toggleCompactMode}
-            className="absolute left-full top-1/2 -translate-y-1/2 -translate-x-1/2 z-[300] w-8 h-8 flex items-center justify-center rounded-full border border-[var(--color-borderDefault)] bg-[var(--color-sheetBg)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-white/10 transition-all shadow-lg cursor-pointer focus:outline-none"
-            style={{
-              backdropFilter: 'blur(24px) saturate(1.2)',
-              WebkitBackdropFilter: 'blur(24px) saturate(1.2)',
-            }}
-            title={isCompactMode ? "Expand" : "Collapse"}>
-            {isCompactMode ? <FiChevronRight size={18} /> : <FiChevronLeft size={18} />}
-          </button>
-        )}
       </div>
 
       <SpreadsheetQuickAddModal />

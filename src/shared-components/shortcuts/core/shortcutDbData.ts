@@ -2,10 +2,9 @@ import { db } from '../../../storage/indexDB/dbConfig';
 import { CustomSearchPrefixesForOmniboxStorage } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
 import { generateEntityId } from '../../utils';
 import type { UserShortcutRecord, ShortcutReferenceType } from './shortcutDbTypes';
-import { THIS_SECTION_ACTION_PREFIXES } from '../../commands';
 
 const DEFAULT_USER = 'local_user';
-const SHORTCUT_TRIGGER_ALLOWED_PATTERN = /^[a-z0-9]+$/i;
+const SHORTCUT_TRIGGER_ALLOWED_PATTERN = /^[a-z0-9_]+$/i;
 
 export const normalizeShortcutTrigger = (trigger: string) => {
   return trigger.trim().toLowerCase();
@@ -17,7 +16,7 @@ export const getShortcutTriggerFormatError = (trigger: string) => {
 
   return SHORTCUT_TRIGGER_ALLOWED_PATTERN.test(normalized)
     ? null
-    : 'Shortcuts can only use letters and numbers. Symbols like /, @, !, ., spaces, and prefixes are not allowed.';
+    : 'Shortcuts can only use letters, numbers, and underscores (_). Symbols like /, @, !, ., spaces, and prefixes are not allowed.';
 };
 
 const normalizeOmniboxPrefix = (prefix: string) => prefix.trim().toLowerCase();
@@ -35,29 +34,67 @@ export async function getReservedShortcutReason(shortcutText: string): Promise<s
     note: 'n',
     link: 'l',
     command: 'c',
-    session: 's',
+    collection: 'collect',
     prompt: 'p',
-    automation: 'a',
-    agent: 'g',
-    snippet: 'sn',
+    automation: '',
+    agent: '',
+    snippet: 'text',
     todo: 't',
+    bookmark: 'bk',
+    system_command: 'sc',
+    capture_screenshot: 'visiblescreen',
+    capture_clip_screenshot: 'screen',
+    capture_full_screenshot: 'fullscreen',
+    capture_element_screenshot: 'element',
+    downloadallimages: 'dp',
+    downloadalltables: 'tables',
+    save_link: 'ls',
+    save_todo: 'td',
+    save_note: 'cn',
+    save_snippet: 'cs',
+    save_chat: 'save_agent',
+    add_to_existing: 'elc',
+    send_to_agent: 'send_agent',
+    summarize_page: 'summ',
+    merge_windows: 'merge',
+    close_duplicate_tabs: 'duplicate',
+    mute_all_tabs: 'mute',
+    unmute_all_tabs: 'unmute',
   }));
   const reservedOmniboxPrefixes = new Set([
     normalizeOmniboxPrefix(omniboxPrefixes.note || ''),
     normalizeOmniboxPrefix(omniboxPrefixes.link || ''),
     normalizeOmniboxPrefix(omniboxPrefixes.command || ''),
-    normalizeOmniboxPrefix(omniboxPrefixes.session || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.system_command || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.collection || ''),
     normalizeOmniboxPrefix(omniboxPrefixes.prompt || ''),
-    normalizeOmniboxPrefix(omniboxPrefixes.automation || ''),
     normalizeOmniboxPrefix(omniboxPrefixes.agent || ''),
     normalizeOmniboxPrefix(omniboxPrefixes.snippet || ''),
     normalizeOmniboxPrefix(omniboxPrefixes.todo || ''),
-    ...Object.values(THIS_SECTION_ACTION_PREFIXES).map(p => p.toLowerCase()),
+    normalizeOmniboxPrefix(omniboxPrefixes.bookmark || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.capture_screenshot || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.capture_clip_screenshot || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.capture_full_screenshot || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.capture_element_screenshot || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.downloadallimages || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.downloadalltables || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.save_link || ''),
+    normalizeOmniboxPrefix((omniboxPrefixes as any).save_todo || ''),
+    normalizeOmniboxPrefix((omniboxPrefixes as any).save_note || ''),
+    normalizeOmniboxPrefix((omniboxPrefixes as any).save_snippet || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.save_chat || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.add_to_existing || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.send_to_agent || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.summarize_page || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.merge_windows || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.close_duplicate_tabs || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.mute_all_tabs || ''),
+    normalizeOmniboxPrefix(omniboxPrefixes.unmute_all_tabs || ''),
   ]);
 
   const isPrefixCollision = (prefix: string) => {
     if (!prefix) return false;
-    if (/^[a-z0-9]+$/i.test(prefix)) {
+    if (/^[a-z0-9_]+$/i.test(prefix)) {
       return rawShortcut === prefix || rawShortcut.startsWith(`${prefix} `);
     }
     return rawShortcut.startsWith(prefix);

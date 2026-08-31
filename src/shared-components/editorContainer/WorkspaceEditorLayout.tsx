@@ -47,12 +47,15 @@ export interface WorkspaceEditorLayoutProps {
   showConfigureHeader?: boolean;
   hideRightColumnBorder?: boolean;
   headerRightPaddingClass?: string;
+  titleClassName?: string;
   rightColumnWidthClass?: string;
   containerMaxWidthClass?: string;
   allowMainContentOverflow?: boolean;
+  embeddedFullBleed?: boolean;
   // Optional Right Sibling Panel (Full height column next to main container)
   rightSiblingPanel?: React.ReactNode;
   isRightSiblingExpanded?: boolean;
+  isNormalMode?: boolean;
 }
 
 export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
@@ -79,11 +82,14 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
   showConfigureHeader = false,
   hideRightColumnBorder = false,
   headerRightPaddingClass = '',
+  titleClassName,
   rightColumnWidthClass = 'w-[260px]',
   containerMaxWidthClass = 'max-w-[1200px]',
   allowMainContentOverflow = false,
+  embeddedFullBleed = false,
   rightSiblingPanel,
   isRightSiblingExpanded = false,
+  isNormalMode = false,
 }) => {
   const [isUnsavedChangesOpen, setIsUnsavedChangesOpen] = useState(false);
   const [isTableCollapsed, setIsTableCollapsed] = useState(false);
@@ -124,21 +130,37 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
       const existingOnClose = (rightSiblingPanel.props as any)?.onCloseClick;
       return React.cloneElement(rightSiblingPanel as React.ReactElement<any>, {
         onCloseClick: existingOnClose || handleClose,
+        hideBorder: isNormalMode ? true : (rightSiblingPanel.props as any)?.hideBorder,
       });
     }
     return rightSiblingPanel;
-  }, [rightSiblingPanel, handleClose]);
+  }, [rightSiblingPanel, handleClose, isNormalMode]);
 
   if (rightSiblingPanel) {
     return (
       <EditorContainer
-        className="w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4"
-        innerClassName="flex flex-col relative bg-[var(--color-editorBg)] mx-auto rounded-xl min-h-[450px] h-auto max-h-[860px] max-h-[90vh] overflow-hidden border border-[var(--color-borderDefault)] w-[calc(100%-20px)] max-w-[1800px]"
+        className={embeddedFullBleed
+          ? "w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent p-0"
+          : isNormalMode
+            ? "w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-4 md:px-6 py-2"
+            : "w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4"
+        }
+        innerClassName={embeddedFullBleed
+          ? "flex flex-row items-stretch gap-2 relative bg-transparent w-full h-full min-h-0 max-h-full overflow-hidden border-none"
+          : isNormalMode
+            ? "flex flex-row items-stretch gap-2 relative bg-transparent w-full h-auto min-h-[360px] max-h-[85vh] overflow-hidden border-none"
+            : "flex flex-row items-stretch gap-2 relative bg-transparent mx-auto min-h-[450px] h-auto max-h-[860px] max-h-[90vh] overflow-visible w-[calc(100%-20px)] max-w-[1800px]"
+        }
       >
-        <div className="flex-1 flex flex-row items-stretch min-h-0 relative w-full overflow-hidden">
+        {/* Main Editor Surface (Header + Content + Configure Column) */}
+        <div className={isNormalMode
+          ? "flex-1 min-w-0 flex flex-row items-stretch h-full overflow-hidden rounded-none border-none shadow-none bg-[var(--color-editorBg)] relative"
+          : "flex-1 min-w-0 flex flex-row items-stretch h-full overflow-hidden rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-editorBg)] relative"
+        }>
           {/* Column 1: Left Workspace (Header + Title + Content) */}
           <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
             <EditorHeader
+              hideBorder={isNormalMode}
               title={title}
               isDirty={isDirty}
               saveStatus={saveStatus}
@@ -150,6 +172,7 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
               headerActions={headerActions}
               showAutoSaveStatus={showAutoSaveStatus}
               headerRightPaddingClass={headerRightPaddingClass}
+              titleClassName={titleClassName}
             />
             <div className="flex-1 flex flex-col min-h-0 relative px-3 pt-0.5 pb-2 overflow-hidden">
               <div className="flex-1 flex flex-col min-h-0 relative">
@@ -160,7 +183,7 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
 
           {/* Column 2: Middle Column (Configure Toolbar / Conversational Models Links) */}
           {rightColumnContent && !isRightSiblingExpanded && (
-            <div className={`${rightColumnWidthClass} h-full max-h-full flex-shrink-0 flex-col bg-transparent overflow-y-auto custom-scrollbar transition-all duration-300 hidden lg:flex pl-4 pt-2 pb-4 pr-1 ${hideRightColumnBorder ? '' : 'border-l border-[var(--color-borderDefault)]'}`}>
+            <div className={`${rightColumnWidthClass} h-full max-h-full flex-shrink-0 flex-col bg-transparent overflow-y-auto custom-scrollbar transition-all duration-300 hidden lg:flex pl-4 pt-2 pb-4 pr-1 ${hideRightColumnBorder || isNormalMode ? '' : 'border-l border-[var(--color-borderDefault)]'}`}>
               {showConfigureHeader && (
                 <div className="flex items-center justify-between pb-1 shrink-0 px-2">
                   <h3 className="text-xs font-normal text-[var(--color-textSecondary)] opacity-95 flex items-center gap-2">
@@ -174,10 +197,10 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
               </div>
             </div>
           )}
-
-          {/* Column 3: Right Side Items Panel (Attached directly without gap/border wrapper) */}
-          {renderedRightSiblingPanel}
         </div>
+
+        {/* Right Side Items Panel */}
+        {renderedRightSiblingPanel}
 
         {/* standard modal dialogs */}
         {deleteModalProps && deleteModalProps.isOpen && (
@@ -222,11 +245,17 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
 
   return (
     <EditorContainer
-      className="w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4"
-      innerClassName={`flex flex-col relative w-[calc(100%-100px)] bg-[var(--color-editorBg)] ${containerMaxWidthClass} mx-auto rounded-xl ${isTableCollapsed ? 'h-auto max-h-[520px]' : 'h-[860px] max-h-[90vh]'} overflow-hidden transition-all duration-300 ${isFocusMode ? 'border-none' : 'border border-[var(--color-borderDefault)]'}`}
+      className={embeddedFullBleed
+        ? "w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent p-0"
+        : "w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4"
+      }
+      innerClassName={embeddedFullBleed
+        ? "flex flex-col relative w-full h-full max-h-full bg-[var(--color-editorBg)] max-w-none rounded-none overflow-hidden transition-none border-none"
+        : `flex flex-col relative w-[calc(100%-100px)] bg-[var(--color-editorBg)] ${containerMaxWidthClass} mx-auto rounded-xl ${isTableCollapsed ? 'h-auto max-h-[520px]' : 'h-[860px] max-h-[90vh]'} overflow-hidden transition-all duration-300 ${isFocusMode ? 'border-none' : 'border border-[var(--color-borderDefault)]'}`
+      }
     >
       {/* Main Columns System */}
-      <div className={`shrink-0 flex-none flex flex-col ${allowMainContentOverflow ? 'h-auto min-h-[440px] pb-[260px] overflow-visible' : 'h-[440px] overflow-hidden'}`}>
+      <div className={`shrink-0 flex-none flex flex-col ${embeddedFullBleed ? 'h-full min-h-0 overflow-hidden' : allowMainContentOverflow ? 'h-auto min-h-[440px] pb-[260px] overflow-visible' : 'h-[440px] overflow-hidden'}`}>
         <div className={`flex-1 flex flex-col text-[var(--color-textPrimary)] relative bg-transparent border-none min-h-0 ${allowMainContentOverflow ? 'overflow-visible' : 'overflow-hidden'}`}>
           
           {/* Standard Header Row */}
@@ -241,6 +270,7 @@ export const WorkspaceEditorLayout: React.FC<WorkspaceEditorLayoutProps> = ({
             headerActions={headerActions}
             showAutoSaveStatus={showAutoSaveStatus}
             headerRightPaddingClass={headerRightPaddingClass}
+            titleClassName={titleClassName}
           />
 
           {/* Split Panel Area */}

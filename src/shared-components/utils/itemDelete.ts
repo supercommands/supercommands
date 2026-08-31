@@ -7,6 +7,7 @@ import { deleteAiPrompt } from '../../allObjectFolder/src/createObject/aiPrompt/
 import { deleteChatAgent } from '../../allObjectFolder/src/createObject/ChatAgent/chatAgentData';
 import { deleteAutomation } from '../../allObjectFolder/src/createObject/automationBeta/automationData';
 import { deleteSnippet } from '../../allObjectFolder/src/createObject/snippets/snippetData';
+import { removeSessionReferencesForEntities } from '../../allObjectFolder/src/createObject/session/sessionReferenceUtils';
 import { db } from '../../storage/indexDB/dbConfig';
 import { useUIStore } from '../uiStateManager';
 
@@ -65,6 +66,12 @@ const deleteLocally = async (snippetId: string) => {
   await db.aiPrompts.delete(snippetId);
   await db.chatAgents.delete(snippetId);
   await db.automations.delete(snippetId);
+  await removeSessionReferencesForEntities([
+    { type: 'note', id: snippetId },
+    { type: 'link', id: snippetId },
+    { type: 'snippet', id: snippetId },
+    { type: 'agent', id: snippetId },
+  ]);
   window.dispatchEvent(new CustomEvent('todosUpdated'));
 };
 

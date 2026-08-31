@@ -7,7 +7,7 @@ import type { PageActionCommand } from './types';
 export const MuteAllTabsCommand: PageActionCommand = {
   id: 'mute_all_tabs',
   label: 'Mute All Tabs',
-  prefix: 'mat',
+  prefix: 'mute',
   keywords: ['mute', 'tabs', 'silence', 'mat'],
   description: 'Mute all open tabs in the current window',
   action: 'execute_mute_all_tabs',

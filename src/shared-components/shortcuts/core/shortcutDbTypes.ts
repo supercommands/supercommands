@@ -5,9 +5,12 @@ export type ShortcutReferenceType =
   | 'command'
   | 'automation'
   | 'module'
-  | 'session'
+  | 'collection'
+  | 'agent'
+  | 'prompt'
   | 'aiPrompt'
-  | 'todo';
+  | 'todo'
+  | 'bookmark';
 
 export interface UserShortcutRecord {
   id: string; // Unique generated ID
@@ -17,3 +20,5 @@ export interface UserShortcutRecord {
   referenceType: ShortcutReferenceType;
   updatedAt: number;
 }
+
+export const SHORTCUT_COMPARISON_FIELDS = ['id', 'userId', 'trigger', 'referenceId', 'referenceType'] as const satisfies readonly (keyof UserShortcutRecord)[];

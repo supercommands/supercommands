@@ -15,5 +15,8 @@ export type { AiPromptEditorViewProps } from './ui/AiPromptEditorView';
 export { useAiPromptEditor } from './useAiPromptEditor';
 export { getAiPromptExecutionText, hasRunnableAiPrompt, runAiPrompt } from './runAiPrompt';
 export type { RunAiPromptResult } from './runAiPrompt';
+export * from './aiPromptModelHelpers';
+export { useExcludedAiPromptModels } from './useExcludedAiPromptModels';
+export type { UseExcludedAiPromptModelsResult } from './useExcludedAiPromptModels';
 export * from './aiPromptHooks';
 export type { AiPromptRecord, CreateAiPromptInput, UpdateAiPromptInput } from './aiPromptTypes';

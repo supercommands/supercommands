@@ -8,15 +8,17 @@ export const AI_GROUP = {
 export const DEFAULT_SELECTED_AIS: string[] = ['gpt', 'claude', 'gemini', 'perplexity'];
 
 export const THIS_SECTION_ACTION_PREFIXES: Record<string, string> = {
-  capture_screenshot: 'cs',
-  capture_clip_screenshot: 'ccs',
-  capture_full_screenshot: 'cfp',
-  downloadallimages: 'dai',
-  downloadalltables: 'dat',
-  save_link: 'clc',
-  save_session: 'tss',
-  save_chat: 'stc',
+  capture_screenshot: 'visiblescreen',
+  capture_clip_screenshot: 'screen',
+  capture_full_screenshot: 'fullscreen',
+  downloadallimages: 'dp',
+  downloadalltables: 'tables',
+  save_link: 'ls',
+  save_todo: 'td',
+  save_note: 'cn',
+  save_snippet: 'cs',
+  save_chat: 'save_agent',
   add_to_existing: 'elc',
-  add_to_existing_session: 'es',
-  summarize_page: 'smm',
+  send_to_agent: 'send_agent',
+  summarize_page: 'summ',
 };

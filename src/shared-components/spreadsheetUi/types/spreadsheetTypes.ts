@@ -21,7 +21,9 @@ export type BaseRowData = {
   itemType?: 'link' | 'note' | 'snippet' | 'agent' | 'session' | 'todo';
   category?: string;
   urls?: string[];
-  value?: string;  updated_at?: string;
+  value?: string;
+  description?: string;
+  updated_at?: string;
   automationData?: any;
   installation_id?: string | number;
   module_id?: string | number;

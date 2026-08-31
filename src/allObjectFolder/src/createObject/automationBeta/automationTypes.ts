@@ -27,6 +27,8 @@ export interface AutomationRecord {
   deletedAt: number | null;
 }
 
+export const AUTOMATION_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderId', 'name', 'steps', 'inputs', 'tagIds', 'deletedAt'] as const satisfies readonly (keyof AutomationRecord)[];
+
 export interface CreateAutomationInput {
   workspaceId?: string;
   folderId?: string | null;

@@ -12,19 +12,34 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
-import { createSession, updateSession, deleteSession } from './sessionData';
+import { ConflictError, createSession, updateSession, deleteSession } from './sessionData';
 import { getSessionTabTitle } from './sessionHelpers';
 import type { SessionRecord, CreateSessionInput, UpdateSessionInput } from './sessionTypes';
 import type { LinkItem } from '../links/linkTypes';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
-import { SessionOpenSettings, DEFAULT_SESSION_SETTINGS } from './sessionSettings';
-import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
-import { saveShortcut, clearShortcut, useShortcutValidation } from '../../../../shared-components/shortcuts';
-import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
-import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
+import { SessionOpenSettings, DEFAULT_SESSION_SETTINGS, normalizeSessionOpenSettings } from './sessionSettings';
 import { getVersionsNewestFirst, getSnapshotById } from '../../../../shared-components/versionHistory/structuredVersionHistory';
+
+const SESSION_WIDGET_DEBUG = false;
+const sessionWidgetDebug = (label: string, data: Record<string, unknown>) => {
+  if (!SESSION_WIDGET_DEBUG) return;
+  console.log(label, data);
+};
+
+const sanitizeSessionLinkMetadata = (link: LinkItem): LinkItem => {
+  if (!link?.originalData) return link;
+  const snapshot = link.originalData.sessionAgentSnapshot;
+  const rest = { ...link };
+  delete rest.originalData;
+  return snapshot
+    ? {
+        ...rest,
+        originalData: { sessionAgentSnapshot: snapshot },
+      }
+    : rest;
+};
 
 export interface UseSessionEditorParams {
   sessionId?: string;
@@ -47,6 +62,21 @@ const areStringArraysEqual = (a: string[], b: string[]) => {
   if (a.length !== b.length) return false;
   const setB = new Set(b);
   return a.every(item => setB.has(item));
+};
+
+const getCurrentChromeWindowId = async (): Promise<number | undefined> => {
+  const chromeAny = typeof globalThis === 'undefined' ? undefined : (globalThis as any).chrome;
+  if (!chromeAny?.windows?.getCurrent) return undefined;
+
+  return new Promise(resolve => {
+    chromeAny.windows.getCurrent({ populate: false }, (currentWindow: any) => {
+      if (chromeAny.runtime?.lastError || typeof currentWindow?.id !== 'number') {
+        resolve(undefined);
+        return;
+      }
+      resolve(currentWindow.id);
+    });
+  });
 };
 
 export function useSessionEditor(props: UseSessionEditorParams) {
@@ -73,7 +103,6 @@ export function useSessionEditor(props: UseSessionEditorParams) {
   const [sessionTitle, setSessionTitle] = useState<string>(initialDraftKey || '');
   const [sessionDescription, setSessionDescription] = useState<string>('');
   const [sessionUrls, setSessionUrls] = useState<LinkItem[]>(initialDraftUrls || []);
-  const { validateShortcut } = useShortcutValidation();
   const [sessionShortcut, setSessionShortcut] = useState<string>('');
   const isShortcutManuallyEditedRef = useRef(false);
 
@@ -81,16 +110,13 @@ export function useSessionEditor(props: UseSessionEditorParams) {
     isShortcutManuallyEditedRef.current = true;
     setSessionShortcut(val);
   }, []);
-  const lastSavedShortcutRef = useRef<string>('');
   const isSessionShortcutManuallyEditedRef = useRef<boolean>(false);
-  const lastLoadedCompoundIdRef = useRef<string | null>(null);
 
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [openSettings, setOpenSettings] = useState<SessionOpenSettings>(DEFAULT_SESSION_SETTINGS);
   const [isInitialized, setIsInitialized] = useState<boolean>(!sessionId);
-  const [isShortcutInitialized, setIsShortcutInitialized] = useState<boolean>(!sessionId);
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -102,22 +128,30 @@ export function useSessionEditor(props: UseSessionEditorParams) {
   const queuedSaveOverrideRef = useRef<any | null>(null);
   const queuedSaveIsAutoSaveRef = useRef<boolean | null>(null);
 
-  const currentInputsRef = useRef({ sessionTitle, sessionDescription, sessionUrls, workspaceId, folderId, tagIds, openSettings, isInitialized, sessionShortcut });
-  currentInputsRef.current = { sessionTitle, sessionDescription, sessionUrls, workspaceId, folderId, tagIds, openSettings, isInitialized, sessionShortcut };
+  const currentInputsRef = useRef({ sessionTitle, sessionDescription, sessionUrls, workspaceId, folderId, tagIds, openSettings, isInitialized });
+  currentInputsRef.current = { sessionTitle, sessionDescription, sessionUrls, workspaceId, folderId, tagIds, openSettings, isInitialized };
 
   // Load or initialize
   useEffect(() => {
 
     if (sessionId) {
       if (sessionId === activeSessionIdRef.current && isInitialized) {
+        sessionWidgetDebug('[SessionWidgetDebug][useSessionEditor-sessionId-noop]', {
+          sessionId,
+          activeSessionId: activeSessionIdRef.current,
+          isInitialized,
+        });
         return;
       }
+      sessionWidgetDebug('[SessionWidgetDebug][useSessionEditor-sessionId-change]', {
+        previousActiveSessionId: activeSessionIdRef.current,
+        nextSessionId: sessionId,
+        wasInitialized: isInitialized,
+      });
       activeSessionIdRef.current = sessionId;
       setActiveSessionId(sessionId);
       setIsSessionDeleted(false);
-      lastLoadedCompoundIdRef.current = null;
       setSessionShortcut('');
-      lastSavedShortcutRef.current = '';
 
       lastSavedTitleRef.current = '';
       lastSavedUrlsRef.current = [];
@@ -127,7 +161,6 @@ export function useSessionEditor(props: UseSessionEditorParams) {
       lastSavedSettingsRef.current = DEFAULT_SESSION_SETTINGS;
       lastSavedUpdatedAtRef.current = null;
       
-      setIsShortcutInitialized(false);
       setSessionTitle('');
       setSessionDescription('');
       setSessionUrls([]);
@@ -135,16 +168,20 @@ export function useSessionEditor(props: UseSessionEditorParams) {
       return;
     }
 
+    const previousActiveSessionId = activeSessionIdRef.current;
     activeSessionIdRef.current = null;
+    sessionWidgetDebug('[SessionWidgetDebug][useSessionEditor-new-draft]', {
+      previousActiveSessionId,
+      initialDraftKey,
+      initialDraftUrlCount: initialDraftUrls?.length || 0,
+    });
     setActiveSessionId(null);
     setSessionTitle(initialDraftKey || '');
     setSessionDescription('');
     setSessionUrls(initialDraftUrls || []);
     setOpenSettings(DEFAULT_SESSION_SETTINGS);
     setSessionShortcut('');
-    lastSavedShortcutRef.current = '';
     isSessionShortcutManuallyEditedRef.current = false;
-    lastLoadedCompoundIdRef.current = null;
 
     const initDefaults = async () => {
       const smartWs = await getSmartDefaultWorkspace();
@@ -174,7 +211,6 @@ export function useSessionEditor(props: UseSessionEditorParams) {
     setSaveStatus('idle');
     setIsSessionDeleted(false);
     setIsInitialized(true);
-    setIsShortcutInitialized(true);
   }, [sessionId]);
 
   // Sync state reactively with Zustand store using the active sessionId/prop
@@ -215,8 +251,8 @@ export function useSessionEditor(props: UseSessionEditorParams) {
   const displayWorkspaceId = historicalSnapshot ? historicalSnapshot.workspaceId : workspaceId;
   const displayFolderId = historicalSnapshot ? historicalSnapshot.folderId : folderId;
   const displayTagIds = historicalSnapshot ? historicalSnapshot.tagIds : tagIds;
-  const displaySettings = historicalSnapshot ? (historicalSnapshot.sessionOpenSettings || openSettings) : openSettings;
-  const displayShortcut = (historicalSnapshot && historicalSnapshot.shortcut) ? historicalSnapshot.shortcut : sessionShortcut;
+  const displaySettings = historicalSnapshot ? normalizeSessionOpenSettings(historicalSnapshot.sessionOpenSettings || openSettings) : normalizeSessionOpenSettings(openSettings);
+  const displayShortcut = '';
 
   useEffect(() => {
     setSelectedVersionId(null);
@@ -229,72 +265,10 @@ export function useSessionEditor(props: UseSessionEditorParams) {
   const urlsChanged = isInitialized && !areLinkItemsEqual(sessionUrls, lastSavedUrlsRef.current);
   const tagsChanged = isInitialized && !areStringArraysEqual(tagIds, lastSavedTagIdsRef.current);
   const settingsChanged = isInitialized && JSON.stringify(openSettings) !== JSON.stringify(lastSavedSettingsRef.current);
-  const shortcutChanged = isInitialized && isShortcutInitialized && sessionShortcut.toLowerCase().replace(/[^a-z0-9]/g, '') !== (lastSavedShortcutRef.current || '');
 
-  const isDirty = !isViewingHistory && isInitialized && isShortcutInitialized && (titleChanged || descriptionChanged || workspaceChanged || folderChanged || urlsChanged || tagsChanged || settingsChanged || shortcutChanged);
+  const isDirty = !isViewingHistory && isInitialized && (titleChanged || descriptionChanged || workspaceChanged || folderChanged || urlsChanged || tagsChanged || settingsChanged);
 
   const isEditMode = !!sessionId || !!activeSessionId;
-
-  // Synchronize shortcut from DB on load or activeSessionId changes
-
-  useEffect(() => {
-    const currentId = sessionId || activeSessionId;
-    if (!currentId) {
-      setIsShortcutInitialized(true);
-      return;
-    }
-
-    const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
-    const fldObj = folderId ? { folder_id: folderId } : null;
-    const targetCompoundId = getItemCompoundId({
-      id: currentId,
-      workspace_id: wsObj?.workspace_id || null,
-      folder_id: fldObj?.folder_id || null,
-      snippet: { id: currentId, category: 'session' }
-    });
-
-    if (lastLoadedCompoundIdRef.current === targetCompoundId) {
-      return;
-    }
-
-    setIsShortcutInitialized(false);
-
-    const loadSavedShortcut = async () => {
-      try {
-        const shortcutsMap = await readAllShortcuts();
-        let sc = normalizeShortcutTrigger(
-          shortcutsMap[targetCompoundId] || shortcutsMap[currentId] || '',
-        );
-
-        // Board View historically stores Session shortcuts against the raw
-        // session ID, while the editor prefers a workspace/folder compound ID.
-        // Accept either representation so an existing shortcut is visible in
-        // the editor before the next save migrates it to the canonical key.
-        if (!sc) {
-          const matchingKey = Object.keys(shortcutsMap).find(
-            key => key === currentId || key.endsWith(`-${currentId}`),
-          );
-          if (matchingKey) {
-            sc = normalizeShortcutTrigger(shortcutsMap[matchingKey] || '');
-          }
-        }
-        if (isMounted.current) {
-          if (!isShortcutManuallyEditedRef.current) {
-            setSessionShortcut(sc);
-          }
-          lastSavedShortcutRef.current = sc;
-          lastLoadedCompoundIdRef.current = targetCompoundId;
-          setIsShortcutInitialized(true);
-        }
-      } catch (err) {
-        console.error('Failed to load session shortcut:', err);
-        if (isMounted.current) {
-          setIsShortcutInitialized(true);
-        }
-      }
-    };
-    void loadSavedShortcut();
-  }, [sessionId, activeSessionId, workspaceId, folderId]);
 
   useEffect(() => {
     if (liveSession === undefined || isSessionDeleted || !activeSessionId) return;
@@ -307,24 +281,38 @@ export function useSessionEditor(props: UseSessionEditorParams) {
 
 
     if (lastSavedUpdatedAtRef.current !== null && liveSession.updatedAt <= lastSavedUpdatedAtRef.current) {
+      sessionWidgetDebug('[SessionWidgetDebug][useSessionEditor-liveSession-skip-stale]', {
+        sessionId,
+        activeSessionId,
+        liveSessionId: liveSession.id,
+        liveSessionUpdatedAt: liveSession.updatedAt,
+        lastSavedUpdatedAt: lastSavedUpdatedAtRef.current,
+      });
       setIsSessionDeleted(false);
       return;
     }
 
     // DO NOT OVERWRITE if user is typing
     if (isDirty) {
-
+      sessionWidgetDebug('[SessionWidgetDebug][useSessionEditor-liveSession-skip-dirty]', {
+        sessionId,
+        activeSessionId,
+        liveSessionId: liveSession.id,
+        liveUrlCount: Array.isArray(liveSession.urls) ? liveSession.urls.length : 0,
+      });
       return;
     }
 
-    const sanitizedUrls = (liveSession.urls || []).map(link => {
-      if (link && link.originalData) {
-        const { originalData, ...rest } = link;
-        return rest;
-      }
-      return link;
-    });
+    const sanitizedUrls = (liveSession.urls || []).map(sanitizeSessionLinkMetadata);
 
+    sessionWidgetDebug('[SessionWidgetDebug][useSessionEditor-liveSession-hydrate]', {
+      sessionId,
+      activeSessionId,
+      liveSessionId: liveSession.id,
+      title: liveSession.title,
+      urlCount: sanitizedUrls.length,
+      autoSaveMode: liveSession.sessionOpenSettings?.autoSaveMode,
+    });
 
     setSessionTitle(liveSession.title);
     setSessionDescription(liveSession.description || '');
@@ -332,7 +320,8 @@ export function useSessionEditor(props: UseSessionEditorParams) {
     setWorkspaceId(liveSession.workspaceId);
     setFolderId(liveSession.folderId);
     setTagIds(liveSession.tagIds || []);
-    setOpenSettings(liveSession.sessionOpenSettings || DEFAULT_SESSION_SETTINGS);
+    const normalizedLiveSettings = normalizeSessionOpenSettings(liveSession.sessionOpenSettings);
+    setOpenSettings(normalizedLiveSettings);
 
     lastSavedTitleRef.current = liveSession.title;
     lastSavedDescriptionRef.current = liveSession.description || '';
@@ -340,7 +329,7 @@ export function useSessionEditor(props: UseSessionEditorParams) {
     lastSavedWorkspaceIdRef.current = liveSession.workspaceId;
     lastSavedFolderIdRef.current = liveSession.folderId;
     lastSavedTagIdsRef.current = liveSession.tagIds || [];
-    lastSavedSettingsRef.current = liveSession.sessionOpenSettings || DEFAULT_SESSION_SETTINGS;
+    lastSavedSettingsRef.current = normalizedLiveSettings;
     lastSavedUpdatedAtRef.current = liveSession.updatedAt;
 
     setIsInitialized(true);
@@ -389,44 +378,24 @@ export function useSessionEditor(props: UseSessionEditorParams) {
       return savePromiseRef.current as Promise<any>;
     }
 
-    const { sessionTitle: title, sessionDescription: desc, sessionUrls: urls, workspaceId: wsId, folderId: fldId, tagIds: tIds, openSettings: settings, sessionShortcut } = currentInputsRef.current;
+    const { sessionTitle: title, sessionDescription: desc, sessionUrls: urls, workspaceId: wsId, folderId: fldId, tagIds: tIds, openSettings: settings } = currentInputsRef.current;
     const finalWorkspaceId = overrideProps?.workspaceId !== undefined ? overrideProps.workspaceId : wsId;
     const finalFolderId = overrideProps?.folderId !== undefined ? overrideProps.folderId : fldId;
     const finalTagIds = overrideProps?.tagIds !== undefined ? overrideProps.tagIds : tIds;
-    const finalSettings = overrideProps?.openSettings !== undefined ? overrideProps.openSettings : settings;
+    const finalSettings = normalizeSessionOpenSettings(overrideProps?.openSettings !== undefined ? overrideProps.openSettings : settings);
     const finalTitle = overrideProps?.title !== undefined ? overrideProps.title : title;
+    const normalizedTitle = finalTitle.trim() || 'Untitled Tab Session';
     const finalDescription = desc;
     const rawUrls = overrideProps?.urls !== undefined ? overrideProps.urls : urls;
-    const loopShortcut = sessionShortcut;
 
-    const finalUrls = (rawUrls || []).map((link: any) => {
+    const finalUrls = (rawUrls || []).map((link: LinkItem) => {
       const canonicalTitle = getSessionTabTitle(link);
-      if (link && link.originalData) {
-        const { originalData, ...rest } = link;
-        return {
-          ...rest,
-          title: canonicalTitle,
-        };
-      }
+      const sanitizedLink = sanitizeSessionLinkMetadata(link);
       return {
-        ...link,
+        ...sanitizedLink,
         title: canonicalTitle,
       };
     });
-
-    if (!finalTitle.trim()) {
-      if (isMounted.current) {
-        setSaveError('Enter the title');
-      }
-      return false;
-    }
-
-    if (!finalUrls || finalUrls.length === 0) {
-      if (isMounted.current) {
-        setSaveError('Add at least one link to this session');
-      }
-      return false;
-    }
 
     setSaveStatus('saving');
     setSaveError(null);
@@ -435,27 +404,17 @@ export function useSessionEditor(props: UseSessionEditorParams) {
       try {
         let savedRecord: SessionRecord;
         const previousSessionId = activeSessionIdRef.current;
-        const previousCompoundId =
-          previousSessionId
-            ? getItemCompoundId({
-                id: previousSessionId,
-                workspace_id: lastSavedWorkspaceIdRef.current || null,
-                folder_id: lastSavedFolderIdRef.current || null,
-                snippet: { id: previousSessionId, category: 'session' },
-              })
-            : '';
 
         if (!previousSessionId) {
           // Create new
           const input: CreateSessionInput = {
-            title: finalTitle,
+            title: normalizedTitle,
             description: finalDescription,
             urls: finalUrls,
             workspaceId: finalWorkspaceId || undefined,
             folderId: finalFolderId,
             tagIds: finalTagIds,
             sessionOpenSettings: finalSettings,
-            shortcut: loopShortcut,
           };
 
           const created = await createSession(input);
@@ -465,7 +424,8 @@ export function useSessionEditor(props: UseSessionEditorParams) {
             setWorkspaceId(created.workspaceId);
             setFolderId(created.folderId);
             setTagIds(created.tagIds);
-            setOpenSettings(created.sessionOpenSettings || DEFAULT_SESSION_SETTINGS);
+            const normalizedCreatedSettings = normalizeSessionOpenSettings(created.sessionOpenSettings);
+            setOpenSettings(normalizedCreatedSettings);
 
             lastSavedTitleRef.current = created.title;
             lastSavedDescriptionRef.current = created.description || '';
@@ -473,7 +433,7 @@ export function useSessionEditor(props: UseSessionEditorParams) {
             lastSavedWorkspaceIdRef.current = created.workspaceId;
             lastSavedFolderIdRef.current = created.folderId;
             lastSavedTagIdsRef.current = created.tagIds;
-            lastSavedSettingsRef.current = created.sessionOpenSettings || DEFAULT_SESSION_SETTINGS;
+            lastSavedSettingsRef.current = normalizedCreatedSettings;
             lastSavedUpdatedAtRef.current = created.updatedAt;
             setSaveStatus('saved');
             setLastSavedAt(new Date(created.updatedAt));
@@ -481,24 +441,37 @@ export function useSessionEditor(props: UseSessionEditorParams) {
         } else {
           // Update existing
           const input: UpdateSessionInput = {
-            title: finalTitle,
+            title: normalizedTitle,
             description: finalDescription,
             urls: finalUrls,
             workspaceId: finalWorkspaceId || undefined,
             folderId: finalFolderId,
             tagIds: finalTagIds,
             sessionOpenSettings: finalSettings,
-            shortcut: loopShortcut,
             expectedUpdatedAt: lastSavedUpdatedAtRef.current || undefined,
           };
 
-          const updated = await updateSession(activeSessionIdRef.current!, input);
+          let updated: SessionRecord;
+          try {
+            updated = await updateSession(activeSessionIdRef.current!, input);
+          } catch (error) {
+            if (isAutoSave && error instanceof ConflictError && error.remoteSession) {
+              lastSavedUpdatedAtRef.current = error.remoteSession.updatedAt;
+              updated = await updateSession(activeSessionIdRef.current!, {
+                ...input,
+                expectedUpdatedAt: error.remoteSession.updatedAt,
+              });
+            } else {
+              throw error;
+            }
+          }
           savedRecord = updated;
           if (isMounted.current) {
             setWorkspaceId(updated.workspaceId);
             setFolderId(updated.folderId);
             setTagIds(updated.tagIds);
-            setOpenSettings(updated.sessionOpenSettings || DEFAULT_SESSION_SETTINGS);
+            const normalizedUpdatedSettings = normalizeSessionOpenSettings(updated.sessionOpenSettings);
+            setOpenSettings(normalizedUpdatedSettings);
 
             lastSavedTitleRef.current = updated.title;
             lastSavedDescriptionRef.current = updated.description || '';
@@ -506,57 +479,29 @@ export function useSessionEditor(props: UseSessionEditorParams) {
             lastSavedWorkspaceIdRef.current = updated.workspaceId;
             lastSavedFolderIdRef.current = updated.folderId;
             lastSavedTagIdsRef.current = updated.tagIds;
-            lastSavedSettingsRef.current = updated.sessionOpenSettings || DEFAULT_SESSION_SETTINGS;
+            lastSavedSettingsRef.current = normalizedUpdatedSettings;
             lastSavedUpdatedAtRef.current = updated.updatedAt;
             setSaveStatus('saved');
             setLastSavedAt(new Date(updated.updatedAt));
           }
         }
 
-        // Save shortcut trigger!
         const targetId = activeSessionIdRef.current;
         if (targetId && savedRecord) {
           if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            const currentWindowId = await getCurrentChromeWindowId();
             chrome.runtime.sendMessage({
               action: 'update_active_session_urls',
               sessionId: targetId,
+              windowId: currentWindowId,
               urls: savedRecord.urls.map(link => link.url),
               names: savedRecord.urls.map(link => link.title || link.name || link.url),
             }).catch(() => {});
-          }
-
-          const wsObj = savedRecord.workspaceId ? { workspace_id: savedRecord.workspaceId } : null;
-          const fldObj = savedRecord.folderId ? { folder_id: savedRecord.folderId } : null;
-          const targetCompoundId = getItemCompoundId({
-            id: targetId,
-            workspace_id: wsObj?.workspace_id || null,
-            folder_id: fldObj?.folder_id || null,
-            snippet: { id: targetId, category: 'session' }
-          });
-          
-          if (previousCompoundId && targetCompoundId && previousCompoundId !== targetCompoundId) {
-            await migrateItemCompoundId(previousCompoundId, targetCompoundId, 'session');
-          }
-
-          if (targetId && targetCompoundId && targetId !== targetCompoundId) {
-            await migrateItemCompoundId(targetId, targetCompoundId, 'session');
-          }
-          
-          const finalShortcut = loopShortcut.toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (finalShortcut) {
-            const valRes = await validateShortcut(finalShortcut, targetId);
-            if (valRes.isValid) {
-              console.log(`[ShortcutDebug][SessionEditor] handleSave: Valid shortcut "${finalShortcut}", saving to DB for session "${targetId}"...`);
-              await saveShortcut(targetId, targetCompoundId, finalShortcut, savedRecord.title, 'session');
-            } else {
-              console.warn(`[ShortcutDebug][SessionEditor] handleSave: Shortcut "${finalShortcut}" has validation error "${valRes.errorMessage}". SKIPPING DB save on background autosave.`);
-            }
-            // Always update the ref to prevent infinite autosave loops
-            lastSavedShortcutRef.current = finalShortcut;
-          } else if (lastSavedShortcutRef.current !== '') {
-            console.log(`[ShortcutDebug][SessionEditor] handleSave: Clearing shortcut for session "${targetId}"...`);
-            await clearShortcut(targetId, targetCompoundId, 'session');
-            lastSavedShortcutRef.current = '';
+            chrome.runtime.sendMessage({
+              action: 'update_active_session_settings',
+              sessionId: targetId,
+              openSettings: normalizeSessionOpenSettings(savedRecord.sessionOpenSettings),
+            }).catch(() => {});
           }
         }
 
@@ -618,7 +563,6 @@ export function useSessionEditor(props: UseSessionEditorParams) {
       tagIds: [],
       openSettings: DEFAULT_SESSION_SETTINGS,
       isInitialized: true,
-      sessionShortcut: '',
     };
     setActiveSessionId(null);
     setSessionTitle('');
@@ -628,9 +572,7 @@ export function useSessionEditor(props: UseSessionEditorParams) {
     // Keep workspaceId/folderId so new session defaults to the same location
     setOpenSettings(DEFAULT_SESSION_SETTINGS);
     setSessionShortcut('');
-    lastSavedShortcutRef.current = '';
     isSessionShortcutManuallyEditedRef.current = false;
-    lastLoadedCompoundIdRef.current = null;
     lastSavedTitleRef.current = '';
     lastSavedDescriptionRef.current = '';
     lastSavedUrlsRef.current = [];
@@ -677,10 +619,8 @@ export function useSessionEditor(props: UseSessionEditorParams) {
     },
     handleDelete,
     isInitialized: isInitialized && (sessionId === activeSessionId),
-    isShortcutInitialized,
     activeSessionId: sessionId || activeSessionId,
     resetEditor,
-    lastSavedShortcutRef,
     lastSavedTitleRef,
     versionHistory,
     versionHistoryItems,

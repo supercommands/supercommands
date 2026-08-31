@@ -19,6 +19,7 @@ export const baseVersionHistory = {
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import { createNote, updateNote, deleteNote } from './noteData';
+import { createTag } from '../tags/tagData';
 import type { NoteRecord, CreateNoteInput, UpdateNoteInput } from './noteTypes';
 import type { NoteEditorViewProps } from './ui/NoteEditorView';
 import type { SharedProperties } from '../../../../shared-components/editorToolbar/types';
@@ -48,8 +49,13 @@ const sameString = (a: string | null | undefined, b: string | null | undefined) 
 const sameTagList = sameTagIds;
 
 export function useNoteEditor(props: NoteEditorViewProps) {
-  const { noteId, onBack, initialDraftKey, initialDraftContent } = props;
+  const { noteId, onBack, initialDraftKey, initialDraftContent, initialTagIds, onNoteCreated, saveNoteAdapter, onSavedClose, propertyPersistenceAdapter } = props;
   const resolvedNoteId = noteId && noteId !== 'new' ? noteId : null;
+
+  const onNoteCreatedRef = useRef(onNoteCreated);
+  onNoteCreatedRef.current = onNoteCreated;
+  const propertyPersistenceAdapterRef = useRef(propertyPersistenceAdapter);
+  propertyPersistenceAdapterRef.current = propertyPersistenceAdapter;
 
   noteEditorLog('render', {
     incomingNoteId: noteId,
@@ -85,7 +91,9 @@ export function useNoteEditor(props: NoteEditorViewProps) {
   // Editor state tracking for location and tags
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
-  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [tagIds, setTagIds] = useState<string[]>(
+    !resolvedNoteId && Array.isArray(initialTagIds) ? Array.from(new Set(initialTagIds)) : []
+  );
   const [isInitialized, setIsInitialized] = useState<boolean>(!resolvedNoteId);
 
   const [saveStatusRaw, setSaveStatusRaw] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle');
@@ -213,19 +221,23 @@ export function useNoteEditor(props: NoteEditorViewProps) {
 
     // Load default workspace (falling back to smart default) and folder
     const initDefaults = async () => {
-      const smartWs = await getSmartDefaultWorkspace();
-      if (smartWs) {
-        setWorkspaceId(smartWs.id);
-        const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
-        setFolderId(savedFolderId || null);
+      const savedWsId = await StorageManager.getItem('lastUsedWorkspaceId');
+      if (savedWsId) {
+        setWorkspaceId(savedWsId);
       } else {
-        setWorkspaceId(null);
-        setFolderId(null);
+        const smartWs = await getSmartDefaultWorkspace();
+        if (smartWs) {
+          setWorkspaceId(smartWs.id);
+        } else {
+          setWorkspaceId(null);
+        }
       }
+      const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
+      setFolderId(savedFolderId || null);
     };
     void initDefaults();
 
-    setTagIds([]);
+    setTagIds(!resolvedNoteId && Array.isArray(initialTagIds) ? Array.from(new Set(initialTagIds)) : []);
 
     lastSavedTitleRef.current = initialDraftKey || '';
     lastSavedBodyRef.current = initialDraftContent || '';
@@ -468,6 +480,29 @@ export function useNoteEditor(props: NoteEditorViewProps) {
 
         const currentTagIdsKey = [...activeTagIds].sort().join(',');
 
+        // Convert any temp tags into real tags before saving
+        const finalWorkspaceId = activeWorkspaceId || (await getSmartDefaultWorkspace())?.id;
+        if (finalWorkspaceId) {
+          const resolvedTagIds: string[] = [];
+          for (const tId of activeTagIds) {
+            if (tId.startsWith('temp_')) {
+              const tagName = tId.replace('temp_', '');
+              try {
+                const newTag = propertyPersistenceAdapterRef.current?.createTag
+                  ? await propertyPersistenceAdapterRef.current.createTag({ name: tagName, workspaceId: finalWorkspaceId })
+                  : await createTag(tagName, finalWorkspaceId);
+                resolvedTagIds.push(newTag.id);
+              } catch (e) {
+                console.error('Failed to create temp tag', e);
+                resolvedTagIds.push(tId);
+              }
+            } else {
+              resolvedTagIds.push(tId);
+            }
+          }
+          activeTagIds = resolvedTagIds;
+        }
+
         try {
           let savedNote: NoteRecord;
           if (!currentNoteId) {
@@ -485,11 +520,20 @@ export function useNoteEditor(props: NoteEditorViewProps) {
                 body: summarizeHtml(input.body),
               },
             });
-            savedNote = await createNote(input);
+            savedNote = saveNoteAdapter
+              ? await saveNoteAdapter({ mode: 'create', input })
+              : await createNote(input);
             noteEditorLog('createNote success', {
               savedId: savedNote.id,
               updatedAt: savedNote.updatedAt,
             });
+            if (onNoteCreatedRef.current) {
+              try {
+                await onNoteCreatedRef.current(savedNote);
+              } catch (err) {
+                console.error('[useNoteEditor] onNoteCreated callback failed:', err);
+              }
+            }
           } else {
             const input: UpdateNoteInput = {
               expectedUpdatedAt: lastSavedUpdatedAtRef.current ?? undefined,
@@ -536,7 +580,9 @@ export function useNoteEditor(props: NoteEditorViewProps) {
               category: 'note',
             });
 
-            savedNote = await updateNote(currentNoteId, input);
+            savedNote = saveNoteAdapter
+              ? await saveNoteAdapter({ mode: 'update', noteId: currentNoteId, input })
+              : await updateNote(currentNoteId, input);
 
             const newCompoundId = getItemCompoundId({
               id: savedNote.id,
@@ -553,6 +599,10 @@ export function useNoteEditor(props: NoteEditorViewProps) {
               savedId: savedNote.id,
               updatedAt: savedNote.updatedAt,
             });
+          }
+
+          if (onSavedClose && !silent) {
+            onSavedClose();
           }
 
           if (activeNoteIdRef.current !== savingNoteId) {
@@ -1190,15 +1240,19 @@ export function useNoteEditor(props: NoteEditorViewProps) {
     lastSavedUpdatedAtRef.current = null;
 
     const initDefaults = async () => {
-      const smartWs = await getSmartDefaultWorkspace();
-      if (smartWs) {
-        setWorkspaceId(smartWs.id);
-        const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
-        setFolderId(savedFolderId || null);
+      const savedWsId = await StorageManager.getItem('lastUsedWorkspaceId');
+      if (savedWsId) {
+        setWorkspaceId(savedWsId);
       } else {
-        setWorkspaceId(null);
-        setFolderId(null);
+        const smartWs = await getSmartDefaultWorkspace();
+        if (smartWs) {
+          setWorkspaceId(smartWs.id);
+        } else {
+          setWorkspaceId(null);
+        }
       }
+      const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
+      setFolderId(savedFolderId || null);
     };
     void initDefaults();
     setTagIds([]);

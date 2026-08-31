@@ -32,7 +32,8 @@ type Snippet = SnippetRecord & {
   tags?: { tag_id: string; name: string }[] | null;
   snippet_id?: string;
 };
-import { FaCode, FaFlag, FaCheck, FaTimes, FaRobot } from 'react-icons/fa';
+import { FaCode, FaFlag, FaCheck, FaTimes } from 'react-icons/fa';
+import { LuSparkles } from 'react-icons/lu';
 import { TbNotes } from 'react-icons/tb';
 import { StorageManager } from '../../../storage/localStorage/storageManager';
 import CmdIcon from '../../icons/cmdIcon';
@@ -867,7 +868,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
       : categoryStr === 'session'
         ? 'Tab Session'
         : categoryStr === 'prompt'
-          ? 'AI Prompt'
+          ? 'Chat Agent'
           : categoryStr === 'snippet'
             ? 'Text Expander'
             : categoryStr === 'automation' || categoryStr === 'agent'
@@ -946,7 +947,7 @@ const SnippetFavoriteItem: React.FC<FavoriteItemProps & { snippet: Snippet }> = 
     }
 
     if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(normalizedCategory)) {
-      return <FaRobot size={16} className="text-[var(--color-iconDefault)]" />;
+      return <LuSparkles size={16} className="text-[var(--color-iconDefault)]" />;
     }
 
     if (normalizedCategory === 'automation' || normalizedCategory === 'automations' || snippet.steps || snippet.automation) {

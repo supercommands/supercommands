@@ -19,6 +19,7 @@ import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastU
 import { normalizeNoteBody } from './noteHelpers';
 import { runAssetGarbageCollection } from '../../../../storage/assets/assetGarbageCollector';
 import { createCheckpoint, createInitialHistory, shouldCreateCheckpoint, extractNoteSnapshotFromRecord } from './noteHistory';
+import { removeSessionReferencesForEntity } from '../session/sessionReferenceUtils';
 
 /**
  * Creates a new note record.
@@ -282,6 +283,7 @@ export async function deleteNote(noteId: string): Promise<void> {
     const note = await db.notes.get(noteId);
     if (note) {
       await db.notes.delete(noteId);
+      await removeSessionReferencesForEntity('note', noteId);
       // Run GC to clean up any orphaned images that only belonged to this note
       runAssetGarbageCollection().catch(err => {
         console.error('[deleteNote] GC failed:', err);
@@ -291,6 +293,7 @@ export async function deleteNote(noteId: string): Promise<void> {
     const snippet = await db.snippets.get(noteId);
     if (snippet) {
       await db.snippets.delete(noteId);
+      await removeSessionReferencesForEntity('snippet', noteId);
       return;
     }
     const todo = await db.todos.get(noteId);

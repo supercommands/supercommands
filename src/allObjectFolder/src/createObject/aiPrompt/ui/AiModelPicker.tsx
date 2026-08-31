@@ -20,6 +20,7 @@ import { useAppearance } from '@extension/ui';
 import { motion } from 'framer-motion';
 import { FaCheck, FaPencilAlt, FaPlus } from 'react-icons/fa';
 import { getFaviconUrl } from '../../../../../shared-components/searchBarMain/utilityFunctions/utils';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
 
 interface ModelOption {
   id: string;
@@ -206,7 +207,7 @@ const AiModelPicker: React.FC<AiModelPickerProps> = ({
                   if (newModelName.trim() && newModelUrl.trim()) {
                     const isAllowed = ALLOWED_HOSTS.some(h => newModelUrl.toLowerCase().includes(h));
                     if (isAllowed) {
-                      const customId = `custom-${Date.now()}`;
+                      const customId = generateEntityId('customModel');
                       handleModelClick(customId);
                       setIsAddingModel(false);
                       setNewModelName('');

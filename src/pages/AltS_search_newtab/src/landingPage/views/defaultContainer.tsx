@@ -417,8 +417,7 @@ const CommandIcon: React.FC<{ item: CommandInteractiveItem }> = ({ item }) => {
   if (
     (item.iconHosts.length === 0 && isLocalCommandId((item as any).commandId)) ||
     (item as any).commandId === 'createnotes' ||
-    (item as any).commandId === 'createlinks' ||
-    (item as any).commandId === 'createsession'
+    (item as any).commandId === 'createlinks'
   ) {
     return (
       <div className="w-3.5 h-3.5 flex items-center justify-center text-neutral-500 dark:text-neutral-400 overflow-hidden">
@@ -1243,7 +1242,7 @@ const DefaultContainer = forwardRef<DefaultContainerHandle, DefaultContainerProp
             ).toLowerCase();
             const type = cat === 'session' ? 'session' : cat === 'link' ? 'link' : 'note';
             if (hotkeyValue) {
-              await saveUserHotkey(hotkeyValue, itemId, type);
+              await saveUserHotkey(hotkeyValue, itemId, type as any);
             } else {
               await deleteUserHotkeyByReference(itemId);
             }

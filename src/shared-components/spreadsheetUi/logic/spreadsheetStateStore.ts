@@ -20,8 +20,9 @@ import {
   updateAutomation as updateAutomationRecord,
   deleteAutomation,
 } from '../../../allObjectFolder/src/createObject/automationBeta/automationData';
-import { deleteChatAgent } from '../../../allObjectFolder/src/createObject/ChatAgent/chatAgentData';
-import { deleteAiPrompt } from '../../../allObjectFolder/src/createObject/aiPrompt/aiPromptData';
+import { updateChatAgent, deleteChatAgent } from '../../../allObjectFolder/src/createObject/ChatAgent/chatAgentData';
+import { updateAiPrompt, deleteAiPrompt } from '../../../allObjectFolder/src/createObject/aiPrompt/aiPromptData';
+import { updateTodoContent } from '../../../allObjectFolder/src/createObject/todos/todoData';
 import {
   createSession,
   updateSession,
@@ -38,6 +39,7 @@ import { resolveCommandLookupKey, isCommandId } from '../../../shared-components
 import { useDbStore } from '../../../storage/store/useDbStore';
 import { db } from '../../../storage/indexDB/dbConfig';
 import { syncCommandsFromSource } from '../../../allObjectFolder/src/createObject/commands/commandData';
+import { generateEntityId } from '../../../shared-components/utils/idGenerator';
 import type { NoteRecord } from '../../../allObjectFolder/src/createObject/notes/noteTypes';
 import type { LinkRecord } from '../../../allObjectFolder/src/createObject/links/linkTypes';
 import type { SnippetRecord } from '../../../allObjectFolder/src/createObject/snippets/snippetTypes';
@@ -73,6 +75,61 @@ const invalidateHotkeyCache = () => {
     chromeAny.runtime.sendMessage({ action: 'INVALIDATE_HOTKEYS_CACHE' }).catch(() => {});
   }
 };
+export const isTagSupportedRow = (row: any): boolean => {
+  if (!row) return false;
+  const cat = String(row.category || '').toLowerCase();
+  const section = String(row.section || '').toLowerCase();
+  const itemType = String(row.itemType || '').toLowerCase();
+
+  if (
+    cat === 'commands' ||
+    cat === 'general_commands' ||
+    cat === 'command' ||
+    section.includes('browser command') ||
+    section.includes('system command') ||
+    cat === 'bookmark' ||
+    cat === 'bookmarks' ||
+    section.includes('bookmark') ||
+    cat === 'module' ||
+    section.includes('installed modules')
+  ) {
+    return false;
+  }
+
+  return (
+    cat === 'note' ||
+    section.includes('note') ||
+    itemType === 'note' ||
+    cat === 'link' ||
+    section.includes('link') ||
+    itemType === 'link' ||
+    cat === 'session' ||
+    section.includes('session') ||
+    section.includes('collection') ||
+    itemType === 'session' ||
+    cat === 'snippet' ||
+    section.includes('snippet') ||
+    section.includes('text expander') ||
+    itemType === 'snippet' ||
+    cat === 'todo' ||
+    section.includes('todo') ||
+    itemType === 'todo' ||
+    cat === 'aiprompt' ||
+    cat === 'ai_prompt' ||
+    cat === 'prompt' ||
+    section.includes('ai prompt') ||
+    itemType === 'aiprompt' ||
+    cat === 'chatagent' ||
+    cat === 'chat_agent' ||
+    cat === 'agent' ||
+    section.includes('chat agent') ||
+    itemType === 'agent' ||
+    cat === 'automation' ||
+    section.includes('automation') ||
+    itemType === 'automation'
+  );
+};
+
 export type CellPosition = {
   rowIndex: number;
   colIndex: number;
@@ -93,13 +150,12 @@ interface GridState {
   showFavoritesOnly: boolean;
   showHotkeysOnly: boolean;
   showShortcutsOnly: boolean;
+  showTagsOnly: boolean;
   spaceFilter: string[];
   isFilterMenuOpen: boolean;
 
   expandedEmptySections: boolean;
-  isCompactMode: boolean;
   isEmbedded: boolean;
-  toggleCompactMode: () => void;
   setFilterMenuOpen: (open: boolean) => void;
   setIsEmbedded: (val: boolean) => void;
 
@@ -115,6 +171,7 @@ interface GridState {
     columnId: string,
     value: any
   ) => void;
+  updateRowTags: (rowId: string, tagIds: string[]) => Promise<void>;
   overwriteCellData: (
     rowId: string,
     colIndex: number,
@@ -160,6 +217,7 @@ interface GridState {
   setShowFavoritesOnly: (val: boolean) => void;
   setShowHotkeysOnly: (val: boolean) => void;
   setShowShortcutsOnly: (val: boolean) => void;
+  setShowTagsOnly: (val: boolean) => void;
   setSpaceFilter: (filter: string[]) => void;
   targetSection: string | null;
   setTargetSection: (section: string | null) => void;
@@ -185,10 +243,10 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
     { type: 'section', title: 'Notes' },
     { type: 'section', title: 'Snippets' },
     { type: 'section', title: 'Todos' },
+    { type: 'section', title: 'Browser Commands' },
     { type: 'section', title: 'Saved Automations' },
     { type: 'section', title: 'Chat Agents' },
     { type: 'section', title: 'System Commands' },
-    { type: 'section', title: 'Browser Commands' },
   ],
 
   columnCount: 7,
@@ -203,12 +261,12 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
   showFavoritesOnly: false,
   showHotkeysOnly: false,
   showShortcutsOnly: false,
+  showTagsOnly: false,
   spaceFilter: ['all'],
   collapsedSections: [],
   expandedCategories: [],
   expandedEmptySections: false,
   targetSection: null,
-  isCompactMode: false,
   isEmbedded: false,
   quickAddModal: { isOpen: false, type: null },
 
@@ -229,6 +287,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
   setShowFavoritesOnly: val => set({ showFavoritesOnly: val }),
   setShowHotkeysOnly: val => set({ showHotkeysOnly: val }),
   setShowShortcutsOnly: val => set({ showShortcutsOnly: val }),
+  setShowTagsOnly: val => set({ showTagsOnly: val }),
   setSpaceFilter: filter => set({ spaceFilter: filter }),
 
   setQuickAddModal: type => set({ quickAddModal: { isOpen: !!type, type } }),
@@ -255,7 +314,6 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
       }
     }),
   toggleEmptySections: () => set(state => ({ expandedEmptySections: !state.expandedEmptySections })),
-  toggleCompactMode: () => set(state => ({ isCompactMode: !state.isCompactMode })),
   toggleCategory: categoryId =>
     set(state => {
       const isExpanded = state.expandedCategories.includes(categoryId);
@@ -311,7 +369,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
             try {
               const state = get();
               const chromeAny = (window as any).chrome;
-              let response: any = { favourite_id: Math.random().toString(36) };
+              let response: any = { favourite_id: generateEntityId('favorite') };
               let apiType: 'snippet' | 'automation' | 'agent' | 'command' | 'module' | 'session' = 'snippet';
               if (row.category === 'automation') apiType = 'automation';
               else if (row.category === 'agent') apiType = 'agent';
@@ -342,7 +400,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
                 if (idx !== -1 && nd[idx].type === 'data') {
                   nd[idx] = {
                     ...nd[idx],
-                    favourite_id: response?.favourite_id || Math.random().toString(36),
+                    favourite_id: response?.favourite_id || generateEntityId('favorite'),
                     syncStatus: 'saved',
                     favAction: 'adding',
                     fav: true,
@@ -444,7 +502,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
     set(state => {
       const newRow: GridRow = {
         type: 'data',
-        id: Math.random().toString(36).substr(2, 9),
+        id: generateEntityId('spreadsheetRow'),
         name: '',
         url: '',
         folder: '',
@@ -623,6 +681,177 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
 
     set({ tableData: newData });
     state.commitRowToBackend(rowId, noChange);
+  },
+
+  updateRowTags: async (rowId: string, tagIds: string[]) => {
+    const state = useSpreadsheetStore.getState();
+    const index = state.tableData.findIndex(
+      r => (r.type === 'data' || r.type === 'automationModule') && r.id === rowId
+    );
+    if (index === -1) return;
+
+    const newData = [...state.tableData];
+    const row = newData[index] as any;
+    if (!row) return;
+
+    const normalizedTagIds = Array.from(new Set(tagIds.filter(Boolean)));
+    const prevTagIds = row.tagIds || [];
+
+    // Optimistic UI update
+    row.tagIds = normalizedTagIds;
+    row.syncStatus = 'syncing';
+    row.syncMessage = 'Syncing tags...';
+    set({ tableData: newData });
+
+    try {
+      const chromeAny = (window as any).chrome;
+      const isEmbedded = state.isEmbedded;
+      const cat = String(row.category || '').toLowerCase();
+      const section = String(row.section || '').toLowerCase();
+      const itemType = String(row.itemType || '').toLowerCase();
+
+      if (section === 'Notes' || cat === 'note' || itemType === 'note') {
+        const notePayload = {
+          title: row.name || '',
+          body: row.value || '',
+          workspaceId: row.workspace_id || row.workspaceId || null,
+          folderId: row.folder_id ?? row.folderId ?? null,
+          tagIds: normalizedTagIds,
+        };
+        if (isEmbedded && chromeAny?.runtime?.sendMessage) {
+          await new Promise((resolve, reject) => {
+            chromeAny.runtime.sendMessage(
+              { action: 'db_update_note', noteId: String(row.id), input: notePayload },
+              (res: any) => {
+                if (chromeAny.runtime.lastError) return reject(chromeAny.runtime.lastError);
+                if (!res || !res.success) return reject(res?.error || 'Failed to update note tags');
+                resolve(res.note);
+              }
+            );
+          });
+        } else {
+          await updateNote(String(row.id), notePayload as any);
+        }
+      } else if (section === 'Smart Links' || cat === 'link' || itemType === 'link') {
+        const existingLink = useDbStore.getState().links.find(l => l.id === row.id);
+        const linkPayload = {
+          title: row.name || '',
+          urls: row.urls || existingLink?.urls || (row.url ? [{ id: generateEntityId('linkItem'), url: row.url, title: row.name || '', source: 'link' }] : []),
+          workspaceId: row.workspace_id || row.workspaceId || null,
+          folderId: row.folder_id ?? row.folderId ?? null,
+          tagIds: normalizedTagIds,
+        };
+        if (isEmbedded && chromeAny?.runtime?.sendMessage) {
+          await new Promise((resolve, reject) => {
+            chromeAny.runtime.sendMessage(
+              { action: 'db_update_link', linkId: String(row.id), input: linkPayload },
+              (res: any) => {
+                if (chromeAny.runtime.lastError) return reject(chromeAny.runtime.lastError);
+                if (!res || !res.success) return reject(res?.error || 'Failed to update link tags');
+                resolve(res.link);
+              }
+            );
+          });
+        } else {
+          await updateLink(String(row.id), linkPayload as any);
+        }
+      } else if (section === 'Tab Sessions' || cat === 'session' || itemType === 'session') {
+        const sessionPayload = {
+          title: row.name || '',
+          urls: Array.isArray(row.urls) ? row.urls : (row.value ? JSON.parse(row.value).urls : []),
+          workspaceId: row.workspace_id || row.workspaceId || null,
+          folderId: row.folder_id ?? row.folderId ?? null,
+          tagIds: normalizedTagIds,
+        };
+        if (isEmbedded && chromeAny?.runtime?.sendMessage) {
+          await new Promise((resolve, reject) => {
+            chromeAny.runtime.sendMessage(
+              { action: 'db_update_session', sessionId: String(row.id), input: sessionPayload },
+              (res: any) => {
+                if (chromeAny.runtime.lastError) return reject(chromeAny.runtime.lastError);
+                if (!res || !res.success) return reject(res?.error || 'Failed to update session tags');
+                resolve(res.session);
+              }
+            );
+          });
+        } else {
+          await updateSession(String(row.id), sessionPayload as any);
+        }
+      } else if (section === 'Snippets' || cat === 'snippet' || itemType === 'snippet') {
+        const snippetPayload = {
+          title: row.name || '',
+          config: typeof row.value === 'string' ? row.value : JSON.stringify(row.value || ''),
+          workspaceId: row.workspace_id || row.workspaceId || null,
+          folderId: row.folder_id ?? row.folderId ?? null,
+          tagIds: normalizedTagIds,
+        };
+        if (isEmbedded && chromeAny?.runtime?.sendMessage) {
+          await new Promise((resolve, reject) => {
+            chromeAny.runtime.sendMessage(
+              { action: 'db_update_snippet', snippetId: String(row.id), input: snippetPayload },
+              (res: any) => {
+                if (chromeAny.runtime.lastError) return reject(chromeAny.runtime.lastError);
+                if (!res || !res.success) return reject(res?.error || 'Failed to update snippet tags');
+                resolve(res.snippet);
+              }
+            );
+          });
+        } else {
+          await updateSnippet(String(row.id), snippetPayload as any);
+        }
+      } else if (section === 'Todos' || cat === 'todo' || itemType === 'todo') {
+        const dbTags = useDbStore.getState().tags || [];
+        const resolvedTagRecords = dbTags.filter(t => normalizedTagIds.includes(t.id));
+        await updateTodoContent(String(row.id), {
+          tagIds: normalizedTagIds,
+          tags: resolvedTagRecords.map(t => t.name),
+        } as any);
+      } else if (section === 'AI Prompts' || cat === 'aiprompt' || cat === 'ai_prompt' || cat === 'prompt' || itemType === 'aiprompt') {
+        await updateAiPrompt(String(row.id), { tagIds: normalizedTagIds } as any);
+      } else if (section === 'Chat Agents' || cat === 'chatagent' || cat === 'chat_agent' || cat === 'agent' || itemType === 'agent') {
+        await updateChatAgent(String(row.id), { tagIds: normalizedTagIds } as any);
+      } else if (section === 'My Saved Automations' || cat === 'automation' || itemType === 'automation') {
+        const userId = await getUserId();
+        await updateAutomationRecord(userId, { automation_id: String(row.id), tagIds: normalizedTagIds } as any);
+        await (db.automations.update as any)(String(row.id), { tagIds: normalizedTagIds, updatedAt: Date.now() });
+      }
+
+      // Success
+      set(s => {
+        const nd = [...s.tableData];
+        const freshIndex = nd.findIndex(r => (r as any).id === rowId);
+        if (freshIndex !== -1 && (nd[freshIndex].type === 'data' || nd[freshIndex].type === 'automationModule')) {
+          (nd[freshIndex] as any).syncStatus = 'saved';
+          (nd[freshIndex] as any).syncMessage = 'Tags Saved';
+        }
+        return { tableData: nd };
+      });
+
+      setTimeout(() => {
+        set(s => {
+          const nd = [...s.tableData];
+          const freshIndex = nd.findIndex(r => (r as any).id === rowId);
+          if (freshIndex !== -1 && (nd[freshIndex].type === 'data' || nd[freshIndex].type === 'automationModule')) {
+            (nd[freshIndex] as any).syncStatus = 'idle';
+            (nd[freshIndex] as any).syncMessage = undefined;
+          }
+          return { tableData: nd };
+        });
+      }, 2000);
+    } catch (err) {
+      console.error('[updateRowTags] Tag update failed:', err);
+      // Rollback optimistic update
+      set(s => {
+        const nd = [...s.tableData];
+        const freshIndex = nd.findIndex(r => (r as any).id === rowId);
+        if (freshIndex !== -1 && (nd[freshIndex].type === 'data' || nd[freshIndex].type === 'automationModule')) {
+          (nd[freshIndex] as any).tagIds = prevTagIds;
+          (nd[freshIndex] as any).syncStatus = 'error';
+          (nd[freshIndex] as any).syncMessage = 'Tag Save Failed';
+        }
+        return { tableData: nd };
+      });
+    }
   },
 
   overwriteCellData: async (rowId, colIndex, columnId, value, conflictId) => {
@@ -1279,7 +1508,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
                 return matchedExisting;
               }
               return {
-                id: typeof u === 'object' && u?.id && !u.id.startsWith('http') ? u.id : crypto.randomUUID(),
+                id: typeof u === 'object' && u?.id && !u.id.startsWith('http') ? u.id : generateEntityId('linkItem'),
                 url: urlStr,
                 title: typeof u === 'object' && u?.title ? u.title : '',
                 source: 'link'
@@ -1289,7 +1518,7 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
             ? (() => {
                 const matchedExisting = existingUrls.find(eu => eu.url === String(row.url));
                 return [{
-                  id: matchedExisting?.id || crypto.randomUUID(),
+                  id: matchedExisting?.id || generateEntityId('linkItem'),
                   url: String(row.url),
                   title: row.name || '',
                   source: 'link',
@@ -1298,8 +1527,8 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
             : row.value
               ? (() => {
                   const matchedExisting = existingUrls.find(eu => eu.url === String(row.value));
-                  return [{
-                    id: matchedExisting?.id || crypto.randomUUID(),
+                return [{
+                    id: matchedExisting?.id || generateEntityId('linkItem'),
                     url: String(row.value),
                     title: row.name || '',
                     source: 'link',
@@ -2015,12 +2244,12 @@ export const useSpreadsheetStore = create<GridState>((set, get) => ({
         { type: 'section', title: 'Todos' },
         ...realTodos,
 
+        { type: 'section', title: 'Browser Commands' },
+        ...browserCommands,
         { type: 'section', title: 'Saved Automations' },
         ...realAutomations,
         { type: 'section', title: 'Chat Agents' },
         ...realChatAgents,
-        { type: 'section', title: 'Browser Commands' },
-        ...browserCommands,
       ];
       newTableData.forEach(row => {
         if (deletingRowsMap.has(String(row.id))) {

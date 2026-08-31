@@ -2,6 +2,10 @@ import * as React from 'react';
 import { FaTimes } from 'react-icons/fa';
 import { AutoSaveIndicator } from '../autoSaveEngine/autoSave';
 
+import { EditableWidgetTitle } from '../../pages/AltS_search_newtab/src/components/widgets/components/EditableWidgetTitle';
+import { getWidgetHeaderIcon } from '../../pages/AltS_search_newtab/src/components/widgets/utils/widgetHeaderIcons';
+
+
 export interface EditorHeaderProps {
   title: string;
   isDirty?: boolean;
@@ -14,6 +18,14 @@ export interface EditorHeaderProps {
   showAutoSaveStatus?: boolean;
   headerRightPaddingClass?: string;
   showCloseButton?: boolean;
+  isWidgetMode?: boolean;
+  viewId?: string;
+  widgetId?: string;
+  isEditMode?: boolean;
+  typeLabel?: string | null;
+  titleRightActions?: React.ReactNode;
+  titleClassName?: string;
+  hideBorder?: boolean;
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = ({
@@ -28,13 +40,42 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   showAutoSaveStatus = true,
   headerRightPaddingClass = '',
   showCloseButton = true,
+  isWidgetMode = false,
+  viewId,
+  widgetId,
+  isEditMode = false,
+  typeLabel,
+  titleRightActions,
+  titleClassName,
+  hideBorder = false,
 }) => {
   return (
-    <div className="w-full flex items-center py-1 px-3 border-b border-[var(--color-borderDefault)] shrink-0 relative z-30">
-      <div className="flex items-center flex-1 min-w-0 relative">
-        <h3 className="text-lg font-bold text-[var(--color-textPrimary)] pl-2 truncate">
-          {title}
-        </h3>
+    <div className={`w-full flex items-center ${isWidgetMode ? 'px-4 pt-3 pb-1.5' : 'py-1 px-3'} ${hideBorder ? '' : 'border-b border-[var(--color-borderDefault)]'} shrink-0 relative z-30`}>
+      <div className="flex items-center flex-1 min-w-0 relative gap-3">
+        <div className="flex items-center min-w-0">
+          {isWidgetMode && viewId && widgetId ? (
+            <div className="flex items-center min-w-0">
+              <EditableWidgetTitle
+                viewId={viewId}
+                widgetId={widgetId}
+                initialTitle={title || 'Session'}
+                isEditMode={isEditMode}
+                icon={getWidgetHeaderIcon(typeLabel ? `${typeLabel.toLowerCase()}-item` : 'session-item')}
+                typeLabel={typeLabel || 'Session'}
+                className="text-xs font-bold truncate text-[var(--color-textMuted)]"
+              />
+            </div>
+          ) : title ? (
+            <h3 className={titleClassName || 'text-lg font-bold text-[var(--color-textPrimary)] pl-2 truncate'}>
+              {title}
+            </h3>
+          ) : null}
+        </div>
+        {titleRightActions && (
+          <div className="flex-shrink-0 flex items-center">
+            {titleRightActions}
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3 ml-auto relative">
         <div className={`flex items-center gap-3 ${headerRightPaddingClass}`}>

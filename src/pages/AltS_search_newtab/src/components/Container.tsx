@@ -9,7 +9,6 @@ import {
 } from '../../../../allObjectFolder/src/createObject/automationBeta/utilities/automation';
 import clsx from 'clsx';
 
-import ModelSelector from '../../../../allObjectFolder/src/createObject/ChatAgent/ModelSelector';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { isLocalCommandId, findCommandByAnyId } from '../../../../shared-components/commands';
 import { resolveAutomationIconMeta } from '../../../../shared-components/icons/automationDynamicIcon';
@@ -18,8 +17,9 @@ import {
   resolvePrimaryAction,
 } from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
 import { resolveEntityById } from '../../../../shared-components/utils/entityResolver';
-import { motion, AnimatePresence } from 'framer-motion';
-import { FaLink,
+import { generateEntityId } from '../../../../shared-components/utils/idGenerator';
+import {
+  FaLink,
   FaNetworkWired,
   FaBook,
   FaPlus,
@@ -30,13 +30,12 @@ import { FaLink,
   FaMoon,
   FaFileAlt,
   FaHome,
-  FaChevronDown } from 'react-icons/fa';
+  FaChevronDown,
+} from 'react-icons/fa';
 import { FiCreditCard, FiTerminal, FiSettings, FiCheck, FiLayout } from 'react-icons/fi';
 import { LuSparkles } from 'react-icons/lu';
 import { AiOutlineEnter } from 'react-icons/ai';
 import { BsPinAngle, BsPinAngleFill, BsList, BsGrid, BsTable, BsLayoutSidebarInsetReverse } from 'react-icons/bs';
-
-import DeleteDialog from '../../../../shared-components/modals/deleteDialog';
 
 import type { SnippetActionDetail } from '../../../../allObjectFolder/src/createObject/snippets/SnippetClickActions';
 import type { InteractiveItem } from '../landingPage/views/defaultContainer';
@@ -49,23 +48,15 @@ import { type LocalCommandId } from '../../../../shared-components/searchBarMain
 import type { FolderData } from '../../../../settings/allWorkspaceManager/folders/folderTypes';
 import type { WorkspaceData } from '../../../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 import type { SnippetRecord } from '../../../../allObjectFolder/src/createObject/snippets/snippetTypes';
-import { EditSnippetScreen } from '../../../../allObjectFolder/src/createObject/snippets/SnippetEditorScreen';
-import { NoteEditorView, CreateTodoView } from '../../../../allObjectFolder/src';
-import {
-  AiPromptEditorView,
-  hasRunnableAiPrompt,
-  runAiPrompt,
-} from '../../../../allObjectFolder/src/createObject/aiPrompt';
+import { hasRunnableAiPrompt, runAiPrompt } from '../../../../allObjectFolder/src/createObject/aiPrompt';
 
 import { useUIStore } from '../../../../shared-components/uiStateManager';
+import { launchSessionSmartWithReferences } from '../../../../allObjectFolder/src/createObject/session/sessionReferenceActions';
 
 import { getUserId } from '../../../../storage/API/core/api';
-import LinkEditorView from '../../../../allObjectFolder/src/createObject/links/ui/LinkEditorView';
-import SessionEditorView from '../../../../allObjectFolder/src/createObject/session/ui/SessionEditorView';
-import AutomationDashboard from '../../../../allObjectFolder/src/createObject/automationBeta/dashboard/automationDashboard';
 import { updateSnippet } from '../../../../allObjectFolder/src/createObject/snippets/snippetData';
 import { nowUtc } from '../../../../shared-components/utils';
-import { format, isSameDay } from 'date-fns';
+import { isSameDay } from 'date-fns';
 import { toggleFavoriteRecord } from '../../../../shared-components/favorites/favoriteData';
 import {
   getItemCompoundId,
@@ -81,29 +72,60 @@ import Searchbar, {
   type SuggestionState,
   type WorkspaceItemSuggestion as SnippetSuggestion,
 } from '../../../../shared-components/searchBarMain/userInterfaceComponents/searchBar';
-import ChatAgent from '../../../../allObjectFolder/src/createObject/ChatAgent';
-import AutomationSavePrompt from '../../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/automationSavePrompt';
 import useNotification from '../../../../shared-components/notifications/useNotification';
 
-import UnsavedChangesDialog from '../../../../shared-components/modals/unsavedChangesDialog';
 import { useConvertibleItems } from '../../../../allObjectFolder/src/createObject/todos/todoHooks';
-import CreateWorkspacePanel from '../../../../settings/allWorkspaceManager/workspaces/ui/CreateWorkspacePanel';
-import CreateFolderPanel from '../../../../settings/allWorkspaceManager/folders/ui/CreateFolderPanel';
+// Workspace/folder creation is only allowed from onboarding for now.
+// import CreateWorkspacePanel from '../../../../settings/allWorkspaceManager/workspaces/ui/CreateWorkspacePanel';
+// import CreateFolderPanel from '../../../../settings/allWorkspaceManager/folders/ui/CreateFolderPanel';
 
-import AutomationCapabilitiesMenu from '../../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/automationCapabilitiesMenu';
-import MyAutomationsList from '../../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/myAutomationsList';
-import BoardView from '../../../../shared-components/BoardView/BoardView';
-import OnboardingCards from '../../../../welcomeGuide/OnboardingCards';
-import { isOnboardingCompleted } from '../../../../storage/localStorage/onboardingStorage';
 import { storageDebug } from '../../../../shared-components/utils/storageDebugLogger';
 
 import AutomationActionMenu from '../../../../allObjectFolder/src/createObject/automationBeta/utilities/automationActionMenu';
 
-import { SettingsLayout, GeneralSettingsPanel, AllWorkspacesPanel } from '../../../../settings';
-import SpreadsheetMainContainer from '../../../../shared-components/spreadsheetUi/ui/spreadsheetMainContainer';
 import { SessionGridIcon } from '../../../../shared-components/icons/sessionGridIcon';
+import { updateWidgetSettingsAsync } from '../../../../storage/localStorage/widgetDashboardStorage';
 import WidgetMainContainer from './widgets/components/WidgetMainContainer';
+import { startupPerf } from '../startupPerf';
 
+const DeleteDialog = React.lazy(() => import('../../../../shared-components/modals/deleteDialog'));
+const EditSnippetScreen = React.lazy(
+  () => import('../../../../allObjectFolder/src/createObject/snippets/SnippetEditorScreen'),
+);
+const NoteEditorView = React.lazy(() =>
+  import('../../../../allObjectFolder/src/createObject/notes/ui/NoteEditorView').then(module => ({
+    default: module.NoteEditorView,
+  })),
+);
+const CreateTodoView = React.lazy(() => import('../../../../allObjectFolder/src/createObject/todos/ui/CreateTodoView'));
+const AiPromptEditorView = React.lazy(() =>
+  import('../../../../allObjectFolder/src/createObject/aiPrompt/ui/AiPromptEditorView').then(module => ({
+    default: module.AiPromptEditorView,
+  })),
+);
+const LinkEditorView = React.lazy(() => import('../../../../allObjectFolder/src/createObject/links/ui/LinkEditorView'));
+const SessionEditorView = React.lazy(
+  () => import('../../../../allObjectFolder/src/createObject/session/ui/SessionEditorView'),
+);
+const AutomationDashboard = React.lazy(
+  () => import('../../../../allObjectFolder/src/createObject/automationBeta/dashboard/automationDashboard'),
+);
+const ChatAgent = React.lazy(() => import('../../../../allObjectFolder/src/createObject/ChatAgent'));
+const AutomationSavePrompt = React.lazy(
+  () => import('../../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/automationSavePrompt'),
+);
+const AutomationCapabilitiesMenu = React.lazy(
+  () =>
+    import('../../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/automationCapabilitiesMenu'),
+);
+const MyAutomationsList = React.lazy(
+  () => import('../../../../allObjectFolder/src/createObject/automationBeta/searchIntegration/myAutomationsList'),
+);
+const BoardView = React.lazy(() => import('../../../../shared-components/BoardView/BoardView'));
+const SettingsLayout = React.lazy(() => import('../../../../settings/uxLayoutCustomization/settingsLayout'));
+const SpreadsheetMainContainer = React.lazy(
+  () => import('../../../../shared-components/spreadsheetUi/ui/spreadsheetMainContainer'),
+);
 
 type Snippet = SnippetRecord & {
   key?: string;
@@ -148,8 +170,6 @@ interface ContainerProps {
   onMenuStateChange?: (isOpen: boolean) => void;
   onAutomationActiveChange?: (isActive: boolean) => void;
   onQueryChange?: (value: string) => void;
-  showTutorialTrigger?: number;
-  onTutorialTriggerConsumed?: () => void;
   isSpreadsheetViewOpen?: boolean;
   onOpenSpreadsheetMainContainer?: (section?: string) => void;
   onCloseSpreadsheetMainContainer?: () => void;
@@ -160,15 +180,16 @@ interface ContainerProps {
   onBoardViewOpenChange?: (isOpen: boolean) => void;
   /** Called after user confirms unsaved-changes dialog triggered by Alt+S */
   onShortcutBoardView?: () => void;
-  showTutorial?: boolean;
-  setShowTutorial?: React.Dispatch<React.SetStateAction<boolean>>;
   /** Called after user confirms unsaved-changes dialog triggered by shortcut */
   onShortcutCreateMenu?: () => void;
   onSuggestionStateChange?: (state: SuggestionState | null) => void;
   onHoverSlashDot?: () => void;
   onBoardViewRedirect?: () => void;
-  onTutorialVisibilityChange?: (visible: boolean) => void;
   isWidgetEditMode?: boolean;
+  onEnterWidgetEditMode?: (widgetId?: string) => void;
+  onExitWidgetEditMode?: () => void;
+  pendingSelectedWidgetId?: string | null;
+  isLeftSidebarCollapsed?: boolean;
 }
 
 const KeyHint: React.FC<{ keys: string[] }> = ({ keys }) => (
@@ -208,8 +229,6 @@ const Container: React.FC<ContainerProps> = ({
   isLoggedIn,
   onLockedCommandChange,
   onQueryChange: propOnQueryChange,
-  showTutorialTrigger,
-  onTutorialTriggerConsumed,
   isSpreadsheetViewOpen,
   onOpenSpreadsheetMainContainer,
   onCloseSpreadsheetMainContainer,
@@ -223,18 +242,29 @@ const Container: React.FC<ContainerProps> = ({
   onSuggestionStateChange,
   onHoverSlashDot,
   onBoardViewRedirect,
-  onTutorialVisibilityChange,
-  showTutorial = false,
-  setShowTutorial,
   isWidgetEditMode = false,
+  onEnterWidgetEditMode,
+  onExitWidgetEditMode,
+  pendingSelectedWidgetId,
+  isLeftSidebarCollapsed = false,
 }: ContainerProps) => {
-  const [storeTab, setStoreTab] = useState<'catalog' | 'saved'>('catalog');
-  const [isOnboardingDone, setIsOnboardingDone] = useState(false);
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
 
+  const [windowWidth, setWindowWidth] = useState(() => typeof window !== 'undefined' ? window.innerWidth : 1366);
+
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const [storeTab, setStoreTab] = useState<'catalog' | 'saved'>('catalog');
   const boardViewRef = useRef<any>(null);
 
   // Clear any persisted dirty/draft states on app initialization (e.g. refresh)
   useEffect(() => {
+    startupPerf('Container:clearDrafts');
     useUIStore.getState().setDraftAutomation(null);
     // Clear Todo draft as well
     useUIStore.getState().setTodoDraft({
@@ -278,6 +308,7 @@ const Container: React.FC<ContainerProps> = ({
   const sameJson = (a: any, b: any) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
   useEffect(() => {
+    startupPerf('Container:initDbSync:start');
     useDbStore.getState().initDbSync();
   }, []);
 
@@ -297,6 +328,11 @@ const Container: React.FC<ContainerProps> = ({
 
         // 2. Load from cache immediately
         if (storage.installed_modules && Array.isArray(storage.installed_modules)) {
+          startupPerf('Container:installedModulesCacheResolved', {
+            count: storage.installed_modules.length,
+            isCoolingDown,
+            forceCloud,
+          });
           setInstalledModules(prev => (sameJson(prev, storage.installed_modules) ? prev : storage.installed_modules));
           // If we are cooling down and not forced, we are done!
           if (isCoolingDown && !forceCloud) return;
@@ -409,6 +445,10 @@ const Container: React.FC<ContainerProps> = ({
       const legacyAutomations = toAutomationArray(result.saved_automations).map(withIconMeta);
       const local = syncedAutomations.length > 0 ? syncedAutomations : legacyAutomations;
       const nextAiLocals = getAiLocals(local);
+      startupPerf('Container:automationsStorageResolved', {
+        savedCount: local.length,
+        aiLocalCount: nextAiLocals.length,
+      });
       setLocalSavedAutomations(prev => (sameJson(prev, local) ? prev : local));
       setLocalAutomations(prev => (sameJson(prev, nextAiLocals) ? prev : nextAiLocals));
       persistIconMeta(local);
@@ -431,6 +471,9 @@ const Container: React.FC<ContainerProps> = ({
     const fetchInstalled = async () => {
       const cached = await chrome.storage.local.get(['installed_modules']);
       if (cached?.installed_modules) {
+        startupPerf('Container:installedModulesInitialResolved', {
+          count: cached.installed_modules.length,
+        });
         setInstalledModules(prev => (sameJson(prev, cached.installed_modules) ? prev : cached.installed_modules));
       }
       // Also trigger a fresh fetch from API to ensure metadata (icons, etc.) are up to date
@@ -459,6 +502,27 @@ const Container: React.FC<ContainerProps> = ({
   const dbHotkeysMap = useDbStore(state => state.hotkeysMap);
   const dbChatAgents = useDbStore(state => state.chatAgents);
   const dbAiPrompts = useDbStore(state => state.aiPrompts);
+
+  useEffect(() => {
+    startupPerf('Container:commit', {
+      renderCount: renderCountRef.current,
+      activeViewType: activeView?.type || 'none',
+      activeEditorType: activeEditor?.type || 'none',
+      suggestionVisible: Boolean(suggestionState),
+      lockedCommand: suggestionState?.lockedCommand || null,
+      searchValueLength: searchValue.length,
+      workspaceCount: dbWorkspaces.length,
+      folderCount: dbFolders.length,
+      snippetCount: dbSnippets.length,
+      automationCount: dbAutomations.length,
+      todoCount: dbTodos.length,
+      chatAgentCount: dbChatAgents.length,
+      aiPromptCount: dbAiPrompts.length,
+      localAutomationCount: localAutomations.length,
+      localSavedAutomationCount: localSavedAutomations.length,
+      installedModuleCount: installedModules.length,
+    });
+  });
 
   const [activeTodoId, setActiveTodoId] = React.useState<string | null>(null);
 
@@ -506,7 +570,13 @@ const Container: React.FC<ContainerProps> = ({
       try {
         await db.todos.delete(id);
         await deleteTodo(id);
-        const currentActiveId = activeTodoId || (useUIStore.getState().activeEditor?.type === 'todo' ? (useUIStore.getState().activeEditor?.props?.prefill?.todo_id || useUIStore.getState().activeEditor?.props?.prefill?.id || useUIStore.getState().activeEditor?.id) : null);
+        const currentActiveId =
+          activeTodoId ||
+          (useUIStore.getState().activeEditor?.type === 'todo'
+            ? useUIStore.getState().activeEditor?.props?.prefill?.todo_id ||
+              useUIStore.getState().activeEditor?.props?.prefill?.id ||
+              useUIStore.getState().activeEditor?.id
+            : null);
         if (String(currentActiveId) === String(id) || activeTodoId === id) {
           setActiveTodoId(null);
           useUIStore.getState().setTodoCreatePrefill(null);
@@ -571,10 +641,6 @@ const Container: React.FC<ContainerProps> = ({
       console.error('[Container] Failed to update todo inline field:', e);
     }
   }, []);
-
-  const isReturningUser = useMemo(() => {
-    return isOnboardingDone;
-  }, [isOnboardingDone]);
 
   const getWorkspaceIdForFolder = useCallback(
     (folderId: string | null | undefined): string | null => {
@@ -788,6 +854,7 @@ const Container: React.FC<ContainerProps> = ({
   const selectedSnippet = activeEditor ? selectedSnippetRaw : null;
   const isCreatingEditorView =
     activeEditor?.type === 'note' ||
+    activeEditor?.type === 'snippet' ||
     activeEditor?.type === 'aiPrompt' ||
     activeEditor?.type === 'session' ||
     activeEditor?.type === 'todo';
@@ -819,59 +886,6 @@ const Container: React.FC<ContainerProps> = ({
     }
   }, [selectedFolder?.folder_id, selectedWorkspace?.workspace_id, selectedTeam?.team_id]);
   */
-
-  const [isCheckingTutorial, setIsCheckingTutorial] = useState(true);
-  const tutorialVideoSrc = 'https://drive.google.com/file/d/1IyGR9rKItnPPwXdw8RJkNcfnf7HNdfmz/view?usp=sharing';
-
-  useEffect(() => {
-    const checkTutorial = async () => {
-      try {
-        const completed = await isOnboardingCompleted();
-        setIsOnboardingDone(completed);
-        if (completed) {
-          setIsCheckingTutorial(false);
-          return;
-        }
-      } catch (error) {
-        console.error('[Container] Error checking onboarding status:', error);
-      }
-
-      // Do NOT show tutorial overlay automatically on startup/refresh
-      setIsCheckingTutorial(false);
-    };
-    checkTutorial();
-  }, []);
-
-  useEffect(() => {
-    if (showTutorial) {
-      isOnboardingCompleted().then(completed => {
-        setIsOnboardingDone(completed);
-      });
-    }
-  }, [showTutorial]);
-
-  const handleCloseTutorial = useCallback(async () => {
-    setShowTutorial?.(false);
-    const chromeAny = (window as any).chrome;
-    if (chromeAny?.storage?.local && !(window as any).isReplayingTutorial) {
-      chromeAny.storage.local.set({ tutorial_watched: true });
-    }
-    // 1. Refresh all data (snippets, workspaces) and AWAIT it
-    await (reload() as any);
-
-    // 2. Trigger favorites re-sync by toggling the trigger.
-    // useFavoritesSync listens for this change, clears its internal cache, and fetches cloud favs.
-    try {
-      if (chromeAny?.storage?.local) {
-        chromeAny.storage.local.get('user_fav_sync_trigger', (res: any) => {
-          const val = res.user_fav_sync_trigger || 0;
-          chromeAny.storage.local.set({ user_fav_sync_trigger: val + 1 });
-        });
-      }
-    } catch (e) {
-      console.error('[Container] Failed to trigger favorites sync:', e);
-    }
-  }, [reload, onTutorialTriggerConsumed]);
 
   // Load and sync favorites
   useEffect(() => {
@@ -938,6 +952,11 @@ const Container: React.FC<ContainerProps> = ({
 
     // Clear suggestion state
     setSuggestionState(null);
+
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+    window.scrollTo(0, 0);
 
     // RESET TO HOME VIEW - ensures fresh start on refresh/new tab
     // Specifically clear any pending AI/Command locks via the ref if it's available after mount
@@ -1025,17 +1044,20 @@ const Container: React.FC<ContainerProps> = ({
   );
 
   const handleCreateWorkspace = useCallback(() => {
-    useUIStore.getState().setView({ type: 'createWorkspace' });
-    onCreateWorkspace?.();
+    // Workspace creation is only allowed from onboarding for now.
+    // useUIStore.getState().setView({ type: 'createWorkspace' });
+    // onCreateWorkspace?.();
   }, [onCreateWorkspace]);
 
   const handleCreateFolder = useCallback(() => {
-    useUIStore.getState().setView({ type: 'createFolder' });
+    // Folder creation is only allowed from onboarding for now.
+    // useUIStore.getState().setView({ type: 'createFolder' });
   }, []);
 
   const handleCreateOrganization = useCallback(() => {
-    useUIStore.getState().setView({ type: 'createWorkspace' });
-    onCreateOrganization?.();
+    // Organization/workspace creation is only allowed from onboarding for now.
+    // useUIStore.getState().setView({ type: 'createWorkspace' });
+    // onCreateOrganization?.();
   }, [onCreateOrganization]);
 
   const handleWorkspaceShare = useCallback(
@@ -1053,7 +1075,9 @@ const Container: React.FC<ContainerProps> = ({
     if (onOrganizationHandlersReady) {
       onOrganizationHandlersReady({
         onOrganizationSettings: handleOrganizationSettings,
-        onCreateOrganization: handleCreateOrganization,
+        // Organization/workspace creation is only allowed from onboarding for now.
+        // onCreateOrganization: handleCreateOrganization,
+        onCreateOrganization: () => {},
         onWorkspaceShare: handleWorkspaceShare,
       });
     }
@@ -1159,7 +1183,7 @@ const Container: React.FC<ContainerProps> = ({
         suggestionState?.lockedCommand === 'claude' ||
         suggestionState?.lockedCommand === 'gemini';
 
-      if (!isInEditor && !isAiLocked && !isModalOpen() && searchbarRef.current) {
+      if (!isInEditor && !isAiLocked && !isModalOpen() && !isWidgetEditMode && searchbarRef.current) {
         searchbarRef.current.focus();
       }
     }, 0);
@@ -1186,7 +1210,7 @@ const Container: React.FC<ContainerProps> = ({
       // Removed search clearing to allow persistent suggestions during sidebar navigation
       // searchbarRef.current?.clear();
       setTimeout(() => {
-        if (!isModalOpen() && searchbarRef.current) {
+        if (!isModalOpen() && !isWidgetEditMode && searchbarRef.current) {
           searchbarRef.current.focus();
         }
       }, 0);
@@ -1602,15 +1626,20 @@ const Container: React.FC<ContainerProps> = ({
           sessionNames = Array.isArray(itemValue?.names) ? itemValue.names : [];
         }
 
-        chrome.runtime.sendMessage({
-          action: 'start_session',
-          sessionId: searchItem.snippet_id || searchItem.id,
-          sessionName: searchItem.key || 'Untitled Tab Session',
+        await launchSessionSmartWithReferences(sessionRecord || {
+          id: searchItem.snippet_id || searchItem.id,
+          title: searchItem.key || 'Untitled Tab Session',
           workspaceId: workspace?.workspace_id || null,
           folderId: folder?.folder_id || null,
-          initialUrls: sessionUrls,
-          initialNames: sessionNames,
-          openSettings: sessionRecord?.sessionOpenSettings || (searchItem as any).sessionOpenSettings,
+          urls: sessionUrls.map((url, index) => ({
+            url,
+            name: sessionNames[index] || url,
+            title: sessionNames[index] || url,
+          })),
+          sessionOpenSettings: (searchItem as any).sessionOpenSettings,
+        }, {
+          source: 'search',
+          requireAutoSave: false,
         });
         return;
       }
@@ -1857,12 +1886,7 @@ const Container: React.FC<ContainerProps> = ({
         selectedTeamStorageMode: selectedTeam?.storageMode,
       });
     }
-  }, [
-    homeDeleteContext.detail,
-    reload,
-    selectedSnippet,
-    selectedTeam,
-  ]);
+  }, [homeDeleteContext.detail, reload, selectedSnippet, selectedTeam]);
 
   // Allow DefaultContainer (HomeView) to return focus back to the search bar
   const handleRequestFocusSearch = useCallback(() => {
@@ -1948,7 +1972,8 @@ const Container: React.FC<ContainerProps> = ({
             } else if (view.kind === 'sessionEditor') {
               useUIStore.getState().openEditor({ type: 'session', id: 'new', props: view.sessionProps });
             } else if (view.kind === 'folderEditor') {
-              useUIStore.getState().openCreateFolder();
+              // Folder creation is only allowed from onboarding for now.
+              // useUIStore.getState().openCreateFolder();
             } else if (view.kind === 'agentPanel') {
               useUIStore.getState().openEditor({ type: 'agent', id: 'new', props: view.agentProps });
             } else if (view.kind === 'custom') {
@@ -1966,9 +1991,11 @@ const Container: React.FC<ContainerProps> = ({
                 searchbarRef.current?.focus();
               }, 10);
             } else if (view.kind === 'createWorkspace') {
-              useUIStore.getState().openCreateWorkspace();
+              // Workspace creation is only allowed from onboarding for now.
+              // useUIStore.getState().openCreateWorkspace();
             } else if (view.kind === 'createFolder') {
-              useUIStore.getState().openCreateFolder();
+              // Folder creation is only allowed from onboarding for now.
+              // useUIStore.getState().openCreateFolder();
             } else if (view.kind === 'workspaceShare') {
             } else if (commandId === 'showallnotes') {
               setSuggestionState(null);
@@ -2320,7 +2347,7 @@ const Container: React.FC<ContainerProps> = ({
         }
 
         const taskValue = data.description;
-        let todoIdVal = `local-temp-${Date.now()}`;
+        let todoIdVal = generateEntityId('todo');
 
         // Save to Dexie database first to get the correct entity ID
         try {
@@ -2528,6 +2555,16 @@ const Container: React.FC<ContainerProps> = ({
   // DefaultContainer listens to global keydown events (like AltS) and
   // handles ArrowUp/ArrowDown navigation while the search input stays focused.
 
+  const isBoardSlashDropdownActive = useMemo(() => {
+    if (suggestionState?.showEmptySlashDropdown) return true;
+    const val = (suggestionState?.value || '').replace(/\u00A0/g, ' ');
+    if (!val.startsWith('/')) return false;
+    const textAfterSlash = val.slice(1).toUpperCase();
+    const aliases = ['A', 'T', 'N', 'S', 'P', 'L', 'C', 'B'];
+    const hasSpaceMatch = aliases.some(alias => textAfterSlash.startsWith(alias + ' '));
+    return !hasSpaceMatch;
+  }, [suggestionState?.value, suggestionState?.showEmptySlashDropdown]);
+
   // Determines what to render in the main content area
   const renderMainContent = () => {
     // Priority -1: Sheet UI
@@ -2535,13 +2572,13 @@ const Container: React.FC<ContainerProps> = ({
     if (isSpreadsheetViewOpen) {
       sheetBackground = (
         <div className="flex-1 w-full flex overflow-auto p-[1px] relative">
+          {/* Organization/workspace creation is only allowed from onboarding for now.
+              Previously passed onCreateOrganization={handleCreateOrganization} and onCreateWorkspace={onCreateWorkspace}. */}
           <SpreadsheetMainContainer
             onClose={onCloseSpreadsheetMainContainer}
             savedAutomations={savedAutomations}
             savedAgents={savedAiAgents}
-            onCreateOrganization={handleCreateOrganization}
             onOrganizationSettings={handleOrganizationSettings}
-            onCreateWorkspace={onCreateWorkspace}
             isLoggedIn={isLoggedIn}
             onRequireLogin={() => {}}
             onBoardViewRedirect={onBoardViewRedirect}
@@ -2597,7 +2634,10 @@ const Container: React.FC<ContainerProps> = ({
     }
 
     // Priority 1: Editor
-    const showEditor = activeEditor?.type === 'note' || activeEditor?.type === 'link';
+    const showEditor =
+      activeEditor?.type === 'note' ||
+      activeEditor?.type === 'snippet' ||
+      activeEditor?.type === 'link';
 
     if (activeEditor?.type === 'session') {
       const editorComponent = (
@@ -2630,9 +2670,11 @@ const Container: React.FC<ContainerProps> = ({
 
     if (activeEditor?.type === 'todo') {
       const editorComponent = (
-        <div className="flex-1 min-h-0 pt-6">
+        <div className="flex-1 min-h-0">
           <div className="h-full w-full flex flex-col overflow-visible">
             <CreateTodoView
+              key={`todo-editor-${activeEditor?.id || 'new'}-${activeEditor?.openInstanceId || 0}`}
+              isOverlay={Boolean(activeEditor?.props?.isOverlay)}
               items={finalConvertibleItems}
               onCreateTodo={async (data: any) => {
                 await handleCreateFromSelection(data);
@@ -2693,7 +2735,14 @@ const Container: React.FC<ContainerProps> = ({
         );
       }
 
-      return editorComponent;
+      const isNormalTodoMode = !activeEditor?.props?.isOverlay && !isFocusMode;
+      return (
+        <div className={`flex-1 min-h-0 pt-6 ${isNormalTodoMode ? 'bg-[var(--color-editorBg)] h-full w-full' : ''}`}>
+          <div className="h-full w-full flex flex-col overflow-visible">
+            {editorComponent}
+          </div>
+        </div>
+      );
     }
 
     // Agent Panel
@@ -2721,10 +2770,51 @@ const Container: React.FC<ContainerProps> = ({
 
     // AI Prompt Generator
     if (activeEditor?.type === 'aiPrompt') {
+      const aiPromptCreationContext = activeEditor?.props?.aiPromptWidgetCreationContext;
+      const aiPromptInitialTagIds = aiPromptCreationContext?.sourceMode === 'tags' ? aiPromptCreationContext.selectedTagIds : undefined;
+
+      const handleAiPromptCreated = async (createdPrompt: any) => {
+        if (!aiPromptCreationContext) return;
+        const { widgetId, viewId, sourceMode } = aiPromptCreationContext;
+
+        if (sourceMode === 'manual') {
+          try {
+            let currentWidget: any = null;
+            let currentSettings: any = {};
+            let currentSourceMode = 'all';
+
+            const dbWidget = await db.widgets.get(widgetId);
+            if (dbWidget && dbWidget.viewId === viewId) {
+              currentSettings = dbWidget.settings || {};
+              currentSourceMode = currentSettings.sourceMode || 'all';
+              currentWidget = dbWidget;
+            }
+
+            if (!currentWidget) return;
+            if (currentSourceMode !== 'manual') return;
+
+            const existingPromptIds: string[] = Array.isArray(currentSettings.selectedPromptIds)
+              ? currentSettings.selectedPromptIds
+              : [];
+
+            if (!existingPromptIds.includes(createdPrompt.id)) {
+              const updatedPromptIds = [...existingPromptIds, createdPrompt.id];
+              await updateWidgetSettingsAsync(viewId, widgetId, {
+                ...currentSettings,
+                selectedPromptIds: updatedPromptIds,
+              });
+            }
+          } catch (err) {
+            console.error('[Container] Failed to append created AI prompt to Custom widget settings:', err);
+          }
+        }
+      };
+
       const editorComponent = (
-        <div className="flex-1 min-h-0 pt-6">
+        <div className="flex-1 min-h-0">
           <div className="h-full w-full flex flex-col overflow-visible">
             <AiPromptEditorView
+              key={`ai-prompt-editor-${activeEditor?.id || 'new'}-${activeEditor?.openInstanceId || 0}`}
               aiPromptId={activeEditor?.id === 'new' ? null : activeEditor?.id}
               onBack={() => {
                 useUIStore.getState().closeEditor();
@@ -2732,7 +2822,10 @@ const Container: React.FC<ContainerProps> = ({
                   useUIStore.getState().setView({ type: 'home' });
                 }
               }}
+              initialTagIds={aiPromptInitialTagIds}
+              onAiPromptCreated={handleAiPromptCreated}
               isFullScreenMode={false}
+              isOverlay={Boolean(activeEditor?.props?.isOverlay)}
             />
           </div>
         </div>
@@ -2749,7 +2842,14 @@ const Container: React.FC<ContainerProps> = ({
         );
       }
 
-      return editorComponent;
+      const isNormalAiPromptMode = !activeEditor?.props?.isOverlay && !isFocusMode;
+      return (
+        <div className={`flex-1 min-h-0 pt-6 ${isNormalAiPromptMode ? 'bg-[var(--color-editorBg)] h-full w-full' : ''}`}>
+          <div className="h-full w-full flex flex-col overflow-visible">
+            {editorComponent}
+          </div>
+        </div>
+      );
     }
 
     if (showEditor) {
@@ -2774,6 +2874,7 @@ const Container: React.FC<ContainerProps> = ({
       // The 'category' prop was passed to RichTextEditor.
 
       const isSnippetMode =
+        activeEditor?.type === 'snippet' ||
         activeEditor?.props?.snippet?.category === 'snippet' ||
         activeEditor?.props?.snippet?.type === 'snippet' ||
         activeEditor?.props?.category === 'snippet';
@@ -2783,13 +2884,54 @@ const Container: React.FC<ContainerProps> = ({
           ? useDbStore.getState().snippets.find(s => s.id === activeEditor?.id)
           : null;
 
-      if (activeEditor?.type === 'note' || activeEditor?.type === 'link') {
+      if (activeEditor?.type === 'note' || activeEditor?.type === 'link' || activeEditor?.type === 'snippet') {
         let editorContent: React.ReactNode = null;
 
         if (activeEditor?.type === 'link') {
+          const creationContext = activeEditor?.props?.linkWidgetCreationContext;
+          const initialTagIds = creationContext?.sourceMode === 'tags' ? creationContext.selectedTagIds : undefined;
+
+          const handleLinkCreated = async (createdLink: any) => {
+            if (!creationContext) return;
+            const { widgetId, viewId, sourceMode } = creationContext;
+
+            if (sourceMode === 'manual') {
+              try {
+                let currentWidget: any = null;
+                let currentSettings: any = {};
+                let currentSourceMode = 'all';
+
+                const dbWidget = await db.widgets.get(widgetId);
+                if (dbWidget && dbWidget.viewId === viewId) {
+                  currentSettings = dbWidget.settings || {};
+                  currentSourceMode = currentSettings.sourceMode || 'all';
+                  currentWidget = dbWidget;
+                }
+
+                if (!currentWidget) return;
+                if (currentSourceMode !== 'manual') return;
+
+                const existingCollectionIds: string[] = Array.isArray(currentSettings.selectedCollectionIds)
+                  ? currentSettings.selectedCollectionIds
+                  : [];
+
+                if (!existingCollectionIds.includes(createdLink.id)) {
+                  const updatedCollectionIds = [...existingCollectionIds, createdLink.id];
+                  await updateWidgetSettingsAsync(viewId, widgetId, {
+                    ...currentSettings,
+                    selectedCollectionIds: updatedCollectionIds,
+                  });
+                }
+              } catch (err) {
+                console.error('[Container] Failed to append created link to Custom widget settings:', err);
+              }
+            }
+          };
+
           editorContent = (
             <LinkEditorView
               isOpen={true}
+              isOverlay={Boolean(activeEditor?.props?.isOverlay)}
               onClose={() => {
                 useUIStore.getState().closeEditor();
                 if (!activeEditor?.props?.isOverlay) {
@@ -2801,19 +2943,62 @@ const Container: React.FC<ContainerProps> = ({
               }}
               link={activeEditor?.props?.snippet || activeLinkSnippet || null}
               prefill={activeEditor?.props?.prefill || linkEditPrefill || null}
+              initialTagIds={initialTagIds}
+              onLinkCreated={handleLinkCreated}
               reload={reload}
             />
           );
         } else if (isSnippetMode) {
+          const snippetCreationContext = activeEditor?.props?.snippetWidgetCreationContext;
+          const snippetInitialTagIds = snippetCreationContext?.sourceMode === 'tags' ? snippetCreationContext.selectedTagIds : undefined;
+
+          const handleSnippetCreated = async (createdSnippet: any) => {
+            if (!snippetCreationContext) return;
+            const { widgetId, viewId, sourceMode } = snippetCreationContext;
+
+            if (sourceMode === 'manual') {
+              try {
+                let currentWidget: any = null;
+                let currentSettings: any = {};
+                let currentSourceMode = 'all';
+
+                const dbWidget = await db.widgets.get(widgetId);
+                if (dbWidget && dbWidget.viewId === viewId) {
+                  currentSettings = dbWidget.settings || {};
+                  currentSourceMode = currentSettings.sourceMode || 'all';
+                  currentWidget = dbWidget;
+                }
+
+                if (!currentWidget) return;
+                if (currentSourceMode !== 'manual') return;
+
+                const existingSnippetIds: string[] = Array.isArray(currentSettings.selectedSnippetIds)
+                  ? currentSettings.selectedSnippetIds
+                  : [];
+
+                if (!existingSnippetIds.includes(createdSnippet.id)) {
+                  const updatedSnippetIds = [...existingSnippetIds, createdSnippet.id];
+                  await updateWidgetSettingsAsync(viewId, widgetId, {
+                    ...currentSettings,
+                    selectedSnippetIds: updatedSnippetIds,
+                  });
+                }
+              } catch (err) {
+                console.error('[Container] Failed to append created snippet to Custom widget settings:', err);
+              }
+            }
+          };
+
           editorContent = (
             <EditSnippetScreen
+              isOverlay={Boolean(activeEditor?.props?.isOverlay)}
               key={`snippet-editor-${activeEditor?.id || 'new'}-${activeEditor?.openInstanceId || 0}`}
               selectedSnippet={activeEditor?.props?.snippet || hotkeySnippet || effectiveSnippet}
               isCreatingNew={activeEditor?.id === 'new'}
               snippetBreadCrum={snippetBreadCrum}
               reload={handleReload}
               favoritesMapping={favoritesMapping}
-              setFavoritesMapping={setFavoritesMapping} // fix type mismatch if any
+              setFavoritesMapping={setFavoritesMapping}
               onBack={() => {
                 useUIStore.getState().closeEditor();
                 if (!activeEditor?.props?.isOverlay) {
@@ -2825,6 +3010,8 @@ const Container: React.FC<ContainerProps> = ({
               }}
               initialDraftKey={activeEditor?.props?.initialDraftKey}
               initialDraftContent={activeEditor?.props?.initialDraftContent}
+              initialTagIds={snippetInitialTagIds}
+              onSnippetCreated={handleSnippetCreated}
               category="snippet"
             />
           );
@@ -2847,6 +3034,46 @@ const Container: React.FC<ContainerProps> = ({
             activeEditor?.props?.item?.content ||
             activeEditor?.props?.item?.value;
 
+          const noteCreationContext = activeEditor?.props?.noteWidgetCreationContext;
+          const noteInitialTagIds = noteCreationContext?.sourceMode === 'tags' ? noteCreationContext.selectedTagIds : undefined;
+
+          const handleNoteCreated = async (createdNote: any) => {
+            if (!noteCreationContext) return;
+            const { widgetId, viewId, sourceMode } = noteCreationContext;
+
+            if (sourceMode === 'manual') {
+              try {
+                let currentWidget: any = null;
+                let currentSettings: any = {};
+                let currentSourceMode = 'all';
+
+                const dbWidget = await db.widgets.get(widgetId);
+                if (dbWidget && dbWidget.viewId === viewId) {
+                  currentSettings = dbWidget.settings || {};
+                  currentSourceMode = currentSettings.sourceMode || 'all';
+                  currentWidget = dbWidget;
+                }
+
+                if (!currentWidget) return;
+                if (currentSourceMode !== 'manual') return;
+
+                const existingNoteIds: string[] = Array.isArray(currentSettings.selectedNoteIds)
+                  ? currentSettings.selectedNoteIds
+                  : [];
+
+                if (!existingNoteIds.includes(createdNote.id)) {
+                  const updatedNoteIds = [...existingNoteIds, createdNote.id];
+                  await updateWidgetSettingsAsync(viewId, widgetId, {
+                    ...currentSettings,
+                    selectedNoteIds: updatedNoteIds,
+                  });
+                }
+              } catch (err) {
+                console.error('[Container] Failed to append created note to Custom widget settings:', err);
+              }
+            }
+          };
+
           editorContent = (
             <NoteEditorView
               key={`note-editor-${activeEditor?.id || 'new'}-${activeEditor?.openInstanceId || 0}`}
@@ -2860,8 +3087,11 @@ const Container: React.FC<ContainerProps> = ({
                   useUIStore.getState().setView({ type: 'home' });
                 }
               }}
+              isOverlay={Boolean(activeEditor?.props?.isOverlay)}
               initialDraftKey={noteInitialDraftKey}
               initialDraftContent={noteInitialDraftContent}
+              initialTagIds={noteInitialTagIds}
+              onNoteCreated={handleNoteCreated}
             />
           );
         }
@@ -2872,7 +3102,11 @@ const Container: React.FC<ContainerProps> = ({
               {sheetBackground}
               <div className="fixed inset-0 z-[10000] backdrop-blur-md bg-black/50 flex flex-col overflow-y-auto">
                 <div className="flex-1 min-h-0 pt-6">
-                  <div className="h-full w-full flex flex-col overflow-visible">
+                  <div
+                    className="h-full w-full flex flex-col overflow-visible"
+                    style={{
+                      zoom: windowWidth < 1200 ? 0.78 : windowWidth < 1366 ? 0.88 : windowWidth < 1500 ? 0.94 : 1,
+                    }}>
                     {editorContent}
                   </div>
                 </div>
@@ -2881,26 +3115,21 @@ const Container: React.FC<ContainerProps> = ({
           );
         }
 
+        const isNormalEditorView = (activeEditor?.type === 'note' || activeEditor?.type === 'link' || activeEditor?.type === 'snippet' || activeEditor?.type === 'aiPrompt') && !activeEditor?.props?.isOverlay && !isFocusMode;
+
         return (
-          <div className="flex-1 min-h-0 pt-6">
-            <div className={`${isFocusMode || isCreatingEditorView ? 'h-full' : 'h-full  '} w-full flex flex-col overflow-visible`}>
+          <div className={`flex-1 min-h-0 pt-6 ${isNormalEditorView ? 'bg-[var(--color-editorBg)] h-full w-full' : ''}`}>
+            <div
+              className={`${isFocusMode || isCreatingEditorView ? 'h-full' : 'h-full  '} w-full flex flex-col overflow-visible`}
+              style={{
+                zoom: windowWidth < 1200 ? 0.78 : windowWidth < 1366 ? 0.88 : windowWidth < 1500 ? 0.94 : 1,
+              }}>
               {editorContent}
             </div>
           </div>
         );
       }
     }
-
-    // Priority 2: Absolute Persistent Search Suggestions (Overlays secondary views)
-
-    const isBoardSlashDropdownActive = (() => {
-      const val = (suggestionState?.value || '').replace(/\u00A0/g, ' ');
-      if (!val.startsWith('/')) return false;
-      const textAfterSlash = val.slice(1).toUpperCase();
-      const aliases = ['A', 'T', 'N', 'S', 'P', 'L', 'C', 'B'];
-      const hasSpaceMatch = aliases.some(alias => textAfterSlash.startsWith(alias + ' '));
-      return !hasSpaceMatch;
-    })();
 
     if (
       suggestionState &&
@@ -2914,7 +3143,7 @@ const Container: React.FC<ContainerProps> = ({
     ) {
       return (
         <div
-          className={`${isBoardSlashDropdownActive ? '' : 'glass-card border border-white/40 border-b-none border-r-none border-l-none dark:border-white/10'} ${!isStoreLocked ? 'w-[75vw] -ml-[calc(37.5vw-50%)] max-w-none mt-4 h-[calc(100vh-200px)]' : 'h-[90%] w-full'} min-h-0 overflow-visible rounded-xl dark:rounded-none dark:bg-transparent`}
+          className={`${isBoardSlashDropdownActive ? '' : 'glass-card border border-white/40 border-b-none border-r-none border-l-none dark:border-white/10'} ${!isStoreLocked ? `w-[75vw] -ml-[calc(37.5vw-50%)] max-w-none ${isBoardSlashDropdownActive ? 'mt-0' : 'mt-4'} h-[calc(100vh-200px)]` : 'h-[90%] w-full'} min-h-0 overflow-visible rounded-xl dark:rounded-none dark:bg-transparent`}
           style={{ border: 'none' }}>
           {isStoreLocked ? (
             storeTab === 'catalog' ? (
@@ -3030,45 +3259,47 @@ const Container: React.FC<ContainerProps> = ({
     // Priority 3.5: Organization Panels
     // OrganizationSettings panel removed
 
-    if (activeView?.type === 'createFolder') {
-      return (
-        <div
-          className="fixed top-0 bottom-0 right-0 z-[100] flex items-start pt-[15vh] justify-center pointer-events-none"
-          style={{ left: showSidebarColumn ? '280px' : '0px' }}>
-          <div className="w-[500px] h-[400px] pointer-events-auto relative bg-[var(--color-editorBg)] rounded-xl border border-neutral-800 dark:border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden translate-x-[8px]">
-            <CreateFolderPanel
-              onClose={() => {
-                useUIStore.getState().setView({ type: 'home' });
-              }}
-              onSuccess={(id: string, name: string) => {
-                console.log(`Created Folder ${name} (${id})`);
-                useUIStore.getState().setView({ type: 'home' });
-              }}
-            />
-          </div>
-        </div>
-      );
-    }
+    // Folder creation is only allowed from onboarding for now.
+    // if (activeView?.type === 'createFolder') {
+    //   return (
+    //     <div
+    //       className="fixed top-0 bottom-0 right-0 z-[100] flex items-start pt-[15vh] justify-center pointer-events-none"
+    //       style={{ left: showSidebarColumn ? '280px' : '0px' }}>
+    //       <div className="w-[500px] h-[400px] pointer-events-auto relative bg-[var(--color-editorBg)] rounded-xl border border-neutral-800 dark:border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden translate-x-[8px]">
+    //         <CreateFolderPanel
+    //           onClose={() => {
+    //             useUIStore.getState().setView({ type: 'home' });
+    //           }}
+    //           onSuccess={(id: string, name: string) => {
+    //             console.log(`Created Folder ${name} (${id})`);
+    //             useUIStore.getState().setView({ type: 'home' });
+    //           }}
+    //         />
+    //       </div>
+    //     </div>
+    //   );
+    // }
 
-    if (activeView?.type === 'createWorkspace') {
-      return (
-        <div
-          className="fixed top-0 bottom-0 right-0 z-[100] flex items-start pt-[15vh] justify-center pointer-events-none"
-          style={{ left: showSidebarColumn ? '280px' : '0px' }}>
-          <div className="w-[500px] h-[340px] pointer-events-auto relative bg-[var(--color-editorBg)] rounded-xl border border-neutral-800 dark:border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden translate-x-[8px]">
-            <CreateWorkspacePanel
-              onClose={() => {
-                useUIStore.getState().setView({ type: 'home' });
-              }}
-              onSuccess={(id: string, name: string) => {
-                console.log(`Created Workspace ${name} (${id})`);
-                useUIStore.getState().setView({ type: 'home' });
-              }}
-            />
-          </div>
-        </div>
-      );
-    }
+    // Workspace creation is only allowed from onboarding for now.
+    // if (activeView?.type === 'createWorkspace') {
+    //   return (
+    //     <div
+    //       className="fixed top-0 bottom-0 right-0 z-[100] flex items-start pt-[15vh] justify-center pointer-events-none"
+    //       style={{ left: showSidebarColumn ? '280px' : '0px' }}>
+    //       <div className="w-[500px] h-[340px] pointer-events-auto relative bg-[var(--color-editorBg)] rounded-xl border border-neutral-800 dark:border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden translate-x-[8px]">
+    //         <CreateWorkspacePanel
+    //           onClose={() => {
+    //             useUIStore.getState().setView({ type: 'home' });
+    //           }}
+    //           onSuccess={(id: string, name: string) => {
+    //             console.log(`Created Workspace ${name} (${id})`);
+    //             useUIStore.getState().setView({ type: 'home' });
+    //           }}
+    //         />
+    //       </div>
+    //     </div>
+    //   );
+    // }
 
     if (activeView?.type === 'workspaceShare') {
       return null;
@@ -3091,7 +3322,11 @@ const Container: React.FC<ContainerProps> = ({
 
       return (
         <div className="flex-1 min-h-0 pt-6">
-          <div className="h-full w-full flex flex-col overflow-hidden px-6 md:px-12 lg:px-24 py-6 md:py-10">
+          <div
+            className="h-full w-full flex flex-col overflow-hidden px-6 md:px-12 lg:px-24 py-6 md:py-10"
+            style={{
+              zoom: windowWidth < 1200 ? 0.78 : windowWidth < 1366 ? 0.88 : windowWidth < 1500 ? 0.94 : 1,
+            }}>
             <SettingsLayout view={_settingsView} onClose={handleGoHome} isLoggedIn={isLoggedIn} />
           </div>
         </div>
@@ -3101,9 +3336,13 @@ const Container: React.FC<ContainerProps> = ({
     // Priority 4: Home View
     if (displayHomeView) {
       return (
-        <div className={`flex-1 min-h-0 h-full max-w-none ${showSidebarColumn ? 'w-[calc(100vw-280px)] -ml-[calc(50vw-140px-50%)]' : 'w-[100vw] -ml-[calc(50vw-50%)]'}`}>
+        <div
+          className={`flex-1 min-h-0 h-full max-w-none ${showSidebarColumn ? (isLeftSidebarCollapsed ? 'w-[calc(100vw-76px)] -ml-[calc(50vw-38px-50%)]' : 'w-[calc(100vw-240px)] -ml-[calc(50vw-120px-50%)]') : 'w-[100vw] -ml-[calc(50vw-50%)]'}`}>
           <WidgetMainContainer
             isEditMode={isWidgetEditMode}
+            onEnterWidgetEditMode={onEnterWidgetEditMode}
+            onExitWidgetEditMode={onExitWidgetEditMode}
+            pendingSelectedWidgetId={pendingSelectedWidgetId}
             onQuickCommandSelect={commandId => {
               const localDef = findCommandByAnyId(commands, commandId);
               if (localDef && localDef.surface !== 'website') {
@@ -3145,9 +3384,13 @@ const Container: React.FC<ContainerProps> = ({
     }
 
     return (
-      <div className={`flex-1 min-h-0 h-full max-w-none ${showSidebarColumn ? 'w-[calc(100vw-280px)] -ml-[calc(50vw-140px-50%)]' : 'w-[100vw] -ml-[calc(50vw-50%)]'}`}>
+      <div
+        className={`flex-1 min-h-0 h-full max-w-none ${showSidebarColumn ? (isLeftSidebarCollapsed ? 'w-[calc(100vw-76px)] -ml-[calc(50vw-38px-50%)]' : 'w-[calc(100vw-240px)] -ml-[calc(50vw-120px-50%)]') : 'w-[100vw] -ml-[calc(50vw-50%)]'}`}>
         <WidgetMainContainer
           isEditMode={isWidgetEditMode}
+          onEnterWidgetEditMode={onEnterWidgetEditMode}
+          onExitWidgetEditMode={onExitWidgetEditMode}
+          pendingSelectedWidgetId={pendingSelectedWidgetId}
           onQuickCommandSelect={commandId => {
             if (commandId === 'todo') {
               useUIStore.getState().setSidebar('todoSidebar', { open: true });
@@ -3178,6 +3421,24 @@ const Container: React.FC<ContainerProps> = ({
       // 1. Check for changes before updating state to avoid render loops
       // We compare critical properties that affect UI rendering.
       const prevState = lastEmittedStateRef.current;
+      const isInteractiveState = Boolean(
+        state?.lockedCommand ||
+          state?.isAtMenuOpen ||
+          state?.isAutomationActive ||
+          state?.activeAiSession ||
+          state?.selectedImagesCount ||
+          state?.value?.trim() ||
+          state?.showEmptySlashDropdown,
+      );
+      const wasInteractiveState = Boolean(
+        prevState?.lockedCommand ||
+          prevState?.isAtMenuOpen ||
+          prevState?.isAutomationActive ||
+          prevState?.activeAiSession ||
+          prevState?.selectedImagesCount ||
+          prevState?.value?.trim() ||
+          prevState?.showEmptySlashDropdown,
+      );
       const hasChanged =
         !prevState ||
         !state ||
@@ -3187,11 +3448,12 @@ const Container: React.FC<ContainerProps> = ({
         state.highlightIndex !== prevState.highlightIndex ||
         state.isAtMenuOpen !== prevState.isAtMenuOpen ||
         state.isAutomationActive !== prevState.isAutomationActive ||
-        state.selectedAIs?.length !== prevState.selectedAIs?.length ||
-        JSON.stringify(state.selectedAIs) !== JSON.stringify(prevState.selectedAIs) ||
-        state.activeAiSession?.id !== prevState.activeAiSession?.id ||
-        state.activeAiSession?.sessionKey !== prevState.activeAiSession?.sessionKey ||
-        state.suggestions?.length !== prevState.suggestions?.length;
+        (isInteractiveState &&
+          (state.selectedAIs?.length !== prevState.selectedAIs?.length ||
+            JSON.stringify(state.selectedAIs) !== JSON.stringify(prevState.selectedAIs) ||
+            state.activeAiSession?.id !== prevState.activeAiSession?.id ||
+            state.activeAiSession?.sessionKey !== prevState.activeAiSession?.sessionKey ||
+            state.suggestions?.length !== prevState.suggestions?.length));
 
       if (hasChanged) {
         if (!state?.value || state.value.trim() === '') {
@@ -3200,7 +3462,9 @@ const Container: React.FC<ContainerProps> = ({
           }
         }
         lastEmittedStateRef.current = state;
-        setSuggestionState(state);
+        if (isInteractiveState || wasInteractiveState || !state) {
+          setSuggestionState(state);
+        }
       }
 
       // 2. Proactively notify parent of command lock changes to avoid race conditions in UI
@@ -3312,7 +3576,7 @@ const Container: React.FC<ContainerProps> = ({
           } else if (category === 'note') {
             itemType = 'note';
           } else if (category === 'session' || category === 'sessions' || category === 'tabgroup') {
-            itemType = 'session';
+            itemType = 'collection';
           } else if (category === 'snippet') {
             itemType = 'snippet';
           } else if (category === 'chat_agent' || category === 'agent') {
@@ -3393,71 +3657,98 @@ const Container: React.FC<ContainerProps> = ({
     return (
       <div className={'flex-shrink-0 relative z-48'}>
         <div className={'flex items-center gap-2'}>
-          {/* Left: Search Bar */}
-          <div className={'flex-1 min-w-0'}>
-            <Searchbar
-              ref={searchbarRef}
-              savedAiAgents={savedAiAgents}
-              hideDynamicIcon={Boolean(
-                suggestionState &&
-                  (isStoreLocked || (shouldShowSuggestions && suggestionState.isVisible !== false)) &&
-                  !suggestionState.isAtMenuOpen &&
-                  !suggestionState.isAutomationActive &&
-                  suggestionState.lockedCommand !== 'calendar' &&
-                  suggestionState.lockedCommand !== 'upload_drive' &&
-                  (activeView?.type !== 'allItems' || isStoreLocked) &&
-                  !isLinkEditModalOpen,
-              )}
-              disableContextualPopup={true}
-              placeholder={defaultPlaceholder}
-              onSuggestionStateChange={handleSuggestionStateChange}
-              onLockedCommandChange={handleLockedCommandChangeInternal}
-              lockedCommand={
-                activeEditor?.type === 'ai' && !suggestionState?.lockedCommand
-                  ? 'ai'
-                  : suggestionState?.lockedCommand || null
-              }
-              onSnippetSelect={handleSearchSnippetSelect}
-              onAutomationSelect={handleAutomationSelect}
-              onAutomationEdit={handleAutomationEdit}
-              searchValue={searchValue}
-              onQueryChange={handleQueryChange}
-              onCommandModeExit={() => {
-                if (displayHomeView) {
-                  setTimeout(() => {
-                    searchbarRef.current?.focus();
-                  }, 0);
+          {/* Left: Search Bar - fully disabled in widget edit mode (no clicks, no Tab, no drag-drop, no focus) */}
+          <div className="flex-1 min-w-0 relative">
+            <div
+              className={`transition-opacity duration-200 ${isWidgetEditMode ? 'pointer-events-none opacity-40 select-none' : ''}`}
+              inert={isWidgetEditMode || undefined}
+              style={{
+                zoom: windowWidth < 1200 ? 0.78 : windowWidth < 1366 ? 0.88 : windowWidth < 1500 ? 0.94 : 1,
+              }}>
+              <Searchbar
+                ref={searchbarRef}
+                savedAiAgents={savedAiAgents}
+                hideDynamicIcon={Boolean(
+                  suggestionState &&
+                    (isStoreLocked || (shouldShowSuggestions && suggestionState.isVisible !== false)) &&
+                    !suggestionState.isAtMenuOpen &&
+                    !suggestionState.isAutomationActive &&
+                    suggestionState.lockedCommand !== 'calendar' &&
+                    suggestionState.lockedCommand !== 'upload_drive' &&
+                    (activeView?.type !== 'allItems' || isStoreLocked) &&
+                    !isLinkEditModalOpen,
+                )}
+                disableContextualPopup={true}
+                placeholder={defaultPlaceholder}
+                onSuggestionStateChange={handleSuggestionStateChange}
+                onLockedCommandChange={handleLockedCommandChangeInternal}
+                lockedCommand={
+                  activeEditor?.type === 'ai' && !suggestionState?.lockedCommand
+                    ? 'ai'
+                    : suggestionState?.lockedCommand || null
                 }
-              }}
-              onCommandExecute={handleCommandExecute}
-              onRequestFocusChange={handleSearchbarFocusChange}
-              onClearFolder={handleGoHome}
-              onNavigateBack={handleNavigateBack}
-              onRequestEditLink={handleHomeLinkEdit}
-              onRequestSnippetDelete={handleHomeDeleteRequest as any}
-              onToggleFavorite={handleToggleFavorite}
-              onSearchbarFocus={onSearchbarFocus}
-              isLoggedIn={isLoggedIn}
-              onSaveAgent={() => {
-                setIsAutomationSavePromptOpen(true);
-              }}
-              activeStoreTab={storeTab}
-              onToggleStoreTab={() => {
-                setStoreTab(prev => {
-                  const nextTab = prev === 'catalog' ? 'saved' : 'catalog';
-                  const nextCmd = nextTab === 'catalog' ? 'store' : 'saved-automation';
-                  if (lockedCommand !== nextCmd) {
-                    const currentVal = searchbarRef.current?.getValue() || '';
-                    searchbarRef.current?.lockCommand(nextCmd, currentVal);
+                onSnippetSelect={handleSearchSnippetSelect}
+                onAutomationSelect={handleAutomationSelect}
+                onAutomationEdit={handleAutomationEdit}
+                searchValue={searchValue}
+                onQueryChange={handleQueryChange}
+                onCommandModeExit={() => {
+                  if (displayHomeView) {
+                    setTimeout(() => {
+                      searchbarRef.current?.focus();
+                    }, 0);
                   }
-                  return nextTab;
-                });
-              }}
-              isInitialAltSFocus={isInitialAltSFocus}
-              onInitialAltSFocusChange={onInitialAltSFocusChange}
-              displayHomeView={displayHomeView}
-              onHoverSlashDot={onHoverSlashDot}
-            />
+                }}
+                onCommandExecute={handleCommandExecute}
+                onRequestFocusChange={handleSearchbarFocusChange}
+                onClearFolder={handleGoHome}
+                onNavigateBack={handleNavigateBack}
+                onRequestEditLink={handleHomeLinkEdit}
+                onRequestSnippetDelete={handleHomeDeleteRequest as any}
+                onToggleFavorite={handleToggleFavorite}
+                onSearchbarFocus={onSearchbarFocus}
+                isLoggedIn={isLoggedIn}
+                onSaveAgent={() => {
+                  setIsAutomationSavePromptOpen(true);
+                }}
+                activeStoreTab={storeTab}
+                onToggleStoreTab={() => {
+                  setStoreTab(prev => {
+                    const nextTab = prev === 'catalog' ? 'saved' : 'catalog';
+                    const nextCmd = nextTab === 'catalog' ? 'store' : 'saved-automation';
+                    if (lockedCommand !== nextCmd) {
+                      const currentVal = searchbarRef.current?.getValue() || '';
+                      searchbarRef.current?.lockCommand(nextCmd, currentVal);
+                    }
+                    return nextTab;
+                  });
+                }}
+                isInitialAltSFocus={isInitialAltSFocus}
+                onInitialAltSFocusChange={onInitialAltSFocusChange}
+                displayHomeView={displayHomeView}
+                onHoverSlashDot={onHoverSlashDot}
+              />
+            </div>
+            {/* Drag-drop firewall overlay — sits above the searchbar in edit mode to block
+                the browser's native text-drop behavior that bypasses inert/pointer-events */}
+            {isWidgetEditMode && (
+              <div
+                className="absolute inset-0 z-[9999] cursor-not-allowed"
+                onPointerDown={e => e.stopPropagation()}
+                onDragOver={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDragEnter={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -3508,8 +3799,6 @@ const Container: React.FC<ContainerProps> = ({
       suggestionState.lockedCommand !== 'ai',
   );
 
-
-
   // Right-side root layout.
   // AppMainContent gives Container the right-side area; Container owns the header, main content router,
   // future draggable-region slot, and local dialogs for this area.
@@ -3550,61 +3839,51 @@ const Container: React.FC<ContainerProps> = ({
                           ? `pb-[5px] overflow-visible w-full mx-auto max-w-2xl pt-[10vh]`
                           : isNarrowView
                             ? `max-w-[480px] mx-auto pt-[10vh] pb-0 min-[1600px]:max-w-[540px] min-[1800px]:max-w-2xl max-[1480px]:max-w-[440px] max-[1370px]:max-w-[400px] max-[1270px]:max-w-[360px] overflow-visible`
-                            : `max-w-[1200px] mx-auto pt-[10vh] pb-0 mt-0 h-full px-8 min-[1600px]:max-w-[1400px] overflow-visible`
+                            : `max-w-[1200px] mx-auto pt-[10vh] pb-0 mt-0 h-full px-8 min-[1600px]:max-w-[1400px] overflow-hidden`
       }`}>
-      {!isOrganizationPanelOpen && !showTutorial && !isCheckingTutorial && (
+      {!isOrganizationPanelOpen && (
         <div className={shouldHideHeader ? 'hidden pointer-events-none opacity-0 h-0 overflow-hidden' : ''}>
           {renderHeader()}
         </div>
       )}
 
       {/* Right-side main content router: BoardView, SheetView, HomeView, editors, AI/store, settings, and creation panels. */}
-      {!showTutorial &&
-      !isCheckingTutorial &&
-      ((activeEditor?.type === 'agent' && !isAutomationActive) ||
-        activeView?.type === 'todo' ||
-        isSpreadsheetViewOpen ||
-        !shouldHideMainContent) ? (
+      {(activeEditor?.type === 'agent' && !isAutomationActive) ||
+      activeView?.type === 'todo' ||
+      isSpreadsheetViewOpen ||
+      !shouldHideMainContent ? (
         <div
-          className={`flex-1 min-h-0 flex flex-col ${isSpreadsheetViewOpen || isOrganizationPanelOpen ? 'overflow-hidden' : 'overflow-visible'} ${isSpreadsheetViewOpen ? 'mt-0' : 'mt-[10px]'}`}>
-          {renderMainContent()}
+          className={`flex-1 min-h-0 flex flex-col ${isSpreadsheetViewOpen || isOrganizationPanelOpen ? 'overflow-hidden' : 'overflow-visible'} ${isSpreadsheetViewOpen || isBoardSlashDropdownActive ? 'mt-0' : 'mt-[10px]'}`}>
+          <React.Suspense fallback={null}>{renderMainContent()}</React.Suspense>
         </div>
       ) : null}
 
-
-
       {/* Right-side local dialogs and overlays owned by Container. */}
-      <DeleteDialog
-        isOpen={homeDeleteContext.isOpen}
-        onClose={handleCloseHomeDeleteDialog}
-        onConfirm={handleConfirmHomeDelete}
-        title={homeDeleteContext.detail?.commandId === 'delete_link' ? 'Delete Link' : 'Delete Note'}
-        description={
-          homeDeleteContext.detail
-            ? `Do you want to delete "${homeDeleteContext.detail.snippetKey}"?`
-            : 'Do you want to delete this item?'
-        }
-      />
-
-      {/* Save Agent Modal */}
-      <AutomationSavePrompt
-        isOpen={isAutomationSavePromptOpen}
-        onClose={() => setIsAutomationSavePromptOpen(false)}
-        selectedAIs={suggestionState?.selectedAIs || []}
-        prompt={suggestionState?.value || ''}
-        activeAiSession={suggestionState?.activeAiSession}
-        onSaveSuccess={(name: string, id: string | number) => searchbarRef.current?.updateActiveSessionMetadata({ name, id: String(id) })}
-      />
-
-      {/* Tutorial Overlay */}
-      {showTutorial && !isReturningUser && (
-        <OnboardingCards
-          onClose={handleCloseTutorial}
-          isLoggedIn={isLoggedIn}
-          isReturningUser={isReturningUser}
-          initialStep={isReturningUser ? 'presentation' : 'quote'}
+      <React.Suspense fallback={null}>
+        <DeleteDialog
+          isOpen={homeDeleteContext.isOpen}
+          onClose={handleCloseHomeDeleteDialog}
+          onConfirm={handleConfirmHomeDelete}
+          title={homeDeleteContext.detail?.commandId === 'delete_link' ? 'Delete Link' : 'Delete Note'}
+          description={
+            homeDeleteContext.detail
+              ? `Do you want to delete "${homeDeleteContext.detail.snippetKey}"?`
+              : 'Do you want to delete this item?'
+          }
         />
-      )}
+
+        {/* Save Agent Modal */}
+        <AutomationSavePrompt
+          isOpen={isAutomationSavePromptOpen}
+          onClose={() => setIsAutomationSavePromptOpen(false)}
+          selectedAIs={suggestionState?.selectedAIs || []}
+          prompt={suggestionState?.value || ''}
+          activeAiSession={suggestionState?.activeAiSession}
+          onSaveSuccess={(name: string, id: string | number) =>
+            searchbarRef.current?.updateActiveSessionMetadata({ name, id: String(id) })
+          }
+        />
+      </React.Suspense>
 
       {/* Onboarding Loader - shown during post-login draft processing */}
     </div>

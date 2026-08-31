@@ -50,8 +50,27 @@ const mountAndOpenPopup = async (initialCommand?: string) => {
 
   rootEl = document.createElement('div');
   rootEl.id = 'alts-root';
-  rootEl.style.cssText =
-    'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2147483646; pointer-events: auto; border: none; outline: none;';
+  const rootStyles: Record<string, string> = {
+    all: 'initial',
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    width: '100vw',
+    height: '100vh',
+    zIndex: '2147483646',
+    pointerEvents: 'auto',
+    border: 'none',
+    outline: 'none',
+    margin: '0',
+    padding: '0',
+    overflow: 'visible',
+    background: 'transparent',
+    isolation: 'isolate',
+    contain: 'layout style paint',
+  };
+  Object.entries(rootStyles).forEach(([property, value]) => {
+    rootEl?.style.setProperty(property.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`), value, 'important');
+  });
 
   document.body.appendChild(rootEl);
 
@@ -84,15 +103,103 @@ const mountAndOpenPopup = async (initialCommand?: string) => {
       height: 100vh !important;
       z-index: 2147483646 !important;
       pointer-events: auto;
+      color-scheme: light dark;
+      isolation: isolate !important;
+      contain: layout style paint !important;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
     #shadow-root-container {
-      all: initial;
-      display: block;
-      width: 100%;
-      height: 100%;
-      pointer-events: inherit;
-      font-family: 'Inter', sans-serif;
+      all: initial !important;
+      display: block !important;
+      width: 100% !important;
+      height: 100% !important;
+      pointer-events: inherit !important;
+      color: initial !important;
+      background: transparent !important;
+      direction: ltr !important;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+      font-size: 14px !important;
+      font-style: normal !important;
+      font-weight: 400 !important;
+      line-height: normal !important;
+      letter-spacing: normal !important;
+      text-align: left !important;
+      text-rendering: geometricPrecision !important;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      -webkit-text-size-adjust: 100% !important;
+      text-size-adjust: 100% !important;
+      isolation: isolate !important;
+      contain: layout style paint !important;
+    }
+    #shadow-root-app-container {
+      all: initial !important;
+      display: block !important;
+      width: 100% !important;
+      height: 100% !important;
+      pointer-events: inherit !important;
+      color: inherit !important;
+      background: transparent !important;
+      direction: inherit !important;
+      font: inherit !important;
+      letter-spacing: inherit !important;
+      text-align: inherit !important;
+    }
+    #shadow-root-portal-container {
+      all: initial !important;
+      display: block !important;
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 2147483647 !important;
+      pointer-events: none !important;
+      color: initial !important;
+      background: transparent !important;
+      direction: ltr !important;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+      font-size: 14px !important;
+      font-style: normal !important;
+      font-weight: 400 !important;
+      line-height: normal !important;
+      letter-spacing: normal !important;
+      text-align: left !important;
+      text-rendering: geometricPrecision !important;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      -webkit-text-size-adjust: 100% !important;
+      text-size-adjust: 100% !important;
+      isolation: isolate !important;
+      contain: layout style paint !important;
+    }
+    #shadow-root-container,
+    #shadow-root-container *,
+    #shadow-root-app-container,
+    #shadow-root-app-container *,
+    #shadow-root-portal-container,
+    #shadow-root-portal-container * {
+      box-sizing: border-box;
+    }
+    #shadow-root-container button,
+    #shadow-root-container input,
+    #shadow-root-container textarea,
+    #shadow-root-container select,
+    #shadow-root-portal-container button,
+    #shadow-root-portal-container input,
+    #shadow-root-portal-container textarea,
+    #shadow-root-portal-container select {
+      font: inherit;
+      color: inherit;
+      letter-spacing: inherit;
+    }
+    #shadow-root-container button,
+    #shadow-root-portal-container button {
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
+    }
+    #shadow-root-portal-container > * {
+      pointer-events: auto;
     }
   `;
   shadowRoot.appendChild(themeStyleTag);
@@ -101,8 +208,18 @@ const mountAndOpenPopup = async (initialCommand?: string) => {
   container.id = 'shadow-root-container';
   shadowRoot.appendChild(container);
 
+  const appContainer = document.createElement('div');
+  appContainer.id = 'shadow-root-app-container';
+  container.appendChild(appContainer);
+
+  const portalContainer = document.createElement('div');
+  portalContainer.id = 'shadow-root-portal-container';
+  container.appendChild(portalContainer);
+
   (window as any).__ALTS_PORTAL_HOST__ = container;
   (window as any).__ALTQ_PORTAL_HOST__ = container; // Keep legacy reference just in case
+  (window as any).__ALTS_MODAL_PORTAL_HOST__ = portalContainer;
+  (window as any).__ALTQ_MODAL_PORTAL_HOST__ = portalContainer;
 
   const Main = ({ initialCommand }: { initialCommand?: string }) => {
     const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -140,7 +257,7 @@ const mountAndOpenPopup = async (initialCommand?: string) => {
     );
   };
 
-  reactRootInstance = createRoot(container);
+  reactRootInstance = createRoot(appContainer);
   reactRootInstance.render(<Main initialCommand={initialCommand} />);
   isAltsPopupOpen = true;
 };
@@ -246,7 +363,13 @@ export function startAltSWebsite() {
   const handleGlobalCapture = (event: KeyboardEvent) => {
     if (isAltsPopupOpen) {
       const path = event.composedPath();
-      const isInsideAlts = path.some((el: any) => el.id === 'alts-root' || el.id === 'shadow-root-container');
+      const isInsideAlts = path.some(
+        (el: any) =>
+          el.id === 'alts-root' ||
+          el.id === 'shadow-root-container' ||
+          el.id === 'shadow-root-app-container' ||
+          el.id === 'shadow-root-portal-container',
+      );
       if (isInsideAlts) {
         // If an input is focused inside our shadow root, allow all key events
         const shadow = rootEl?.shadowRoot;

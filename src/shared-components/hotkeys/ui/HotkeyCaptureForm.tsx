@@ -123,7 +123,7 @@ export const HotkeyCaptureForm: React.FC<HotkeyCaptureFormProps> = ({
                       if (typeRaw === 'note') typeDisplay = 'Note';
                       else if (typeRaw === 'link') typeDisplay = 'Link';
                       else if (typeRaw === 'snippet') typeDisplay = 'Text Expander';
-                      else if (false) typeDisplay = 'Tab Session';
+                      else if (typeRaw === 'collection') typeDisplay = 'Collection';
                      
                       else if (typeRaw === 'command') typeDisplay = 'Command';
                       else if (typeRaw) typeDisplay = typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1);

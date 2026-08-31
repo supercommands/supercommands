@@ -1,7 +1,8 @@
 import type * as React from 'react';
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaRobot, FaLink, FaSearch } from 'react-icons/fa';
+import { FaLink, FaSearch } from 'react-icons/fa';
+import { LuSparkles } from 'react-icons/lu';
 import type { SavedAutomation } from '../../../allObjectFolder/src/createObject/automationBeta/utilities/automation';
 import type { InstalledModule } from '../searchLogicAndAlgorithms/searchEngine';
 

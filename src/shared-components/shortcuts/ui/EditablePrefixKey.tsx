@@ -34,9 +34,13 @@ const showToast = (message: string, isError = false) => {
 export const EditablePrefixKey = ({
   category,
   currentValue,
+  alwaysVisible = false,
+  variant = 'default',
 }: {
   category: keyof CustomOmniboxPrefixes;
   currentValue: string;
+  alwaysVisible?: boolean;
+  variant?: 'default' | 'compactPalette';
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(currentValue);
@@ -69,6 +73,11 @@ export const EditablePrefixKey = ({
       
       // Notify other components
       window.dispatchEvent(new Event('omniboxPrefixesChanged'));
+      try {
+        chrome?.runtime?.sendMessage?.({ action: 'INVALIDATE_OMNIBOX_CACHE' }).catch(() => {});
+      } catch {
+        // ignore non-extension contexts
+      }
       setIsEditing(false);
       showToast('Shortcut updated successfully!');
     } catch (error: any) {
@@ -96,8 +105,10 @@ export const EditablePrefixKey = ({
   return (
     <div 
       className={clsx(
-        "flex items-center justify-center gap-1 px-1.5 py-0 rounded border border-white/5 bg-white/5 hover:bg-white/10 transition-all duration-200 cursor-pointer",
-        !isEditing && "opacity-0 group-hover/sidebar:opacity-100 focus-within:opacity-100",
+        variant === 'compactPalette'
+          ? "inline-flex h-5 items-center justify-center gap-1 rounded-[5px] border border-[var(--alts-shortcut-border,var(--color-borderDefault))] bg-[var(--alts-shortcut-bg,transparent)] px-1.5 text-[var(--alts-shortcut-text,var(--color-textMuted))] transition-colors duration-150 cursor-pointer hover:text-[var(--alts-text-primary,var(--color-textSecondary))]"
+          : "flex items-center justify-center gap-1 px-1.5 py-0 rounded border border-white/5 bg-white/5 hover:bg-white/10 transition-all duration-200 cursor-pointer",
+        !isEditing && !alwaysVisible && "opacity-0 group-hover/sidebar:opacity-100 focus-within:opacity-100",
         isEditing && "ring-1 ring-blue-500 border-transparent opacity-100"
       )}
       onClick={(e) => {
@@ -108,7 +119,12 @@ export const EditablePrefixKey = ({
     >
       {/* Fixed global prefix */}
       {category !== 'command' && (
-        <span className="text-[13px] font-light font-mono text-[var(--color-textSecondary)] lowercase pointer-events-none select-none opacity-70">
+        <span className={clsx(
+          "lowercase pointer-events-none select-none",
+          variant === 'compactPalette'
+            ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textMuted))]"
+            : "text-[13px] font-light font-mono text-[var(--color-textSecondary)] opacity-70"
+        )}>
           C
         </span>
       )}
@@ -118,20 +134,27 @@ export const EditablePrefixKey = ({
         <input
           ref={inputRef}
           type="text"
-          maxLength={2}
+          maxLength={12}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={handleSave}
           onKeyDown={handleKeyDown}
           disabled={isSaving}
           className={clsx(
-            "text-[13px] font-light font-mono text-[var(--color-textPrimary)] bg-transparent outline-none lowercase p-0 m-0 text-center opacity-70",
+            variant === 'compactPalette'
+              ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textSecondary))] bg-transparent outline-none lowercase p-0 m-0 text-center"
+              : "text-[13px] font-light font-mono text-[var(--color-textPrimary)] bg-transparent outline-none lowercase p-0 m-0 text-center opacity-70",
             isSaving && "opacity-50"
           )}
           style={{ width: `${Math.max(1, editValue.length)}ch` }}
         />
       ) : (
-        <span className="text-[13px] font-light font-mono text-[var(--color-textPrimary)] lowercase select-none opacity-70">
+        <span className={clsx(
+          "lowercase select-none",
+          variant === 'compactPalette'
+            ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textMuted))]"
+            : "text-[13px] font-light font-mono text-[var(--color-textPrimary)] opacity-70"
+        )}>
           {currentValue}
         </span>
       )}

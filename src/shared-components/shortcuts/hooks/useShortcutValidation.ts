@@ -39,7 +39,7 @@ export const useShortcutValidation = () => {
         };
       }
 
-      // Fetch dynamic omni prefixes from Chrome local storage
+      // Fetch dynamic omni prefixes from IndexedDB-backed prefix settings
       const omniboxPrefixes = await CustomSearchPrefixesForOmniboxStorage.getPrefixes().catch(() => ({}));
 
       const activePrefixes = Object.values(omniboxPrefixes)
@@ -87,14 +87,16 @@ export const useShortcutValidation = () => {
         const conflictingId = existingEntry[0];
         const conflictName = findConflictingItemName(conflictingId);
         if (!conflictName) {
-          console.warn(`[ShortcutDebug] Found orphan shortcut trigger "${normalized}" for unknown ID ${conflictingId}. Auto-pruning...`);
-          try {
-            const { clearShortcut } = await import('../core/shortcutManager');
-            await clearShortcut(conflictingId, conflictingId, 'note');
-          } catch (e) {
-            console.error('Failed to auto-prune orphaned shortcut:', e);
-          }
-          return { isValid: true, conflictId: null, errorMessage: null };
+          // Orphaned reference - treat as safe to override, do NOT auto-delete.
+          // The shortcut may belong to a type that cannot be resolved in the current context (e.g. a view).
+          console.log(`[ShortcutDebug] Found shortcut trigger "${normalized}" for unknown ID ${conflictingId}. Treating as safe-to-override conflict.`);
+          return {
+            isValid: false,
+            conflictId: conflictingId,
+            conflictingItemName: conflictingId,
+            isOverrideable: true,
+            errorMessage: `Shortcut "${normalized}" is already in use`,
+          };
         }
 
         console.log(`[ShortcutDebug] CONFLICT DETECTED: Shortcut "${normalized}" is currently assigned to "${conflictName}" (ID: ${conflictingId}). Override button enabled.`);

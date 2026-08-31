@@ -36,6 +36,9 @@ export const getItemCompoundId = (item: any): string => {
   // Direct ID check for commands or folders
   if (item.kind === 'command' || item._kind === 'command') return item.id;
   if (item._kind === 'folder' || item.kind === 'folder') return item.folder_id || item.id;
+  if (item._kind === 'collection_view' || item.kind === 'collection_view' || item.type === 'collection_view') {
+    return String(item.collectionView?.id || item.id || '');
+  }
   if (
     item._kind === 'automation' ||
     item.kind === 'automation' ||

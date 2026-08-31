@@ -23,9 +23,50 @@ import { syncCommandsFromSource } from '../../allObjectFolder/src/createObject/c
 import type { UpdateCommandInput } from '../../allObjectFolder/src/createObject/commands/commandTypes';
 import { storageDebug } from '../../shared-components/utils/storageDebugLogger';
 import { SessionRecord } from '../../allObjectFolder/src/createObject/session/sessionTypes';
+import {
+  normalizeCollectionLaunchSettings,
+  type WidgetViewRecord,
+} from '../../allObjectFolder/src/createObject/widgets/widgetTypes';
+import type { PrefixSettingCategory, PrefixSettingRecord } from '../../allObjectFolder/src/createObject/prefixSettings/prefixSettingTypes';
+import {
+  syncPrefixSettingsFromSource,
+  updatePrefixSetting as updatePrefixSettingData,
+} from '../../allObjectFolder/src/createObject/prefixSettings/prefixSettingData';
 import { normalizePrefix } from '../../shared-components/commands/utils';
 
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const ENABLE_DEXIE_STORE_PERF_LOGS = false;
+
+const dexieStorePerf = (label: string, data?: Record<string, unknown>) => {
+  if (!ENABLE_DEXIE_STORE_PERF_LOGS) return;
+  if (data) {
+    console.log('[NewTabPerf][DexieStore]', label, data);
+  } else {
+    console.log('[NewTabPerf][DexieStore]', label);
+  }
+};
+
+const normalizeWidgetViewsForStore = (widgetViews: WidgetViewRecord[]): WidgetViewRecord[] => {
+  const seenDefaultViews = new Set<string>();
+  return [...(widgetViews || [])]
+    .sort((a, b) => {
+      if (!!a.isDefault !== !!b.isDefault) return a.isDefault ? -1 : 1;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    })
+    .map(view => ({
+      ...view,
+      collectionLaunchSettings: normalizeCollectionLaunchSettings(view.collectionLaunchSettings),
+    }))
+    .filter(view => {
+      if (!view?.isDefault) return true;
+      const workspaceId = String(view.workspaceId || 'global');
+      const title = String(view.title || '').trim().toLowerCase() || 'main dashboard';
+      const key = `${workspaceId}:${title}`;
+      if (seenDefaultViews.has(key)) return false;
+      seenDefaultViews.add(key);
+      return true;
+    });
+};
 
 interface DbStoreState {
   notes: NoteRecord[];
@@ -47,6 +88,8 @@ interface DbStoreState {
   hotkeysMap: Record<string, string>;
   shortcutsMap: Record<string, string>;
   isInitialized: boolean;
+  widgetViews: WidgetViewRecord[];
+  prefixSettings: PrefixSettingRecord[];
   
   // Method to start listening to the database
   initDbSync: () => void;
@@ -64,6 +107,13 @@ interface DbStoreState {
   getNotesByWorkspaceId: (workspaceId: string | null | undefined) => NoteRecord[];
   getLinksByWorkspaceId: (workspaceId: string | null | undefined) => LinkRecord[];
   getSessionsByWorkspaceId: (workspaceId: string | null | undefined) => SessionRecord[];
+  getWidgetViewsByWorkspaceId: (workspaceId: string | null | undefined) => WidgetViewRecord[];
+  getPrefixSettingByCategory: (category: PrefixSettingCategory | null | undefined) => PrefixSettingRecord | null;
+  getEnabledPrefixSettings: () => PrefixSettingRecord[];
+  getCategoryPrefixSettings: () => PrefixSettingRecord[];
+  getActionPrefixSettings: () => PrefixSettingRecord[];
+  getPrefixMap: () => Record<string, string>;
+  updatePrefixSettingRecord: (id: string, patch: Partial<PrefixSettingRecord>) => Promise<PrefixSettingRecord>;
   updateCommandRecord: (commandId: string, input: UpdateCommandInput & { hotkey?: string | null; keywords?: string[] | null }) => Promise<CommandRecord>;
   sessions: SessionRecord[];
 }
@@ -86,6 +136,8 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
   userShortcuts: [],
   favorites: [],
   sessions: [],
+  widgetViews: [],
+  prefixSettings: [],
   hotkeysMap: {},
   shortcutsMap: {},
   isInitialized: false,
@@ -150,6 +202,41 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
     return get().sessions.filter(session => session.workspaceId === workspaceId);
   },
 
+  getWidgetViewsByWorkspaceId: workspaceId => {
+    if (!workspaceId) return [];
+    return get().widgetViews.filter(view => view.workspaceId === workspaceId);
+  },
+
+  getPrefixSettingByCategory: category => {
+    if (!category) return null;
+    return get().prefixSettings.find(setting => setting.category === category) ?? null;
+  },
+
+  getEnabledPrefixSettings: () => {
+    return get().prefixSettings.filter(setting => setting.enabled);
+  },
+
+  getCategoryPrefixSettings: () => {
+    return get().prefixSettings.filter(setting => setting.type === 'category');
+  },
+
+  getActionPrefixSettings: () => {
+    return get().prefixSettings.filter(setting => setting.type === 'action');
+  },
+
+  getPrefixMap: () => {
+    return get().prefixSettings.reduce<Record<string, string>>((map, setting) => {
+      if (setting.enabled && setting.prefix) {
+        map[setting.category] = setting.prefix;
+      }
+      return map;
+    }, {});
+  },
+
+  updatePrefixSettingRecord: async (id, patch) => {
+    return updatePrefixSettingData(id, patch as any);
+  },
+
   updateCommandRecord: async (commandId, input) => {
     let existing = await db.commands.get(commandId);
     if (!existing) {
@@ -187,9 +274,12 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
   initDbSync: () => {
     if (get().isInitialized) {
       storageDebug.log('useDbStore.initDbSync', 'Skipped because DB sync is already initialized');
+      dexieStorePerf('initDbSync:skipped');
       return;
     }
     
+    const startedAt = performance.now();
+    dexieStorePerf('initDbSync:start');
     set({ isInitialized: true });
     storageDebug.log('useDbStore.initDbSync', 'Starting Dexie liveQuery subscriptions');
 
@@ -207,6 +297,11 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
     syncCommandsFromSource().catch(err => {
       console.error('Failed to sync commands to Dexie:', err);
       storageDebug.error('useDbStore.syncCommandsFromSource', 'Failed to sync commands to Dexie', err);
+    });
+
+    syncPrefixSettingsFromSource().catch(err => {
+      console.error('Failed to sync prefix settings to Dexie:', err);
+      storageDebug.error('useDbStore.syncPrefixSettingsFromSource', 'Failed to sync prefix settings to Dexie', err);
     });
 
     // Subscribe to Dexie changes and push them to Zustand
@@ -299,6 +394,19 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
         if (!isInitCommands) notifyDbChanged('commands');
         isInitCommands = false;
         return { commands };
+      });
+    });
+
+    let isInitPrefixSettings = true;
+    liveQuery(() => db.prefixSettings.toArray()).subscribe(prefixSettings => {
+      storageDebug.log('useDbStore.liveQuery.prefixSettings', 'Dexie emitted prefix settings', {
+        count: prefixSettings.length,
+      });
+      set(state => {
+        if (sameJson(state.prefixSettings, prefixSettings)) return state;
+        if (!isInitPrefixSettings) notifyDbChanged('prefixSettings');
+        isInitPrefixSettings = false;
+        return { prefixSettings };
       });
     });
 
@@ -425,6 +533,25 @@ export const useDbStore = create<DbStoreState>((set, get) => ({
         isInitSessions = false;
         return { sessions };
       });
+    });
+
+    let isInitWidgetViews = true;
+    liveQuery(() => db.widgetViews.toArray()).subscribe((widgetViews) => {
+      const normalizedWidgetViews = normalizeWidgetViewsForStore(widgetViews);
+      storageDebug.log('useDbStore.liveQuery.widgetViews', 'Dexie emitted widget views', {
+        count: normalizedWidgetViews.length,
+        rawCount: widgetViews.length,
+      });
+      set(state => {
+        if (sameJson(state.widgetViews, normalizedWidgetViews)) return state;
+        if (!isInitWidgetViews) notifyDbChanged('widgetViews');
+        isInitWidgetViews = false;
+        return { widgetViews: normalizedWidgetViews };
+      });
+    });
+
+    dexieStorePerf('initDbSync:subscriptionsRegistered', {
+      durationMs: Math.round(performance.now() - startedAt),
     });
   }
 }));

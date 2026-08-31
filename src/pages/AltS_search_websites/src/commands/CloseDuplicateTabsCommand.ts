@@ -7,7 +7,7 @@ import type { PageActionCommand } from './types';
 export const CloseDuplicateTabsCommand: PageActionCommand = {
   id: 'close_duplicate_tabs',
   label: 'Close Duplicate Tabs',
-  prefix: 'cdt',
+  prefix: 'duplicate',
   keywords: ['close', 'duplicate', 'tabs', 'cdt'],
   description: 'Close all duplicate tabs with identical URLs across all windows',
   action: 'execute_close_duplicate_tabs',

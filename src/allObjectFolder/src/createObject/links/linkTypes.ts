@@ -16,7 +16,7 @@ export interface LinkItem {
   name?: string;
   url: string;
   favIconUrl?: string;
-  source?: 'tab' | 'custom' | 'note' | 'link' | 'history' | 'bookmark';
+  source?: 'tab' | 'custom' | 'note' | 'link' | 'snippet' | 'agent' | 'history' | 'bookmark';
   originalData?: any;
 }
 
@@ -49,6 +49,8 @@ export interface LinkRecord {
 
   versionHistory?: StructuredVersionHistory<LinkSnapshot>;
 }
+
+export const LINK_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderId', 'title', 'urls', 'tagIds', 'shortcut', 'deletedAt'] as const satisfies readonly (keyof LinkRecord)[];
 
 export interface CreateLinkInput {
   id?: string;

@@ -2,7 +2,7 @@
  * @file todoData.ts
  * @description Handles IndexedDB transactions (CRUD) for Todo records,
  * supporting setting references and updating completion status.
- * 
+ *
  * @usage
  * ```ts
  * import { createTodo, updateTodo } from './todoData';
@@ -101,16 +101,27 @@ export const createTodo = async (
   recurringCycle?: string,
   description?: string,
   tagIds?: string[],
-  shortcut?: string
+  shortcut?: string,
+  workspaceId?: string,
+  folderId?: string,
 ): Promise<TodoRecord> => {
   try {
-    console.log('[createTodo:Dexie] Invoked with:', { title, references, scheduleType, scheduleTime, recurringCycle, description, tagIds, shortcut });
+    console.log('[createTodo:Dexie] Invoked with:', {
+      title,
+      references,
+      scheduleType,
+      scheduleTime,
+      recurringCycle,
+      description,
+      tagIds,
+      shortcut,
+    });
     const now = Date.now();
     let finalTitle = title;
     const mappedReferences = mapTodoReferences(references);
-    
+
     if (!finalTitle && mappedReferences.length) {
-       finalTitle = mappedReferences[0].name || 'Untitled Todo';
+      finalTitle = mappedReferences[0].name || 'Untitled Todo';
     }
 
     const newTodo: TodoRecord = {
@@ -125,6 +136,8 @@ export const createTodo = async (
       tagIds: tagIds || [],
       tags: tagIds || [],
       shortcut: shortcut || '',
+      workspaceId,
+      folderId,
       createdAt: now,
       updatedAt: now,
       versionHistory: undefined as any,
@@ -153,10 +166,7 @@ export const deleteTodo = async (todoId: string): Promise<void> => {
   }
 };
 
-export const updateTodoContent = async (
-  todoId: string,
-  updates: Partial<TodoRecord>
-): Promise<TodoRecord> => {
+export const updateTodoContent = async (todoId: string, updates: Partial<TodoRecord>): Promise<TodoRecord> => {
   try {
     if (!todoId) throw new Error('todoId is required');
     return await db.transaction('rw', db.todos, async () => {
@@ -177,7 +187,7 @@ export const updateTodoContent = async (
         existing.versionHistory,
         prevSnapshot,
         nextSnapshot,
-        now
+        now,
       );
 
       nextRecord.versionHistory = nextHistory;
@@ -190,11 +200,7 @@ export const updateTodoContent = async (
   }
 };
 
-export const updateTodo = async (
-  todoId: string, 
-  newDoneStatus: boolean, 
-  nextDeadline?: string
-): Promise<void> => {
+export const updateTodo = async (todoId: string, newDoneStatus: boolean, nextDeadline?: string): Promise<void> => {
   const updates: Partial<TodoRecord> = {
     isDone: newDoneStatus,
   };

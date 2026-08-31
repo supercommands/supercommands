@@ -10,7 +10,6 @@ import {
   FaLink,
   FaHistory,
   FaBookmark,
-  FaRobot,
   FaSearch,
   FaGlobe,
   FaFolder,
@@ -45,6 +44,8 @@ import {
   CustomSearchPrefixesForOmniboxStorage,
   DEFAULT_OMNIBOX_PREFIXES,
 } from '../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
+import { launchDashboardCollectionView } from '../dashboardCollections/launchDashboardCollectionView';
+import { launchSessionSmart } from '../sessions/launchSessionSmart';
 import { VisualKeyDisplay } from '../hotkeys/ui/VisualKeyDisplay';
 import { EditablePrefixKey } from '../shortcuts/ui/EditablePrefixKey';
 
@@ -104,7 +105,7 @@ const buildSlashSectionAliases = (
     TS: 'thissite',
     [String(resolved.todo).trim().toUpperCase()]: 'todos',
     [String(resolved.note).trim().toUpperCase()]: 'notes',
-    [String(resolved.session).trim().toUpperCase()]: 'sessions',
+    [String(resolved.collection).trim().toUpperCase()]: 'collections',
     [String(resolved.snippet).trim().toUpperCase()]: 'snippets',
     [String(resolved.link).trim().toUpperCase()]: 'links',
     [String(resolved.bookmark).trim().toUpperCase()]: 'bookmarks',
@@ -290,68 +291,20 @@ const SLASH_SECTION_META: Record<string, { title: string; icon: React.ReactNode 
   snippets: { title: 'Text Expanders', icon: <FaCode size={16} className="text-[var(--color-iconDefault)]" /> },
   links: { title: 'Links', icon: <FaLink size={16} className="text-[var(--color-iconDefault)]" /> },
   bookmarks: { title: 'Bookmarks', icon: <FaBookmark size={16} className="text-[var(--color-iconDefault)]" /> },
-  chat_agents: { title: 'Chat Agents', icon: <FaRobot size={16} className="text-[var(--color-iconDefault)]" /> },
-  sessions: { title: 'Tab Sessions', icon: <SessionGridIcon size={16} className="text-[var(--color-iconDefault)]" /> },
+  chat_agents: { title: 'Chat Agents', icon: <LuSparkles size={16} className="text-[var(--color-iconDefault)]" /> },
+  collections: { title: 'Collections', icon: <SessionGridIcon size={16} className="text-[var(--color-iconDefault)]" /> },
   commands: { title: 'Commands', icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
   system_commands: { title: 'System Commands', icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
   automations: { title: 'Automations', icon: <FiZap size={16} className="text-[var(--color-iconDefault)]" /> },
 };
-export type SlashLauncherItem =
-  | {
-      kind: 'action';
-      id: 'ai' | 'collections';
-      title: string;
-      description?: string;
-      icon: React.ReactNode;
-      keywords?: string[];
-    }
-  | {
-      kind: 'category';
-      id: string;
-      title: string;
-      alias: string;
-      icon: React.ReactNode;
-      keywords?: string[];
-    };
-
-const SUGGESTION_ACTION_ITEMS: Array<Extract<SlashLauncherItem, { kind: 'action' }>> = [
-  {
-    kind: 'action',
-    id: 'ai',
-    title: 'All AI Chat Agents',
-    description: 'Search across all AI assistants at once',
-    keywords: ['ai', 'chat', 'assistants', 'gpt', 'claude', 'gemini', 'perplexity'],
-    icon: (
-      <div className="flex -space-x-1.5 items-center justify-start shrink-0 py-0.5">
-        {['chatgpt.com', 'claude.ai', 'gemini.google.com', 'perplexity.ai'].map((host, idx) => (
-          <div
-            key={host}
-            className="w-4 h-4 rounded-full flex items-center justify-center overflow-hidden border border-white dark:border-neutral-800 bg-white shadow-sm shrink-0 relative"
-            style={{ zIndex: 4 - idx }}>
-            <img src={getFaviconUrl(host)} alt={host} className="w-full h-full object-cover" />
-          </div>
-        ))}
-      </div>
-    ),
-  },
-  {
-    kind: 'action',
-    id: 'collections',
-    title: 'All Command Shortcuts',
-    description: 'Access all your saved collections and shortcuts',
-    keywords: ['collections', 'shortcuts', 'commands', 'all', 'folders'],
-    icon: (
-      <div className="w-5 h-5 flex items-center justify-center shrink-0">
-        <svg className="w-4 h-4 text-[var(--color-iconDefault)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <rect x="3" y="3" width="7" height="7" rx="1" />
-          <rect x="14" y="3" width="7" height="7" rx="1" />
-          <rect x="14" y="14" width="7" height="7" rx="1" />
-          <rect x="3" y="14" width="7" height="7" rx="1" />
-        </svg>
-      </div>
-    ),
-  },
-];
+export type SlashLauncherItem = {
+  kind: 'category';
+  id: string;
+  title: string;
+  alias: string;
+  icon: React.ReactNode;
+  keywords?: string[];
+};
 
 interface BoardViewProps {
   state?: SuggestionState | null;
@@ -494,6 +447,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   const dbAutomations = useDbStore(state => state.automations);
   const dbChatAgents = useDbStore(state => state.chatAgents);
   const dbAiPrompts = useDbStore(state => state.aiPrompts);
+  const dbWidgetViews = useDbStore(state => state.widgetViews);
+  const activeWorkspaceId = dbWorkspaces[0]?.id || 'default';
   const expandedWorkspaces = useUIStore(state => state.expandedWorkspaces);
   const commands = useDbStore(state => state.commands);
   const visibleCommands = useMemo(() => commands.filter((cmd: any) => {
@@ -516,6 +471,46 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       }
       return true;
     });
+  const isLegacySessionSuggestion = (item: any) => {
+    const kind = String(item?._kind || item?.type || '').toLowerCase();
+    const category = String(item?.item?.category || item?.snippet?.category || item?.category || '').toLowerCase();
+    return kind === 'session' || ['session', 'sessions', 'tab session', 'tabgroup'].includes(category);
+  };
+  const collectionViewItems = useMemo(() => {
+    const seenIds = new Set<string>();
+    const seenDefaultLikeViews = new Set<string>();
+
+    return [...dbWidgetViews]
+      .filter((view: any) => String(view?.workspaceId || 'default') === String(activeWorkspaceId))
+      .sort((a: any, b: any) => {
+        if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+        return (a.createdAt || 0) - (b.createdAt || 0);
+      })
+      .filter((view: any) => {
+        const id = String(view?.id || '').trim();
+        if (id && seenIds.has(id)) return false;
+        if (id) seenIds.add(id);
+
+        const workspaceKey = String(view?.workspaceId || 'global');
+        const titleKey = String(view?.title || 'Main Dashboard').trim().toLowerCase();
+        const isDefaultLikeMainView = Boolean(view?.isDefault) || titleKey === 'main dashboard';
+        if (!isDefaultLikeMainView) return true;
+
+        const defaultLikeKey = `${workspaceKey}:main-dashboard`;
+        if (seenDefaultLikeViews.has(defaultLikeKey)) return false;
+        seenDefaultLikeViews.add(defaultLikeKey);
+        return true;
+      })
+      .map((view: any) => ({
+        _kind: 'collection_view',
+        type: 'collection_view',
+        category: 'collection_view',
+        id: view.id,
+        title: view.title || 'Untitled Collection',
+        collectionView: view,
+        workspace: view.workspaceId ? { workspace_id: view.workspaceId } : null,
+      }) as any);
+  }, [activeWorkspaceId, dbWidgetViews]);
 
   // defaultWorkspaceId has been removed as it relied on the old architecture and is now dead code.
 
@@ -914,6 +909,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     const itemId = getItemCompoundId(item);
     const kind = item._kind || item.type;
     const category = String(item.snippet?.category || item.category || '').toLowerCase();
+    const isCollectionItem = kind === 'collection_view' || category === 'collection' || category === 'collections';
     const isSessionItem = kind === 'session' || category === 'session';
     const sessionReferenceIds = isSessionItem ? getSessionReferenceIds(item) : [itemId];
     const [primarySessionId, legacySessionId] = sessionReferenceIds;
@@ -939,8 +935,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
             ? 'command'
             : kind === 'aiPrompt' || kind === 'chat_agent' || category === 'automation'
               ? 'automation'
-              : isSessionItem
-                ? 'session'
+            : isCollectionItem || isSessionItem
+                ? 'collection'
                 : category === 'link'
                   ? 'link'
                   : 'note';
@@ -989,6 +985,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     const itemId = getItemCompoundId(item);
     const kind = item._kind || item.type;
     const category = String(item.snippet?.category || item.category || '').toLowerCase();
+    const isCollectionItem = kind === 'collection_view' || category === 'collection' || category === 'collections';
     const isSessionItem = kind === 'session' || category === 'session';
     const sessionReferenceIds = isSessionItem ? getSessionReferenceIds(item) : [itemId];
     const [primarySessionId, legacySessionId] = sessionReferenceIds;
@@ -1024,7 +1021,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           } else {
             await apiSaveShortcut(itemId, itemId, normalized, getTitle(item), 'automation' as any);
           }
-        } else if (isSessionItem) {
+        } else if (isCollectionItem || isSessionItem) {
           if (legacySessionId) {
             if (isEmbedded) {
               chrome.runtime.sendMessage({ action: 'delete_user_shortcut', payload: { referenceId: legacySessionId }, userId: userId || 'local_user' });
@@ -1033,9 +1030,9 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
             }
           }
           if (isEmbedded) {
-            chrome.runtime.sendMessage({ action: 'api_save_shortcut', payload: { id: primarySessionId || itemId, referenceId: primarySessionId || itemId, trigger: normalized, label: getTitle(item), type: 'session' }, userId: userId || 'local_user' });
+            chrome.runtime.sendMessage({ action: 'api_save_shortcut', payload: { id: primarySessionId || itemId, referenceId: primarySessionId || itemId, trigger: normalized, label: getTitle(item), type: 'collection' }, userId: userId || 'local_user' });
           } else {
-            await apiSaveShortcut(primarySessionId || itemId, primarySessionId || itemId, normalized, getTitle(item), 'session' as any);
+            await apiSaveShortcut(primarySessionId || itemId, primarySessionId || itemId, normalized, getTitle(item), 'collection' as any);
           }
         } else {
           const type = kind === 'command' ? 'command' : category === 'link' ? 'link' : 'note';
@@ -1124,11 +1121,117 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     }
   };
 
+  const handleEditCollectionView = async (item: any) => {
+    const view = item?.collectionView || item?.data || item;
+    const viewId = String(view?.id || item?.id || '').trim();
+    const workspaceId = String(view?.workspaceId || activeWorkspaceId || 'default');
+    if (!viewId) return;
+
+    await launchDashboardCollectionView(viewId, { workspaceId, mode: 'edit' });
+
+    setContextMenuState(null);
+    handleCancelEdit();
+    onBoardRedirect?.();
+    onClose?.();
+  };
+
+  const handleOpenCollectionView = async (item: any) => {
+    const view = item?.collectionView || item?.data || item;
+    const viewId = String(view?.id || item?.id || '').trim();
+    const workspaceId = String(view?.workspaceId || activeWorkspaceId || 'default');
+    if (!viewId) return;
+
+    await launchDashboardCollectionView(viewId, { workspaceId, mode: 'open' });
+    setContextMenuState(null);
+    handleCancelEdit();
+    onBoardRedirect?.();
+    onClose?.();
+  };
+
   const buildContextMenuActions = (item: any) => {
     const kind = item._kind || item.type;
+    if (kind === 'collection_view') {
+      const compoundId = getItemCompoundId(item);
+      const currentShortcut = shortcutsMap[compoundId] || item.shortcut || item.data?.shortcut || '';
+      const normalizedCurrentShortcut = currentShortcut ? normalizeShortcutTrigger(currentShortcut) : '';
+      const currentHotkey = hotkeysMap[compoundId] || item.hotkey || item.data?.hotkey || '';
+      const actions: any[] = [
+        {
+          key: 'edit-collection',
+          label: 'Edit Collection',
+          icon: <FiEdit2 size={14} />,
+          closeOnExecute: true,
+          onSelect: () => {
+            void handleEditCollectionView(item);
+          },
+        },
+      ];
+
+      if (currentShortcut) {
+        actions.push({
+          key: 'remove-shortcut',
+          label: 'Remove command',
+          shortcut: normalizedCurrentShortcut,
+          icon: <FiTrash2 size={14} />,
+          className: 'hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400',
+          closeOnExecute: true,
+          onSelect: async () => {
+            await saveShortcut(item, '');
+          },
+        });
+      }
+
+      actions.push({
+        key: 'assign-shortcut',
+        label: currentShortcut ? 'Edit command' : 'Assign command',
+        shortcut: normalizedCurrentShortcut,
+        icon: <MdOutlineShortcut size={14} className="text-green-600 dark:text-green-400" />,
+        className: 'hover:bg-green-50 dark:hover:bg-green-900/20 text-neutral-700 dark:text-neutral-300',
+        closeOnExecute: false,
+        onSelect: async () => {
+          setEditingShortcutFor(compoundId);
+          setEditingHotkeyFor(null);
+          setEditValue(normalizedCurrentShortcut);
+          setIsUpdatingShortcut(!!currentShortcut);
+          setSaveError(null);
+        },
+      });
+
+      if (currentHotkey) {
+        actions.push({
+          key: 'remove-hotkey',
+          label: 'Remove hotkey',
+          shortcut: currentHotkey,
+          icon: <FiTrash2 size={14} />,
+          className: 'hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400',
+          closeOnExecute: true,
+          onSelect: async () => {
+            await saveHotkey(item, '', true);
+          },
+        });
+      }
+
+      actions.push({
+        key: 'assign-hotkey',
+        label: currentHotkey ? 'Edit hotkey' : 'Assign hotkey',
+        shortcut: currentHotkey,
+        icon: <BsKeyboard size={14} className="text-green-600 dark:text-green-400" />,
+        className: 'hover:bg-green-50 dark:hover:bg-green-900/20 text-neutral-700 dark:text-neutral-300',
+        closeOnExecute: false,
+        onSelect: async () => {
+          setEditingHotkeyFor(compoundId);
+          setEditingShortcutFor(null);
+          setEditValue(currentHotkey || '');
+          setIsUpdatingHotkey(!!currentHotkey);
+          setSaveError(null);
+        },
+      });
+
+      return actions;
+    }
     const isNote =
       kind === 'snippet' &&
-      !['link', 'tabgroup', 'Tab Session', 'automation', 'agent', 'snippet'].includes(
+      !['link', 'tabgroup', 'tab session', 'automation', 'agent', 'snippet'].includes(
         String(item.snippet?.category || '').toLowerCase(),
       );
     const isSnippet =
@@ -1143,7 +1246,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       kind === 'link' ||
       kind === 'bookmark';
     const isTabGroup =
-      kind === 'snippet' && ['tabgroup', 'Tab Session'].includes(String(item.snippet?.category || '').toLowerCase());
+      kind === 'snippet' && ['tabgroup', 'tab session'].includes(String(item.snippet?.category || '').toLowerCase());
     const isTodo = kind === 'todo';
     const isCommand = kind === 'command' || kind === 'common_command';
     const isAutomation =
@@ -1185,7 +1288,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           : isTabGroup
             ? 'Edit routine'
             : isSession
-              ? 'Edit Tab Session'
+              ? 'Edit Collection'
               : isLink
                 ? 'Edit link'
                 : isSnippet
@@ -1611,7 +1714,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   if (query.length === 0 || isSlashModeActive) {
     // Build from Dexie/current team directly
     const boardItems: SuggestionListItem[] = [];
-    // Add Dexie items (notes, links,snippets)
+    // Add Dexie items (notes, links, snippets, dashboard views)
     dbNotes.forEach((n: any) =>
       boardItems.push({
         _kind: 'snippet',
@@ -1636,14 +1739,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         folder: s.folderId ? { folder_id: s.folderId } : null,
       } as any),
     );
-    dbSessions.forEach((s: any) =>
-      boardItems.push({
-        _kind: 'session',
-        session: s,
-        workspace: s.workspaceId ? { workspace_id: s.workspaceId } : null,
-        folder: s.folderId ? { folder_id: s.folderId } : null,
-      } as any),
-    );
+    boardItems.push(...collectionViewItems);
     dbChatAgents.forEach((agent: any) => boardItems.push({ _kind: 'chat_agent', ...agent } as any));
     dbAiPrompts.forEach((prompt: any) => boardItems.push({ _kind: 'aiPrompt', ...prompt } as any));
     dbAutomations.forEach((automation: any) => boardItems.push({ _kind: 'automation', automation } as any));
@@ -1691,7 +1787,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       ...(state?.suggestions || []),
     ]).filter((item: any) => {
       const kind = item?._kind || item?.type;
-      if (kind !== 'workspace_item' && kind !== 'session' && kind !== 'chat_agent' && kind !== 'aiPrompt' && kind !== 'automation')
+      if (kind !== 'workspace_item' && kind !== 'chat_agent' && kind !== 'aiPrompt' && kind !== 'automation')
         return false;
       const category = String(item?.item?.category || item?.category || item?.snippet?.category || '').toLowerCase();
       return [
@@ -1701,10 +1797,6 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         'links',
         'snippet',
         'snippets',
-        'session',
-        'sessions',
-        'tab session',
-        'tabgroup',
         'todo',
         'todos',
         'bookmark',
@@ -1728,17 +1820,14 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         item?.category ||
         (kind === 'aiprompt' || kind === 'chat_agent' || kind === 'chatagent' || kind === 'agent' ? 'agent' : kind),
       ).toLowerCase();
-      const normalizedCategory = ['sessions', 'tab session', 'tabgroup'].includes(category)
-        ? 'session'
-        : ['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent'].includes(category)
+      const normalizedCategory = ['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent'].includes(category)
           ? 'agent'
           : category;
       const id = String(
         item?.item?.id ||
         item?.item?.item_id ||
         item?.id ||
-        item?.session?.id ||
-        item?.session?.session_id ||
+        item?.collectionView?.id ||
         item?.automation?.id ||
         item?.automation?.automation_id ||
         item?.snippet?.id ||
@@ -1750,9 +1839,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         item?.item?.title ||
         item?.item?.key ||
         item?.item?.name ||
-        item?.session?.title ||
-        item?.session?.key ||
-        item?.session?.name ||
+        item?.collectionView?.title ||
         item?.snippet?.title ||
         item?.snippet?.key ||
         item?.snippet?.name ||
@@ -1821,7 +1908,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         kind === 'chat_agent' ||
         kind === 'chatagent' ||
         kind === 'agent' ||
-        ['note', 'notes', 'link', 'links', 'session', 'sessions', 'tab session', 'tabgroup', 'todo', 'todos', 'bookmark', 'bookmarks', 'automation', 'automations', 'aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent', 'snippet', 'snippets'].includes(category);
+        ['note', 'notes', 'link', 'links', 'todo', 'todos', 'bookmark', 'bookmarks', 'automation', 'automations', 'aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent', 'snippet', 'snippets'].includes(category);
 
       if (!isCategoryEntity) {
         mergedBoardItems.push(item);
@@ -1875,7 +1962,15 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           (b.title && String(b.title).toLowerCase().includes(lowerQuery)) ||
           (b.url && String(b.url).toLowerCase().includes(lowerQuery)),
       );
-    sourceItems = [...activeSuggestions, ...filteredBookmarks];
+    const filteredCollectionViews = collectionViewItems.filter((item: any) => {
+      const title = String(item.title || item.collectionView?.title || '').toLowerCase();
+      return title.includes(lowerQuery);
+    });
+    sourceItems = [
+      ...activeSuggestions.filter((item: any) => !isLegacySessionSuggestion(item)),
+      ...filteredCollectionViews,
+      ...filteredBookmarks,
+    ];
   }
 
   const handleCreateItem = (groupKey: string, e: React.MouseEvent) => {
@@ -1973,7 +2068,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
 
   const filteredAllItems = sourceItems.filter(item => {
     const kind = (item as any)._kind || (item as any).type;
-    return !['history', 'ai_history', 'open_url'].includes(kind);
+    return !['history', 'ai_history', 'open_url'].includes(kind) && !isLegacySessionSuggestion(item);
   });
 
   const builtInCommandsById = useMemo(
@@ -2040,11 +2135,11 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     snippets: { title: 'Text Expanders', items: [] as SuggestionListItem[], icon: <FaCode size={16} className="text-[var(--color-iconDefault)]" /> },
     links: { title: 'Links', items: [] as SuggestionListItem[], icon: <FaLink size={16} className="text-[var(--color-iconDefault)]" /> },
     bookmarks: { title: 'Bookmarks', items: [] as SuggestionListItem[], icon: <FaBookmark size={16} className="text-[var(--color-iconDefault)]" /> },
-    sessions: { title: 'Tab Sessions', items: [] as SuggestionListItem[], icon: <SessionGridIcon size={16} className="text-[var(--color-iconDefault)]" /> },
+    collections: { title: 'Collections', items: [] as SuggestionListItem[], icon: <SessionGridIcon size={16} className="text-[var(--color-iconDefault)]" /> },
     chat_agents: {
       title: 'Chat Agents',
       items: [] as SuggestionListItem[],
-      icon: <FaRobot size={16} className="text-[var(--color-iconDefault)]" />,
+      icon: <LuSparkles size={16} className="text-[var(--color-iconDefault)]" />,
     },
     commands: { title: 'Commands', items: [] as SuggestionListItem[], icon: <FaTerminal size={16} className="text-[var(--color-iconDefault)]" /> },
     system_commands: {
@@ -2083,7 +2178,6 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     if (kind === 'snippet' || kind === 'workspace_item') {
       const cat = String((item as any).item?.category || (item as any).snippet?.category || '').toLowerCase();
       if (['link', 'links'].includes(cat)) groups.links.items.push(item);
-      else if (['session', 'sessions', 'tab session', 'tabgroup'].includes(cat)) groups.sessions.items.push(item);
       else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(cat)) groups.chat_agents.items.push(item);
       else if (['automation', 'automations'].includes(cat)) groups.automations.items.push(item);
       else if (['todo', 'todos'].includes(cat)) groups.todos.items.push(item);
@@ -2107,12 +2201,12 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       groups.bookmarks.items.push(item);
     } else if (kind === 'todo') {
       groups.todos.items.push(item);
+    } else if (kind === 'collection_view') {
+      groups.collections.items.push(item);
     } else if (kind === 'automation' || kind === 'agent' || kind === 'module') {
       groups.automations.items.push(item);
     } else if (kind === 'link' || (item as any).category === 'link') {
       groups.links.items.push(item);
-    } else if (kind === 'session' || (item as any).category === 'session') {
-      groups.sessions.items.push(item);
     } else if (
       kind === 'history' ||
       kind === 'ai_history' ||
@@ -2221,6 +2315,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     const kind = item._kind || (item as any).type;
 
     if (kind === 'todo') return item.key || item.title || item.name || 'Todo';
+    if (kind === 'collection_view') return item.collectionView?.title || item.title || 'Untitled Collection';
     if (kind === 'command' || kind === 'common_command') return item.label || item.command?.label || 'Command';
     if (kind === 'aggregate') return item.label || 'All AI Chat Agents';
     if (kind === 'snippet')
@@ -2233,7 +2328,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         item.data?.title ||
         item.data?.key ||
         item.title ||
-        'Untitled Tab Session'
+        'Untitled Collection'
       );
     if (kind === 'bookmark') return item.title || item.url || 'Link';
     if (kind === 'open_url') return item.displayUrl || item.url || 'Open URL';
@@ -2256,7 +2351,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     if (kind === 'snippet') {
       const cat = String(item.snippet?.category || '').toLowerCase();
       if (['link'].includes(cat)) return 'Links';
-      if (['session'].includes(cat)) return 'Tab Sessions';
+      if (['session'].includes(cat)) return 'Collection';
       if (cat === 'link' || cat === 'link') return 'Link Group';
       if (cat === 'note') return 'Snippet';
       return 'Notes';
@@ -2308,7 +2403,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       if (['note', 'notes'].includes(normalizedCategory)) return 'Note';
       if (['link', 'links', 'collection'].includes(normalizedCategory)) return 'Link';
       if (['snippet', 'snippets'].includes(normalizedCategory)) return 'Text Expander';
-      if (['session', 'sessions', 'tab session'].includes(normalizedCategory)) return 'Session';
+      if (['session', 'sessions', 'tab session'].includes(normalizedCategory)) return 'Collection';
       if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(normalizedCategory)) {
         return 'Chat Agent';
       }
@@ -2372,6 +2467,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           return `${count} tab${count !== 1 ? 's' : ''} saved`;
         }
       }
+      if (kind === 'collection_view') return 'Dashboard view';
       if (kind === 'note') {
         if (item.description) return String(item.description).replace(/<[^>]+>/g, '');
         if (item.body) return item.body.replace(/<[^>]+>/g, '').trim();
@@ -2674,6 +2770,10 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     if (entityKind === 'aggregate' || entityKind === 'agent_collection')
       return <SessionGridIcon className="text-[var(--color-iconDefault)]" size={16} />;
 
+    if (entityKind === 'collection_view') {
+      return <SessionGridIcon className="text-[var(--color-iconDefault)]" size={16} />;
+    }
+
     if (entityKind === 'session') {
       const urls = getSnippetAllUrls(entity.session || entity);
       if (urls.length > 0) {
@@ -2766,7 +2866,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
           </div>
         );
       }
-      return <FaRobot className="text-[var(--color-iconDefault)]" size={16} />;
+      return <LuSparkles className="text-[var(--color-iconDefault)]" size={16} />;
     }
 
     if (entityKind === 'automation') return <FiZap className="text-[var(--color-iconDefault)]" size={16} />;
@@ -2782,7 +2882,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
             }}
           />
         );
-      return <FaRobot className="text-[var(--color-iconDefault)]" size={16} />;
+      return <LuSparkles className="text-[var(--color-iconDefault)]" size={16} />;
     }
 
     return <FaSearch className="text-[var(--color-iconDefault)]" size={16} />;
@@ -2794,7 +2894,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     'notes',
     'links',
     'bookmarks',
-    'sessions',
+    'collections',
     'chat_agents',
     'commands',
     'system_commands',
@@ -2902,7 +3002,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
         category: 'session',
         data: {
           id: snippet_id || todo.id || todo.todo_id || value,
-          title: todo.key || todo.title || todo.name || 'Untitled Tab Session',
+          title: todo.key || todo.title || todo.name || 'Untitled Collection',
           value,
           urls: todo.urls,
           sessionOpenSettings: todo.sessionOpenSettings,
@@ -3035,6 +3135,11 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
 
     if (kind === 'todo') {
       executeTodoItem(entity, e);
+      return;
+    }
+
+    if (kind === 'collection_view') {
+      void handleOpenCollectionView(item);
       return;
     }
 
@@ -3236,10 +3341,11 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                   useUIStore.getState().openEditor({ type: 'session', id: 'new' });
                 } else if (args.kind === 'commandList') {
                   useUIStore.getState().setSidebar('commandListSidebar' as any, { open: true });
-                } else if (args.kind === 'folderEditor') {
-                  useUIStore.getState().openCreateItem('folder' as any, { id: 'new' });
-                } else if (args.kind === 'createWorkspace') {
-                  useUIStore.getState().openCreateItem('workspace' as any, { id: 'new' });
+                // Workspace/folder creation is only allowed from onboarding for now.
+                // } else if (args.kind === 'folderEditor') {
+                //   useUIStore.getState().openCreateItem('folder' as any, { id: 'new' });
+                // } else if (args.kind === 'createWorkspace') {
+                //   useUIStore.getState().openCreateItem('workspace' as any, { id: 'new' });
                 } else if (args.kind === 'home') {
                   useUIStore.getState().setView({ type: 'home' });
                 } else if (args.kind === 'custom') {
@@ -3356,8 +3462,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     const isActualSession = !!item.session || item._kind === 'session' || (item._kind === 'workspace_item' && record.category?.toLowerCase().includes('session'));
     const sessionId = isActualSession ? record.id : record.snippet_id || record.id;
     const sessionName = isActualSession
-      ? record.title || record.key || record.name || 'Untitled Tab Session'
-      : record.key || record.name || record.title || 'Untitled Tab Session';
+      ? record.title || record.key || record.name || 'Untitled Collection'
+      : record.key || record.name || record.title || 'Untitled Collection';
     const workspaceId = isActualSession ? record.workspaceId : record.workspace_id || null;
     const folderId = isActualSession ? record.folderId : record.folder_id || null;
 
@@ -3437,45 +3543,42 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       });
     });
 
-    chrome.runtime.sendMessage(
-      {
-        action: 'start_session',
-        sessionId,
-        sessionName,
-        workspaceId,
-        folderId: folderId || null,
-        teamId: 'local',
-        storageMode: 'local',
-        initialUrls,
-        initialNames,
-        openSettings,
-        isInlineCreation: true,
-        ...activeTabContext,
-      },
-      response => {
-        if (response?.ok && openSettings?.openMode === 'same_window') {
-          if (response?.reused || response?.reusedCurrentTab) {
-            return;
-          }
-          const encodedName = encodeURIComponent(sessionName);
-          window.history.replaceState(
-            null,
-            '',
-            `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`,
-          );
-          useUIStore.getState().openEditor({
-            type: 'session',
+    const response = await launchSessionSmart({
+      sessionId,
+      sessionName,
+      workspaceId,
+      folderId: folderId || null,
+      teamId: 'local',
+      storageMode: 'local',
+      initialUrls,
+      initialNames,
+      openSettings,
+      isInlineCreation: true,
+      context: activeTabContext,
+      source: 'board',
+    });
+
+    if (response?.ok && openSettings?.openMode === 'same_window' && openSettings?.openInNewTab !== true && !response?.openedInNewTab) {
+      if (response?.reused || response?.reusedCurrentTab || response?.skipped) {
+        return;
+      }
+      const encodedName = encodeURIComponent(sessionName);
+      window.history.replaceState(
+        null,
+        '',
+        `?session_mode=true&session_id=${sessionId}&session_name=${encodedName}`,
+      );
+      useUIStore.getState().openEditor({
+        type: 'session',
+        id: sessionId,
+        props: {
+          session: {
             id: sessionId,
-            props: {
-              session: {
-                id: sessionId,
-                title: sessionName,
-              },
-            },
-          });
-        }
-      },
-    );
+            title: sessionName,
+          },
+        },
+      });
+    }
   };
 
   // Click outside or ESC to close context menu
@@ -3565,19 +3668,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
     }
   }, [slashMode.activeSection, slashMode.slashDropdown, rawSearchValue]);
 
-  // Slash launcher options (Suggestions + All Results)
+  // Slash launcher options (All Results)
   const slashPickerFilterText = String(rawSearchValue.slice(1) || '').trim().toLowerCase();
-
-  const filteredSuggestions = useMemo(() => {
-    return SUGGESTION_ACTION_ITEMS.filter(item => {
-      if (!slashPickerFilterText) return true;
-      return (
-        item.title.toLowerCase().includes(slashPickerFilterText) ||
-        item.id.toLowerCase().includes(slashPickerFilterText) ||
-        (item.keywords && item.keywords.some(k => k.toLowerCase().includes(slashPickerFilterText)))
-      );
-    });
-  }, [slashPickerFilterText]);
 
   const filteredCategories = useMemo(() => {
     return Object.keys(SLASH_SECTION_META)
@@ -3603,38 +3695,17 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
   }, [slashPickerFilterText, slashAliasDisplay]);
 
   const visibleLauncherItems = useMemo<SlashLauncherItem[]>(() => {
-    return [...filteredSuggestions, ...filteredCategories];
-  }, [filteredSuggestions, filteredCategories]);
+    return filteredCategories;
+  }, [filteredCategories]);
 
   const executeLauncherItem = useCallback((item: SlashLauncherItem) => {
-    if (item.kind === 'action') {
-      setSlashDropdownSelectedIndex(-1);
-      state?.onDismissSlashDropdown?.({ clearQuery: true, blur: false });
-      state?.onQueryChange?.('');
-      if (item.id === 'ai') {
-        if (state?.onSlashSuggestionSelect) {
-          state.onSlashSuggestionSelect('ai');
-        } else {
-          useUIStore.getState().setLockedCommand('ai');
-        }
-      } else if (item.id === 'collections') {
-        if (onSheetRedirect) {
-          onSheetRedirect('collections');
-        } else if (state?.onSlashSuggestionSelect) {
-          state.onSlashSuggestionSelect('collections');
-        } else {
-          useUIStore.getState().openSheet('collections');
-        }
-      }
-    } else {
-      const alias = item.alias;
-      state?.onQueryChange?.(`/${alias} `);
-      setSlashDropdownSelectedIndex(-1);
-      requestAnimationFrame(() => {
-        focusSearchbarInput();
-      });
-    }
-  }, [state, onSheetRedirect]);
+    const alias = item.alias;
+    state?.onQueryChange?.(`/${alias} `);
+    setSlashDropdownSelectedIndex(-1);
+    requestAnimationFrame(() => {
+      focusSearchbarInput();
+    });
+  }, [state]);
 
   // Reset highlight index when dropdown closes
   useEffect(() => {
@@ -3961,8 +4032,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       ),
     },
     {
-      id: 'sessions',
-      label: 'Tab Sessions',
+      id: 'collections',
+      label: 'Collections',
       icon: (isSelected: boolean) => (
         <SessionGridIcon
           className={clsx(
@@ -3976,7 +4047,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
       id: 'chat_agents',
       label: 'Chat Agents',
       icon: (isSelected: boolean) => (
-        <FaRobot
+        <LuSparkles
           className={clsx(
             'w-4 h-4 shrink-0 transition-colors',
             isSelected ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
@@ -4024,6 +4095,33 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
 
 
 
+  const [viewport, setViewport] = useState(() => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1366,
+    height: typeof window !== 'undefined' ? window.innerHeight : 900,
+  }));
+
+  useEffect(() => {
+    const handleResize = () => {
+      setViewport({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isWidthShrunk = viewport.width < 1366;
+  const isHeightCompact = viewport.height < 820; // heightBands.normal
+  const isHeightShort = viewport.height < 760;   // heightBands.compact
+
+  const currentZoom = useMemo(() => {
+    if (viewport.width < 1200) return 0.78;
+    if (viewport.width < 1366) return 0.88;
+    if (viewport.width < 1500) return 0.94;
+    return 1;
+  }, [viewport.width]);
+
   return (
     <div
       className={clsx('mx-auto w-full max-w-[1400px] relative', isEmbedded ? 'flex flex-col flex-1 min-h-0' : 'h-full')}
@@ -4050,13 +4148,15 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
             ? 'h-auto border-transparent shadow-none bg-transparent'
             : isEmbedded
               ? 'flex-1 min-h-0 rounded-2xl border border-[var(--color-borderDefault)] shadow-2xl'
-              : 'h-[600px] rounded-2xl border border-[var(--color-borderDefault)] shadow-2xl',
+              : 'rounded-2xl border border-[var(--color-borderDefault)] shadow-2xl',
         )}
         style={{
           backgroundColor: slashMode.slashDropdown ? 'transparent' : (theme?.tokens?.sheetBg || 'var(--color-sheetBg)'),
           opacity: 1,
           backdropFilter: 'none',
           WebkitBackdropFilter: 'none',
+          height: slashMode.slashDropdown ? 'auto' : (isEmbedded ? undefined : '100%'),
+          zoom: currentZoom,
         }}>
         {/* Left Sidebar */}
         {!slashMode.slashDropdown && (
@@ -4102,8 +4202,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                       item.id === 'snippets' ||
                       item.id === 'commands' ||
                       item.id === 'system_commands' ||
-                      item.id === 'sessions' ||
-                      item.id === 'automations' ||
+                      item.id === 'collections' ||
                       item.id === 'todos' ||
                       item.id === 'chat_agents') && (
                       <span className="ml-2 flex items-center gap-1">
@@ -4121,15 +4220,13 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                       ? 'link'
                                       : item.id === 'bookmarks'
                                         ? 'bookmark'
-                                        : item.id === 'sessions'
-                                          ? 'session'
-                                          : item.id === 'automations'
-                                            ? 'automation'
-                                            : item.id === 'todos'
-                                              ? 'todo'
-                                              : item.id === 'chat_agents'
-                                                ? 'agent'
-                                                : 'note'
+                                      : item.id === 'collections'
+                                        ? 'collection'
+                                        : item.id === 'todos'
+                                          ? 'todo'
+                                          : item.id === 'chat_agents'
+                                            ? 'agent'
+                                            : 'note'
                           }
                           currentValue={
                             item.id === 'notes'
@@ -4141,18 +4238,16 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                                   : item.id === 'bookmarks'
                                     ? omniboxPrefixes.bookmark || ''
                                     : item.id === 'commands'
-                                      ? omniboxPrefixes.command
-                                      : item.id === 'system_commands'
-                                        ? omniboxPrefixes.system_command || ''
-                                        : item.id === 'sessions'
-                                          ? omniboxPrefixes.session || ''
-                                          : item.id === 'automations'
-                                            ? omniboxPrefixes.automation || ''
-                                            : item.id === 'todos'
-                                              ? omniboxPrefixes.todo || ''
-                                              : item.id === 'chat_agents'
-                                                ? omniboxPrefixes.agent || ''
-                                                : ''
+                                    ? omniboxPrefixes.command
+                                    : item.id === 'system_commands'
+                                      ? omniboxPrefixes.system_command || ''
+                                      : item.id === 'collections'
+                                        ? omniboxPrefixes.collection || ''
+                                        : item.id === 'todos'
+                                          ? omniboxPrefixes.todo || ''
+                                          : item.id === 'chat_agents'
+                                            ? omniboxPrefixes.agent || ''
+                                            : ''
                           }
                         />
                       </span>
@@ -4231,7 +4326,8 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                 <div
                   key={group.title}
                   className={clsx(
-                    'flex flex-col items-start flex-1 min-w-[260px] max-w-[400px] bg-transparent pr-4 pl-4 pt-4 pb-4 box-border',
+                    'flex flex-col items-start flex-1 min-w-[260px] max-w-[400px] bg-transparent px-4 box-border',
+                    isHeightShort ? 'py-1.5' : isHeightCompact ? 'py-2.5' : 'py-4',
                     'border-r border-[var(--color-borderDefault)] last:border-r-0',
                   )}>
                   {/* Header */}
@@ -4245,7 +4341,7 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
                         </h2>
                       </div>
                     </div>
-                    {!['bookmarks', 'commands', 'system commands'].includes(String(group.title).toLowerCase()) && (
+                    {!['bookmarks', 'commands', 'system commands', 'collections'].includes(String(group.title).toLowerCase()) && (
                       <button
                         onClick={e => handleCreateItem(String(group.title).toLowerCase(), e)}
                         className="shrink-0 p-1.5 rounded-md text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] transition-colors cursor-pointer"
@@ -4550,103 +4646,56 @@ const BoardView = React.forwardRef<any, BoardViewProps>(({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -6, scale: 0.97 }}
               transition={{ duration: 0.13, ease: [0.16, 1, 0.3, 1] }}
-              className="absolute top-[-16px] left-0 right-0 z-[70] flex justify-center px-6 pt-0">
+              className="absolute top-[-1px] left-0 right-0 z-[70] flex justify-center px-6 pt-0">
               <div
                 role="listbox"
                 aria-label="Slash search suggestions"
-                className="w-full max-w-[480px] min-[1600px]:max-w-[540px] min-[1800px]:max-w-2xl max-[1480px]:max-w-[440px] max-[1370px]:max-w-[400px] max-[1270px]:max-w-[360px] bg-[var(--color-containerBg)] border border-[var(--color-borderDefault)] rounded-b-xl rounded-t-none shadow-2xl overflow-hidden flex flex-col">
+                className="w-full max-w-[480px] min-[1600px]:max-w-[540px] min-[1800px]:max-w-2xl max-[1480px]:max-w-[440px] max-[1370px]:max-w-[400px] max-[1270px]:max-w-[360px] bg-[var(--color-searchBarBg,var(--color-containerBg))] border border-[var(--color-searchBarBorder,var(--color-borderDefault))] border-t-0 rounded-b-xl rounded-t-none shadow-[var(--color-searchBarShadow,0_10px_30px_rgba(0,0,0,0.15))] backdrop-blur-[var(--color-searchBarBlur,14px)] overflow-hidden flex flex-col">
                 {/* Options */}
                 <div className="flex flex-col py-1.5 max-h-[420px] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:w-0 [&::-webkit-scrollbar]:h-0">
                   {visibleLauncherItems.length === 0 ? (
                     <div className="px-4 py-3 text-sm text-[var(--color-textMuted)] select-none">No matching results</div>
                   ) : (
-                    <>
-                      {filteredSuggestions.length > 0 && (
-                        <div className="flex flex-col">
-                          <div className="px-4 pt-2.5 pb-1 text-[10px] font-bold text-[var(--color-textMuted)] tracking-wider uppercase select-none">
-                            SUGGESTIONS
-                          </div>
-                          {filteredSuggestions.map(item => {
-                            const globalIndex = visibleLauncherItems.indexOf(item);
-                            const isSelected = slashDropdownSelectedIndex === globalIndex;
-                            return (
-                              <div
-                                key={item.id}
-                                role="option"
-                                aria-selected={isSelected}
-                                onMouseDown={e => e.preventDefault()}
-                                onPointerDown={e => e.preventDefault()}
-                                onClick={() => executeLauncherItem(item)}
-                                onMouseEnter={() => setSlashDropdownSelectedIndex(globalIndex)}
-                                className={clsx(
-                                  'mx-2 px-3 py-2 flex items-center justify-between gap-3 cursor-pointer transition-colors rounded-lg',
-                                  isSelected
-                                    ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)]'
-                                    : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
-                                )}>
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <div className="shrink-0 min-w-[36px] flex items-center justify-start">
-                                    {item.icon}
-                                  </div>
-                                  <div className="flex flex-col min-w-0">
-                                    <span className="text-[13px] font-medium tracking-tight truncate">{item.title}</span>
-                                    {item.description && (
-                                      <span className="text-[11px] text-[var(--color-textMuted)] truncate opacity-80">{item.description}</span>
-                                    )}
-                                  </div>
-                                </div>
+                    <div className="flex flex-col py-1">
+                      {filteredCategories.map(item => {
+                        const globalIndex = visibleLauncherItems.indexOf(item);
+                        const isSelected = slashDropdownSelectedIndex === globalIndex;
+                        return (
+                           <div
+                            key={item.id}
+                            role="option"
+                            aria-selected={isSelected}
+                            onMouseDown={e => e.preventDefault()}
+                            onPointerDown={e => e.preventDefault()}
+                            onClick={() => executeLauncherItem(item)}
+                            onMouseEnter={() => setSlashDropdownSelectedIndex(globalIndex)}
+                            className={clsx(
+                              'mx-2 px-3 py-2 flex items-center justify-between gap-3 cursor-pointer transition-colors rounded-lg',
+                              isSelected
+                                ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)]'
+                                : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
+                            )}>
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="shrink-0 w-[22px] h-[22px] flex items-center justify-center opacity-80 text-[var(--color-iconDefault)]">
+                                {item.icon}
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {filteredCategories.length > 0 && (
-                        <div className="flex flex-col mt-1">
-                          <div className="px-4 pt-2.5 pb-1 text-[10px] font-bold text-[var(--color-textMuted)] tracking-wider uppercase select-none">
-                            ALL RESULTS
-                          </div>
-                          {filteredCategories.map(item => {
-                            const globalIndex = visibleLauncherItems.indexOf(item);
-                            const isSelected = slashDropdownSelectedIndex === globalIndex;
-                            return (
-                              <div
-                                key={item.id}
-                                role="option"
-                                aria-selected={isSelected}
-                                onMouseDown={e => e.preventDefault()}
-                                onPointerDown={e => e.preventDefault()}
-                                onClick={() => executeLauncherItem(item)}
-                                onMouseEnter={() => setSlashDropdownSelectedIndex(globalIndex)}
+                              <span className="text-[13px] font-medium tracking-tight truncate">{item.title}</span>
+                            </div>
+                            {item.alias && (
+                              <span
                                 className={clsx(
-                                  'mx-2 px-3 py-2 flex items-center justify-between gap-3 cursor-pointer transition-colors rounded-lg',
+                                  'text-[10px] font-mono px-2 py-0.5 rounded border tracking-wider min-w-[34px] text-center shrink-0 transition-colors',
                                   isSelected
-                                    ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)]'
-                                    : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
+                                    ? 'border-[var(--color-searchBarKbdBorder,var(--color-borderActive))] bg-[var(--color-searchBarKbdBg,var(--color-hoverBg))] text-[var(--color-searchBarKbdText,var(--color-textPrimary))] font-bold shadow-sm'
+                                    : 'border-[var(--color-searchBarKbdBorder,var(--color-borderDefault))] bg-[var(--color-searchBarKbdBg,transparent)] text-[var(--color-searchBarKbdText,var(--color-textMuted))] font-semibold',
                                 )}>
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <div className="shrink-0 w-[22px] h-[22px] flex items-center justify-center opacity-80 text-[var(--color-iconDefault)]">
-                                    {item.icon}
-                                  </div>
-                                  <span className="text-[13px] font-medium tracking-tight truncate">{item.title}</span>
-                                </div>
-                                {item.alias && (
-                                  <span
-                                    className={clsx(
-                                      'text-[11px] font-mono px-2 py-0.5 rounded-md border font-semibold tracking-wider min-w-[34px] text-center shrink-0',
-                                      isSelected
-                                        ? 'border-[var(--color-borderActive)] bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)]'
-                                        : 'border-[var(--color-borderDefault)] bg-transparent text-[var(--color-textMuted)]',
-                                    )}>
-                                    /{item.alias}
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
+                                /{String(item.alias).toLowerCase()}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               </div>

@@ -35,6 +35,11 @@ import { DestinationPicker } from '../../../../../shared-components/editorToolba
 import { saveShortcut, clearShortcut } from '../../../../../shared-components/shortcuts';
 import { readAllShortcuts, getItemCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { HotkeyAssignButton } from '../../../../../shared-components/hotkeys';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
+import type { CustomModelConfig } from '../aiPromptTypes';
+import CircularModelStackIcon from '../../../../../shared-components/icons/circularModelStackIcon';
+import { resolveEnabledAiPromptModels, type AiModelTarget } from '../aiPromptModelHelpers';
+import { useExcludedAiPromptModels } from '../useExcludedAiPromptModels';
 
 interface ModelOption {
   id: string;
@@ -54,12 +59,38 @@ export interface AiPromptEditorViewProps {
   onBack?: () => void;
   initialTitle?: string;
   initialPrompt?: string;
+  initialModelUrls?: Record<string, string>;
+  initialTagIds?: string[];
+  onAiPromptCreated?: (prompt: any) => void | Promise<void>;
   isFullScreenMode?: boolean;
+  isOverlay?: boolean;
+  hideRightPanel?: boolean;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
+  saveAiPromptAdapter?: (args: {
+    mode: 'create' | 'update';
+    aiPromptId?: string;
+    input: any;
+  }) => Promise<any>;
+  propertyPersistenceAdapter?: React.ComponentProps<typeof SharedPropertiesToolbar>['propertyPersistenceAdapter'];
 }
 
 export function AiPromptEditorView(props: AiPromptEditorViewProps) {
-  const { isFullScreenMode = false } = props;
+  const {
+    isFullScreenMode = false,
+    isOverlay: propIsOverlay = false,
+    hideRightPanel = false,
+    appearanceScope = 'default',
+    appearanceTokens,
+    propertyPersistenceAdapter,
+  } = props;
+  const activeEditor = useUIStore(s => s.activeEditor);
+  const isFocusMode = useUIStore(s => s.isFocusMode);
+  const isOverlay = Boolean(propIsOverlay || activeEditor?.props?.isOverlay);
+  const isNormalAiPromptMode = !isFullScreenMode && !isOverlay && !isFocusMode;
+
   const state = useAiPromptEditor(props);
+  const { excludedModelIds } = useExcludedAiPromptModels();
   const containerRef = useRef<HTMLDivElement>(null);
   const { theme } = useAppearance();
   const isDark = theme.isDark;
@@ -101,13 +132,34 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
   const [titleError, setTitleError] = useState<string | null>(null);
+  const getPromptModels = useCallback((p: any): AiModelTarget[] => {
+    if (!p) return [];
+
+    let targetEnabledIds: string[] | undefined = undefined;
+    let targetCustomModels: CustomModelConfig[] = p.customModels || [];
+
+    if (p.id === state.activeAiPromptId) {
+      targetEnabledIds = state.enabledModelIds;
+      targetCustomModels = state.customModels || [];
+    } else if (Array.isArray(p.enabledModelIds) && p.enabledModelIds.length > 0) {
+      targetEnabledIds = p.enabledModelIds;
+    } else if (p.modelUrls && typeof p.modelUrls === 'object' && Object.keys(p.modelUrls).length > 0) {
+      targetEnabledIds = Object.keys(p.modelUrls);
+    }
+
+    return resolveEnabledAiPromptModels(
+      { enabledModelIds: targetEnabledIds, customModels: targetCustomModels },
+      excludedModelIds
+    );
+  }, [state.activeAiPromptId, state.enabledModelIds, state.customModels, excludedModelIds]);
 
   // Clear validation errors when switching between active prompts/drafts
   useEffect(() => {
     setTitleError(null);
+    setShowTooltip(false);
   }, [state.activeAiPromptId]);
 
-  const { isFavorite, toggleFavorite } = useFavorites();
+  const { isFavorite, toggleFavorite, addFavorite } = useFavorites();
 
   const tagNamesMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -168,6 +220,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
       if (isCtrlShiftEnter) {
         event.preventDefault();
         event.stopPropagation();
+        setShowTooltip(false);
         if (state.saveStatus === 'saving') return;
         
         void (async () => {
@@ -200,11 +253,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
   }, [isAddModelOpen, state.isUnsavedChangesDialogOpen, state.isDeleteDialogOpen, state.handleClose]);
 
   const toggleModelExclusion = (modelId: string) => {
-    setExcludedModels(prev => {
-      const next = prev.includes(modelId) ? prev.filter(id => id !== modelId) : [...prev, modelId];
-      void StorageManager.setItem('aiPrompt_excludedModels', JSON.stringify(next));
-      return next;
-    });
+    state.toggleModelEnabled(modelId);
   };
 
   const handleProviderChange = (providerId: string) => {
@@ -246,21 +295,20 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
     const matchedDefault = MODELS.find(m => m.name.toLowerCase() === newModelName.trim().toLowerCase());
     if (matchedDefault) {
       targetModelId = matchedDefault.id;
-      if (excludedModels.includes(targetModelId)) {
-        setExcludedModels(prev => {
-          const next = prev.filter(id => id !== targetModelId);
-          void StorageManager.setItem('aiPrompt_excludedModels', JSON.stringify(next));
-          return next;
-        });
+      if (!state.enabledModelIds.includes(targetModelId)) {
+        state.toggleModelEnabled(targetModelId);
       }
     } else {
-      const newId = `${newModelProvider}_custom_${Date.now()}`;
+      const newId = generateEntityId(`${newModelProvider}CustomModel`);
       const newModel = {
         id: newId,
         name: newModelName.trim(),
         host: providerHosts[newModelProvider] || 'chatgpt.com',
       };
       state.setCustomModels([...(state.customModels || []), newModel]);
+      if (!state.enabledModelIds.includes(newId)) {
+        state.setEnabledModelIds(prev => [...prev, newId]);
+      }
       targetModelId = newId;
     }
 
@@ -269,10 +317,15 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
   };
 
   const handleDeleteCustomModel = (modelId: string) => {
+    if (state.enabledModelIds.length === 1 && state.enabledModelIds.includes(modelId)) {
+      state.setEnabledModelIds((prev: string[]) => prev.filter(id => id !== modelId));
+      return;
+    }
     state.setCustomModels((state.customModels || []).filter((m: any) => m.id !== modelId));
+    state.setEnabledModelIds((prev: string[]) => prev.filter(id => id !== modelId));
   };
 
-  const isFocusMode = useUIStore((s: any) => s.isFocusMode);
+
   const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
 
   useEffect(() => {
@@ -301,11 +354,12 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
   }, [sortedPrompts, searchQuery]);
 
   const handleCopyTitleToShortcut = useCallback(() => {
-    const sanitized = state.promptTitle.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sanitized = state.promptTitle.toLowerCase().replace(/[^a-z0-9_]/g, '');
     state.setPromptShortcut(sanitized);
   }, [state.promptTitle, state.setPromptShortcut]);
 
   const handleCreateNew = useCallback(async () => {
+    setShowTooltip(false);
     if (state.isDirty) {
       await state.handleSave();
     }
@@ -329,7 +383,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             snippet: { id: record.id, category: 'aiPrompt' }
           });
           if (value) {
-            await saveShortcut(itemId, compoundId, value.toLowerCase().replace(/[^a-z0-9]/g, ''), record.title, 'aiPrompt');
+            await saveShortcut(itemId, compoundId, value.toLowerCase().replace(/[^a-z0-9_]/g, ''), record.title, 'aiPrompt');
           } else {
             await clearShortcut(itemId, compoundId, 'aiPrompt');
           }
@@ -406,10 +460,152 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
     };
   }, [state.activeAiPromptId, state.workspaceId, state.folderId, state.promptTitle, state.tagIds, tagIdsKey, tags]);
 
+  const conversationalModelsLinksContent = (
+    <div className={`flex flex-col gap-3 h-full overflow-visible ${isNormalAiPromptMode ? 'border-x border-[var(--color-borderDefault)] px-3' : ''}`}>
+      {/* Conversational Models Links - Clean List View */}
+      <div className={`flex flex-col gap-2 ${hideRightPanel ? '' : 'mt-2'}`}>
+        <div className="flex flex-col gap-1">
+          {/* Model Rows */}
+          <div className="flex flex-col divide-y divide-white/5 dark:divide-white/5">
+            {ALL_MODELS.map((model) => {
+              const isEnabled = state.enabledModelIds.includes(model.id);
+              const isCustom = !MODELS.some(m => m.id === model.id);
+              return (
+                <div
+                  key={model.id}
+                  className="flex items-center justify-between gap-3 py-2 px-1 hover:bg-white/[0.02] transition-colors rounded-md"
+                >
+                  {/* Left: Checkbox + Favicon + Model Name (Fixed width for straight vertical alignment) */}
+                  <div className="flex items-center gap-2.5 w-[120px] shrink-0 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={isEnabled}
+                      onChange={() => toggleModelExclusion(model.id)}
+                      className="w-3.5 h-3.5 cursor-pointer rounded border-neutral-600 text-blue-600 focus:ring-blue-500 shrink-0"
+                    />
+                    <img
+                      src={getFaviconUrl(model.host)}
+                      alt={model.name}
+                      className="w-4 h-4 object-contain shrink-0"
+                    />
+                    <span className="text-xs font-semibold text-neutral-200 dark:text-neutral-200 truncate">
+                      {model.name}
+                    </span>
+                  </div>
+
+                  {/* Right: URL Link Input (Truncated & Vertically Aligned) & Custom Delete */}
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <input
+                      value={state.modelUrls[model.id] ?? `https://${model.host}`}
+                      onChange={e => state.setModelUrl(model.id, e.target.value)}
+                      title={state.modelUrls[model.id] ?? `https://${model.host}`}
+                      className="w-full text-[10px] bg-black/20 dark:bg-white/5 border border-white/10 rounded-md px-2 py-1 outline-none text-neutral-300 dark:text-neutral-300 placeholder-neutral-500 font-mono truncate text-ellipsis overflow-hidden whitespace-nowrap"
+                      placeholder="Enter URL..."
+                    />
+                    {isCustom && (
+                      <button
+                        onClick={() => handleDeleteCustomModel(model.id)}
+                        className="text-red-400 hover:text-red-500 transition-colors p-1 shrink-0"
+                        title="Delete custom model"
+                      >
+                        <FaTimes size={10} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {state.modelSelectionError && (
+            <div className="px-1 py-1 text-[10px] font-medium text-[var(--color-danger)]">
+              {state.modelSelectionError}
+            </div>
+          )}
+
+          {/* Add Custom Model Button - Reduced width pill button */}
+          <div className="flex justify-center pt-3">
+            <button
+              onClick={handleOpenAddModal}
+              className="flex items-center justify-center gap-1.5 px-5 py-1.5 rounded-xl border border-white/10 bg-neutral-800/80 hover:bg-neutral-700 text-neutral-200 text-xs font-medium shadow-sm transition-all cursor-pointer w-full max-w-[200px]"
+              title="Add Custom Model"
+            >
+              <FaPlus size={10} />
+              <span>Add Model</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const addModelDialog = (
+    <div className={`fixed inset-0 ${isOverlay ? 'z-[999999]' : 'z-[100]'} flex items-center justify-center bg-black/40 backdrop-blur-sm`}>
+      <div className="w-[400px] rounded-xl p-5 border border-black/10 dark:border-white/10 shadow-2xl transition-all bg-[#171821] text-white">
+        <h3 className="text-sm font-semibold mb-4 text-white">Add Custom Model Slot</h3>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold opacity-60 text-neutral-400">Provider (Icon & Host)</label>
+            <select
+              value={newModelProvider}
+              onChange={e => handleProviderChange(e.target.value)}
+              className="w-full text-xs border rounded-md px-3 py-2 outline-none bg-black/20 border-white/10 text-white">
+              <option value="gpt" className="bg-[#171821]">ChatGPT</option>
+              <option value="claude" className="bg-[#171821]">Claude</option>
+              <option value="gemini" className="bg-[#171821]">Gemini</option>
+              <option value="perplexity" className="bg-[#171821]">Perplexity</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold opacity-60 text-neutral-400">Model Name</label>
+            <input
+              type="text"
+              value={newModelName}
+              onChange={e => setNewModelName(e.target.value)}
+              placeholder="e.g. ChatGPT Copy"
+              className="w-full text-xs border border-white/10 rounded-md px-3 py-2 outline-none bg-black/20 text-white placeholder-neutral-500"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-semibold opacity-60 text-neutral-400">Prompt Message</label>
+            <textarea
+              rows={4}
+              value={customPromptText}
+              onChange={e => setCustomPromptText(e.target.value)}
+              className="w-full text-xs border border-white/10 rounded-md p-3 outline-none resize-none font-medium bg-black/20 text-white placeholder-neutral-500"
+              placeholder="Enter prompt message..."
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-6">
+          <button
+            onClick={() => setIsAddModelOpen(false)}
+            className="flex-1 py-2 px-3 text-xs font-semibold rounded-md border text-center transition-all bg-black/10 border-white/10 text-neutral-300 hover:bg-white/5"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!newModelName.trim() || !customPromptText.trim()}
+            onClick={handleAddAndGenerate}
+            className="flex-1 py-2 px-3 text-xs font-semibold rounded-md text-center transition-all bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Generate Links
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <>
       <WorkspaceEditorLayout
-        title={state.activeAiPromptId ? 'Edit AI Prompt' : 'Create an AI Prompt'}
+        isNormalMode={isNormalAiPromptMode}
+        title={state.activeAiPromptId ? 'Edit Chat Agent' : 'Create a Chat Agent'}
+        titleClassName={isNormalAiPromptMode ? 'absolute left-1/2 top-1/2 w-full max-w-[740px] -translate-x-1/2 -translate-y-1/2 px-4 md:px-6 text-lg font-bold text-[var(--color-textPrimary)] truncate pointer-events-none' : undefined}
         isDirty={state.isDirty}
         saveStatus={state.saveStatus}
         lastSavedAt={state.lastSavedAt}
@@ -423,8 +619,9 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         searchPlaceholder="Search prompts..."
-        isRightSiblingExpanded={isRightPanelExpanded}
-        rightSiblingPanel={
+        embeddedFullBleed={hideRightPanel}
+        isRightSiblingExpanded={hideRightPanel ? false : isRightPanelExpanded}
+        rightSiblingPanel={hideRightPanel ? undefined : (
           <RightSideItemsPanel<any>
             items={filteredPrompts}
             activeItemId={state.activeAiPromptId}
@@ -433,6 +630,10 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             searchPlaceholder="Search prompts..."
             getItemTitle={p => p.title || 'Untitled Prompt'}
             getItemPreview={p => p.prompt ? p.prompt.replace(/<[^>]+>/g, '').substring(0, 100) : ''}
+            getItemIcon={p => {
+              const enabledModels = getPromptModels(p);
+              return <CircularModelStackIcon models={enabledModels} variant="compact" maxVisible={3} />;
+            }}
             getItemCompoundId={p =>
               getItemCompoundId({
                 id: p.id,
@@ -455,9 +656,23 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
               const rec = aiPrompts.find(p => p.id === id);
               if (rec) state.loadPrompt(rec);
             }}
-            onDeleteItem={id => {
-              setPromptToDeleteId(id);
-              state.setIsDeleteDialogOpen(true);
+            onDeleteItem={async id => {
+              try {
+                const targetPrompt = aiPrompts.find(p => p.id === id);
+                const compoundId = getItemCompoundId({
+                  id,
+                  workspace_id: targetPrompt?.workspaceId || state.workspaceId || null,
+                  folder_id: targetPrompt?.folderId || state.folderId || null,
+                  snippet: { id, category: 'aiPrompt' }
+                });
+                await clearShortcut(id, compoundId, 'aiPrompt');
+                await deleteAiPrompt(id);
+                if (id === state.activeAiPromptId || id === props.aiPromptId) {
+                  state.loadPrompt(null);
+                }
+              } catch (err) {
+                console.error('Delete failed:', err);
+              }
             }}
             onUpdateShortcut={async (id, val) => {
               await handleUpdateItemField(id, 'shortcut', val);
@@ -470,12 +685,13 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             }}
             isFavorite={isFavorite}
             toggleFavorite={toggleFavorite}
+            addFavorite={addFavorite}
             isExpanded={isRightPanelExpanded}
             onExpandChange={setIsRightPanelExpanded}
             searchInputRef={rightSideSearchInputRef}
-            emptyStateMessage="No AI prompts found"
+            emptyStateMessage="No Chat Agents found"
           />
-        }
+        )}
         deleteModalProps={{
           isOpen: state.isDeleteDialogOpen,
           onClose: () => {
@@ -504,13 +720,13 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             state.setIsDeleteDialogOpen(false);
             setPromptToDeleteId(null);
           },
-          title: promptToDeleteId && aiPrompts.find(p => p.id === promptToDeleteId)?.title ? `Delete "${aiPrompts.find(p => p.id === promptToDeleteId)?.title}"?` : 'Delete this prompt?',
-          description: "Are you sure you want to delete this AI prompt? This action cannot be undone."
+          title: promptToDeleteId && aiPrompts.find(p => p.id === promptToDeleteId)?.title ? `Delete "${aiPrompts.find(p => p.id === promptToDeleteId)?.title}"?` : 'Delete this Chat Agent?',
+          description: "Are you sure you want to delete this Chat Agent? This action cannot be undone."
         }}
         headerActions={
           <SharedPropertiesToolbar
             key={state.activeAiPromptId || 'new-prompt'}
-            initialSnippet={state.activeAiPromptId ? initialProperties : null}
+            initialSnippet={initialProperties}
             compoundId={currentCompoundId}
             defaultName={state.promptTitle || 'New Prompt'}
             onChange={state.handlePropertiesChange}
@@ -554,110 +770,18 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
               }
             }}
             saveStatus={state.saveStatus}
+            entityType="aiPrompt"
             openPopupsToBottom={true}
             layout="horizontal"
+            appearanceScope={appearanceScope}
+            appearanceTokens={appearanceTokens}
+            propertyPersistenceAdapter={propertyPersistenceAdapter}
           />
         }
-        rightColumnContent={
-          <div className="flex flex-col gap-4 h-full overflow-visible">
-            {/* Conversational Models Links - Right Side Table */}
-            <div className="flex flex-col gap-2 mt-2">
-              <label className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 px-1">
-                Conversational Models Links
-              </label>
-              
-              <div className="rounded-xl border border-black/10 dark:border-white/10 overflow-hidden bg-black/[0.02] dark:bg-white/[0.02] flex flex-col">
-                {/* Table Header */}
-                <div className="grid grid-cols-[50px_90px_1fr_16px] items-stretch border-b border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5">
-                  <div className="flex items-center justify-center py-1.5 border-r border-black/10 dark:border-white/10">
-                    <span className="text-[10px] font-semibold text-neutral-500">Enabled</span>
-                  </div>
-                  <div className="flex items-center py-1.5 px-2 border-r border-black/10 dark:border-white/10">
-                    <span className="text-[10px] font-semibold text-neutral-500">Model</span>
-                  </div>
-                  <div className="flex items-center py-1.5 px-2">
-                    <span className="text-[10px] font-semibold text-neutral-500">Link</span>
-                  </div>
-                  <div className="w-4 shrink-0" />
-                </div>
-                
-                {/* Table Body */}
-                <div className="flex flex-col max-h-[160px] overflow-y-auto custom-scrollbar">
-                  {ALL_MODELS.map((model) => {
-                    const isEnabled = !excludedModels.includes(model.id);
-                    const isCustom = !MODELS.some(m => m.id === model.id);
-                    return (
-                      <div
-                        key={model.id}
-                        className="grid grid-cols-[50px_90px_1fr_16px] items-stretch border-b border-black/5 dark:border-white/5 last:border-0 hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
-                      >
-                        {/* Checkbox */}
-                        <div className="flex items-center justify-center py-1 border-r border-black/5 dark:border-white/5">
-                          <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            onChange={() => toggleModelExclusion(model.id)}
-                            className="w-3 h-3 cursor-pointer rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
-                          />
-                        </div>
-                        
-                        {/* Model name */}
-                        <div className="flex items-center gap-1.5 px-2 py-1 border-r border-black/5 dark:border-white/5">
-                          <img
-                            src={getFaviconUrl(model.host)}
-                            alt={model.name}
-                            className="w-3 h-3 object-contain"
-                          />
-                          <span className="text-[10px] font-bold text-neutral-600 dark:text-neutral-400 truncate">
-                            {model.name}
-                          </span>
-                        </div>
-                        
-                        {/* URL Link Input */}
-                        <div className="flex items-center px-1.5 py-1">
-                          <input
-                            value={state.modelUrls[model.id] ?? `https://${model.host}`}
-                            onChange={e => state.setModelUrl(model.id, e.target.value)}
-                            className="w-full text-[9px] bg-transparent border border-black/10 dark:border-white/10 rounded px-1.5 py-0.5 outline-none text-neutral-700 dark:text-neutral-300 placeholder-black/35 dark:placeholder-white/35"
-                            placeholder="Enter URL..."
-                          />
-                        </div>
-                        
-                        {/* Delete custom model button */}
-                        <div className="flex items-center justify-center">
-                          {isCustom ? (
-                            <button
-                              onClick={() => handleDeleteCustomModel(model.id)}
-                              className="text-red-400 hover:text-red-600 transition-colors p-0.5"
-                            >
-                              <FaTimes size={8} />
-                            </button>
-                          ) : (
-                            <span className="w-3.5 h-3.5" />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                
-                {/* Add Custom Button */}
-                <div className="flex justify-center p-1.5 border-t border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
-                  <button
-                    onClick={handleOpenAddModal}
-                    className="flex items-center justify-center w-6 h-6 rounded-full border border-black/10 dark:border-white/10 bg-white dark:bg-[#1a1a1a] hover:bg-black/5 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-300 shadow-sm transition-all"
-                    title="Add Custom Model"
-                  >
-                    <FaPlus size={10} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        }
+        rightColumnContent={hideRightPanel ? undefined : conversationalModelsLinksContent}
       >
         <div ref={containerRef} className="flex-1 flex flex-col min-h-0 relative">
-          <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2 overflow-hidden">
+          <div className={`w-full flex-1 flex flex-col min-h-0 pt-0.5 pb-2 ${isNormalAiPromptMode ? 'max-w-[740px] mx-auto px-4 md:px-6' : 'px-3'} overflow-visible`}>
             <EditorTitleShortcutInput
               title={state.promptTitle}
               setTitle={(val) => {
@@ -700,18 +824,27 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             />
 
             {/* Main Workspace Inner Content */}
-            <div className="flex-1 flex flex-col min-w-0 relative h-full max-h-full overflow-hidden mt-4">
+            <div className={`flex-shrink-0 min-w-0 relative mt-4 ${isNormalAiPromptMode ? 'flex flex-col h-auto overflow-visible' : hideRightPanel ? 'grid grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)] gap-4 h-full max-h-full overflow-y-auto custom-scrollbar pr-1' : 'flex flex-col h-full max-h-full overflow-hidden'}`}>
               {/* Prompt Text Editor */}
-              <div className="flex-1 min-h-[140px] relative flex flex-col gap-1.5 pb-2 text-sm font-medium">
+              <div className={`flex-shrink-0 flex flex-col gap-1.5 pb-2 text-sm font-medium ${isNormalAiPromptMode ? 'h-auto overflow-visible' : hideRightPanel ? 'min-h-[220px] relative' : 'flex-1 min-h-[140px] relative'}`}>
                 <h4 className="text-xs font-semibold text-[var(--color-textSecondary)] px-3.5 flex items-center gap-1">
                   Prompt <span className="text-red-500">*</span>
                 </h4>
-                <div className="flex-1 relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm overflow-hidden px-0 py-0">
+                <div
+                  className={`relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm px-0 py-0 overflow-hidden cursor-text`}
+                  style={{ minHeight: '220px', maxHeight: 'clamp(280px, 35vh, 400px)' }}
+                  onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                      const editorDom = e.currentTarget.querySelector('.ql-editor') as HTMLElement | null;
+                      editorDom?.focus();
+                    }
+                  }}
+                >
                   <TextEditor
                     key={state.activeAiPromptId || 'new'}
                     value={state.promptBody}
                     onChange={state.setPromptBody}
-                    placeholder="Elaborate your prompt"
+                    placeholder="Enter your prompt (Optional)"
                     readOnly={false}
                     onUpArrowAtStart={() => state.titleInputRef.current?.focus()}
                     showToolbar={true}
@@ -720,7 +853,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
                   />
 
                   {state.activeAiPromptId && (
-                <button
+                  <button
                   id="create-another-btn"
                   type="button"
                   onClick={handleCreateNew}
@@ -740,6 +873,11 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
               )}
                 </div>
               </div>
+              {hideRightPanel && (
+                <div className="w-full min-w-0 self-start">
+                  {conversationalModelsLinksContent}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -749,66 +887,7 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
       <div id={toolbarIdRef.current} className="hidden" />
 
       {/* Add Custom Model Dialog Modal */}
-      {isAddModelOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="w-[400px] rounded-xl p-5 border border-black/10 dark:border-white/10 shadow-2xl transition-all bg-[#171821] text-white">
-            <h3 className="text-sm font-semibold mb-4 text-white">Add Custom Model Slot</h3>
-            
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-semibold opacity-60 text-neutral-400">Provider (Icon & Host)</label>
-                <select
-                  value={newModelProvider}
-                  onChange={e => handleProviderChange(e.target.value)}
-                  className="w-full text-xs border rounded-md px-3 py-2 outline-none bg-black/20 border-white/10 text-white">
-                  <option value="gpt" className="bg-[#171821]">ChatGPT</option>
-                  <option value="claude" className="bg-[#171821]">Claude</option>
-                  <option value="gemini" className="bg-[#171821]">Gemini</option>
-                  <option value="perplexity" className="bg-[#171821]">Perplexity</option>
-                </select>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-semibold opacity-60 text-neutral-400">Model Name</label>
-                <input
-                  type="text"
-                  value={newModelName}
-                  onChange={e => setNewModelName(e.target.value)}
-                  placeholder="e.g. ChatGPT Copy"
-                  className="w-full text-xs border border-white/10 rounded-md px-3 py-2 outline-none bg-black/20 text-white placeholder-neutral-500"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-semibold opacity-60 text-neutral-400">Prompt Message</label>
-                <textarea
-                  rows={4}
-                  value={customPromptText}
-                  onChange={e => setCustomPromptText(e.target.value)}
-                  className="w-full text-xs border border-white/10 rounded-md p-3 outline-none resize-none font-medium bg-black/20 text-white placeholder-neutral-500"
-                  placeholder="Enter prompt message..."
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 mt-6">
-              <button
-                onClick={() => setIsAddModelOpen(false)}
-                className="flex-1 py-2 px-3 text-xs font-semibold rounded-md border text-center transition-all bg-black/10 border-white/10 text-neutral-300 hover:bg-white/5"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={!newModelName.trim() || !customPromptText.trim()}
-                onClick={handleAddAndGenerate}
-                className="flex-1 py-2 px-3 text-xs font-semibold rounded-md text-center transition-all bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Generate Links
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {isAddModelOpen && (isOverlay ? createPortal(addModelDialog, document.body) : addModelDialog)}
 
       {showTooltip && createPortal(
         <div
@@ -817,16 +896,16 @@ export function AiPromptEditorView(props: AiPromptEditorViewProps) {
             top: `${tooltipPos.top}px`,
             left: `${tooltipPos.left}px`,
           }}
-          className="bg-[#1c1d27] border border-[#2f3142] rounded-xl px-3 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.6)] z-[999999] flex items-center gap-3 text-[12px] font-sans text-white pointer-events-none"
+          className="rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-popupBg)] px-3 py-2 shadow-2xl z-[999999] flex items-center gap-3 text-[12px] font-sans text-[var(--color-textPrimary)] pointer-events-none"
         >
           <div className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Ctrl</kbd>
-            <span className="text-[10px] text-neutral-400 font-bold">+</span>
-            <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Shift</kbd>
-            <span className="text-[10px] text-neutral-400 font-bold">+</span>
-            <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 text-[10px] font-bold font-mono text-neutral-200">Enter</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">Ctrl</kbd>
+            <span className="text-[10px] text-[var(--color-textSecondary)] font-bold">+</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">Shift</kbd>
+            <span className="text-[10px] text-[var(--color-textSecondary)] font-bold">+</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">Enter</kbd>
           </div>
-          <span className="text-neutral-400 text-left whitespace-nowrap">to save and create another</span>
+          <span className="text-[var(--color-textSecondary)] text-left whitespace-nowrap">to save and create another</span>
         </div>,
         document.body
       )}

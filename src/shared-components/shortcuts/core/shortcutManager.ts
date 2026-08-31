@@ -1,7 +1,7 @@
 import { saveUserShortcut, deleteUserShortcutByReference } from './shortcutDbData';
 import { normalizeShortcutTrigger } from './shortcutDbData';
 
-export type ShortcutItemType = 'link' | 'note' | 'snippet' | 'automation' | 'module' | 'command' | 'session' | 'aiPrompt' | 'todo';
+export type ShortcutItemType = 'link' | 'note' | 'snippet' | 'automation' | 'module' | 'command' | 'collection' | 'aiPrompt' | 'todo';
 export type StorageMode = 'local' | 'cloud';
 
 function invalidateBackgroundCache() {

@@ -11,7 +11,7 @@ import type { PageActionCommand } from './types';
 export const ElementScreenshotCommand: PageActionCommand = {
   id: 'capture_element_screenshot',
   label: 'Capture Element',
-  prefix: 'elementscreenshot',
+  prefix: 'element',
   keywords: ['capture', 'element', 'part', 'select', 'pick', 'hover', 'screenshot', 'section'],
   description: 'Hover to highlight, click to capture any element as a PNG',
   action: 'INIT_ELEMENT_SELECTION',

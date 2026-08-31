@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { MainView, ActiveEditorState, SidebarType, SidebarState, ModalType, ContextualUIType, ContextualUIState, TodoDisplayMode, EditorType } from './types';
 import { getStoredTodoDisplayMode, setStoredTodoDisplayMode } from '../../storage/localStorage/uxCustomizationStorage';
+import type { CollectionOpenBehavior } from '../../allObjectFolder/src/createObject/widgets/widgetTypes';
 
 export const NONE_TEAM = {
   team_id: 'none',
@@ -71,6 +72,13 @@ interface UIStoreState {
   activeTutorial: string | null;
   isSheetOpen: boolean;
   activeSheetSection: string | null;
+  dashboardViewIntent: {
+    workspaceId: string;
+    viewId: string;
+    mode: 'open' | 'edit';
+    openBehavior?: CollectionOpenBehavior;
+    requestedAt: number;
+  } | null;
 
   // --- Explicit Actions ---
   setView: (view: MainView) => void;
@@ -78,6 +86,13 @@ interface UIStoreState {
   closeEditor: () => void;
   openSheet: (section?: string | null) => void;
   closeSheet: () => void;
+  setDashboardViewIntent: (intent: {
+    workspaceId: string;
+    viewId: string;
+    mode: 'open' | 'edit';
+    openBehavior?: CollectionOpenBehavior;
+  } | null) => void;
+  clearDashboardViewIntent: () => void;
   openCreateWorkspace: () => void;
   openCreateFolder: () => void;
   openItemEditor: (
@@ -209,6 +224,7 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
   activeTutorial: null,
   isSheetOpen: false,
   activeSheetSection: null,
+  dashboardViewIntent: null,
   draftAutomation: null,
 
   setView: (view) =>
@@ -252,20 +268,34 @@ export const useUIStore = create<UIStoreState>((set, get) => ({
       isSheetOpen: false,
       activeSheetSection: null,
     })),
+  setDashboardViewIntent: intent =>
+    set({
+      dashboardViewIntent: intent
+        ? {
+            ...intent,
+            requestedAt: Date.now(),
+          }
+        : null,
+    }),
+  clearDashboardViewIntent: () => set({ dashboardViewIntent: null }),
   openCreateWorkspace: () =>
-    set({
-      activeEditor: null,
-      activeView: { type: 'createWorkspace' },
-      isSheetOpen: false,
-      activeSheetSection: null,
-    }),
+    set(state => ({
+      // Workspace creation is only allowed from onboarding for now.
+      // activeEditor: null,
+      // activeView: { type: 'createWorkspace' },
+      // isSheetOpen: false,
+      // activeSheetSection: null,
+      activeView: state.activeView,
+    })),
   openCreateFolder: () =>
-    set({
-      activeEditor: null,
-      activeView: { type: 'createFolder' },
-      isSheetOpen: false,
-      activeSheetSection: null,
-    }),
+    set(state => ({
+      // Folder creation is only allowed from onboarding for now.
+      // activeEditor: null,
+      // activeView: { type: 'createFolder' },
+      // isSheetOpen: false,
+      // activeSheetSection: null,
+      activeView: state.activeView,
+    })),
   openItemEditor: (editorType, id, options) =>
     set(state => {
       const updates: Partial<UIStoreState> = {

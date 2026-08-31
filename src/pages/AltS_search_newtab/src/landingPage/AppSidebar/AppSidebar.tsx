@@ -9,12 +9,14 @@ interface AppSidebarProps {
   searchbarRef?: React.RefObject<any>;
   reload?: () => void;
   isSidebar?: boolean;
+  widthMode?: string;
   onCommandSelect?: (id: string) => void;
   onSelectSavedAgent?: (agent: any) => void;
   onAutomationSelect?: (automation: any) => void;
   onNavigateToListView?: (type: 'notes' | 'links' | 'commands', section?: string) => void;
   openSpreadsheetView?: (section?: string) => void;
   hideCreatePanelItems?: boolean;
+  isCollapsed?: boolean;
 }
 
 export const AppSidebar: React.FC<AppSidebarProps> = props => {
@@ -33,7 +35,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = props => {
   // Wait, if EditorItemsPanel was added for a reason, maybe we should render both?
   // Let's just render FavoritesPanel as it was the original fully featured sidebar.
 
-  return <FavoritesPanel {...(props as any)} searchbarRef={props.searchbarRef} forceMode={forceMode} />;
+  return <FavoritesPanel {...(props as any)} searchbarRef={props.searchbarRef} forceMode={forceMode} widthMode={props.widthMode} isCollapsed={props.isCollapsed} />;
 };
 
 export default AppSidebar;

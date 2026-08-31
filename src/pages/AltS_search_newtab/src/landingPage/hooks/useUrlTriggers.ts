@@ -4,10 +4,21 @@ import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { extractSnippetIdFromCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { resolveEntityById } from '../../../../../shared-components/utils/entityResolver';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
+import { commandRegistry } from '../../../../../shared-components/commands';
+import { hasRunnableAiPrompt, runAiPrompt } from '../../../../../allObjectFolder/src/createObject/aiPrompt/runAiPrompt';
+import { launchDashboardCollectionView } from '../../../../../shared-components/dashboardCollections/launchDashboardCollectionView';
 import {
-  hasRunnableAiPrompt,
-  runAiPrompt,
-} from '../../../../../allObjectFolder/src/createObject/aiPrompt/runAiPrompt';
+  handleSessionReferenceLaunchActions,
+  launchSessionSmartWithReferences,
+} from '../../../../../allObjectFolder/src/createObject/session/sessionReferenceActions';
+import type { CollectionOpenBehavior } from '../../../../../allObjectFolder/src/createObject/widgets/widgetTypes';
+import type { AiPromptRecord } from '../../../../../allObjectFolder/src/createObject/aiPrompt/aiPromptTypes';
+
+export interface MissingAiPromptInputRequest {
+  promptRecord: AiPromptRecord;
+  promptId: string;
+  editorProps?: unknown;
+}
 
 interface UseUrlTriggersProps {
   userId: string;
@@ -16,7 +27,15 @@ interface UseUrlTriggersProps {
   setIsGlobalCreateMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   dismissAllViews: (except?: any) => void;
   handleAltSInitialization: (forceBoardView?: boolean) => void;
+  requestMissingAiPromptInput?: (request: MissingAiPromptInputRequest) => void;
 }
+
+const ENABLE_SESSION_FLOW_URL_TRIGGER_LOGS = false;
+
+const sessionFlowUrlTriggerDebug = (...args: unknown[]) => {
+  if (!ENABLE_SESSION_FLOW_URL_TRIGGER_LOGS) return;
+  console.log(...args);
+};
 
 const normalizeText = (value: unknown): string => {
   if (typeof value !== 'string') return '';
@@ -45,16 +64,18 @@ const matchesEntityId = (item: any, entityId: string | null): boolean => {
   return candidateIds.some(candidateId => String(candidateId) === String(entityId));
 };
 
-const openNoteById = (noteId: string) => {
-  const foundNote = useDbStore.getState().notes.find(note => String(note.id) === String(noteId));
+const openNoteById = (noteId: string, resolvedNote?: any) => {
+  const foundNote = resolvedNote || useDbStore
+    .getState()
+    .notes.find(note => String(note.id) === String(noteId) || String((note as any).snippet_id || '') === String(noteId));
+  useUIStore.getState().setView({ type: 'home' });
   useUIStore.getState().openItemEditor('note', noteId, {
     props: foundNote ? { snippet: foundNote, category: 'note', editMode: true } : { category: 'note' },
   });
-  useUIStore.getState().setView({ type: 'home' });
 };
 
-const openSnippetById = (snippetId: string) => {
-  const foundSnippet = useDbStore.getState().snippets.find(snippet => String(snippet.id) === String(snippetId));
+const openSnippetById = (snippetId: string, resolvedSnippet?: any) => {
+  const foundSnippet = resolvedSnippet || useDbStore.getState().snippets.find(snippet => String(snippet.id) === String(snippetId));
   useUIStore.getState().openItemEditor('note', snippetId, {
     props: foundSnippet ? { snippet: foundSnippet, editMode: true, category: 'snippet' } : { category: 'snippet' },
   });
@@ -74,6 +95,126 @@ const openAutomationById = (automationId: string) => {
   useUIStore.getState().setView({ type: 'home' });
 };
 
+const getCollectionOpenBehaviorFromUrl = (urlParams: URLSearchParams): CollectionOpenBehavior | undefined => {
+  return urlParams.get('openBehavior') === 'focus_mode' ? 'focus_mode' : undefined;
+};
+
+const launchCollectionViewById = async (
+  referenceId: string,
+  openBehavior?: CollectionOpenBehavior,
+): Promise<boolean> => {
+  return launchDashboardCollectionView(referenceId, { mode: 'open', openBehavior });
+};
+
+const getCurrentExtensionTabContext = async () => {
+  const chromeAny = (window as any).chrome;
+  const fallbackToCurrentWindow = () =>
+    new Promise<{ currentTabId?: number; currentWindowId?: number; currentPageUrl?: string }>(resolve => {
+      if (!chromeAny?.windows?.getCurrent) {
+        resolve({ currentPageUrl: window.location.href });
+        return;
+      }
+
+      chromeAny.windows.getCurrent({ populate: false }, (win: any) => {
+        resolve({
+          currentWindowId: win?.id,
+          currentPageUrl: window.location.href,
+        });
+      });
+    });
+
+  if (!chromeAny?.tabs?.getCurrent) {
+    return fallbackToCurrentWindow();
+  }
+
+  return new Promise<{ currentTabId?: number; currentWindowId?: number; currentPageUrl?: string }>(resolve => {
+    chromeAny.tabs.getCurrent((tab: any) => {
+      if (typeof tab?.windowId !== 'number') {
+        fallbackToCurrentWindow().then(resolve);
+        return;
+      }
+
+      resolve({
+        currentTabId: tab?.id,
+        currentWindowId: tab?.windowId,
+        currentPageUrl: tab?.url || window.location.href,
+      });
+    });
+  });
+};
+
+const hasCommandQueryPlaceholder = (url: string): boolean =>
+  /\{query\s*\}|\[query\s*\]|\{content\s*\}|\{prompt\s*\}/i.test(url);
+
+const tryRunDirectUrlCommand = async (commandId?: string | null): Promise<boolean> => {
+  const normalizedCommandId = String(commandId || '').trim();
+  if (!normalizedCommandId) return false;
+
+  const command = commandRegistry.get(normalizedCommandId);
+  const url = String((command as any)?.urlTemplate || (command as any)?.url || '').trim();
+  if (!url || hasCommandQueryPlaceholder(url)) {
+    console.log('[UrlTrigger][direct-command] skipped', {
+      commandId: normalizedCommandId,
+      hasCommand: Boolean(command),
+      url,
+      reason: !url ? 'no_direct_url' : 'query_placeholder',
+    });
+    return false;
+  }
+
+  console.log('[UrlTrigger][direct-command] attempting', {
+    commandId: normalizedCommandId,
+    url,
+  });
+
+  const chromeAny = (window as any).chrome;
+  if (chromeAny?.tabs?.getCurrent && chromeAny?.tabs?.update) {
+    const updated = await new Promise<boolean>(resolve => {
+      chromeAny.tabs.getCurrent((tab: any) => {
+        if (chromeAny.runtime?.lastError || typeof tab?.id !== 'number') {
+          console.warn('[UrlTrigger][direct-command] current tab unavailable', {
+            commandId: normalizedCommandId,
+            runtimeError: chromeAny.runtime?.lastError?.message,
+          });
+          resolve(false);
+          return;
+        }
+        chromeAny.tabs.update(tab.id, { url }, () => {
+          const ok = !chromeAny.runtime?.lastError;
+          console.log('[UrlTrigger][direct-command] current tab update result', {
+            commandId: normalizedCommandId,
+            tabId: tab.id,
+            ok,
+            runtimeError: chromeAny.runtime?.lastError?.message,
+          });
+          resolve(ok);
+        });
+      });
+    });
+    if (updated) return true;
+  }
+
+  if (chromeAny?.tabs?.create) {
+    console.log('[UrlTrigger][direct-command] opening new tab fallback', {
+      commandId: normalizedCommandId,
+      url,
+    });
+    chromeAny.tabs.create({ url, active: true });
+    return true;
+  }
+
+  console.log('[UrlTrigger][direct-command] window.location fallback', {
+    commandId: normalizedCommandId,
+    url,
+  });
+  window.location.href = url;
+  return true;
+};
+
+const replaceTriggerUrlWithNormalNewtabUrl = () => {
+  window.history.replaceState({}, '', window.location.pathname);
+};
+
 export const useUrlTriggers = ({
   userId,
   openSpreadsheetView,
@@ -81,20 +222,64 @@ export const useUrlTriggers = ({
   setIsGlobalCreateMenuOpen,
   dismissAllViews,
   handleAltSInitialization,
+  requestMissingAiPromptInput,
 }: UseUrlTriggersProps) => {
-  const hasHandledUrlTrigger = useRef(false);
+  const handledUrlTriggerKeyRef = useRef<string | null>(null);
   const isHandlingUrlTrigger = useRef(false);
   const openedSessionFromUrlRef = useRef<string | null>(null);
+  const handledSessionReferenceDispatchesRef = useRef<Set<string>>(new Set());
   const dbNotes = useDbStore(state => state.notes);
   const dbLinks = useDbStore(state => state.links);
   const dbSnippets = useDbStore(state => state.snippets);
   const dbAutomations = useDbStore(state => state.automations);
   const dbSessions = useDbStore(state => state.sessions);
+  const isDbInitialized = useDbStore(state => state.isInitialized);
 
   useEffect(() => {
-    if (hasHandledUrlTrigger.current || isHandlingUrlTrigger.current) return;
-
     const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('session_reference') === 'true') {
+      const referenceType = urlParams.get('type');
+      const referenceId = urlParams.get('id');
+      if ((referenceType === 'note' || referenceType === 'snippet') && referenceId) {
+        if (!isDbInitialized) return;
+        const referenceKey = `${referenceType}:${referenceId}`;
+        if (handledSessionReferenceDispatchesRef.current.has(referenceKey)) return;
+        handledSessionReferenceDispatchesRef.current.add(referenceKey);
+        console.log('[SessionLaunchTrace] opening session reference tab', {
+          referenceType,
+          referenceId,
+        });
+        window.setTimeout(() => {
+          if (referenceType === 'note') {
+            openNoteById(referenceId);
+          } else {
+            openSnippetById(referenceId);
+          }
+          console.log('[SessionLaunchTrace] session reference editor requested', {
+            referenceType,
+            referenceId,
+            activeEditor: useUIStore.getState().activeEditor,
+          });
+        }, 100);
+        return;
+      }
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
+    const currentTriggerKey = `${window.location.pathname}${window.location.search}`;
+    if (isHandlingUrlTrigger.current || handledUrlTriggerKeyRef.current === currentTriggerKey) {
+      if (window.location.search) {
+        sessionFlowUrlTriggerDebug('[UrlTrigger][guard] skipped', {
+          currentTriggerKey,
+          isHandling: isHandlingUrlTrigger.current,
+          handledKey: handledUrlTriggerKeyRef.current,
+          href: window.location.href,
+        });
+      }
+      return;
+    }
+
     const hasTrigger =
       urlParams.get('focus_sheet_ui_first_column') === 'true' ||
       urlParams.get('force_board_view') === 'true' ||
@@ -106,12 +291,25 @@ export const useUrlTriggers = ({
       urlParams.get('create_note') === 'true' ||
       urlParams.get('create_snippet') === 'true' ||
       urlParams.get('create_todo') === 'true' ||
+      urlParams.get('trigger_hotkey') === 'true' ||
       urlParams.get('omnibox') === 'true' ||
       urlParams.get('alts_action') === 'true';
     const hasOmniboxTrigger = urlParams.get('omnibox') === 'true' || urlParams.get('alts_action') === 'true';
 
-    if (hasTrigger && !hasOmniboxTrigger) {
-      hasHandledUrlTrigger.current = true;
+    if (hasTrigger || hasOmniboxTrigger || urlParams.get('trigger_hotkey') === 'true') {
+      console.log('[UrlTrigger][detected]', {
+        href: window.location.href,
+        currentTriggerKey,
+        hasTrigger,
+        hasOmniboxTrigger,
+        triggerHotkey: urlParams.get('trigger_hotkey'),
+        type: urlParams.get('type'),
+        id: urlParams.get('id'),
+        query: urlParams.get('query'),
+        isDbInitialized,
+        hasSearchbarRef: Boolean(searchbarRef.current),
+        userReady: userId !== '',
+      });
     }
 
     if (urlParams.get('focus_sheet_ui_first_column') === 'true') {
@@ -150,8 +348,6 @@ export const useUrlTriggers = ({
             id: 'new',
             linkPrefill: { key: activeTabTitle, value: activeTabUrl, category: 'link' } as any,
           });
-        } else if (sheetAction === 'createsession') {
-          useUIStore.getState().openCreateItem('session', { id: 'new' });
         } else if (sheetAction === 'createprompt') {
           useUIStore.getState().openCreateItem('aiPrompt', { id: 'new', props: {} });
         }
@@ -191,7 +387,7 @@ export const useUrlTriggers = ({
       const newSearch = newParams.toString();
       const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : '');
       window.history.replaceState({}, '', newUrl);
-      hasHandledUrlTrigger.current = true;
+      handledUrlTriggerKeyRef.current = currentTriggerKey;
       return;
     }
 
@@ -275,7 +471,7 @@ export const useUrlTriggers = ({
       }
 
       openedSessionFromUrlRef.current = sessionId || 'new';
-      console.log('[SessionFlow][useUrlTriggers] session_mode=true detected → opening session editor', {
+      sessionFlowUrlTriggerDebug('[SessionFlow][useUrlTriggers] session_mode=true detected -> opening session editor', {
         sessionId,
         sessionName,
         sessionProps,
@@ -323,6 +519,7 @@ export const useUrlTriggers = ({
       const type = urlParams.get('type');
       const query = normalizeText(urlParams.get('query') || '');
       const temporaryPrompt = urlParams.get('temporaryPrompt') || '';
+      const collectionOpenBehavior = getCollectionOpenBehaviorFromUrl(urlParams);
       const commandId = urlParams.get('id');
       const editMode = urlParams.get('edit_mode') === 'true';
       let editorProps: any = undefined;
@@ -349,6 +546,9 @@ export const useUrlTriggers = ({
           'link',
           'links',
           'tabgroup',
+          'collection',
+          'collections',
+          'collection_view',
           'snippet',
           'snippets',
           'automation',
@@ -373,8 +573,8 @@ export const useUrlTriggers = ({
           query,
           entityId,
         });
-        hasHandledUrlTrigger.current = true;
-        window.history.replaceState({}, '', window.location.pathname);
+        handledUrlTriggerKeyRef.current = currentTriggerKey;
+        replaceTriggerUrlWithNormalNewtabUrl();
         return;
       }
 
@@ -403,25 +603,94 @@ export const useUrlTriggers = ({
         isHandlingUrlTrigger.current = false;
       };
 
+      replaceTriggerUrlWithNormalNewtabUrl();
+
       const tryHandleOmnibox = async () => {
+        console.log('[UrlTrigger][omnibox] handling attempt', {
+          invocationKey,
+          type,
+          commandId,
+          query,
+          attempts,
+          isDbInitialized: useDbStore.getState().isInitialized,
+          renderIsDbInitialized: isDbInitialized,
+          hasSearchbarRef: Boolean(searchbarRef.current),
+          userReady: userId !== '',
+        });
+
+        if (type === 'command' && commandId && await tryRunDirectUrlCommand(commandId)) {
+          console.log('[UrlTrigger][omnibox] command handled by direct URL executor', {
+            commandId,
+            invocationKey,
+          });
+          handledUrlTriggerKeyRef.current = currentTriggerKey;
+          releaseOmniboxInvocation();
+          return;
+        }
+
         const currentIsLoggedIn = userId !== '';
-        if (!searchbarRef.current || (!currentIsLoggedIn && attempts < 30)) {
+        const currentIsDbInitialized = useDbStore.getState().isInitialized;
+        const directDbTargetTypes = [
+          'note',
+          'notes',
+          'snippet',
+          'snippets',
+          'todo',
+          'todos',
+          'automation',
+          'automations',
+          'agent',
+          'chat_agent',
+          'chatagent',
+          'aiprompt',
+          'ai_prompt',
+          'prompt',
+          'collection',
+          'collections',
+          'collection_view',
+          'session',
+          'sessions',
+        ];
+        const hasDirectDbTarget = Boolean(entityId && directDbTargetTypes.includes(type || ''));
+        const needsSearchbarRef = type === 'command' || ['link', 'links', 'tabgroup'].includes(type || '');
+        const needsUserReady = !hasDirectDbTarget;
+        if (
+          (needsSearchbarRef && !searchbarRef.current) ||
+          !currentIsDbInitialized ||
+          (needsUserReady && !currentIsLoggedIn && attempts < 30)
+        ) {
+          console.log('[UrlTrigger][omnibox] waiting for readiness', {
+            invocationKey,
+            attempts,
+            hasSearchbarRef: Boolean(searchbarRef.current),
+            needsSearchbarRef,
+            hasDirectDbTarget,
+            needsUserReady,
+            currentIsDbInitialized,
+            renderIsDbInitialized: isDbInitialized,
+            currentIsLoggedIn,
+          });
           if (attempts++ < maxAttempts) {
             window.setTimeout(tryHandleOmnibox, retryDelayMs);
           } else {
             console.warn('[useUrlTriggers] Omnibox trigger timed out before the UI became ready.', {
               invocationKey,
+              currentIsDbInitialized,
+              renderIsDbInitialized: isDbInitialized,
             });
             releaseOmniboxInvocation();
           }
           return;
         }
 
-        const noteCandidates = [...dbNotes];
-        const linkCandidates = [...dbLinks];
-        const snippetCandidates = [...dbSnippets];
-        const automationCandidates = [...dbAutomations];
-        const aiPromptCandidates = useDbStore.getState().aiPrompts || [];
+        const latestDbState = useDbStore.getState();
+        const noteCandidates = [...(latestDbState.notes || [])];
+        const linkCandidates = [...(latestDbState.links || [])];
+        const snippetCandidates = [...(latestDbState.snippets || [])];
+        const automationCandidates = [...(latestDbState.automations || [])];
+        const chatAgentCandidates = latestDbState.chatAgents || [];
+        const aiPromptCandidates = latestDbState.aiPrompts || [];
+        const widgetViewCandidates = latestDbState.widgetViews || [];
 
         let resolvedEntity: any = null;
         if (entityId) {
@@ -433,11 +702,17 @@ export const useUrlTriggers = ({
         }
 
         if (type === 'note') {
-          console.log('[useUrlTriggers] Searching for note:', { entityId, query });
           const foundNote =
-            resolvedEntity?.entity ||
+            (resolvedEntity?.type === 'note' ? resolvedEntity.entity : null) ||
             noteCandidates.find(item => matchesEntityId(item, entityId)) ||
             (query ? noteCandidates.find(item => includesQuery(item.title, query)) : null);
+          console.log('[useUrlTriggers] Searching for note:', {
+            entityId,
+            query,
+            resolvedType: resolvedEntity?.type || null,
+            foundNoteId: foundNote?.id || (foundNote as any)?.snippet_id || null,
+            noteCount: noteCandidates.length,
+          });
           if (foundNote || editorProps) {
             if (editorProps && editorProps.props) {
               const snipObj = editorProps.props.item || editorProps.props.snippet || foundNote;
@@ -449,9 +724,21 @@ export const useUrlTriggers = ({
               useUIStore.getState().openItemEditor('note', String(foundNote?.id || entityId || 'new'), { props: mergedProps });
               useUIStore.getState().setView({ type: 'home' });
             } else if (foundNote) {
-              openNoteById(String(foundNote.id));
+              const foundNoteId = String(foundNote.id || (foundNote as any).snippet_id);
+              window.setTimeout(() => {
+                openNoteById(foundNoteId, foundNote);
+                console.log('[UrlTrigger][omnibox] note editor requested', {
+                  noteId: foundNoteId,
+                  activeEditor: useUIStore.getState().activeEditor,
+                });
+              }, 100);
             }
           } else {
+            console.warn('[useUrlTriggers] Note trigger did not resolve a note; opening create note fallback.', {
+              entityId,
+              query,
+              noteCount: noteCandidates.length,
+            });
             useUIStore.getState().setView({ type: 'home' });
             useUIStore.getState().openCreateItem('note', { id: 'new', props: { category: 'note' } });
           }
@@ -469,18 +756,24 @@ export const useUrlTriggers = ({
             useUIStore.getState().setView({ type: 'home' });
             useUIStore.getState().openCreateItem('link', { id: 'new', props: { category: 'link' } });
           }
+        } else if (['collection', 'collections', 'collection_view'].includes(type || '')) {
+          const foundView =
+            widgetViewCandidates.find(view => String(view.id) === String(entityId || commandId || '')) ||
+            widgetViewCandidates.find(view => normalizeText(view.title) === query) ||
+            widgetViewCandidates.find(view => includesQuery(view.title, query));
+          if (foundView) {
+            await launchCollectionViewById(String(foundView.id), collectionOpenBehavior);
+          } else if (entityId || commandId) {
+            await launchCollectionViewById(String(entityId || commandId), collectionOpenBehavior);
+          } else {
+            useUIStore.getState().setView({ type: 'home' });
+          }
         } else if (['session', 'sessions'].includes(type || '')) {
           if (resolvedEntity?.entity) {
             const session = resolvedEntity.entity as any;
-            chrome.runtime.sendMessage({
-              action: 'start_session',
-              sessionId: String(session.id || '').trim(),
-              sessionName: session.title || 'Untitled Tab Session',
-              workspaceId: session.workspaceId,
-              folderId: session.folderId || null,
-              initialUrls: session.urls?.map((u: any) => u.url) || [],
-              initialNames: session.urls?.map((u: any) => u.title || u.name || '') || [],
-              openSettings: session.sessionOpenSettings,
+            await launchSessionSmartWithReferences(session, {
+              source: 'omnibox',
+              requireAutoSave: false,
             });
           } else {
             useUIStore.getState().setView({ type: 'home' });
@@ -506,7 +799,7 @@ export const useUrlTriggers = ({
               });
               useUIStore.getState().setView({ type: 'home' });
             } else if (foundSnippet) {
-              openSnippetById(String(foundSnippet.id));
+              openSnippetById(String(foundSnippet.id), foundSnippet);
             }
           } else {
             useUIStore.getState().setView({ type: 'home' });
@@ -526,22 +819,43 @@ export const useUrlTriggers = ({
             });
           }
         } else if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(type || '')) {
+          const isChatAgentTrigger = ['chatagent', 'chat_agent', 'agent'].includes(type || '');
+          const foundChatAgent =
+            (resolvedEntity?.type === 'chatAgent' ? resolvedEntity.entity : null) ||
+            (isChatAgentTrigger
+              ? chatAgentCandidates.find((item: any) => matchesEntityId(item, entityId)) ||
+                chatAgentCandidates.find((item: any) => includesQuery(item.title, query))
+              : null);
+          if (foundChatAgent) {
+            useUIStore.getState().setView({ type: 'home' });
+            useUIStore.getState().openEditor({ type: 'ai', id: String(foundChatAgent.id || entityId || 'new') });
+            handledUrlTriggerKeyRef.current = currentTriggerKey;
+            releaseOmniboxInvocation();
+            window.history.replaceState({}, '', window.location.pathname);
+            return;
+          }
+
           const foundPrompt =
-            resolvedEntity?.entity || aiPromptCandidates.find(item => includesQuery(item.title, query));
+            (resolvedEntity?.type === 'aiPrompt' ? resolvedEntity.entity : null) ||
+            aiPromptCandidates.find(item => includesQuery(item.title, query));
           if (foundPrompt || editorProps) {
             useUIStore.getState().setView({ type: 'home' });
+            const isRunPromptFromOmniboxCommand =
+              urlParams.get('omnibox') === 'true' && urlParams.get('runPrompt') === 'true' && !editMode && !editorProps;
             const shouldRunFromOmnibox =
-              urlParams.get('omnibox') === 'true' &&
-              urlParams.get('runPrompt') === 'true' &&
-              !editMode &&
-              !editorProps &&
-              hasRunnableAiPrompt(foundPrompt, temporaryPrompt);
+              isRunPromptFromOmniboxCommand && hasRunnableAiPrompt(foundPrompt, temporaryPrompt);
             if (shouldRunFromOmnibox) {
               try {
                 await runAiPrompt(foundPrompt, temporaryPrompt);
               } catch (error) {
                 console.error('[useUrlTriggers] Failed to run AI prompt from omnibox:', error);
               }
+            } else if (isRunPromptFromOmniboxCommand && foundPrompt && requestMissingAiPromptInput) {
+              requestMissingAiPromptInput({
+                promptRecord: foundPrompt,
+                promptId: String(foundPrompt.id || entityId || 'new'),
+                editorProps,
+              });
             } else {
               useUIStore.getState().openItemEditor('aiPrompt', String(foundPrompt?.id || entityId || 'new'), editorProps);
             }
@@ -573,9 +887,13 @@ export const useUrlTriggers = ({
           }
         } else if (type === 'command') {
           if (commandId) {
+            console.log('[UrlTrigger][omnibox] executing command through searchbar', {
+              commandId,
+              query,
+            });
             if (commandId === 'search') {
               openSpreadsheetView();
-              hasHandledUrlTrigger.current = true;
+              handledUrlTriggerKeyRef.current = currentTriggerKey;
               releaseOmniboxInvocation();
               window.history.replaceState({}, '', window.location.pathname);
               return;
@@ -589,7 +907,7 @@ export const useUrlTriggers = ({
           }
         }
 
-        hasHandledUrlTrigger.current = true;
+        handledUrlTriggerKeyRef.current = currentTriggerKey;
         releaseOmniboxInvocation();
         window.history.replaceState({}, '', window.location.pathname);
       };
@@ -605,39 +923,143 @@ export const useUrlTriggers = ({
 
     const type = urlParams.get('type');
     const rawId = urlParams.get('id');
+    const collectionOpenBehavior = getCollectionOpenBehaviorFromUrl(urlParams);
     if (!rawId) {
       console.warn('[App] [HOTKEY_TRIGGER] Trigger detected but missing ID parameter');
+      replaceTriggerUrlWithNormalNewtabUrl();
       return;
     }
 
-    let cancelled = false;
+    const invocationKey = currentTriggerKey;
+    const windowWithHotkeyGuard = window as typeof window & {
+      __cmdosHotkeyInvocationsInFlight?: Set<string>;
+    };
+    const inFlightHotkeyInvocations =
+      windowWithHotkeyGuard.__cmdosHotkeyInvocationsInFlight ||
+      new Set<string>();
+    windowWithHotkeyGuard.__cmdosHotkeyInvocationsInFlight = inFlightHotkeyInvocations;
+
+    if (inFlightHotkeyInvocations.has(invocationKey)) {
+      console.warn('[UrlTrigger][hotkey] duplicate invocation suppressed', {
+        invocationKey,
+        type,
+        rawId,
+      });
+      return;
+    }
+
+    inFlightHotkeyInvocations.add(invocationKey);
+    isHandlingUrlTrigger.current = true;
     let attempts = 0;
     const maxAttempts = 80;
     const retryDelayMs = 100;
 
     const findById = (records: any[], id: string) => records.find(record => String(record?.id) === id);
+    const finishHotkeyTrigger = () => {
+      inFlightHotkeyInvocations.delete(invocationKey);
+      isHandlingUrlTrigger.current = false;
+      handledUrlTriggerKeyRef.current = currentTriggerKey;
+      replaceTriggerUrlWithNormalNewtabUrl();
+    };
 
     const tryHandle = async () => {
-      if (cancelled) return;
+      let normalizedId = rawId.startsWith('/') ? rawId.substring(1) : rawId;
+      normalizedId = normalizedId.replace(/^automation-/, '').replace(/^agent-/, '');
+
+      console.log('[UrlTrigger][hotkey] handling attempt', {
+        type,
+        rawId,
+        normalizedId,
+        attempts,
+        isDbInitialized: useDbStore.getState().isInitialized,
+        renderIsDbInitialized: isDbInitialized,
+        hasSearchbarRef: Boolean(searchbarRef.current),
+        userReady: userId !== '',
+      });
+
+      if (type === 'command' && await tryRunDirectUrlCommand(normalizedId)) {
+        console.log('[UrlTrigger][hotkey] command handled by direct URL executor', {
+          commandId: normalizedId,
+        });
+        finishHotkeyTrigger();
+        return;
+      }
+
+      if (['collection', 'collections', 'collection_view'].includes(type || '')) {
+        const currentIsDbInitialized = useDbStore.getState().isInitialized;
+        if (!currentIsDbInitialized) {
+          console.log('[UrlTrigger][hotkey] waiting for collection DB readiness', {
+            normalizedId,
+            attempts,
+            renderIsDbInitialized: isDbInitialized,
+          });
+          if (attempts++ < maxAttempts) {
+            window.setTimeout(tryHandle, retryDelayMs);
+          } else {
+            console.warn('[UrlTrigger][hotkey] collection trigger timed out before DB became ready', {
+              normalizedId,
+              currentIsDbInitialized,
+              renderIsDbInitialized: isDbInitialized,
+            });
+            finishHotkeyTrigger();
+          }
+          return;
+        }
+        const didLaunch = await launchCollectionViewById(normalizedId, collectionOpenBehavior);
+        sessionFlowUrlTriggerDebug('[UrlTrigger][hotkey] collection launch result', {
+          normalizedId,
+          didLaunch,
+          collectionOpenBehavior,
+        });
+        handledUrlTriggerKeyRef.current = currentTriggerKey;
+        if (!didLaunch) {
+          console.warn(`[App] Collection view not found for ID: ${normalizedId}`);
+        }
+        finishHotkeyTrigger();
+        return;
+      }
+
       const currentIsLoggedIn = userId !== '';
-      if (!searchbarRef.current || (!currentIsLoggedIn && attempts < 30)) {
+      const currentIsDbInitialized = useDbStore.getState().isInitialized;
+      if (!searchbarRef.current || !currentIsDbInitialized || (!currentIsLoggedIn && attempts < 30)) {
+        console.log('[UrlTrigger][hotkey] waiting for searchbar readiness', {
+          type,
+          normalizedId,
+          attempts,
+          hasSearchbarRef: Boolean(searchbarRef.current),
+          currentIsDbInitialized,
+          renderIsDbInitialized: isDbInitialized,
+          currentIsLoggedIn,
+        });
         if (attempts++ < maxAttempts) {
           window.setTimeout(tryHandle, retryDelayMs);
+        } else {
+          console.warn('[UrlTrigger][hotkey] trigger timed out before UI became ready', {
+            type,
+            normalizedId,
+            currentIsDbInitialized,
+            renderIsDbInitialized: isDbInitialized,
+            hasSearchbarRef: Boolean(searchbarRef.current),
+            currentIsLoggedIn,
+          });
+          finishHotkeyTrigger();
         }
         return;
       }
 
-      let normalizedId = rawId.startsWith('/') ? rawId.substring(1) : rawId;
-      normalizedId = normalizedId.replace(/^automation-/, '').replace(/^agent-/, '');
-
       if (type === 'command') {
+        console.log('[UrlTrigger][hotkey] executing command through searchbar', {
+          commandId: normalizedId,
+        });
         searchbarRef.current.executeCommand(normalizedId as any, { mode: 'execute' });
         if (!searchbarRef.current.isLocked) searchbarRef.current.focus();
+        finishHotkeyTrigger();
         return;
       }
 
       if (type === 'module') {
         searchbarRef.current.executeModule(normalizedId);
+        finishHotkeyTrigger();
         return;
       }
 
@@ -646,17 +1068,35 @@ export const useUrlTriggers = ({
           type || '',
         )
       ) {
-        let foundAuto = findById(dbAutomations, normalizedId);
+        const latestDbState = useDbStore.getState();
+        const actualItemId = extractSnippetIdFromCompoundId(normalizedId);
+        const isChatAgentTrigger = ['agent', 'chat_agent', 'chatagent'].includes(type || '');
+        if (isChatAgentTrigger) {
+          const chatAgentCandidates = latestDbState.chatAgents || [];
+          const foundChatAgent =
+            findById(chatAgentCandidates, actualItemId) ||
+            chatAgentCandidates.find((agent: any) => includesQuery(agent.title, normalizedId));
+          if (foundChatAgent) {
+            useUIStore.getState().setView({ type: 'home' });
+            useUIStore.getState().openEditor({ type: 'ai', id: String(foundChatAgent.id) });
+            finishHotkeyTrigger();
+            return;
+          }
+        }
+
+        const latestAutomations = latestDbState.automations || [];
+        let foundAuto = findById(latestAutomations, normalizedId);
         if (!foundAuto) {
-          foundAuto = dbAutomations.find(auto => includesQuery(auto.name, normalizedId));
+          foundAuto = latestAutomations.find(auto => includesQuery(auto.name, normalizedId));
         }
         if (foundAuto) {
           openAutomationById(String(foundAuto.id));
+          finishHotkeyTrigger();
           return;
         }
 
         // Also check AI Prompts!
-        const aiPromptCandidates = useDbStore.getState().aiPrompts || [];
+        const aiPromptCandidates = latestDbState.aiPrompts || [];
         let foundPrompt = findById(aiPromptCandidates, normalizedId);
         if (!foundPrompt) {
           foundPrompt = aiPromptCandidates.find((p: any) => includesQuery(p.title, normalizedId));
@@ -672,47 +1112,47 @@ export const useUrlTriggers = ({
           } else {
             useUIStore.getState().openItemEditor('aiPrompt', String(foundPrompt.id));
           }
+          finishHotkeyTrigger();
           return;
         }
 
         searchbarRef.current.executeCommand(normalizedId as any, { mode: 'execute' });
         if (!searchbarRef.current.isLocked) searchbarRef.current.focus();
+        finishHotkeyTrigger();
         return;
       }
 
       if (['session', 'sessions', 'tab session'].includes(type || '')) {
+        const latestDbState = useDbStore.getState();
         const actualItemId = extractSnippetIdFromCompoundId(normalizedId);
-        const foundSession = findById(dbSessions, actualItemId);
+        const foundSession = findById(latestDbState.sessions || [], actualItemId);
         if (foundSession) {
-          chrome.runtime.sendMessage({
-            action: 'start_session',
-            sessionId: String(foundSession.id || '').trim(),
-            sessionName: foundSession.title || 'Untitled Tab Session',
-            workspaceId: foundSession.workspaceId || null,
-            folderId: foundSession.folderId || null,
-            initialUrls: foundSession.urls?.map((u: any) => u.url) || [],
-            initialNames: foundSession.urls?.map((u: any) => u.title || u.name || '') || [],
-            openSettings: foundSession.sessionOpenSettings,
+          await launchSessionSmartWithReferences(foundSession, {
+            source: 'url_trigger',
+            requireAutoSave: false,
           });
+          finishHotkeyTrigger();
         } else {
           console.warn(`[App] Session not found for ID: ${normalizedId}. Falling back to command execution.`);
           searchbarRef.current.executeCommand(normalizedId as any, { mode: 'execute' });
           if (!searchbarRef.current.isLocked) searchbarRef.current.focus();
+          finishHotkeyTrigger();
         }
         return;
       }
 
       if (['link', 'links', 'tabgroup', 'note', 'notes', 'snippet', 'snippets'].includes(type || '')) {
+        const latestDbState = useDbStore.getState();
         const isLinkType = ['link', 'links', 'tabgroup'].includes(type || '');
         const isNoteType = ['note', 'notes'].includes(type || '');
 
         const actualItemId = extractSnippetIdFromCompoundId(normalizedId);
 
         const foundItem: any = isLinkType
-          ? findById(dbLinks, actualItemId) || findById(dbSnippets, actualItemId)
+          ? findById(latestDbState.links || [], actualItemId) || findById(latestDbState.snippets || [], actualItemId)
           : isNoteType
-            ? findById(dbNotes, actualItemId) || findById(dbSnippets, actualItemId)
-            : findById(dbSnippets, actualItemId) || findById(dbNotes, actualItemId);
+            ? findById(latestDbState.notes || [], actualItemId) || findById(latestDbState.snippets || [], actualItemId)
+            : findById(latestDbState.snippets || [], actualItemId) || findById(latestDbState.notes || [], actualItemId);
 
         if (foundItem && isLinkType) {
           if (searchbarRef.current?.executeSnippet) {
@@ -721,20 +1161,23 @@ export const useUrlTriggers = ({
             useUIStore.getState().openCreateItem('link', { id: 'new', props: { category: 'link' } });
           }
         } else if (foundItem) {
-          openNoteById(String(foundItem.id));
+          if (isNoteType) {
+            openNoteById(String(foundItem.id), foundItem);
+          } else {
+            openSnippetById(String(foundItem.id), foundItem);
+          }
         } else {
           console.warn(`[App] ${type} not found for ID: ${normalizedId}. Falling back to command execution.`);
           searchbarRef.current.executeCommand(normalizedId as any, { mode: 'execute' });
           if (!searchbarRef.current.isLocked) searchbarRef.current.focus();
         }
+        finishHotkeyTrigger();
         return;
       }
     };
 
     tryHandle();
-    return () => {
-      cancelled = true;
-    };
+    return;
   }, [
     dbAutomations,
     dbLinks,
@@ -742,7 +1185,9 @@ export const useUrlTriggers = ({
     dbSnippets,
     dismissAllViews,
     handleAltSInitialization,
+    isDbInitialized,
     openSpreadsheetView,
+    requestMissingAiPromptInput,
     searchbarRef,
     setIsGlobalCreateMenuOpen,
     userId,
@@ -757,13 +1202,25 @@ export const useUrlTriggers = ({
     // Only activate if the URL doesn't already have session_mode (that case is handled above)
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('session_mode') === 'true') return;
+    if (urlParams.get('session_reference') === 'true') return;
+    if (urlParams.get('skip_session_recovery') === 'true') {
+      sessionFlowUrlTriggerDebug('[SessionFlow][useUrlTriggers] skip_session_recovery=true detected; leaving dashboard view open');
+      return;
+    }
 
     chromeAny.windows.getCurrent((currentWindow: any) => {
       if (!currentWindow?.id) return;
       chromeAny.storage.local.get('active_sessions', (result: any) => {
-        const sessions: { sessionId: string; sessionName: string; windowId: number }[] = result.active_sessions || [];
+        const sessions: { sessionId: string; sessionName: string; windowId: number; launchSource?: string }[] = result.active_sessions || [];
         const matchedSession = sessions.find(s => s.windowId === currentWindow.id);
         if (matchedSession) {
+          if (matchedSession.launchSource === 'dashboard_view') {
+            sessionFlowUrlTriggerDebug(
+              '[SessionFlow][useUrlTriggers] Dashboard-launched active session found on refresh; leaving dashboard view open:',
+              matchedSession.sessionId,
+            );
+            return;
+          }
           const activeEditor = useUIStore.getState().activeEditor;
           const alreadyOpenedFromUrl = openedSessionFromUrlRef.current === matchedSession.sessionId;
           const isAlreadyActiveEditor =
@@ -771,10 +1228,10 @@ export const useUrlTriggers = ({
           if (alreadyOpenedFromUrl || isAlreadyActiveEditor) {
             return;
           }
-          console.log(
+          sessionFlowUrlTriggerDebug(
             '[SessionFlow][useUrlTriggers] Active session found for this window on load/refresh:',
             matchedSession.sessionId,
-            '— opening session editor',
+            '- opening session editor',
           );
           useUIStore.getState().openEditor({
             type: 'session',
@@ -787,12 +1244,54 @@ export const useUrlTriggers = ({
             },
           });
         } else {
-          console.log(
+          sessionFlowUrlTriggerDebug(
             '[SessionFlow][useUrlTriggers] No active session for this window (normal tab load). windowId:',
             currentWindow.id,
           );
         }
       });
     });
+  }, []);
+
+  useEffect(() => {
+    const chromeAny = (window as typeof window & { chrome?: typeof chrome }).chrome;
+    if (!chromeAny?.runtime?.connect || !chromeAny?.tabs?.getCurrent) return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const isSessionControlPage =
+      urlParams.get('skip_session_recovery') === 'true' || urlParams.get('session_mode') === 'true';
+    if (!isSessionControlPage) return;
+
+    let controlPort: chrome.runtime.Port | undefined;
+    chromeAny.tabs.getCurrent(tab => {
+      if (typeof tab?.id !== 'number') return;
+      controlPort = chromeAny.runtime.connect({ name: `session-control:${tab.id}` });
+      console.log('[SessionLaunchTrace] control port connected', { tabId: tab.id });
+      controlPort.onMessage.addListener((message: any) => {
+        if (message?.type !== 'OPEN_SESSION_REFERENCES' || !Array.isArray(message.items)) return;
+        console.log('[SessionLaunchTrace] target control tab received references', {
+          tabId: tab.id,
+          sessionId: message.sessionId,
+          itemCount: message.items.length,
+        });
+        const dispatchKey = `${tab.id}:${message.sessionId || ''}:${JSON.stringify(message.items)}`;
+        if (handledSessionReferenceDispatchesRef.current.has(dispatchKey)) return;
+        handledSessionReferenceDispatchesRef.current.add(dispatchKey);
+        void handleSessionReferenceLaunchActions(message.items, {
+          aiPrompts: useDbStore.getState().aiPrompts || [],
+          chatAgents: useDbStore.getState().chatAgents || [],
+          shouldContinue: async () => {
+            const response = await chromeAny.runtime.sendMessage({ action: 'get_active_session_status' });
+            return (
+              response?.ok === true &&
+              String(response.active_session?.sessionId || '') === String(message.sessionId || '') &&
+              response.active_session?.pinnedTabId === tab.id
+            );
+          },
+        });
+      });
+    });
+
+    return () => controlPort?.disconnect();
   }, []);
 };

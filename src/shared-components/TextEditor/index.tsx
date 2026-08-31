@@ -92,12 +92,13 @@ interface TextEditorProps {
   syncRevision?: number;
 }
 
-const resolveToolbarTarget = (selector?: string) => {
+const resolveToolbarTarget = (selector?: string, root?: Document | ShadowRoot) => {
   if (!selector) return null;
-  if (selector.startsWith('#')) {
-    return document.getElementById(selector.slice(1));
-  }
-  return document.querySelector(selector);
+  const rootMatch = root?.querySelector?.(selector);
+  if (rootMatch instanceof HTMLElement) return rootMatch;
+  const documentMatch = document.querySelector(selector);
+  if (documentMatch instanceof HTMLElement) return documentMatch;
+  return null;
 };
 
 /**
@@ -237,7 +238,7 @@ const TextEditor = forwardRef<any, TextEditorProps>(
       if (!isClient) return;
 
       const toolbar = toolbarSelector
-        ? resolveToolbarTarget(toolbarSelector)
+        ? resolveToolbarTarget(toolbarSelector, containerRef.current?.getRootNode() as Document | ShadowRoot | undefined)
         : containerRef.current?.parentElement?.querySelector('.ql-toolbar') || containerRef.current?.querySelector('.ql-toolbar');
 
       if (!toolbar) return;

@@ -22,6 +22,7 @@ import {
   upsertVersionForChange,
   deepCloneSnapshot,
 } from '../../../../shared-components/versionHistory/structuredVersionHistory';
+import { removeSessionReferencesForEntity } from '../session/sessionReferenceUtils';
 
 function extractSnippetSnapshot(snippet: SnippetRecord): SnippetSnapshot {
   return {
@@ -214,6 +215,7 @@ export async function getSnippetsForFolder(workspaceId: string, folderId: string
 export async function deleteSnippet(snippetId: string): Promise<void> {
   try {
     await db.snippets.delete(snippetId);
+    await removeSessionReferencesForEntity('snippet', snippetId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';
     console.error('[snippetData.deleteSnippet] Failed:', message);

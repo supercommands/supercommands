@@ -22,7 +22,8 @@ import {
   FiTerminal,
   FiTrash2,
 } from 'react-icons/fi';
-import { FaUser, FaPalette, FaGithub, FaLink, FaRobot } from 'react-icons/fa';
+import { FaUser, FaPalette, FaGithub, FaLink } from 'react-icons/fa';
+import { LuSparkles } from 'react-icons/lu';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { FiCreditCard, FiSearch, FiPlus } from 'react-icons/fi';
 import CreateWorkspacePanel from './workspaces/ui/CreateWorkspacePanel';
@@ -387,7 +388,8 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
         className="hidden"
       />
 
-      {showCreateOrg && (
+      {/* Organization/workspace creation is only allowed from onboarding for now. */}
+      {false && showCreateOrg && (
         <div
           className="absolute inset-0 z-50 flex items-start pt-[15vh] justify-center  backdrop-blur-sm"
           onClick={() => setShowCreateOrg(false)}
@@ -552,7 +554,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                                     </div>
                                     <div className="flex items-center justify-between">
                                       <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
-                                        <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <LuSparkles size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Chat Agents</span>
                                       </div>
                                       <span className="font-mono text-[var(--color-textSecondary)]">{ws.chatAgentsCount}</span>
@@ -591,16 +593,19 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
 
           </div>
 
-          {/* Centered Create Organization Action Row (OUTSIDE table container) */}
-          <div className="w-full flex justify-center pt-2">
-            <button
-              onClick={() => setShowCreateOrg(true)}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] transition-all shadow-sm active:scale-95 cursor-pointer"
-            >
-              <FiPlus size={14} className="text-[var(--color-accent)]" />
-              <span className="text-[var(--color-textPrimary)]">Create Organization</span>
-            </button>
-          </div>
+          {/* Organization/workspace creation is only allowed from onboarding for now.
+              Previously rendered the Create Organization button here. */}
+          {/*
+            <div className="w-full flex justify-center pt-2">
+              <button
+                onClick={() => setShowCreateOrg(true)}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] transition-all shadow-sm active:scale-95 cursor-pointer"
+              >
+                <FiPlus size={14} className="text-[var(--color-accent)]" />
+                <span className="text-[var(--color-textPrimary)]">Create Organization</span>
+              </button>
+            </div>
+          */}
 
         </div>
       </div>
@@ -905,7 +910,7 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
                                     </div>
                                     <div className="flex items-center justify-between">
                                       <div className="flex items-center gap-2.5 text-[var(--color-textPrimary)]">
-                                        <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />
+                                        <LuSparkles size={14} className="text-[var(--color-iconDefault)] shrink-0" />
                                         <span>Chat Agents</span>
                                       </div>
                                       <span className="font-mono text-[var(--color-textSecondary)]">{ws.chatAgentsCount}</span>
@@ -944,16 +949,19 @@ export const AllWorkspacesPanel: React.FC<AllWorkspacesPanelProps> = ({ onClose,
 
           </div>
 
-          {/* Centered Create Organization Action Row (OUTSIDE table container) */}
-          <div className="w-full flex justify-center pt-2">
-            <button
-              onClick={() => setShowCreateOrg(true)}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] transition-all shadow-sm active:scale-95 cursor-pointer"
-            >
-              <FiPlus size={14} className="text-[var(--color-accent)]" />
-              <span className="text-[var(--color-textPrimary)]">Create Organization</span>
-            </button>
-          </div>
+          {/* Organization/workspace creation is only allowed from onboarding for now.
+              Previously rendered the Create Organization button here. */}
+          {/*
+            <div className="w-full flex justify-center pt-2">
+              <button
+                onClick={() => setShowCreateOrg(true)}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] transition-all shadow-sm active:scale-95 cursor-pointer"
+              >
+                <FiPlus size={14} className="text-[var(--color-accent)]" />
+                <span className="text-[var(--color-textPrimary)]">Create Organization</span>
+              </button>
+            </div>
+          */}
 
         </div>
       </div>

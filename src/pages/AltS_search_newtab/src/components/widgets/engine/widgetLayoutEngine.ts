@@ -1,22 +1,45 @@
-import { WIDGET_CONSTRAINTS, WIDGET_GRID_COLUMNS } from './widgetDashboardData';
+import {
+  convertFineGridToLegacyPosition,
+  getAllowedWidgetColumns,
+  snapToAllowedColumn,
+  snapToAllowedWidth,
+  WIDGET_MACRO_ROW_HEIGHT,
+  WIDGET_SIZE_PRESETS,
+  WIDGET_CONSTRAINTS,
+  WIDGET_GRID_COLUMNS,
+} from './widgetDashboardData';
 import type { WidgetGridPosition } from '../widgetDashboard.types';
 
 export const clampWidgetPosition = (position: WidgetGridPosition): WidgetGridPosition => {
-  const rawWidth = Number.isFinite(position.w) ? Math.round(position.w) : WIDGET_CONSTRAINTS.minW;
-  const rawHeight = Number.isFinite(position.h) ? Math.round(position.h) : WIDGET_CONSTRAINTS.minH;
-  const w = Math.min(Math.max(rawWidth, WIDGET_CONSTRAINTS.minW), WIDGET_CONSTRAINTS.maxW, WIDGET_GRID_COLUMNS);
-  const h = Math.min(Math.max(rawHeight, WIDGET_CONSTRAINTS.minH), WIDGET_CONSTRAINTS.maxH);
-  const maxX = Math.max(WIDGET_GRID_COLUMNS - w, 0);
-  const rawX = Number.isFinite(position.x) ? Math.round(position.x) : 0;
-  const rawY = Number.isFinite(position.y) ? Math.round(position.y) : 0;
+  const currentPos = position.gridVersion === 2 ? convertFineGridToLegacyPosition(position) : position;
+
+  const rawWidth = Number.isFinite(currentPos.w) ? Math.round(currentPos.w) : WIDGET_CONSTRAINTS.minW;
+  const rawHeight = Number.isFinite(currentPos.h) ? Math.round(currentPos.h) : WIDGET_CONSTRAINTS.minH;
+
+  const minW = currentPos.minW ? Math.max(WIDGET_CONSTRAINTS.minW, Math.round(currentPos.minW)) : WIDGET_CONSTRAINTS.minW;
+  const maxW = currentPos.maxW ? Math.round(currentPos.maxW) : WIDGET_CONSTRAINTS.maxW;
+  const minH = currentPos.minH ? Math.max(WIDGET_CONSTRAINTS.minH, Math.round(currentPos.minH)) : WIDGET_CONSTRAINTS.minH;
+  const maxH = currentPos.maxH ? Math.round(currentPos.maxH) : WIDGET_CONSTRAINTS.maxH;
+
+  const w = Math.min(Math.max(rawWidth, minW), maxW, WIDGET_GRID_COLUMNS);
+  const h = Math.min(Math.max(rawHeight, minH), maxH);
+
+  const rawX = Number.isFinite(currentPos.x) ? Math.round(currentPos.x) : 0;
+  const rawY = Number.isFinite(currentPos.y) ? Math.round(currentPos.y) : 0;
+  const clampedX = Math.min(Math.max(rawX, 0), WIDGET_GRID_COLUMNS - w);
+
+  const { gridVersion, ...rest } = currentPos;
 
   return {
-    ...position,
-    x: Math.min(Math.max(rawX, 0), maxX),
+    ...rest,
+    x: clampedX,
     y: Math.max(rawY, 0),
     w,
     h,
-    ...WIDGET_CONSTRAINTS,
+    minW,
+    maxW,
+    minH,
+    maxH,
   };
 };
 
@@ -26,13 +49,96 @@ export const hasWidgetLayoutOverlap = (first: WidgetGridPosition, second: Widget
   first.y < second.y + second.h &&
   first.y + first.h > second.y;
 
+export type EmptyWidgetSlot = Pick<WidgetGridPosition, 'x' | 'y' | 'w' | 'h'>;
+
+/** Returns first-row slots for an empty layout, gaps in incomplete rows, or a fresh row when every existing row is full. */
+export const getIncompleteWidgetRowSlots = (
+  layout: readonly WidgetGridPosition[],
+): EmptyWidgetSlot[] => {
+  const smallSize = WIDGET_SIZE_PRESETS.small;
+  if (layout.length === 0) {
+    return getAllowedWidgetColumns(smallSize.w).map(x => ({
+      x,
+      y: 0,
+      ...smallSize,
+    }));
+  }
+
+  const occupiedRows = new Set<number>();
+
+  layout.forEach(position => {
+    const startRow = Math.max(0, Math.floor(position.y / WIDGET_MACRO_ROW_HEIGHT));
+    const endRow = Math.max(
+      startRow,
+      Math.ceil((position.y + position.h) / WIDGET_MACRO_ROW_HEIGHT) - 1,
+    );
+    for (let row = startRow; row <= endRow; row += 1) occupiedRows.add(row);
+  });
+
+  const emptySlots = Array.from(occupiedRows)
+    .sort((first, second) => first - second)
+    .flatMap(row => {
+      const y = row * WIDGET_MACRO_ROW_HEIGHT;
+      return getAllowedWidgetColumns(smallSize.w)
+        .map(x => ({ x, y, ...smallSize }))
+        .filter(candidate =>
+          !layout.some(position =>
+            hasWidgetLayoutOverlap(
+              { ...candidate, i: '__empty-slot__', viewId: position.viewId },
+              position,
+            ),
+          ),
+        );
+    });
+
+  if (emptySlots.length > 0) return emptySlots;
+
+  const nextRowY = Math.ceil(
+    Math.max(0, ...layout.map(position => position.y + position.h)) / WIDGET_MACRO_ROW_HEIGHT,
+  ) * WIDGET_MACRO_ROW_HEIGHT;
+
+  return getAllowedWidgetColumns(smallSize.w).map(x => ({
+    x,
+    y: nextRowY,
+    ...smallSize,
+  }));
+};
+
+/** Revalidates a requested position against the latest persisted dashboard layout. */
+export const findNextAvailableWidgetPosition = (
+  requested: WidgetGridPosition,
+  occupied: readonly WidgetGridPosition[],
+): WidgetGridPosition => {
+  const candidate = clampWidgetPosition(requested);
+  const requestedY = Number.isFinite(candidate.y) && candidate.y < 100000
+    ? Math.max(0, Math.floor(candidate.y / WIDGET_MACRO_ROW_HEIGHT) * WIDGET_MACRO_ROW_HEIGHT)
+    : 0;
+  const lowestOccupiedRow = Math.max(0, ...occupied.map(position => position.y + position.h));
+  const finalSearchRow = Math.ceil(lowestOccupiedRow / WIDGET_MACRO_ROW_HEIGHT) * WIDGET_MACRO_ROW_HEIGHT;
+  const allowedColumns = getAllowedWidgetColumns(candidate.w);
+  const preferredX = snapToAllowedColumn(candidate.x, candidate.w);
+  const columns = [preferredX, ...allowedColumns.filter(column => column !== preferredX)];
+
+  for (let y = requestedY; y <= finalSearchRow; y += WIDGET_MACRO_ROW_HEIGHT) {
+    for (const x of columns) {
+      const nextCandidate = clampWidgetPosition({ ...candidate, x, y });
+      if (!occupied.some(position => hasWidgetLayoutOverlap(nextCandidate, position))) {
+        return nextCandidate;
+      }
+    }
+  }
+
+  return clampWidgetPosition({ ...candidate, x: columns[0] || 0, y: finalSearchRow });
+};
+
 const getColumnOrder = (preferredColumn: number, widgetWidth: number) => {
-  const lastColumn = Math.max(WIDGET_GRID_COLUMNS - widgetWidth, 0);
-  const safePreferredColumn = Math.max(0, Math.min(preferredColumn, lastColumn));
+  const maxAllowedX = Math.max(0, WIDGET_GRID_COLUMNS - widgetWidth);
+  const safePreferredColumn = Math.min(Math.max(preferredColumn, 0), maxAllowedX);
+  const allColumns = Array.from({ length: maxAllowedX + 1 }, (_, i) => i);
 
   return [
     safePreferredColumn,
-    ...Array.from({ length: lastColumn + 1 }, (_, column) => column).filter(column => column !== safePreferredColumn),
+    ...allColumns.filter(column => column !== safePreferredColumn),
   ];
 };
 
@@ -77,13 +183,12 @@ export const normalizeWidgetLayout = (
     ? [priorityPosition, ...remainingPositions]
     : remainingPositions;
   const resolvedPositions: WidgetGridPosition[] = [];
-
   orderedPositions.forEach(position => {
-    if (!resolvedPositions.some(current => hasWidgetLayoutOverlap(position, current))) {
+    const isUnplaced = position.y > 100000;
+    if (!isUnplaced && !resolvedPositions.some(current => hasWidgetLayoutOverlap(position, current))) {
       resolvedPositions.push(position);
       return;
     }
-
     resolvedPositions.push(findFirstAvailablePosition(position, resolvedPositions));
   });
 
@@ -96,22 +201,28 @@ export const resolveWidgetLayout = (
 ): WidgetGridPosition[] => normalizeWidgetLayout(candidateLayout, priorityWidgetId);
 
 export const resolveDropCollision = (
-  previousLayout: readonly WidgetGridPosition[],
+  _previousLayout: readonly WidgetGridPosition[],
   nextLayout: readonly WidgetGridPosition[],
   draggedWidgetId: string | undefined,
 ): WidgetGridPosition[] => {
-  if (!draggedWidgetId) return normalizeWidgetLayout(nextLayout);
+  return normalizeWidgetLayout(nextLayout, draggedWidgetId);
+};
 
-  const previousDraggedPosition = previousLayout.find(position => position.i === draggedWidgetId);
-  const droppedPosition = nextLayout.find(position => position.i === draggedWidgetId);
+export const compactLayoutVertically = (layout: readonly WidgetGridPosition[]): WidgetGridPosition[] => {
+  const views = Array.from(new Set(layout.map(p => p.viewId).filter(Boolean)));
+  if (views.length === 0) return [...layout];
 
-  if (!previousDraggedPosition || !droppedPosition) return normalizeWidgetLayout(nextLayout, draggedWidgetId);
-
-  const candidateLayout = previousLayout.map(position =>
-    position.i === draggedWidgetId
-      ? clampWidgetPosition({ ...position, ...droppedPosition })
-      : { ...position },
-  );
-
-  return resolveWidgetLayout(candidateLayout, draggedWidgetId);
+  return views.flatMap(viewId => {
+    const viewLayout = layout.filter(p => p.viewId === viewId);
+    const sorted = [...viewLayout].sort((first, second) => first.y - second.y || first.x - second.x);
+    const compacted: WidgetGridPosition[] = [];
+    sorted.forEach(item => {
+      let targetY = 0;
+      while (compacted.some(other => hasWidgetLayoutOverlap({ ...item, y: targetY }, other))) {
+        targetY += 1;
+      }
+      compacted.push({ ...item, y: targetY });
+    });
+    return compacted;
+  });
 };

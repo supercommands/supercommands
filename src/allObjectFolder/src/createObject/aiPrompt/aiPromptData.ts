@@ -13,9 +13,11 @@
 import Dexie from 'dexie';
 
 import type { AiPromptRecord, CreateAiPromptInput, UpdateAiPromptInput } from './aiPromptTypes';
+import { sanitizeEnabledAiPromptModelIds } from './aiPromptModelHelpers';
 import { generateEntityId } from '../../../../shared-components/utils';
 import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
+import { removeSessionReferencesForEntity } from '../session/sessionReferenceUtils';
 
 export async function createAiPrompt(input: CreateAiPromptInput): Promise<AiPromptRecord> {
   const defaultWorkspace = input.workspaceId
@@ -35,7 +37,7 @@ export async function createAiPrompt(input: CreateAiPromptInput): Promise<AiProm
     id: generateEntityId('aiPrompt'),
     workspaceId,
     folderId,
-    title: input.title.trim() || 'Untitled AI Prompt',
+    title: input.title.trim() || 'Untitled Chat Agent',
     prompt: input.prompt,
     rules: input.rules,
     modelUrls: input.modelUrls,
@@ -45,6 +47,9 @@ export async function createAiPrompt(input: CreateAiPromptInput): Promise<AiProm
     updatedAt: now,
     deletedAt: null,
     customModels: input.customModels ?? [],
+    ...(input.enabledModelIds !== undefined
+      ? { enabledModelIds: sanitizeEnabledAiPromptModelIds(input.enabledModelIds) }
+      : {}),
   };
 
   try {
@@ -62,7 +67,7 @@ export async function updateAiPrompt(aiPromptId: string, input: UpdateAiPromptIn
     updatedAt: Date.now(),
   };
 
-  if (input.title !== undefined) changes.title = input.title.trim() || 'Untitled AI Prompt';
+  if (input.title !== undefined) changes.title = input.title.trim() || 'Untitled Chat Agent';
   if (input.prompt !== undefined) changes.prompt = input.prompt;
   if (input.rules !== undefined) changes.rules = input.rules;
   if (input.modelUrls !== undefined) changes.modelUrls = input.modelUrls;
@@ -71,6 +76,9 @@ export async function updateAiPrompt(aiPromptId: string, input: UpdateAiPromptIn
   if (input.folderId !== undefined) changes.folderId = input.folderId;
   if (input.tagIds !== undefined) changes.tagIds = input.tagIds;
   if (input.customModels !== undefined) changes.customModels = input.customModels;
+  if (input.enabledModelIds !== undefined) {
+    changes.enabledModelIds = sanitizeEnabledAiPromptModelIds(input.enabledModelIds) ?? [];
+  }
 
   try {
     const existing = await db.aiPrompts.get(aiPromptId);
@@ -144,6 +152,7 @@ export async function deleteAiPrompt(aiPromptId: string): Promise<void> {
   try {
     await deleteItemAssociations(aiPromptId);
     await db.aiPrompts.delete(aiPromptId);
+    await removeSessionReferencesForEntity('agent', aiPromptId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';
     console.error('[aiPromptData.deleteAiPrompt] Failed:', message);

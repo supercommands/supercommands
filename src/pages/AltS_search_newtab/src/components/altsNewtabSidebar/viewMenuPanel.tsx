@@ -5,7 +5,8 @@ import { useUIStore } from '../../../../../shared-components/uiStateManager';
 import { FiZap, FiCommand, FiFolder, FiBriefcase, FiArrowLeft, FiChevronUp, FiChevronDown } from 'react-icons/fi';
 import { useDbStore } from '../../../../../storage/store/useDbStore';
 import { useSpreadsheetStore } from '../../../../../shared-components/spreadsheetUi/logic/spreadsheetStateStore';
-import { FaCaretDown, FaCaretRight, FaCode, FaLink, FaRobot } from 'react-icons/fa';
+import { FaCaretDown, FaCaretRight, FaCode, FaLink } from 'react-icons/fa';
+import { LuSparkles } from 'react-icons/lu';
 import { BsCalendarCheck } from 'react-icons/bs';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
 import { SessionGridIcon } from '../../../../../shared-components/icons/sessionGridIcon';
@@ -120,20 +121,10 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
         setSidebarStorageData({ sidebar_view_visible_items: newVisible });
       } else {
         if (result.sidebar_view_visible_items) {
-          const stored = result.sidebar_view_visible_items;
-          setVisibleViewItems({
-            ...stored,
-            'header-workflows': stored['header-workflows'] ?? false,
-            'header-shortcuts': stored['header-shortcuts'] ?? false,
-            'header-others': stored['header-others'] ?? false,
-          });
+          setVisibleViewItems(result.sidebar_view_visible_items);
         }
         if (result.sidebar_view_items_order) {
-          let order = result.sidebar_view_items_order;
-          if (!order.some((id: string) => id.startsWith('header-'))) {
-            order = [...order, 'header-workflows', 'header-shortcuts', 'header-others'];
-          }
-          setViewItemsOrder(order);
+          setViewItemsOrder(result.sidebar_view_items_order);
         }
       }
     };
@@ -211,7 +202,7 @@ export const ViewMenuPanel: React.FC<ViewMenuPanelProps> = ({ searchbarRef, open
         id: 'chat_agents',
         label: 'Chat Agents',
         slash: '/ca ',
-        icon: <FaRobot size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
+        icon: <LuSparkles size={14} className="text-[var(--color-iconDefault)] shrink-0" />,
       },
       {
         id: 'snippets',

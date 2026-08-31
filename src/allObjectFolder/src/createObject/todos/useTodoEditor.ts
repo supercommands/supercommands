@@ -220,7 +220,7 @@ export function useTodoEditor(props: UseTodoEditorParams) {
     snippet: { id: currentTargetId, category: 'todo' }
   }) : null;
   const hasLoadedShortcut = !currentTargetId || lastLoadedCompoundIdRef.current === targetCompoundId;
-  const shortcutChanged = isInitialized && hasLoadedShortcut && (todoShortcut || '').toLowerCase().replace(/[^a-z0-9]/g, '') !== (lastSavedShortcutRef.current || '');
+  const shortcutChanged = isInitialized && hasLoadedShortcut && (todoShortcut || '').toLowerCase().replace(/[^a-z0-9_]/g, '') !== (lastSavedShortcutRef.current || '');
 
   const isDirty = !isTodoDeleted && isInitialized && (titleChanged || descriptionChanged || scheduleTypeChanged || scheduleTimeChanged || recurringCycleChanged || itemsChanged || tagsChanged || shortcutChanged);
 
@@ -402,7 +402,7 @@ export function useTodoEditor(props: UseTodoEditorParams) {
               id: targetId,
               snippet: { id: targetId, category: 'todo' }
             });
-            const finalShortcut = loopShortcut.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const finalShortcut = loopShortcut.toLowerCase().replace(/[^a-z0-9_]/g, '');
             if (finalShortcut) {
               const valRes = await validateShortcut(finalShortcut, targetId);
               if (valRes.isValid) {
@@ -459,6 +459,27 @@ export function useTodoEditor(props: UseTodoEditorParams) {
     }
   }, []);
 
+  const bindExternalSavedTodo = useCallback((todo: TodoRecord) => {
+    if (!todo?.id || !isMounted.current) return;
+
+    activeTodoIdRef.current = todo.id;
+    setActiveTodoId(todo.id);
+    lastSavedTitleRef.current = todo.name || '';
+    lastSavedDescriptionRef.current = todo.description || '';
+    lastSavedScheduleTypeRef.current = todo.scheduleType;
+    lastSavedScheduleTimeRef.current = todo.scheduleTime;
+    lastSavedRecurringCycleRef.current = todo.recurringType;
+    lastSavedItemsRef.current = todo.references || [];
+    lastSavedTagsRef.current = todo.tagIds || [];
+    lastSavedShortcutRef.current = todo.shortcut || '';
+    lastSavedUpdatedAtRef.current = todo.updatedAt || Date.now();
+    setSaveStatus('saved');
+    setSaveError(null);
+    setLastSavedAt(new Date(todo.updatedAt || Date.now()));
+    setIsTodoDeleted(false);
+    setIsInitialized(true);
+  }, []);
+
   const resetEditor = useCallback(() => {
     activeTodoIdRef.current = null;
     setActiveTodoId('');
@@ -500,7 +521,7 @@ export function useTodoEditor(props: UseTodoEditorParams) {
     todoShortcut: displayShortcut, setTodoShortcut: updateTodoShortcut,
     saveStatus, setSaveStatus, saveError, setSaveError, lastSavedAt, setLastSavedAt, isDirty: isViewingHistory ? false : isDirty,
     lastSavedTitleRef, lastSavedShortcutRef,
-    handleSave, handleDelete, isInitialized,
+    handleSave, handleDelete, bindExternalSavedTodo, isInitialized,
     activeTodoId: todoId || activeTodoId,
     resetEditor,
     liveTodo,

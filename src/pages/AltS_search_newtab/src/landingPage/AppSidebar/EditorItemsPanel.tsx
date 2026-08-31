@@ -24,7 +24,8 @@ interface EditorItemsPanelProps {
   openSpreadsheetView?: (section?: string) => void;
 }
 
-import { FaCode, FaRobot } from 'react-icons/fa';
+import { FaCode } from 'react-icons/fa';
+import { LuSparkles } from 'react-icons/lu';
 
 import { BsCalendarCheck } from 'react-icons/bs';
 import NotesIcon from '../../../../../shared-components/icons/notesIcon';
@@ -274,7 +275,7 @@ export const EditorItemsPanel: React.FC<EditorItemsPanelProps> = ({
       return <FaCode size={iconSize} className="text-[var(--color-iconDefault)] shrink-0" />;
     }
     if (kind === 'aiPrompt') {
-      return <FaRobot size={iconSize} className="text-[var(--color-iconDefault)] shrink-0" />;
+      return <LuSparkles size={iconSize} className="text-[var(--color-iconDefault)] shrink-0" />;
     }
     if (kind === 'todo') {
       return <BsCalendarCheck size={iconSize} className="text-[var(--color-iconDefault)] shrink-0" />;

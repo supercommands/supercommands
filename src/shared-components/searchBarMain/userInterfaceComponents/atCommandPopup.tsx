@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { SiOpenai, SiPerplexity, SiGoogle } from 'react-icons/si';
+import { SiPerplexity, SiGoogle } from 'react-icons/si';
 import { TbSparkles } from 'react-icons/tb';
 import { FaFileAlt, FaLink, FaBookmark, FaTerminal, FaCalendarAlt, FaTimes } from 'react-icons/fa';
 import NotesIcon from '../../../shared-components/icons/notesIcon';
@@ -40,7 +40,7 @@ interface AtCommandPopupProps {
 const getIconForCommand = (id: string, keywords: string[] = []) => {
   const lowerId = String(id || '').toLowerCase();
 
-  if (lowerId === 'gpt' || lowerId === 'chatgpt') return SiOpenai;
+  if (lowerId === 'gpt' || lowerId === 'chatgpt') return LuSparkles;
   if (lowerId === 'claude') return TbSparkles;
   if (lowerId === 'gemini') return TbSparkles;
   if (lowerId === 'perplexity') return SiPerplexity;

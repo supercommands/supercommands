@@ -18,6 +18,8 @@ export const triggerInPlaceCommand = (creatorType: string) => {
         chrome.tabs.create({ url: targetUrl, active: true });
         return;
       
+      case 'save_todo':
+      case 'save_snippet':
       case 'save_chat':
       case 'add_to_existing':
       case 'add_to_existing_session':

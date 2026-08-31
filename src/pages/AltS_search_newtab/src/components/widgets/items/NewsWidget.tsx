@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type * as React from 'react';
-import { FiExternalLink, FiGlobe, FiRefreshCw } from 'react-icons/fi';
-import type { WidgetSizePreset } from '../widgetDashboard.types';
+import { FiGlobe, FiRefreshCw } from 'react-icons/fi';
+import type { WidgetInstance, WidgetSizePreset } from '../widgetDashboard.types';
+import EditableWidgetTitle from '../components/EditableWidgetTitle';
+import { widgetPerf } from '../utils/widgetPerf';
 
 type NewsRegion = 'us' | 'uk' | 'ca' | 'au' | 'in';
 
@@ -28,9 +30,14 @@ interface NewsData {
   fetchedAt: number;
 }
 
+import type { WidgetLayoutInfo } from '../utils/widgetLayoutInfo';
+import { getWidgetLayoutInfo } from '../utils/widgetLayoutInfo';
+
 interface NewsWidgetProps {
+  widget?: WidgetInstance;
   sizePreset?: WidgetSizePreset;
   isEditMode?: boolean;
+  layoutInfo?: WidgetLayoutInfo;
 }
 
 const NEWS_REGION_CONFIG: Record<NewsRegion, NewsRegionConfig> = {
@@ -375,35 +382,57 @@ const NewsArticleCard = ({
       target="_blank"
       rel="noreferrer"
       data-no-widget-drag="true"
-      className={`group flex min-w-0 items-start gap-2 border-b border-[var(--color-borderDefault)] transition hover:border-[var(--color-borderActive)] ${compact ? 'px-0 py-1' : 'px-0 py-1.5'}`}>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={`${compact ? 'text-[11px]' : 'text-xs'} min-w-0 flex-1 truncate font-bold leading-none text-[var(--color-textPrimary)]`}>
-            {article.title}
-          </span>
-          <span className="hidden max-w-[30%] shrink truncate text-[9px] font-bold leading-none text-[var(--color-textMuted)] sm:inline">
-            {article.source}
-          </span>
-          <span className="shrink-0 text-[9px] font-bold leading-none text-[var(--color-textMuted)]">
-            {article.publishedLabel}
-          </span>
-        </div>
-        {showDescription && article.description ? (
-          <div className="mt-1 line-clamp-2 text-[10px] font-medium leading-snug text-[var(--color-textSecondary)]">
-            {article.description}
-          </div>
-        ) : null}
+      className={`group flex min-w-0 flex-col border-b border-[var(--color-borderDefault)] transition hover:border-[var(--color-borderActive)] ${compact ? 'px-0 py-1' : 'px-0 py-1.5'}`}>
+      <div className="grid grid-cols-[1fr_120px] items-center gap-3 w-full min-w-0">
+        <span
+          className={`${compact ? 'text-[11px]' : 'text-xs'} min-w-0 truncate font-bold leading-normal text-[var(--color-textPrimary)]`}
+          title={article.title}>
+          {article.title}
+        </span>
+        <span
+          className="min-w-0 w-[120px] truncate text-[9.5px] font-bold leading-normal text-[var(--color-textMuted)] text-left"
+          title={article.source}>
+          {article.source}
+        </span>
       </div>
-      {!compact ? <FiExternalLink size={12} className="shrink-0 text-[var(--color-iconDefault)] opacity-60" /> : null}
+      {showDescription && article.description ? (
+        <div className="mt-1 line-clamp-2 text-[10px] font-medium leading-snug text-[var(--color-textSecondary)]">
+          {article.description}
+        </div>
+      ) : null}
     </a>
   );
 };
 
-const NewsWidget: React.FC<NewsWidgetProps> = ({ sizePreset = 'medium', isEditMode = false }) => {
+const NewsWidget: React.FC<NewsWidgetProps> = ({
+  widget,
+  sizePreset = 'medium',
+  isEditMode = false,
+  layoutInfo: providedLayoutInfo,
+}) => {
+  const layout = providedLayoutInfo || getWidgetLayoutInfo(sizePreset === 'large' ? 12 : sizePreset === 'medium' ? 8 : 4, 5);
+  const { isNarrow, isWide, isShort, isTall, isExtraTall } = layout;
+
   const region = useMemo(detectNewsRegion, []);
   const topic = useMemo(getDailyTopic, []);
   const cacheKey = useMemo(() => getCacheKey(region, topic), [region, topic]);
-  const cachedData = useMemo(() => getCachedNews(cacheKey), [cacheKey]);
+  const cachedData = useMemo(() => {
+    widgetPerf('cache:read:start', {
+      widgetType: widget?.type || 'news',
+      widgetId: widget?.id || 'unknown',
+      cacheKey,
+    });
+    const startedAt = performance.now();
+    const result = getCachedNews(cacheKey);
+    widgetPerf(result ? 'cache:read:hit' : 'cache:read:miss', {
+      widgetType: widget?.type || 'news',
+      widgetId: widget?.id || 'unknown',
+      cacheKey,
+      durationMs: Math.round(performance.now() - startedAt),
+      recordsReturned: result?.articles.length || 0,
+    });
+    return result;
+  }, [cacheKey, widget?.id, widget?.type]);
   const [data, setData] = useState<NewsData | null>(cachedData);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(!cachedData);
@@ -411,14 +440,19 @@ const NewsWidget: React.FC<NewsWidgetProps> = ({ sizePreset = 'medium', isEditMo
   const dataRef = useRef<NewsData | null>(cachedData);
   const inFlightRef = useRef<Promise<void> | null>(null);
   const isMountedRef = useRef(true);
-  const isSmall = sizePreset === 'small';
-  const isLarge = sizePreset === 'large';
+  const firstContentLoggedRef = useRef(false);
 
   const fetchNews = useCallback(
     async (mode: 'auto' | 'manual' | 'silent' = 'auto') => {
       if (inFlightRef.current) return inFlightRef.current;
       const cachedNews = newsCache.get(cacheKey) || null;
       if (mode !== 'manual' && isCacheFresh(cachedNews)) {
+        widgetPerf('cache:freshReuse', {
+          widgetType: widget?.type || 'news',
+          widgetId: widget?.id || 'unknown',
+          mode,
+          recordsReturned: cachedNews?.articles.length || 0,
+        });
         if (cachedNews !== dataRef.current) {
           dataRef.current = cachedNews;
           setData(cachedNews);
@@ -441,9 +475,24 @@ const NewsWidget: React.FC<NewsWidgetProps> = ({ sizePreset = 'medium', isEditMo
       if (mode !== 'silent' || !dataRef.current) setIsLoading(true);
       if (mode === 'manual') setCooldownUntil(Date.now() + MANUAL_REFRESH_COOLDOWN_MS);
 
+      widgetPerf('network:start', {
+        widgetType: widget?.type || 'news',
+        widgetId: widget?.id || 'unknown',
+        mode,
+        cacheKey,
+      });
+      const networkStartedAt = performance.now();
       const request = requestNewsData(cacheKey, topic, region)
         .then(nextData => {
           if (!isMountedRef.current) return;
+          widgetPerf('network:end', {
+            widgetType: widget?.type || 'news',
+            widgetId: widget?.id || 'unknown',
+            mode,
+            cacheKey,
+            durationMs: Math.round(performance.now() - networkStartedAt),
+            recordsReturned: nextData.articles.length,
+          });
           dataRef.current = nextData;
           setData(nextData);
           setError('');
@@ -453,6 +502,13 @@ const NewsWidget: React.FC<NewsWidgetProps> = ({ sizePreset = 'medium', isEditMo
           if (!isMountedRef.current) return;
           const fallbackData = newsCache.get(cacheKey) || readNewsCacheStore()[cacheKey] || null;
           if (fallbackData) {
+            widgetPerf('cache:fallbackReuse', {
+              widgetType: widget?.type || 'news',
+              widgetId: widget?.id || 'unknown',
+              mode,
+              cacheKey,
+              recordsReturned: fallbackData.articles.length,
+            });
             dataRef.current = fallbackData;
             setData(fallbackData);
           }
@@ -468,7 +524,7 @@ const NewsWidget: React.FC<NewsWidgetProps> = ({ sizePreset = 'medium', isEditMo
       inFlightRef.current = request;
       return request;
     },
-    [cacheKey, region, topic],
+    [cacheKey, region, topic, widget?.id, widget?.type],
   );
 
   useEffect(() => {
@@ -495,32 +551,46 @@ const NewsWidget: React.FC<NewsWidgetProps> = ({ sizePreset = 'medium', isEditMo
     return () => window.clearTimeout(timeoutId);
   }, [cooldownUntil]);
 
-  const visibleArticles = (data?.articles || []).slice(0, isSmall ? 5 : isLarge ? 12 : 8);
+  const maxArticles = isExtraTall ? 30 : isTall ? 18 : isWide ? 12 : isNarrow ? 5 : 8;
+  const visibleArticles = (data?.articles || []).slice(0, maxArticles);
   const updatedLabel = data ? formatRelativeTime(new Date(data.fetchedAt).toISOString()) : '';
   const refreshDisabled = isLoading || cooldownUntil > Date.now();
-  const containerPadding = isSmall ? 'px-4 py-3' : isLarge ? 'px-6 py-5' : 'px-5 py-4';
-  const topicLabel = formatTopicLabel(topic);
-  const regionLabel = NEWS_REGION_CONFIG[region].label;
+  const containerPadding = isNarrow ? 'px-4 pt-2.5 pb-3' : isWide ? 'px-6 pt-2.5 pb-5' : 'px-5 pt-2.5 pb-4';
+
+  useEffect(() => {
+    if (firstContentLoggedRef.current || visibleArticles.length === 0) return;
+    firstContentLoggedRef.current = true;
+    widgetPerf('content:firstReady', {
+      widgetType: widget?.type || 'news',
+      widgetId: widget?.id || 'unknown',
+      recordsReturned: data?.articles.length || 0,
+      recordsDisplayed: visibleArticles.length,
+      source: cachedData ? 'cache' : 'fresh',
+    });
+  }, [cachedData, data?.articles.length, visibleArticles.length, widget?.id, widget?.type]);
 
   return (
     <div
       className={`flex h-full w-full min-w-0 flex-col overflow-hidden text-[var(--color-textPrimary)] ${containerPadding} ${
-        isEditMode ? (isSmall ? 'pb-11' : 'pb-14') : ''
+        isEditMode ? (isNarrow ? 'pb-11' : 'pb-14') : ''
       }`}>
-      <div className="flex min-w-0 items-center justify-between gap-3">
+      <div className="flex shrink-0 min-w-0 items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <FiGlobe size={14} className="shrink-0 text-[var(--color-iconDefault)]" />
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-1 text-[11px] font-bold leading-none text-[var(--color-textSecondary)]">
-              <span className="shrink-0 uppercase text-[var(--color-textMuted)]">News</span>
-              <span className="shrink-0 text-[var(--color-textMuted)]">/</span>
-              <span className="truncate">{topicLabel}</span>
-              <span className="shrink-0 text-[var(--color-textMuted)]">/</span>
-              <span className="truncate">{regionLabel}</span>
-              <span className="shrink-0 text-[var(--color-textMuted)]">/</span>
-              <span className="shrink-0">Today</span>
-            </div>
-          </div>
+          {widget ? (
+            <EditableWidgetTitle
+              viewId={widget.viewId}
+              widgetId={widget.id}
+              initialTitle={widget.title || 'News'}
+              isEditMode={isEditMode}
+              className="uppercase text-[var(--color-textMuted)] text-[10px] font-bold"
+              icon={<FiGlobe size={14} className="shrink-0 text-[var(--color-iconDefault)]" />}
+            />
+          ) : (
+            <>
+              <FiGlobe size={14} className="shrink-0 text-[var(--color-iconDefault)]" />
+              <span className="shrink-0 uppercase text-[var(--color-textMuted)] text-[10px] font-bold">News</span>
+            </>
+          )}
         </div>
         <button
           type="button"
@@ -532,8 +602,8 @@ const NewsWidget: React.FC<NewsWidgetProps> = ({ sizePreset = 'medium', isEditMo
             event.stopPropagation();
             void fetchNews('manual');
           }}
-          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--color-borderDefault)] ${NEWS_BUTTON_SURFACE_CLASS} text-[var(--color-iconDefault)] transition hover:text-[var(--color-textPrimary)] disabled:cursor-not-allowed disabled:opacity-50`}>
-          <FiRefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--color-borderDefault)] ${NEWS_BUTTON_SURFACE_CLASS} text-[var(--color-iconDefault)] transition hover:text-[var(--color-textPrimary)] disabled:cursor-not-allowed disabled:opacity-50`}>
+          <FiRefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
         </button>
       </div>
 
@@ -548,17 +618,17 @@ const NewsWidget: React.FC<NewsWidgetProps> = ({ sizePreset = 'medium', isEditMo
         </div>
       ) : (
         <>
-          <div className={`custom-scrollbar min-h-0 flex-1 ${isSmall ? 'mt-2 flex flex-col gap-1.5 overflow-y-auto pr-1' : 'mt-2.5 flex flex-col gap-1.5 overflow-y-auto pr-1'}`}>
-            <div className={`min-h-0 flex-col ${isSmall ? 'flex gap-1.5' : 'flex gap-1.5'}`}>
+          <div className="custom-scrollbar min-h-0 flex-1 mt-2.5 flex flex-col gap-1.5 overflow-y-auto pr-1">
+            <div className="min-h-0 flex flex-col gap-1.5">
               {visibleArticles.map(article => (
-                <NewsArticleCard key={`${article.articleUrl}-${article.title}`} article={article} compact={isSmall} showDescription={isLarge} />
+                <NewsArticleCard key={`${article.articleUrl}-${article.title}`} article={article} compact={isNarrow} showDescription={isWide} />
               ))}
             </div>
           </div>
 
           <div className="mt-2 flex shrink-0 min-w-0 items-center justify-between gap-2 text-[9px] font-bold text-[var(--color-textMuted)]">
             <span className="truncate">
-              {error ? `${error} Showing latest saved headlines.` : isLoading ? 'Refreshing headlines...' : 'Live headlines'}
+              {error ? `${error} Showing latest saved headlines.` : isLoading ? 'Refreshing headlines...' : ''}
             </span>
             <span className="shrink-0">{updatedLabel ? `Updated ${updatedLabel}` : 'Live'}</span>
           </div>

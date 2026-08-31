@@ -18,12 +18,68 @@ export function useChromeTabs(isOpen: boolean) {
           setCurrentWindowId(currentWindow.id);
         }
       });
+      return;
     }
-  }, [isOpen]);
+
+    if (chromeAny?.runtime?.sendMessage) {
+      chromeAny.runtime.sendMessage({ action: 'alts_get_chrome_tabs' }, (response: any) => {
+        if (response?.success && typeof response.currentWindowId === 'number') {
+          setCurrentWindowId(response.currentWindowId);
+        }
+      });
+    }
+  }, [isOpen, chromeAny]);
 
   // Fetch all tabs
   const fetchTabs = useCallback(() => {
     if (!chromeAny?.tabs?.query) {
+      if (chromeAny?.runtime?.sendMessage) {
+        chromeAny.runtime.sendMessage({ action: 'alts_get_chrome_tabs' }, (response: any) => {
+          if (!response?.success || !Array.isArray(response.tabs)) {
+            setTabsByWindow({});
+            setHasFetchedTabs(true);
+            return;
+          }
+
+          const tabs = response.tabs.filter(
+            (t: any) =>
+              t.url &&
+              !t.url.startsWith('chrome-extension://') &&
+              !t.url.startsWith('chrome://') &&
+              t.url !== 'about:blank',
+          );
+
+          const grouped = (tabs.reduce((acc: Record<number, BrowserTab[]>, tab: any) => {
+            const windowId = tab.windowId ?? -1;
+            if (!acc[windowId]) acc[windowId] = [];
+            acc[windowId].push({
+              id: tab.id,
+              url: tab.url,
+              title: tab.title || tab.url,
+              favIconUrl: tab.favIconUrl,
+              windowId: tab.windowId,
+              active: tab.active,
+              highlighted: tab.highlighted,
+              index: tab.index,
+            });
+            return acc;
+          }, {} as Record<number, BrowserTab[]>)) as Record<number, BrowserTab[]>;
+
+          Object.keys(grouped).forEach((windowId) => {
+            grouped[Number(windowId)].sort((a, b) => {
+              if (a.active && !b.active) return -1;
+              if (!a.active && b.active) return 1;
+              return Number(a.index ?? 0) - Number(b.index ?? 0);
+            });
+          });
+
+          setTabsByWindow(grouped);
+          if (typeof response.currentWindowId === 'number') setCurrentWindowId(response.currentWindowId);
+          setHasFetchedTabs(true);
+        });
+        return;
+      }
+      setTabsByWindow({});
       setHasFetchedTabs(true);
       return;
     }

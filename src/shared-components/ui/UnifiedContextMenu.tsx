@@ -81,6 +81,8 @@ export interface UnifiedContextMenuProps {
   showAllHotkeysOption?: boolean;
   quickActions?: MenuAction[];
   preferDown?: boolean;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
 }
 
 const shakeKeyframes = `
@@ -110,6 +112,8 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
   showAllHotkeysOption = true,
   quickActions = [],
   preferDown = false,
+  appearanceScope = 'default',
+  appearanceTokens,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -122,6 +126,35 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
   const workspaces = useDbStore(state => state.workspaces);
   const folders = useDbStore(state => state.folders);
   const snippets = useDbStore(state => state.snippets);
+  const isAltSAppearance = appearanceScope === 'alts';
+  const appearanceStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!isAltSAppearance) return appearanceTokens;
+    return {
+      ...appearanceTokens,
+      '--color-contextMenuBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-modalBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-popupBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-inputBg': 'var(--alts-input-bg, var(--color-altsInputBg))',
+      '--color-panelBg': 'var(--alts-row-hover-bg, var(--color-altsRowHoverBg))',
+      '--color-containerBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-hoverBg': 'var(--alts-row-hover-bg, var(--color-altsRowHoverBg))',
+      '--color-selectedBg': 'var(--alts-selected-bg, var(--color-altsSelectedBg))',
+      '--color-borderDefault': 'var(--alts-border-color, var(--color-altsBorderColor))',
+      '--color-borderActive': 'var(--alts-focus-ring, var(--color-altsFocusRing))',
+      '--color-focusRing': 'var(--alts-focus-ring, var(--color-altsFocusRing))',
+      '--color-textPrimary': 'var(--alts-text-primary, var(--color-altsTextPrimary))',
+      '--color-textSecondary': 'var(--alts-text-secondary, var(--color-altsTextSecondary))',
+      '--color-textMuted': 'var(--alts-text-muted, var(--color-altsTextMuted))',
+      '--color-textPlaceholder': 'var(--alts-text-placeholder, var(--color-altsTextPlaceholder))',
+      '--color-iconDefault': 'var(--alts-icon-fg, var(--color-altsIconFg))',
+      '--color-accent': 'var(--alts-icon-tile-action-bg, var(--color-altsIconTileActionBg))',
+      '--color-accentHover': 'var(--alts-icon-tile-action-bg, var(--color-altsIconTileActionBg))',
+      '--color-success': 'var(--alts-icon-tile-action-bg, var(--color-altsIconTileActionBg))',
+      '--color-danger': '#ef4444',
+      '--color-dangerHover': '#f87171',
+      '--color-dangerBg': 'rgba(239, 68, 68, 0.14)',
+    } as React.CSSProperties;
+  }, [appearanceTokens, isAltSAppearance]);
 
   const [internalError, setInternalError] = useState<string | null>(null);
   const [internalConflictId, setInternalConflictId] = useState<string | null>(null);
@@ -351,8 +384,9 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
     <div
       ref={menuRef}
       data-unified-menu="true"
-      className={`bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-row transition-[width,left] ease-out custom-scrollbar`}
+      className={`${isAltSAppearance ? 'unified-context-menu-alts z-alts-subpopup' : ''} bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault,rgba(255,255,255,0.1))] rounded-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-row transition-[width,left] ease-out custom-scrollbar`}
       style={{
+        ...appearanceStyle,
         ...style,
         width: 'max-content',
         maxWidth: 'calc(100vw - 24px)',
@@ -377,6 +411,76 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
         .custom-scrollbar {
           scrollbar-width: thin;
           scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+        }
+        .unified-context-menu-alts,
+        .unified-context-menu-alts * {
+          box-sizing: border-box;
+        }
+        .unified-context-menu-alts input {
+          color: var(--color-textPrimary) !important;
+          border-color: var(--color-borderDefault) !important;
+          box-shadow: none !important;
+        }
+        .unified-context-menu-alts input::placeholder {
+          color: var(--color-textPlaceholder) !important;
+        }
+        .unified-context-menu-alts button {
+          appearance: none;
+          -webkit-appearance: none;
+          color: var(--color-textPrimary) !important;
+        }
+        .unified-context-menu-alts button[title^="Clear"] {
+          color: var(--color-danger) !important;
+        }
+        .unified-context-menu-alts button[title="Cancel"] {
+          color: var(--color-textSecondary) !important;
+        }
+        .unified-context-menu-alts button[title="Save"],
+        .unified-context-menu-alts button[title="Overwrite existing assignment"] {
+          color: var(--color-textPrimary) !important;
+        }
+        .unified-context-menu-alts :where(
+          [class*="text-slate-600"],
+          [class*="text-slate-900"],
+          [class*="dark:text-neutral-200"],
+          [class*="dark:text-neutral-100"],
+          [class*="text-neutral-700"],
+          [class*="text-[#586e75]"]
+        ) {
+          color: var(--color-textPrimary) !important;
+        }
+        .unified-context-menu-alts :where(
+          [class*="text-slate-500"],
+          [class*="text-slate-400"],
+          [class*="dark:text-neutral-500"],
+          [class*="dark:text-neutral-400"]
+        ) {
+          color: var(--color-textSecondary) !important;
+        }
+        .unified-context-menu-alts :where(
+          [class*="bg-[#f5f3ff]"],
+          [class*="dark:bg-neutral-800"]
+        ) {
+          background-color: var(--color-panelBg) !important;
+        }
+        .unified-context-menu-alts :where(
+          [class*="border-[#c7bcff]"],
+          [class*="dark:border-[#9fa2ff]"]
+        ) {
+          border-color: var(--color-borderActive) !important;
+        }
+        .unified-context-menu-alts :where(
+          [class*="hover:border-[#b9adff]"],
+          [class*="dark:hover:border-[#8f93ff]"]
+        ):hover {
+          border-color: var(--color-focusRing) !important;
+        }
+        .unified-context-menu-alts :where(
+          [class*="hover:bg-slate-100"],
+          [class*="dark:hover:bg-white/10"],
+          [class*="hover:bg-[#eee8d5]"]
+        ):hover {
+          background-color: var(--color-hoverBg) !important;
         }
       `}</style>
 
@@ -596,8 +700,8 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     : ''
                     }`}>
                   {/* Header with Clear Button */}
-                  <div className="px-1 py-1.5 border-b border-slate-100 dark:border-white/5 flex items-center justify-between overflow-hidden">
-                    <div className="text-[10px] font-bold tracking-wider text-slate-600 dark:text-neutral-200 leading-tight">
+                  <div className="px-1 py-1.5 border-b border-[var(--color-borderDefault)] flex items-center justify-between overflow-hidden">
+                    <div className="text-[10px] font-bold tracking-wider text-[var(--color-textPrimary)] leading-tight">
                       {hotkeyInput.value
                         ? `Assign a Keyboard Shortcut (${hotkeyInput.value})`
                         : isMac
@@ -608,7 +712,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                       <div className="flex items-center">
                         <button
                           onClick={hotkeyInput.onClear}
-                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors p-1 rounded-md hover:bg-red-500/10 flex items-center gap-1.5 text-[10px] font-medium"
+                          className="text-[var(--color-danger)] hover:text-[var(--color-dangerHover)] transition-colors p-1 rounded-md hover:bg-[var(--color-dangerBg)] flex items-center gap-1.5 text-[10px] font-medium"
                           title="Clear hotkey">
                         {hotkeyInput.isSaving && !hotkeyInput.value ? (
                           <>
@@ -642,7 +746,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     {/* Visual Content */}
                     <div className="relative z-0 pointer-events-none flex items-center justify-center p-3 whitespace-nowrap flex-nowrap overflow-visible">
                       {!hotkeyInput.value ? (
-                        <span className="text-slate-400 dark:text-neutral-500 font-medium text-sm">
+                        <span className="text-[var(--color-textPlaceholder)] font-medium text-sm">
                           {isMac ? 'Press Meta / Ctrl + Key...' : 'Press Alt / Ctrl + Key...'}
                         </span>
                       ) : (
@@ -654,10 +758,10 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                   {/* Footer (Error & Link - Minimalist) */}
                   {error && (
                     <div className="px-3 py-2 border-t border-red-500/20 flex flex-col gap-1">
-                      <div className="flex items-start gap-2 text-red-600 dark:text-red-400">
+                      <div className="flex items-start gap-2 text-[var(--color-danger)]">
                         <FiZap size={12} className="shrink-0 mt-0.5" />
                         <div className="text-[11px] font-medium leading-tight flex flex-wrap gap-x-1">
-                          <span className="text-slate-500 dark:text-neutral-100/90">Conflict:</span>
+                          <span className="text-[var(--color-textSecondary)]">Conflict:</span>
                           {(() => {
                             const parts = error.split('"');
                             if (parts.length >= 5) {
@@ -678,14 +782,14 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
                               return (
                                 <>
-                                  <span className="text-red-600 dark:text-red-400 font-bold">"{hotkeyValue}"</span>
-                                  <span className="text-slate-500 dark:text-neutral-100/90">{isAlreadyAssigned}</span>
-                                  <span className="text-red-600 dark:text-red-400 font-bold">"{itemName}"</span>
+                                  <span className="text-[var(--color-danger)] font-bold">"{hotkeyValue}"</span>
+                                  <span className="text-[var(--color-textSecondary)]">{isAlreadyAssigned}</span>
+                                  <span className="text-[var(--color-danger)] font-bold">"{itemName}"</span>
                                   {/* <span className="text-[#93a1a1] dark:text-neutral-200/80 text-[10px]"> ({typeDisplay})</span> */}
                                 </>
                               );
                             }
-                            return <span className="text-slate-500 dark:text-neutral-200/80">{error}</span>;
+                            return <span className="text-[var(--color-textSecondary)]">{error}</span>;
                           })()}
                         </div>
                       </div>
@@ -720,7 +824,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                       e.stopPropagation();
                       hotkeyInput.onCancel();
                     }}
-                    className="rounded-xl border border-transparent hover:bg-slate-100 dark:hover:bg-white/10 px-1 py-0.5 text-xs font-medium text-slate-500 dark:text-neutral-400 transition-colors"
+                    className="rounded-xl border border-transparent hover:bg-[var(--color-hoverBg)] px-1 py-0.5 text-xs font-medium text-[var(--color-textSecondary)] transition-colors"
                     title="Cancel">
                     Cancel
                   </button>
@@ -731,7 +835,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         e.stopPropagation();
                         if (conflictId) hotkeyInput.onOverwrite?.(conflictId);
                       }}
-                      className="rounded-md border border-[#c7bcff] dark:border-[#9fa2ff] bg-[#f5f3ff] dark:bg-neutral-800 text-neutral-700 dark:text-neutral-100 hover:border-[#b9adff] dark:hover:border-[#8f93ff] px-2 py-1 text-xs font-medium shadow-sm transition-colors"
+                      className="rounded-md border border-[var(--color-borderActive)] bg-[var(--color-panelBg)] text-[var(--color-textPrimary)] hover:border-[var(--color-focusRing)] px-2 py-1 text-xs font-medium shadow-sm transition-colors"
                       title="Overwrite existing assignment">
                       Overwrite
                     </button>
@@ -742,7 +846,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         hotkeyInput.onSave();
                       }}
                       disabled={!!error}
-                      className={`rounded-md border border-[#c7bcff] dark:border-[#9fa2ff] bg-[#f5f3ff] dark:bg-neutral-800 text-neutral-700 dark:text-neutral-100 hover:border-[#b9adff] dark:hover:border-[#8f93ff] px-2 py-1 text-xs font-medium shadow-sm transition-colors ${error ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
+                      className={`rounded-md border border-[var(--color-borderActive)] bg-[var(--color-panelBg)] text-[var(--color-textPrimary)] hover:border-[var(--color-focusRing)] px-2 py-1 text-xs font-medium shadow-sm transition-colors ${error ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                       title="Save">
                       Save
                     </button>
@@ -763,15 +867,15 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                     : ''
                     }`}>
                   {/* Header */}
-                  <div className="px-2 py-1 border-b border-slate-100 dark:border-white/5 flex items-center justify-between">
-                    <div className="text-[9px] font-semibold tracking-wider text-slate-500 dark:text-neutral-200">
+                  <div className="px-2 py-1 border-b border-[var(--color-borderDefault)] flex items-center justify-between">
+                    <div className="text-[9px] font-semibold tracking-wider text-[var(--color-textPrimary)]">
                       Assign a Text Shortcut
                     </div>
                     {shortcutInput.value && shortcutInput.onClear && (
                       <div className="flex items-center">
                         <button
                           onClick={shortcutInput.onClear}
-                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors p-1 rounded-md hover:bg-red-500/10 flex items-center gap-1.5 text-[10px] font-medium"
+                          className="text-[var(--color-danger)] hover:text-[var(--color-dangerHover)] transition-colors p-1 rounded-md hover:bg-[var(--color-dangerBg)] flex items-center gap-1.5 text-[10px] font-medium"
                           title="Clear shortcut">
                         {shortcutInput.isSaving && !shortcutInput.value ? (
                           <>
@@ -800,7 +904,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         if (e.key === 'Enter') shortcutInput.onSave();
                         if (e.key === 'Escape') shortcutInput.onCancel();
                       }}
-                      className="flex-1 min-w-0 bg-transparent py-1 text-center text-xs text-slate-900 dark:text-neutral-200 outline-none px-1"
+                      className="flex-1 min-w-0 bg-transparent py-1 text-center text-xs text-[var(--color-textPrimary)] outline-none px-1"
                       placeholder="shortcut"
                       autoFocus
                     />
@@ -809,10 +913,10 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                   {/* Footer (Error & Link - Minimalist) */}
                   {error && (
                     <div className="px-2 py-1.5 border-t border-red-500/20 flex flex-col gap-1">
-                      <div className="flex items-start gap-1.5 text-red-600 dark:text-red-400">
+                      <div className="flex items-start gap-1.5 text-[var(--color-danger)]">
                         <FiZap size={11} className="shrink-0 mt-0.5" />
                         <div className="text-[10px] font-medium leading-tight flex flex-wrap gap-x-1">
-                          <span className="text-slate-500 dark:text-neutral-100/90">Conflict:</span>
+                          <span className="text-[var(--color-textSecondary)]">Conflict:</span>
                           {(() => {
                             const parts = error.split('"');
                             if (parts.length >= 5) {
@@ -833,17 +937,17 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
 
                               return (
                                 <>
-                                  <span className="text-red-600 dark:text-red-400 font-bold">"{shortcutValue}"</span>
-                                  <span className="text-slate-500 dark:text-neutral-100/90">{isAlreadyAssigned}</span>
-                                  <span className="text-red-600 dark:text-red-400 font-bold">"{itemName}"</span>
-                                  <span className="text-slate-400 dark:text-neutral-200/80 text-[10px]">
+                                  <span className="text-[var(--color-danger)] font-bold">"{shortcutValue}"</span>
+                                  <span className="text-[var(--color-textSecondary)]">{isAlreadyAssigned}</span>
+                                  <span className="text-[var(--color-danger)] font-bold">"{itemName}"</span>
+                                  <span className="text-[var(--color-textSecondary)] text-[10px]">
                                     {' '}
                                     - {typeDisplay}
                                   </span>
                                 </>
                               );
                             }
-                            return <span className="text-slate-500 dark:text-neutral-200/80">{error}</span>;
+                            return <span className="text-[var(--color-textSecondary)]">{error}</span>;
                           })()}
                         </div>
                       </div>
@@ -882,7 +986,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                       e.stopPropagation();
                       shortcutInput.onCancel();
                     }}
-                    className="rounded-xl border border-transparent hover:bg-[#eee8d5] dark:hover:bg-white/10 px-2 py-1 text-xs font-medium text-[#586e75] dark:text-neutral-400 transition-colors"
+                    className="rounded-xl border border-transparent hover:bg-[var(--color-hoverBg)] px-2 py-1 text-xs font-medium text-[var(--color-textSecondary)] transition-colors"
                     title="Cancel">
                     Cancel
                   </button>
@@ -892,7 +996,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         e.stopPropagation();
                         if (conflictId) shortcutInput.onOverwrite?.(conflictId);
                       }}
-                      className="rounded-md border border-[#c7bcff] dark:border-[#9fa2ff] bg-[#f5f3ff] dark:bg-neutral-800 text-neutral-700 dark:text-neutral-100 hover:border-[#b9adff] dark:hover:border-[#8f93ff] px-2 py-1 text-xs font-medium shadow-sm transition-colors"
+                      className="rounded-md border border-[var(--color-borderActive)] bg-[var(--color-panelBg)] text-[var(--color-textPrimary)] hover:border-[var(--color-focusRing)] px-2 py-1 text-xs font-medium shadow-sm transition-colors"
                       title="Overwrite existing assignment">
                       Overwrite
                     </button>
@@ -903,7 +1007,7 @@ export const UnifiedContextMenu: React.FC<UnifiedContextMenuProps> = ({
                         shortcutInput.onSave();
                       }}
                       disabled={!!error}
-                      className={`rounded-md border border-[#c7bcff] dark:border-[#9fa2ff] bg-[#f5f3ff] dark:bg-neutral-800 text-neutral-700 dark:text-neutral-100 hover:border-[#b9adff] dark:hover:border-[#8f93ff] px-2 py-1 text-xs font-medium shadow-sm transition-colors ${error ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
+                      className={`rounded-md border border-[var(--color-borderActive)] bg-[var(--color-panelBg)] text-[var(--color-textPrimary)] hover:border-[var(--color-focusRing)] px-2 py-1 text-xs font-medium shadow-sm transition-colors ${error ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                       title="Save">
                       Save
                     </button>

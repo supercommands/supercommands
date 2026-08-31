@@ -46,7 +46,8 @@ export function formatLocalISODate(date: Date): string {
 }
 
 export function displayDateFormatted(date: Date, _locale?: string): string {
-  return format(date, 'EEE, d MMM');
+  const showYear = date.getFullYear() !== new Date().getFullYear();
+  return format(date, showYear ? 'EEE, d MMM yyyy' : 'EEE, d MMM');
 }
 
 export function displayTimeFormatted(timeStr: string | null, _locale?: string): string {

@@ -86,6 +86,7 @@ export interface ModuleSearchResult {
 
 export interface AgentCollectionSearchResult {
   _kind: 'agent_collection';
+  id: string;
   title: string;
   itemCount: number;
   score: number;
@@ -127,6 +128,13 @@ export interface PromptSearchResult {
   score: number;
 }
 
+export interface TodoSearchResult {
+  _kind: 'todo';
+  id: string;
+  title: string;
+  score: number;
+}
+
 export type UnifiedSearchResult =
   | CommandSearchResult
   | HistorySearchResult
@@ -139,23 +147,25 @@ export type UnifiedSearchResult =
   | LinkSearchResult
   | SnippetSearchResult
   | SessionSearchResult
-  | PromptSearchResult;
+  | PromptSearchResult
+  | TodoSearchResult;
 
 export interface SearchOptions {
   commands: CommandDefinition[];
   localCommands?: LocalCommandDefinition[];
   historyItems: HistoryItem[] | null;
 
-  bookmarks: Array<{ id: string; title: string; url: string }>;
+  bookmarks: Array<{ id: string; title: string; url: string; folderPath?: string }>;
   commonCommands: CommonCommandEntry[];
   automations?: SavedAutomation[];
   agents?: any[];
   modules?: InstalledModule[];
-  notes?: Array<{ id: string; title: string; body: string }>;
-  links?: Array<{ id: string; title: string }>;
-  snippets?: Array<{ id: string; title: string }>;
-  sessions?: Array<{ id: string; title: string }>;
-  prompts?: Array<{ id: string; title: string }>;
+  notes?: any[];
+  links?: any[];
+  snippets?: any[];
+  sessions?: any[];
+  prompts?: any[];
+  todos?: any[];
   lockedCommand?: CommandId | LocalCommandId | 'ai' | null;
   selectedFolder?: { folder_id: string } | null;
   selectedTeam?: { workspaces?: Array<{ folders?: Array<{ folder_id: string; folders?: any[] }> }> } | null;
@@ -305,7 +315,7 @@ export function findContextualMatches(
 
   // 1. Find Commands by URL Domain
   const matchedCmd = findCommandByUrl(url, commands);
-  if (matchedCmd && matchedCmd.id !== 'createnotes' && matchedCmd.id !== 'createlinks' && matchedCmd.id !== 'createsession') {
+  if (matchedCmd && matchedCmd.id !== 'createnotes' && matchedCmd.id !== 'createlinks') {
     matches.push({
       id: matchedCmd.id,
       label: matchedCmd.label,
@@ -345,12 +355,12 @@ export function findContextualMatches(
 
 
 
-const BOOKMARK_FUSE_OPTIONS: IFuseOptions<{ id: string; title: string; url: string }> = {
+const BOOKMARK_FUSE_OPTIONS: IFuseOptions<{ id: string; title: string; url: string; folderPath?: string }> = {
   includeScore: true,
   threshold: 0.25,
   ignoreLocation: true,
   minMatchCharLength: 2,
-  keys: ['title', 'url'] as const,
+  keys: ['title', 'url', 'folderPath'] as const,
 };
 
 // ============================================================================
@@ -820,7 +830,7 @@ function matchesAllQueryTokens(
  */
 function searchBookmarks(
   query: string,
-  bookmarks: Array<{ id: string; title: string; url: string }>,
+  bookmarks: Array<{ id: string; title: string; url: string; folderPath?: string }>,
   limit: number = 5,
 ): BookmarkSearchResult[] {
   if (!query.trim() || bookmarks.length === 0) {
@@ -837,6 +847,7 @@ function searchBookmarks(
   const results = fuseCache.bookmarks.instance!.search(query, { limit });
 
   return results.map(result => ({
+    ...result.item,
     _kind: 'bookmark' as const,
     id: result.item.id,
     title: result.item.title,
@@ -920,19 +931,32 @@ function searchModules(query: string, modules: InstalledModule[] | undefined): M
 /**
  * Search agent collections by title matching query.
  */
-function searchAgentCollections(query: string, agents: any[] | undefined): AgentCollectionSearchResult[] {
-  if (!query.trim() || !agents || agents.length === 0) {
+function searchAgentCollections(
+  query: string,
+  agents: any[] | undefined,
+  includeAllIfEmpty = false,
+): AgentCollectionSearchResult[] {
+  const normalized = query.toLowerCase().trim();
+  if ((!normalized && !includeAllIfEmpty) || !agents || agents.length === 0) {
     return [];
   }
-  const normalized = query.toLowerCase();
   return agents
-    .filter(agent => agent && agent.title && String(agent.title).toLowerCase().includes(normalized))
-    .map(agent => ({
-      _kind: 'agent_collection' as const,
-      title: agent.title,
-      itemCount: agent.itemCount || 0,
-      score: 0.5,
-    }));
+    .filter(agent => {
+      if (!agent?.title) return false;
+      if (!normalized) return true;
+      return String(agent.title).toLowerCase().includes(normalized);
+    })
+    .map(agent => {
+      const titleLower = String(agent.title || '').toLowerCase();
+      return {
+        ...agent,
+        _kind: 'agent_collection' as const,
+        id: String(agent.id || agent.agent_id || agent.chat_agent_id || ''),
+        title: agent.title,
+        itemCount: agent.itemCount || 0,
+        score: !normalized ? 0.3 : titleLower.startsWith(normalized) ? 0.1 : 0.3,
+      };
+    });
 }
 
 // ============================================================================
@@ -1170,8 +1194,28 @@ export function searchAll(query: string, options: SearchOptions): UnifiedSearchR
   const agentResults = searchAgentCollections(dataQuery, options.agents);
   const moduleResults = searchModules(dataQuery, options.modules);
 
-  // Helper: search a flat array of items by title substring match
-  function searchByTitle<T extends { _kind: any }>(
+  const stringifySearchValue = (value: unknown): string => {
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    if (!value) return '';
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '';
+    }
+  };
+
+  const getEntitySearchText = (item: any, kind: string): string => {
+    const common = [item?.title, item?.name, item?.key, item?.description, item?._displayShortcut];
+    if (kind === 'note') common.push(item?.body, item?.content);
+    if (kind === 'link' || kind === 'session') common.push(stringifySearchValue(item?.urls));
+    if (kind === 'snippet') common.push(stringifySearchValue(item?.config), item?.value, item?.content);
+    if (kind === 'prompt') common.push(item?.prompt, item?.rules);
+    if (kind === 'todo') common.push(item?.description, item?.body);
+    return common.filter(Boolean).join(' ').toLowerCase();
+  };
+
+  // Search workspace entities using their category-specific searchable fields.
+  function searchEntities<T extends { _kind: any }>(
     items: any[] | undefined,
     kind: T['_kind'],
     q: string,
@@ -1179,9 +1223,16 @@ export function searchAll(query: string, options: SearchOptions): UnifiedSearchR
     if (!q || !items?.length) return [];
     return items.reduce<T[]>((acc, item) => {
       const titleLower = (item.title || '').toLowerCase();
-      if (titleLower.includes(q)) {
+      const searchableText = getEntitySearchText(item, kind);
+      if (searchableText.includes(q)) {
         const score = titleLower.startsWith(q) ? 0.1 : 0.3;
-        acc.push({ ...item, _kind: kind, id: item.id, title: item.title, score } as unknown as T);
+        acc.push({
+          ...item,
+          _kind: kind,
+          id: item.id || item.todo_id || item.snippet_id,
+          title: item.title || item.name || item.key || '',
+          score,
+        } as unknown as T);
       }
       return acc;
     }, []);
@@ -1189,23 +1240,12 @@ export function searchAll(query: string, options: SearchOptions): UnifiedSearchR
 
   const q = dataQuery.toLowerCase();
 
-  // Search notes by title/body match
-  const noteResults: NoteSearchResult[] = dataQuery
-    ? (options.notes || []).reduce<NoteSearchResult[]>((acc, note) => {
-        const titleLower = (note.title || '').toLowerCase();
-        const bodyLower = (note.body || '').toLowerCase();
-        if (titleLower.includes(q) || bodyLower.includes(q)) {
-          const titleScore = titleLower.startsWith(q) ? 0.1 : titleLower.includes(q) ? 0.3 : 0.5;
-          acc.push({ ...note, _kind: 'note', id: note.id, title: note.title, body: note.body, score: titleScore } as unknown as NoteSearchResult);
-        }
-        return acc;
-      }, [])
-    : [];
-
-  const linkResults = searchByTitle<LinkSearchResult>(options.links, 'link', q);
-  const snippetResults = searchByTitle<SnippetSearchResult>(options.snippets, 'snippet', q);
-  const sessionResults = searchByTitle<SessionSearchResult>(options.sessions, 'session', q);
-  const promptResults = searchByTitle<PromptSearchResult>(options.prompts, 'prompt', q);
+  const noteResults = searchEntities<NoteSearchResult>(options.notes, 'note', q);
+  const linkResults = searchEntities<LinkSearchResult>(options.links, 'link', q);
+  const snippetResults = searchEntities<SnippetSearchResult>(options.snippets, 'snippet', q);
+  const sessionResults = searchEntities<SessionSearchResult>(options.sessions, 'session', q);
+  const promptResults = searchEntities<PromptSearchResult>(options.prompts, 'prompt', q);
+  const todoResults = searchEntities<TodoSearchResult>(options.todos, 'todo', q);
 
   // Exclude Google from common results since it already shows at position 3 (Fuse search is active)
   const commonResults = buildCommonResults(effectiveQuery, commonCommands, true);
@@ -1263,6 +1303,7 @@ export function searchAll(query: string, options: SearchOptions): UnifiedSearchR
     ...snippetResults,
     ...sessionResults,
     ...promptResults,
+    ...todoResults,
     ...bookmarkResults,
     ...automationResults,
     ...agentResults,
@@ -1293,7 +1334,7 @@ export function searchAll(query: string, options: SearchOptions): UnifiedSearchR
       case 'module':
         return `module-${result.module.module_id}`;
       case 'agent_collection':
-        return `agent-${result.title}`;
+        return `agent-${result.id || result.title}`;
       case 'note':
         return `note-${result.id}`;
       case 'link':
@@ -1304,6 +1345,8 @@ export function searchAll(query: string, options: SearchOptions): UnifiedSearchR
         return `session-${result.id}`;
       case 'prompt':
         return `prompt-${result.id}`;
+      case 'todo':
+        return `todo-${result.id}`;
       default:
         return '';
     }

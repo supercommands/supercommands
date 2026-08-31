@@ -1,3 +1,4 @@
+import type * as React from 'react';
 import type { TagRecord } from '../../allObjectFolder/src/createObject/tags';
 import type { WorkspaceData } from '../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 import type { FolderData } from '../../settings/allWorkspaceManager/folders/folderTypes';
@@ -89,4 +90,34 @@ export interface SharedPropertiesToolbarProps {
   layout?: 'vertical' | 'horizontal';
 
   activeNoteId?: string | null;
+
+  /**
+   * Optional visual scope for editors rendered inside another surface such as Alt+S.
+   * Portal popups must receive these tokens because they render under document.body.
+   */
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
+  propertyPersistenceAdapter?: {
+    saveHotkey?: (args: { id: string; referenceId: string; hotkey: string; type: string }) => Promise<void>;
+    clearHotkey?: (args: { id: string; referenceId: string; type: string }) => Promise<void>;
+    saveShortcut?: (args: { id: string; referenceId: string; shortcut: string; label: string; type: string }) => Promise<void>;
+    clearShortcut?: (args: { id: string; referenceId: string; type: string }) => Promise<void>;
+    addFavorite?: (args: { referenceId: string; referenceType: string; label: string }) => Promise<void>;
+    removeFavorite?: (args: { referenceId: string }) => Promise<void>;
+    createTag?: (args: { name: string; workspaceId: string }) => Promise<TagRecord>;
+    updateTag?: (args: { tagId: string; updates: Partial<TagRecord> }) => Promise<void>;
+    deleteTag?: (args: { tagId: string }) => Promise<void>;
+    createTodo?: (args: {
+      title: string;
+      references: Array<{ type: string; id: string; name: string }>;
+      scheduleType: string;
+      scheduleTime: number;
+      recurringCycle?: string;
+      description?: string;
+      tagIds?: string[];
+      shortcut?: string;
+      workspaceId?: string | null;
+      folderId?: string | null;
+    }) => Promise<any>;
+  };
 }

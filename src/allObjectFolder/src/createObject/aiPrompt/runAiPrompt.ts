@@ -1,26 +1,17 @@
-import { StorageManager } from '../../../../storage/localStorage/storageManager';
-
-import type { AiPromptRecord, CustomModelConfig } from './aiPromptTypes';
+import type { AiPromptRecord } from './aiPromptTypes';
+import {
+  getExcludedAiPromptModelIdsAsync,
+  resolveEnabledAiPromptModels,
+  type AiModelTarget,
+} from './aiPromptModelHelpers';
 
 type RunnableAiPrompt = Pick<AiPromptRecord, 'id' | 'prompt' | 'modelUrls' | 'customModels'>;
-
-type AiModelTarget = CustomModelConfig & {
-  id: string;
-  host: string;
-};
 
 export interface RunAiPromptResult {
   prompt: string;
   tabIds: number[];
   models: string[];
 }
-
-const DEFAULT_MODELS: AiModelTarget[] = [
-  { id: 'gpt', name: 'ChatGPT', host: 'chatgpt.com' },
-  { id: 'claude', name: 'Claude', host: 'claude.ai' },
-  { id: 'gemini', name: 'Gemini', host: 'gemini.google.com' },
-  { id: 'perplexity', name: 'Perplexity', host: 'perplexity.ai' },
-];
 
 export function getAiPromptExecutionText(
   prompt: Pick<RunnableAiPrompt, 'prompt'> | null | undefined,
@@ -50,19 +41,6 @@ function getAutoSubmitKind(modelId: string): 'chatgpt' | 'claude' | 'gemini' | '
   if (normalizedId.includes('gemini')) return 'gemini';
   if (normalizedId.includes('perplexity')) return 'perplexity';
   return 'chatgpt';
-}
-
-async function getExcludedModelIds(): Promise<string[]> {
-  const stored = await StorageManager.getItem('aiPrompt_excludedModels');
-  if (Array.isArray(stored)) return stored.map(String);
-  if (!stored) return [];
-
-  try {
-    const parsed = JSON.parse(String(stored));
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
 }
 
 function openModelTab(
@@ -100,10 +78,8 @@ export async function runAiPrompt(promptRecord: RunnableAiPrompt, temporaryPromp
     throw new Error('AI Prompt execution requires the browser extension runtime.');
   }
 
-  const excludedModelIds = await getExcludedModelIds();
-  const models = [...DEFAULT_MODELS, ...(promptRecord.customModels || [])].filter(
-    model => !excludedModelIds.includes(model.id),
-  );
+  const excludedModelIds = await getExcludedAiPromptModelIdsAsync();
+  const models = resolveEnabledAiPromptModels(promptRecord, excludedModelIds);
 
   const openedTabs = await Promise.all(
     models.map(async model => {

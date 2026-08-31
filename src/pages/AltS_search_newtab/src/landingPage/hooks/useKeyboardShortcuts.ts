@@ -8,6 +8,9 @@ import {
   hasRunnableAiPrompt,
   runAiPrompt,
 } from '../../../../../allObjectFolder/src/createObject/aiPrompt/runAiPrompt';
+import { launchDashboardCollectionView } from '../../../../../shared-components/dashboardCollections/launchDashboardCollectionView';
+import { getCurrentExtensionTabContext } from '../../../../../shared-components/sessions/launchSessionSmart';
+import { launchSessionSmartWithReferences } from '../../../../../allObjectFolder/src/createObject/session/sessionReferenceActions';
 
 interface UseKeyboardShortcutsProps {
   setIsViewDropdownOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -28,8 +31,10 @@ export const useKeyboardShortcuts = ({
   const dbAutomations = useDbStore(state => state.automations);
   const dbAiPrompts = useDbStore(state => state.aiPrompts);
   const dbTodos = useDbStore(state => state.todos);
+  const dbSessions = useDbStore(state => state.sessions);
   const dbWorkspaces = useDbStore(state => state.workspaces);
   const dbFolders = useDbStore(state => state.folders);
+  const dbWidgetViews = useDbStore(state => state.widgetViews);
   // Helper function to check if any modal/popup is open
   const isModalOpen = useCallback((): boolean => {
     // Check for modals/popups by looking for common modal classes or fixed overlays
@@ -83,6 +88,8 @@ export const useKeyboardShortcuts = ({
         ...dbAutomations,
         ...dbAiPrompts,
         ...dbTodos,
+        ...dbSessions,
+        ...dbWidgetViews,
       ] as any[];
       const actualId = extractSnippetIdFromCompoundId(referenceId);
       const entity = allRecords.find(record => String(record?.id || record?.snippet_id || '') === actualId);
@@ -99,7 +106,7 @@ export const useKeyboardShortcuts = ({
         triggerLabelSnapshot: hotkey,
       }).catch(err => console.warn('[useKeyboardShortcuts] Failed to record hotkey usage:', err));
     },
-    [dbAiPrompts, dbAutomations, dbLinks, dbNotes, dbSnippets, dbTodos],
+    [dbAiPrompts, dbAutomations, dbLinks, dbNotes, dbSessions, dbSnippets, dbTodos, dbWidgetViews],
   );
 
   const openSnippetRecord = useCallback(
@@ -119,6 +126,13 @@ export const useKeyboardShortcuts = ({
       });
     },
     [findFolder, findWorkspace],
+  );
+
+  const launchCollectionViewById = useCallback(
+    async (referenceId: string) => {
+      return launchDashboardCollectionView(referenceId, { mode: 'open' });
+    },
+    [],
   );
 
   // Handle ESC key to exit filter mode
@@ -233,17 +247,63 @@ export const useKeyboardShortcuts = ({
             return;
           }
 
-          if (referenceType === 'link' || (referenceType as string) === 'session') {
+          if (['collection', 'collections', 'collection_view'].includes(normalizedReferenceType)) {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+              const didLaunch = await launchCollectionViewById(referenceId);
+              recordNewtabHotkeyUsage(
+                pressedHotkey,
+                referenceId,
+                referenceType,
+                didLaunch,
+                didLaunch ? undefined : 'collection_view_not_found',
+              );
+            } catch (error) {
+              console.error('[useKeyboardShortcuts] Failed to launch collection view hotkey:', error);
+              recordNewtabHotkeyUsage(pressedHotkey, referenceId, referenceType, false, 'collection_view_launch_failed');
+            }
+            return;
+          }
+
+          if ((referenceType as string) === 'session') {
             e.preventDefault();
             e.stopPropagation();
 
             const actualId = extractSnippetIdFromCompoundId(referenceId);
+            const session = dbSessions.find(item => String(item.id) === String(actualId));
+            if (!session) {
+              recordNewtabHotkeyUsage(pressedHotkey, referenceId, referenceType, false, 'entity_not_found');
+              return;
+            }
+
+            const response = await launchSessionSmartWithReferences(session, {
+              source: 'hotkey',
+              requireAutoSave: false,
+            });
+            recordNewtabHotkeyUsage(
+              pressedHotkey,
+              referenceId,
+              referenceType,
+              response?.ok && !response?.skipped,
+              response?.skipped ? response.reason : response?.ok ? undefined : response?.error || 'session_launch_failed',
+            );
+            return;
+          }
+
+          if (referenceType === 'link') {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const actualId = extractSnippetIdFromCompoundId(referenceId);
+            const currentTabContext = await getCurrentExtensionTabContext();
 
             // Trigger the hotkey via background to actually open the URLs in new tabs
             chrome.runtime.sendMessage({
               action: 'trigger_hotkey',
               type: referenceType,
               id: actualId,
+              ...currentTabContext,
               triggerUsage: {
                 triggerKind: 'user_hotkey',
                 triggerValue: pressedHotkey,
@@ -305,7 +365,7 @@ export const useKeyboardShortcuts = ({
     return () => {
       window.removeEventListener('keydown', handleHotkeyDown);
     };
-  }, [isKeystrokeRecordingActive]);
+  }, [isKeystrokeRecordingActive, launchCollectionViewById, recordNewtabHotkeyUsage, setIsGlobalCreateMenuOpen, setIsViewDropdownOpen, searchbarRef, dbAiPrompts, dbSessions]);
 
   return { isModalOpen };
 };

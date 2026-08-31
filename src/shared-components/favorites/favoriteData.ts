@@ -7,7 +7,7 @@ export async function addFavoriteRecord(
   referenceId: string,
   referenceType: string,
   label?: string,
-  favoriteCategoryId?: string | null
+  favoriteCategoryId?: string | null,
 ): Promise<FavoriteRecord> {
   const existing = await db.favorites.where('[user_id+reference_id]').equals([userId, referenceId]).first();
   if (existing) {
@@ -66,7 +66,7 @@ export async function toggleFavoriteRecord(
   referenceId: string,
   referenceType: string,
   label?: string,
-  favoriteCategoryId?: string | null
+  favoriteCategoryId?: string | null,
 ): Promise<boolean> {
   const existing = await db.favorites.where('[user_id+reference_id]').equals([userId, referenceId]).first();
   if (existing) {

@@ -39,6 +39,8 @@ export interface NoteRecord {
   versionHistory: NoteVersionHistory;
 }
 
+export const NOTE_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderId', 'title', 'body', 'shortcut', 'tagIds', 'assetIds', 'deletedAt'] as const satisfies readonly (keyof NoteRecord)[];
+
 export interface NoteVersionHistory {
   lastSavedText: string;
   historyBuffer: string[];

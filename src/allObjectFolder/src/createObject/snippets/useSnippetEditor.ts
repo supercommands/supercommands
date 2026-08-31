@@ -13,12 +13,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import { createSnippet, updateSnippet, deleteSnippet } from './snippetData';
+import { createTag } from '../tags/tagData';
 import type { SnippetRecord, CreateSnippetInput, UpdateSnippetInput } from './snippetTypes';
 import { useSnippet } from './snippetHooks';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
-import type { SharedProperties } from '../../../../shared-components/editorToolbar/types';
+import type { SharedProperties, SharedPropertiesToolbarProps } from '../../../../shared-components/editorToolbar/types';
 import { saveShortcut, clearShortcut, useShortcutValidation } from '../../../../shared-components/shortcuts';
 import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
 import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
@@ -30,6 +31,14 @@ export interface SnippetEditorViewProps {
   onBack?: () => void;
   initialDraftKey?: string;
   initialDraftConfig?: string | Record<string, any>;
+  initialTagIds?: string[];
+  onSnippetCreated?: (snippet: SnippetRecord) => void | Promise<void>;
+  saveSnippetAdapter?: (args: {
+    mode: 'create' | 'update';
+    snippetId?: string;
+    input: CreateSnippetInput | UpdateSnippetInput;
+  }) => Promise<SnippetRecord>;
+  propertyPersistenceAdapter?: SharedPropertiesToolbarProps['propertyPersistenceAdapter'];
 }
 
 export function useSnippetEditor(props: SnippetEditorViewProps) {
@@ -38,7 +47,16 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
     onBack,
     initialDraftKey,
     initialDraftConfig,
+    initialTagIds,
+    onSnippetCreated,
+    saveSnippetAdapter,
+    propertyPersistenceAdapter,
   } = props;
+
+  const onSnippetCreatedRef = useRef(onSnippetCreated);
+  onSnippetCreatedRef.current = onSnippetCreated;
+  const propertyPersistenceAdapterRef = useRef(propertyPersistenceAdapter);
+  propertyPersistenceAdapterRef.current = propertyPersistenceAdapter;
 
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -62,7 +80,9 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
   // Editor state tracking for location and tags
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
-  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [tagIds, setTagIds] = useState<string[]>(
+    !snippetId && Array.isArray(initialTagIds) ? Array.from(new Set(initialTagIds)) : []
+  );
   const [isInitialized, setIsInitialized] = useState<boolean>(!snippetId);
   const [isShortcutInitialized, setIsShortcutInitialized] = useState<boolean>(!snippetId);
 
@@ -82,6 +102,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
   const saveInProgressRef = useRef(false);
   const saveAgainRef = useRef(false);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const visibleSaveRequestedDuringLockRef = useRef(false);
 
   // Keep track of latest inputs for retry to avoid stale closures!
   const currentInputsRef = useRef({ snippetTitle, snippetConfig, workspaceId, folderId, tagIds, isInitialized, snippetShortcut });
@@ -135,19 +156,23 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
     // Background Destination Logic: Snippets have no UI for this on initial render
     // Load default workspace (falling back to smart default) and folder from local storage
     const initDefaults = async () => {
-      const smartWs = await getSmartDefaultWorkspace();
-      if (smartWs) {
-        setWorkspaceId(smartWs.id);
-        const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
-        setFolderId(savedFolderId || null);
+      const savedWsId = await StorageManager.getItem('lastUsedWorkspaceId');
+      if (savedWsId) {
+        setWorkspaceId(savedWsId);
       } else {
-        setWorkspaceId(null);
-        setFolderId(null);
+        const smartWs = await getSmartDefaultWorkspace();
+        if (smartWs) {
+          setWorkspaceId(smartWs.id);
+        } else {
+          setWorkspaceId(null);
+        }
       }
+      const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
+      setFolderId(savedFolderId || null);
     };
     void initDefaults();
 
-    setTagIds([]);
+    setTagIds(!snippetId && Array.isArray(initialTagIds) ? Array.from(new Set(initialTagIds)) : []);
 
     lastSavedTitleRef.current = initialDraftKey || '';
     lastSavedConfigRef.current = initialDraftConfig || '';
@@ -209,7 +234,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
   };
 
   const sanitizeTitleToShortcut = (title: string) => {
-    return title.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return title.toLowerCase().replace(/[^a-z0-9_]/g, '');
   };
 
   const isDirty = useMemo(() => {
@@ -263,6 +288,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
     // If it's an existing snippet and they cleared both title and config, delete it
     if (currentSnippetId && !hasTitle && !hasConfig) {
       if (savePromiseRef.current) {
+        if (!silent) visibleSaveRequestedDuringLockRef.current = true;
         saveAgainRef.current = true;
         return savePromiseRef.current;
       }
@@ -311,6 +337,7 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
 
     // Save Concurrency Control (Save Lock)
     if (savePromiseRef.current) {
+      if (!silent) visibleSaveRequestedDuringLockRef.current = true;
       saveAgainRef.current = true;
       return savePromiseRef.current;
     }
@@ -331,6 +358,29 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
       }
 
       try {
+        // Convert any temp tags into real tags before saving
+        const finalWorkspaceId = activeWorkspaceId || (await getSmartDefaultWorkspace())?.id;
+        if (finalWorkspaceId) {
+          const resolvedTagIds: string[] = [];
+          for (const tId of activeTagIds) {
+            if (tId.startsWith('temp_')) {
+              const tagName = tId.replace('temp_', '');
+              try {
+                const newTag = propertyPersistenceAdapterRef.current?.createTag
+                  ? await propertyPersistenceAdapterRef.current.createTag({ name: tagName, workspaceId: finalWorkspaceId })
+                  : await createTag(tagName, finalWorkspaceId);
+                resolvedTagIds.push(newTag.id);
+              } catch (e) {
+                console.error('Failed to create temp tag', e);
+                resolvedTagIds.push(tId);
+              }
+            } else {
+              resolvedTagIds.push(tId);
+            }
+          }
+          activeTagIds = resolvedTagIds;
+        }
+
         let savedSnippet: SnippetRecord;
         if (!currentSnippetId) {
           // CREATE SNIPPET
@@ -342,7 +392,16 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
             tagIds: activeTagIds,
             shortcut: snippetShortcut,
           };
-          savedSnippet = await createSnippet(input);
+          savedSnippet = saveSnippetAdapter
+            ? await saveSnippetAdapter({ mode: 'create', input })
+            : await createSnippet(input);
+          if (onSnippetCreatedRef.current) {
+            try {
+              await onSnippetCreatedRef.current(savedSnippet);
+            } catch (err) {
+              console.error('[useSnippetEditor] onSnippetCreated callback failed:', err);
+            }
+          }
         } else {
           // UPDATE SNIPPET
           const input: UpdateSnippetInput = {
@@ -353,7 +412,9 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
             tagIds: activeTagIds,
             shortcut: snippetShortcut,
           };
-          savedSnippet = await updateSnippet(currentSnippetId, input);
+          savedSnippet = saveSnippetAdapter
+            ? await saveSnippetAdapter({ mode: 'update', snippetId: currentSnippetId, input })
+            : await updateSnippet(currentSnippetId, input);
         }
 
         // Save shortcut!
@@ -373,12 +434,22 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
 
         const compoundId = newCompoundId;
 
-        const finalShortcut = (currentShortcut || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const finalShortcut = (currentShortcut || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
         if (finalShortcut) {
           const valRes = await validateShortcut(finalShortcut, savedSnippet.id);
           if (valRes.isValid) {
             console.log(`[ShortcutDebug][SnippetEditor] handleSave: Valid shortcut "${finalShortcut}", saving to DB for snippet "${savedSnippet.id}"...`);
-            await saveShortcut(savedSnippet.id, compoundId, finalShortcut, savedSnippet.title, 'snippet');
+            if (propertyPersistenceAdapterRef.current?.saveShortcut) {
+              await propertyPersistenceAdapterRef.current.saveShortcut({
+                id: savedSnippet.id,
+                referenceId: compoundId,
+                shortcut: finalShortcut,
+                label: savedSnippet.title,
+                type: 'snippet',
+              });
+            } else {
+              await saveShortcut(savedSnippet.id, compoundId, finalShortcut, savedSnippet.title, 'snippet');
+            }
           } else {
             console.warn(`[ShortcutDebug][SnippetEditor] handleSave: Shortcut "${finalShortcut}" has validation error "${valRes.errorMessage}". SKIPPING DB save on background autosave.`);
           }
@@ -386,11 +457,20 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
           lastSavedShortcutRef.current = finalShortcut;
         } else if (lastSavedShortcutRef.current !== '') {
           console.log(`[ShortcutDebug][SnippetEditor] handleSave: Clearing shortcut for snippet "${savedSnippet.id}"...`);
-          await clearShortcut(savedSnippet.id, compoundId, 'snippet');
+          if (propertyPersistenceAdapterRef.current?.clearShortcut) {
+            await propertyPersistenceAdapterRef.current.clearShortcut({
+              id: savedSnippet.id,
+              referenceId: compoundId,
+              type: 'snippet',
+            });
+          } else {
+            await clearShortcut(savedSnippet.id, compoundId, 'snippet');
+          }
           lastSavedShortcutRef.current = '';
         }
 
         if (activeSnippetIdRef.current !== savingSnippetId) {
+          visibleSaveRequestedDuringLockRef.current = false;
           return true; // Saved to DB, but do not update this editor
         }
 
@@ -419,13 +499,15 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
         if (savedSnippet.folderId) StorageManager.setItem('lastUsedFolderId', savedSnippet.folderId);
         else StorageManager.removeItem('lastUsedFolderId');
 
-        if (!silent) {
+        if (!silent || visibleSaveRequestedDuringLockRef.current) {
           setSaveStatus('saved');
           setLastSavedAt(new Date(savedSnippet.updatedAt));
         }
+        visibleSaveRequestedDuringLockRef.current = false;
         return true;
       } catch (msg) {
         console.error('Save failed:', msg);
+        visibleSaveRequestedDuringLockRef.current = false;
         setSaveStatus('error');
         return false;
       } finally {
@@ -610,13 +692,11 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
       setSnippetConfig('');
       setSnippetShortcut('');
       const initDefaults = async () => {
-        const smartWs = await getSmartDefaultWorkspace();
-        if (smartWs) {
-          const wsId = smartWs.id;
-          setWorkspaceId(wsId);
-          // If exactly one folder in workspace, select it by default
+        const savedWsId = await StorageManager.getItem('lastUsedWorkspaceId');
+        if (savedWsId) {
+          setWorkspaceId(savedWsId);
           const allFolders = useDbStore.getState().folders;
-          const wsFolders = allFolders.filter(f => f.workspaceId === wsId);
+          const wsFolders = allFolders.filter(f => f.workspaceId === savedWsId);
           if (wsFolders.length === 1) {
             setFolderId(wsFolders[0].id);
           } else {
@@ -624,8 +704,22 @@ export function useSnippetEditor(props: SnippetEditorViewProps) {
             setFolderId(savedFolderId || null);
           }
         } else {
-          setWorkspaceId(null);
-          setFolderId(null);
+          const smartWs = await getSmartDefaultWorkspace();
+          if (smartWs) {
+            const wsId = smartWs.id;
+            setWorkspaceId(wsId);
+            const allFolders = useDbStore.getState().folders;
+            const wsFolders = allFolders.filter(f => f.workspaceId === wsId);
+            if (wsFolders.length === 1) {
+              setFolderId(wsFolders[0].id);
+            } else {
+              const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
+              setFolderId(savedFolderId || null);
+            }
+          } else {
+            setWorkspaceId(null);
+            setFolderId(null);
+          }
         }
       };
       void initDefaults();

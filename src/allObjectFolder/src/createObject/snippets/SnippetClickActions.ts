@@ -105,26 +105,36 @@ export const getSnippetPreview = (snippet: Snippet): string => {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
         if (Array.isArray((parsed as any).urls)) {
-          return ((parsed as any).urls as string[]).slice(0, 2).join(', ');
+          const urls = (parsed as any).urls as string[];
+          if (urls.length === 0) return 'No tabs added';
+          return urls.slice(0, 2).join(', ');
         }
         if (typeof (parsed as any).note === 'string') {
           const noteContent = (parsed as any).note as string;
           const cleanNote = stripHtmlTags(noteContent);
           return cleanNote.length > 140 ? `${cleanNote.slice(0, 137)}…` : cleanNote;
         }
+        if (Array.isArray(parsed)) {
+          const texts = parsed
+            .map((b: any) => (typeof b === 'object' && b ? b.value || b.text || b.content || '' : String(b || '')))
+            .filter(Boolean);
+          const cleanBlockText = stripHtmlTags(texts.join(' '));
+          return cleanBlockText.length > 140 ? `${cleanBlockText.slice(0, 137)}…` : cleanBlockText;
+        }
       }
     } catch {
       // fall through to raw string
     }
 
-    // Strip HTML tags from raw content
     const cleanRaw = stripHtmlTags(raw);
     return cleanRaw.length > 140 ? `${cleanRaw.slice(0, 137)}…` : cleanRaw;
   }
 
   if (typeof snippet.value === 'object' && snippet.value) {
     if ('urls' in snippet.value && Array.isArray((snippet.value as any).urls)) {
-      return ((snippet.value as any).urls as string[]).slice(0, 2).join(', ');
+      const urls = (snippet.value as any).urls as string[];
+      if (urls.length === 0) return 'No tabs added';
+      return urls.slice(0, 2).join(', ');
     }
     if ('names' in snippet.value && Array.isArray((snippet.value as any).names)) {
       return ((snippet.value as any).names as string[]).slice(0, 2).join(', ');

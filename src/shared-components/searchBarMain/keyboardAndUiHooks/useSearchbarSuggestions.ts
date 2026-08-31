@@ -6,13 +6,11 @@ import type {
   HistorySuggestionItem,
   BookmarkSuggestionItem,
   OpenUrlSuggestionItem,
-  WorkspaceItemSuggestion,
   AnyCommandId,
   Attachment,
 } from '../utilityFunctions/types';
 import type { CommandDefinition, CommandId } from '../commandConfigurations/commands';
-import { AI_GROUP, AI_GROUP as commandsAI_GROUP, BASE_COMMANDS_BY_ID } from '../commandConfigurations/commands';
-import { normalizeShortcutTrigger } from '../../../shared-components/shortcuts/core/shortcutDbData';
+import { AI_GROUP, BASE_COMMANDS_BY_ID } from '../commandConfigurations/commands';
 import { extractSnippetIdFromCompoundId } from '../../../shared-components/utils/idGenerator';
 import { useDbStore } from '../../../storage/store/useDbStore';
 import type { LocalCommandId, LocalCommandDefinition } from '../commandConfigurations/localCommands';
@@ -20,11 +18,7 @@ import { LOCAL_COMMANDS } from '../commandConfigurations/localCommands';
 import type { SavedAutomation } from '../../../allObjectFolder/src/createObject/automationBeta/utilities/automation';
 
 import type { WorkspaceData } from '../../../settings/allWorkspaceManager/workspaces/workspaceTypes';
-import type { InstalledModule, UnifiedSearchResult } from '../searchLogicAndAlgorithms/searchEngine';
-import {
-  searchAll as fuseSearchAll,
-  preIndexHistory,
-} from '../searchLogicAndAlgorithms/searchEngine';
+import type { InstalledModule } from '../searchLogicAndAlgorithms/searchEngine';
 import { searchCommands } from '../searchLogicAndAlgorithms/commandSearch';
 import { isBookmarksCommand, trimQuery } from '../utilityFunctions/promptHelpers';
 import { getUrlsFromQuery } from '../utilityFunctions/urlHelpers';
@@ -144,7 +138,13 @@ export function useSearchbarSuggestions({
             frecencyScore: typeof item.frecencyScore === 'number' ? item.frecencyScore : undefined,
           }));
 
-          preIndexHistory(items);
+          import('../searchLogicAndAlgorithms/searchEngine')
+            .then(({ preIndexHistory }) => {
+              preIndexHistory(items);
+            })
+            .catch(() => {
+              // History pre-indexing is an optimization; search still works without it.
+            });
           setHistoryItems(items);
         }
       },
@@ -391,7 +391,7 @@ export function useSearchbarSuggestions({
                 else if (normalizedReferenceType === 'link') prefixChar = customPrefixes?.link?.trim()?.toLowerCase() ?? '';
                 else if (normalizedReferenceType === 'snippet') prefixChar = customPrefixes?.snippet?.trim()?.toLowerCase() ?? '';
                 else if (normalizedReferenceType === 'session' || normalizedReferenceType === 'sessions' || normalizedReferenceType === 'tab session' || normalizedReferenceType === 'tabgroup')
-                  prefixChar = customPrefixes?.session?.trim()?.toLowerCase() ?? '';
+                  prefixChar = customPrefixes?.collection?.trim()?.toLowerCase() ?? '';
                 else if (normalizedReferenceType === 'prompt' || normalizedReferenceType === 'aiprompt' || normalizedReferenceType === 'ai_prompt') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
                 else if (normalizedReferenceType === 'agent' || normalizedReferenceType === 'chat_agent') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
                 else if (normalizedReferenceType === 'automation') prefixChar = customPrefixes?.automation?.trim()?.toLowerCase() ?? '';
@@ -399,9 +399,9 @@ export function useSearchbarSuggestions({
                   
                 let shortcutDisplay = '';
                 if (!isHotkey && record.trigger) {
-                   shortcutDisplay = `${safeCommandKey}${prefixChar ? ` ${prefixChar}` : ''} ${record.trigger}`.trim();
+                   shortcutDisplay = `${safeCommandKey}${activeCategoryFilter && prefixChar ? ` ${prefixChar}` : ''} ${record.trigger}`.trim();
                 } else if (!isHotkey) {
-                   shortcutDisplay = `${safeCommandKey}${prefixChar ? ` ${prefixChar}` : ''}`.trim();
+                   shortcutDisplay = `${safeCommandKey}${activeCategoryFilter && prefixChar ? ` ${prefixChar}` : ''}`.trim();
                 }
                 
                 const normalizedCategory =
@@ -807,7 +807,7 @@ export function useSearchbarSuggestions({
       const dbState = useDbStore.getState();
       const allowedCategories =
         activeSnippetCommandId === 'delete_link'
-          ? new Set(['link', 'links', 'tabgroup', 'Tab Session'])
+          ? new Set(['link', 'links', 'tabgroup', 'tab session'])
           : new Set(['snippet']);
           
       let items: any[] = [];
@@ -850,14 +850,23 @@ export function useSearchbarSuggestions({
       return;
     }
 
+    let isCancelled = false;
+
     fuseSearchTimeoutRef.current = window.setTimeout(async () => {
+      const { searchAll } = await import('../searchLogicAndAlgorithms/searchEngine').catch(() => ({ searchAll: null }));
+      if (isCancelled) return;
+      if (!searchAll) {
+        setDebouncedFuseResults(prev => (prev.length > 0 ? [] : prev));
+        return;
+      }
+
       const bookmarksForSearch = bookmarkSuggestions.map(b => ({
         id: b.id,
         title: b.title,
         url: b.url,
       }));
 
-      const fuseResults = fuseSearchAll(value, {
+      const fuseResults = searchAll(value, {
         commands,
         localCommands: LOCAL_COMMANDS,
         historyItems: isSearchFocusEnabled ? historyItems : null,
@@ -871,6 +880,7 @@ export function useSearchbarSuggestions({
         snippets: useDbStore.getState().snippets || [],
         sessions: useDbStore.getState().sessions || [],
         prompts: useDbStore.getState().aiPrompts || [],
+        todos: useDbStore.getState().todos || [],
         lockedCommand: null,
         selectedFolder: selectedFolder ?? null,
         selectedTeam: searchTeamLike ?? selectedTeam ?? null,
@@ -992,6 +1002,14 @@ export function useSearchbarSuggestions({
               folder: (result as any).folderId ? { id: (result as any).folderId, folder_id: (result as any).folderId } : null,
             });
             break;
+          case 'todo':
+            converted.push({
+              _kind: 'workspace_item' as const,
+              item: { ...result, category: 'todo' } as any,
+              workspace: { id: (result as any).workspaceId, workspace_id: (result as any).workspaceId },
+              folder: (result as any).folderId ? { id: (result as any).folderId, folder_id: (result as any).folderId } : null,
+            });
+            break;
           case 'agent_collection':
             converted.push({
               _kind: 'agent_collection' as const,
@@ -1020,7 +1038,7 @@ export function useSearchbarSuggestions({
           if (category === 'note') prefixChar = customPrefixes?.note?.trim()?.toLowerCase() ?? '';
           else if (category === 'link') prefixChar = customPrefixes?.link?.trim()?.toLowerCase() ?? '';
           else if (category === 'snippet') prefixChar = customPrefixes?.snippet?.trim()?.toLowerCase() ?? '';
-          else if (category === 'session') prefixChar = customPrefixes?.session?.trim()?.toLowerCase() ?? '';
+          else if (category === 'session') prefixChar = customPrefixes?.collection?.trim()?.toLowerCase() ?? '';
           else if (category === 'aiPrompt' || category === 'ai_prompt' || category === 'prompt') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
           else if (category === 'agent' || category === 'chat_agent') prefixChar = customPrefixes?.agent?.trim()?.toLowerCase() ?? '';
           else if (category === 'automation') prefixChar = customPrefixes?.automation?.trim()?.toLowerCase() ?? '';
@@ -1051,6 +1069,7 @@ export function useSearchbarSuggestions({
     }, 300);
 
     return () => {
+      isCancelled = true;
       if (fuseSearchTimeoutRef.current) {
         window.clearTimeout(fuseSearchTimeoutRef.current);
       }

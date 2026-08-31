@@ -10,7 +10,7 @@ import type { PageActionCommand } from './types';
 export const MergeWindowsCommand: PageActionCommand = {
   id: 'merge_windows',
   label: 'Merge All Windows',
-  prefix: 'mw',
+  prefix: 'merge',
   keywords: ['merge', 'windows', 'tabs', 'consolidate', 'group', 'mw'],
   description: 'Merge all open tabs from all windows into the current window',
   action: 'execute_merge_windows',

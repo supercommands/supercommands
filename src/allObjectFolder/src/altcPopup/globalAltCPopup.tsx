@@ -2,7 +2,7 @@
  * @file globalAltCPopup.tsx
  * @description This file implements the Global Alt+C Command Popup.
  * It provides a search-and-select interface (command palette style) allowing users
- * to quickly trigger creation actions such as Link Collection, Notes, Sessions, Snippets,
+ * to quickly trigger creation actions such as Link Collection, Notes, Collections, Snippets,
  * Todos, Chat Agent, and Automations via keyboard shortcuts (e.g., ALT+C or specific keys) or search.
  * 
  * @usage
@@ -21,13 +21,14 @@ import * as React from 'react';
 import { useState, useEffect, useMemo, useRef } from 'react';
 
 import { useAppearance } from '@extension/ui';
-import { FaBuilding, FaLink, FaRegFolder } from 'react-icons/fa';
+import { FaLink } from 'react-icons/fa';
+// Workspace/folder creation is only allowed from onboarding for now.
+// import { FaBuilding, FaRegFolder } from 'react-icons/fa';
 import { FiZap, FiCode, FiCheckSquare } from 'react-icons/fi';
 
 import { LuSparkles } from 'react-icons/lu';
 import NotesIcon from '../../../shared-components/icons/notesIcon';
 import { useUIStore } from '../../../shared-components/uiStateManager';
-import { SessionGridIcon } from '../../../shared-components/icons/sessionGridIcon';
 
 
 interface GlobalAltCPopupProps {
@@ -63,14 +64,6 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
       shortcut: 'N',
     },
     {
-      id: 'createsession',
-      label: 'Tab Session',
-      category: 'Data',
-      icon: <SessionGridIcon size={15} />,
-      action: () => onCommandSelect('createsession'),
-      shortcut: 'TS',
-    },
-    {
       id: 'createsnippet',
       label: 'Text Expander',
       category: 'Data',
@@ -94,22 +87,23 @@ export const GlobalAltCPopup: React.FC<GlobalAltCPopupProps> = ({ isOpen, onClos
       action: () => onCommandSelect('createprompt'),
       shortcut: 'C',
     },
-    {
-      id: 'createworkspace',
-      label: 'Workspace',
-      category: 'Structure',
-      icon: <FaBuilding size={14} />,
-      action: () => onCommandSelect('createworkspace'),
-      shortcut: 'W',
-    },
-    {
-      id: 'createfolder',
-      label: 'Folder',
-      category: 'Structure',
-      icon: <FaRegFolder size={14} />,
-      action: () => onCommandSelect('createfolder'),
-      shortcut: 'F',
-    },
+    // Workspace/folder creation is only allowed from onboarding for now.
+    // {
+    //   id: 'createworkspace',
+    //   label: 'Workspace',
+    //   category: 'Structure',
+    //   icon: <FaBuilding size={14} />,
+    //   action: () => onCommandSelect('createworkspace'),
+    //   shortcut: 'W',
+    // },
+    // {
+    //   id: 'createfolder',
+    //   label: 'Folder',
+    //   category: 'Structure',
+    //   icon: <FaRegFolder size={14} />,
+    //   action: () => onCommandSelect('createfolder'),
+    //   shortcut: 'F',
+    // },
     {
       id: 'agent',
       label: 'Automation Agent (beta)',

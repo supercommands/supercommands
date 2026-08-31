@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type * as React from 'react';
 import {
   LuCloud,
@@ -12,8 +12,11 @@ import {
   LuSun,
   LuThermometerSun,
   LuWind,
+  LuExternalLink,
 } from 'react-icons/lu';
 import type { WidgetSizePreset } from '../widgetDashboard.types';
+import type { WidgetInstance } from '../widgetDashboard.types';
+import { widgetPerf } from '../utils/widgetPerf';
 
 type WeatherStatus = 'request-location' | 'loading' | 'ready' | 'permission-denied' | 'error';
 type WeatherErrorReason = 'permission-denied' | 'timeout' | 'unavailable' | 'unknown';
@@ -85,28 +88,28 @@ const isValidWeatherData = (weather: Partial<WeatherData> | null | undefined): w
 
 const readWeatherCache = (): WeatherData | null => {
   try {
-    if (typeof sessionStorage === 'undefined') return null;
-    LEGACY_WEATHER_CACHE_KEYS.forEach(cacheKey => sessionStorage.removeItem(cacheKey));
-    const rawCache = sessionStorage.getItem(WEATHER_CACHE_KEY);
+    if (typeof localStorage === 'undefined') return null;
+    LEGACY_WEATHER_CACHE_KEYS.forEach(cacheKey => localStorage.removeItem(cacheKey));
+    const rawCache = localStorage.getItem(WEATHER_CACHE_KEY);
     if (!rawCache) return null;
 
     const parsedCache = JSON.parse(rawCache) as WeatherCachePayload;
     if (!isValidWeatherData(parsedCache?.weather) || Date.now() - parsedCache.cachedAt > WEATHER_REFRESH_INTERVAL_MS) {
-      sessionStorage.removeItem(WEATHER_CACHE_KEY);
+      localStorage.removeItem(WEATHER_CACHE_KEY);
       return null;
     }
 
     return parsedCache.weather;
   } catch {
-    sessionStorage.removeItem(WEATHER_CACHE_KEY);
+    localStorage.removeItem(WEATHER_CACHE_KEY);
     return null;
   }
 };
 
 const writeWeatherCache = (weather: WeatherData) => {
   try {
-    if (typeof sessionStorage === 'undefined') return;
-    sessionStorage.setItem(
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(
       WEATHER_CACHE_KEY,
       JSON.stringify({
         weather,
@@ -174,6 +177,24 @@ const fetchLocationLabel = async (location: WeatherLocation, fallbackLabel: stri
   }
 };
 
+const fetchApproximateLocation = async (): Promise<WeatherLocation> => {
+  const response = await fetch('https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=en');
+  if (!response.ok) throw new WeatherWidgetError('Unable to detect approximate location.', 'unavailable');
+
+  const data = await response.json();
+  const latitude = Number(data.latitude);
+  const longitude = Number(data.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    throw new WeatherWidgetError('Approximate location is unavailable.', 'unavailable');
+  }
+
+  return {
+    latitude,
+    longitude,
+    label: formatLocationParts(data.city, data.locality, data.principalSubdivision, data.countryName) || 'Current city',
+  };
+};
+
 const getBrowserLocation = () =>
   new Promise<WeatherLocation>((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -204,8 +225,8 @@ const getBrowserLocation = () =>
       },
       {
         enableHighAccuracy: false,
-        maximumAge: 10 * 60 * 1000,
-        timeout: 30000,
+        maximumAge: 30 * 60 * 1000,
+        timeout: 15000,
       },
     );
   });
@@ -238,7 +259,7 @@ const fetchOpenMeteoWeather = async (location: WeatherLocation): Promise<Weather
   const currentWeather = data.current;
   if (!currentWeather) throw new Error('Weather data missing.');
 
-  const fallbackPlaceLabel = formatTimezonePlaceLabel(data.timezone) || location.label;
+  const fallbackPlaceLabel = location.label || formatTimezonePlaceLabel(data.timezone);
   const placeLabel = await fetchLocationLabel(location, fallbackPlaceLabel);
   const weatherCode = Math.round(readRequiredNumber(currentWeather.weather_code, 'weather code'));
 
@@ -257,17 +278,37 @@ const fetchOpenMeteoWeather = async (location: WeatherLocation): Promise<Weather
   };
 };
 
+import type { WidgetLayoutInfo } from '../utils/widgetLayoutInfo';
+import { getWidgetLayoutInfo } from '../utils/widgetLayoutInfo';
+
 interface WeatherWidgetProps {
+  widget?: WidgetInstance;
   sizePreset?: WidgetSizePreset;
+  layoutInfo?: WidgetLayoutInfo;
 }
 
-const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) => {
+const WeatherWidget: React.FC<WeatherWidgetProps> = ({ widget, sizePreset = 'medium', layoutInfo: providedLayoutInfo }) => {
+  const layout = providedLayoutInfo || getWidgetLayoutInfo(sizePreset === 'large' ? 12 : sizePreset === 'medium' ? 8 : 4, 5);
   const isLoadingRef = useRef(false);
+  const firstContentLoggedRef = useRef(false);
+  const cachedWeather = useMemo(() => {
+    widgetPerf('cache:read:start', {
+      widgetType: widget?.type || 'weather',
+      widgetId: widget?.id || 'unknown',
+    });
+    const startedAt = performance.now();
+    const result = readWeatherCache();
+    widgetPerf(result ? 'cache:read:hit' : 'cache:read:miss', {
+      widgetType: widget?.type || 'weather',
+      widgetId: widget?.id || 'unknown',
+      durationMs: Math.round(performance.now() - startedAt),
+    });
+    return result;
+  }, [widget?.id, widget?.type]);
   const [weatherState, setWeatherState] = useState<{
     weather: WeatherData | null;
     status: WeatherStatus;
   }>(() => {
-    const cachedWeather = readWeatherCache();
     return {
       weather: cachedWeather,
       status: cachedWeather ? 'ready' : 'request-location',
@@ -293,7 +334,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
   }, []);
 
   const loadWeather = useCallback(
-    async (silent = false) => {
+    async (silent = false, forceBrowserLocation = false) => {
       if (isLoadingRef.current) return;
       isLoadingRef.current = true;
       if (!silent || !hasWeatherRef.current) setStatus('loading');
@@ -301,15 +342,64 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
       let permissionStateBeforeRequest: PermissionState | null = null;
 
       try {
+        widgetPerf('permission:read:start', {
+          widgetType: widget?.type || 'weather',
+          widgetId: widget?.id || 'unknown',
+        });
+        const permissionStartedAt = performance.now();
         permissionStateBeforeRequest = await getLocationPermissionState();
-        if (permissionStateBeforeRequest === 'denied') {
-          setMessage(LOCATION_BLOCKED_MESSAGE);
-          setStatus('permission-denied');
-          return;
-        }
+        widgetPerf('permission:read:end', {
+          widgetType: widget?.type || 'weather',
+          widgetId: widget?.id || 'unknown',
+          state: permissionStateBeforeRequest,
+          durationMs: Math.round(performance.now() - permissionStartedAt),
+        });
+        widgetPerf('location:read:start', {
+          widgetType: widget?.type || 'weather',
+          widgetId: widget?.id || 'unknown',
+        });
+        const locationStartedAt = performance.now();
+        let location: WeatherLocation;
+        let locationSource = 'ip-location';
+        const shouldTryBrowserLocation =
+          forceBrowserLocation ||
+          permissionStateBeforeRequest === 'granted' ||
+          permissionStateBeforeRequest === 'prompt';
+        try {
+          location = shouldTryBrowserLocation ? await getBrowserLocation() : await fetchApproximateLocation();
+          locationSource = shouldTryBrowserLocation ? 'browser-location' : 'ip-location';
+        } catch (locationError) {
+          if (forceBrowserLocation) {
+            throw locationError;
+          }
 
-        const location = await getBrowserLocation();
+          if (shouldTryBrowserLocation) {
+            console.warn('[WeatherWidget] Browser location failed, falling back to approximate location:', locationError);
+            location = await fetchApproximateLocation();
+            locationSource = 'ip-location-fallback';
+          } else {
+            throw locationError;
+          }
+        }
+        widgetPerf('location:read:end', {
+          widgetType: widget?.type || 'weather',
+          widgetId: widget?.id || 'unknown',
+          source: locationSource,
+          durationMs: Math.round(performance.now() - locationStartedAt),
+        });
+        widgetPerf('network:start', {
+          widgetType: widget?.type || 'weather',
+          widgetId: widget?.id || 'unknown',
+          source: 'open-meteo+reverse-geocode',
+        });
+        const networkStartedAt = performance.now();
         const nextWeather = await fetchOpenMeteoWeather(location);
+        widgetPerf('network:end', {
+          widgetType: widget?.type || 'weather',
+          widgetId: widget?.id || 'unknown',
+          source: 'open-meteo+reverse-geocode',
+          durationMs: Math.round(performance.now() - networkStartedAt),
+        });
         writeWeatherCache(nextWeather);
         setWeather(nextWeather);
         setStatus('ready');
@@ -337,38 +427,30 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
         isLoadingRef.current = false;
       }
     },
-    [setStatus, setWeather],
+    [setStatus, setWeather, widget?.id, widget?.type],
   );
 
   useEffect(() => {
-    let cancelled = false;
-
-    if (weather) return undefined;
-
-    getLocationPermissionState().then(permissionState => {
-      if (cancelled) return;
-
-      if (permissionState === 'granted') {
-        void loadWeather();
-        return;
-      }
-
-      if (permissionState === 'denied') {
-        setMessage(LOCATION_BLOCKED_MESSAGE);
-        setStatus('permission-denied');
-      }
+    if (firstContentLoggedRef.current || status !== 'ready' || !weather) return;
+    firstContentLoggedRef.current = true;
+    widgetPerf('content:firstReady', {
+      widgetType: widget?.type || 'weather',
+      widgetId: widget?.id || 'unknown',
+      source: cachedWeather ? 'cache' : 'fresh',
     });
+  }, [cachedWeather, status, weather, widget?.id, widget?.type]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [loadWeather, setStatus, weather]);
+  useEffect(() => {
+    if (weather) return undefined;
+    if (status === 'request-location') return undefined;
+
+    void loadWeather();
+    return undefined;
+  }, [loadWeather, status, weather]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
-      void getLocationPermissionState().then(permissionState => {
-        if (permissionState === 'granted') void loadWeather(true);
-      });
+      void loadWeather(true);
     }, WEATHER_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
@@ -378,7 +460,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      void loadWeather();
+      void loadWeather(false, true);
     },
     [loadWeather],
   );
@@ -417,21 +499,57 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
     );
   }
 
+  const openChromeLocationSettings = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      const extensionChrome = typeof globalThis === 'undefined' ? undefined : (globalThis as any).chrome;
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const settingsUrl = origin
+        ? `chrome://settings/content/siteDetails?site=${encodeURIComponent(origin)}`
+        : 'chrome://settings/content/location';
+
+      if (extensionChrome?.tabs?.create) {
+        extensionChrome.tabs.create({ url: settingsUrl });
+      } else {
+        window.open(settingsUrl, '_blank');
+      }
+    } catch (err) {
+      console.error('Failed to open location settings tab:', err);
+    }
+  };
+
   if (status === 'permission-denied') {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center">
-        <LuLocateFixed size={26} className="text-[var(--color-iconDefault)]" />
-        <div className="max-w-[220px] text-xs font-semibold text-[var(--color-textSecondary)]">{message}</div>
-        <button
-          type="button"
-          data-no-widget-drag="true"
-          onPointerDown={stopWidgetInteraction}
-          onMouseDown={stopWidgetInteraction}
-          onTouchStart={stopWidgetInteraction}
-          onClick={handleLocationClick}
-          className="rounded-md border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] px-3 py-1.5 text-xs font-semibold text-[var(--color-textPrimary)]">
-          Retry
-        </button>
+      <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-2 text-center">
+        <LuLocateFixed size={24} className="text-[var(--color-textSecondary)] shrink-0 opacity-80" />
+        <div className="text-xs font-bold text-[var(--color-textPrimary)]">Location Access Blocked</div>
+        <div className="text-[11px] leading-tight text-[var(--color-textSecondary)] max-w-[260px]">
+          Chrome is blocking location. Click below to open Site Settings, change Location to <span className="font-bold text-[var(--color-textPrimary)]">Allow</span>, then click Retry.
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          <button
+            type="button"
+            data-no-widget-drag="true"
+            onPointerDown={stopWidgetInteraction}
+            onMouseDown={stopWidgetInteraction}
+            onTouchStart={stopWidgetInteraction}
+            onClick={openChromeLocationSettings}
+            className="rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] px-3 py-1.5 text-xs font-semibold text-[var(--color-textPrimary)] shadow-sm transition-all hover:bg-[var(--color-hoverBg)] flex items-center gap-1.5 cursor-pointer">
+            <LuExternalLink size={13} />
+            Open Site Settings
+          </button>
+          <button
+            type="button"
+            data-no-widget-drag="true"
+            onPointerDown={stopWidgetInteraction}
+            onMouseDown={stopWidgetInteraction}
+            onTouchStart={stopWidgetInteraction}
+            onClick={handleLocationClick}
+            className="rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] px-3 py-1.5 text-xs font-semibold text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] transition-all cursor-pointer">
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -487,25 +605,112 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
       icon: LuGauge,
     },
   ];
-  const isSmall = sizePreset === 'small';
-  const isLarge = sizePreset === 'large';
+
   const compactStats = [
-    { label: 'Wind', value: `${weather.windSpeed} km/h` },
     {
-      label: 'Gust',
-      value: `${Number.isFinite(weather.windGusts) ? weather.windGusts : weather.windSpeed} km/h`,
+      label: 'Feels like',
+      value: `${weatherStats[0].value}${weatherStats[0].suffix}`,
+      icon: LuThermometerSun,
     },
-    { label: 'Feels like', value: `${weatherStats[0].value}${weatherStats[0].suffix}` },
-    { label: 'Humidity', value: `${weatherStats[1].value}${weatherStats[1].suffix}` },
-    { label: 'Clouds', value: `${weatherStats[2].value}${weatherStats[2].suffix}` },
-    { label: 'Rain', value: `${weatherStats[3].value}${weatherStats[3].suffix}` },
-    { label: 'Pressure', value: `${weatherStats[4].value}${weatherStats[4].suffix}`, wide: true },
+    {
+      label: 'Humidity',
+      value: `${weatherStats[1].value}${weatherStats[1].suffix}`,
+      icon: LuDroplets,
+    },
+    {
+      label: 'Wind',
+      value: `${weather.windSpeed} km/h`,
+      icon: LuWind,
+    },
+    {
+      label: 'Rain',
+      value: `${weatherStats[3].value}${weatherStats[3].suffix}`,
+      icon: LuCloudRain,
+    },
+    {
+      label: 'Clouds',
+      value: `${weatherStats[2].value}${weatherStats[2].suffix}`,
+      icon: LuCloud,
+    },
+    {
+      label: 'Pressure',
+      value: `${weatherStats[4].value}${weatherStats[4].suffix}`,
+      icon: LuGauge,
+    },
   ];
 
-  if (isSmall) {
+  const { isNarrow, isWide, isShort, isTall, isExtraTall } = layout;
+
+  /* NARROW (width 4) Layouts */
+  if (isNarrow) {
+    if (isShort) {
+      /* 4 x 5 */
+      return (
+        <div className="relative flex h-full w-full min-w-0 flex-col overflow-hidden text-[var(--color-textPrimary)] p-3.5 gap-2.5">
+          <div className="flex shrink-0 min-w-0 items-start justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2.5 flex-1">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textPrimary)] shadow-xs">
+                <WeatherIcon code={weather.weatherCode} size={20} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-baseline gap-1.5">
+                  <span className="shrink-0 text-2xl font-bold leading-none">{weather.temperature}&deg;</span>
+                  <span className="truncate text-[11px] font-semibold text-[var(--color-textSecondary)]">
+                    {getWeatherDescription(weather.weatherCode)}
+                  </span>
+                </div>
+                <div className="mt-1 flex min-w-0 items-center gap-1 text-[9px] font-semibold leading-none text-[var(--color-textMuted)]">
+                  <LuMapPin size={9} className="shrink-0 text-[var(--color-iconDefault)]" />
+                  <span className="min-w-0 truncate" title={weather.placeLabel}>{weather.placeLabel}</span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              data-no-widget-drag="true"
+              aria-label="Refresh weather"
+              title="Refresh weather"
+              onPointerDown={stopWidgetInteraction}
+              onMouseDown={stopWidgetInteraction}
+              onTouchStart={stopWidgetInteraction}
+              onClick={handleLocationClick}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)] cursor-pointer">
+              <LuRefreshCw size={12} />
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 grid grid-cols-3 gap-2">
+            {compactStats.map(stat => {
+              const IconComponent = stat.icon;
+              return (
+                <div
+                  key={stat.label}
+                  className="flex min-w-0 flex-col justify-center rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] px-2.5 py-2">
+                  <div className="flex items-center gap-1 text-[10px] font-semibold text-[var(--color-textSecondary)] min-w-0">
+                    <IconComponent size={11} className="shrink-0 text-[var(--color-iconDefault)]" />
+                    <span className="truncate">{stat.label}</span>
+                  </div>
+                  <div className="mt-1 truncate text-xs font-bold text-[var(--color-textPrimary)]">
+                    {stat.value}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    /* 4 x 10 & 4 x 15 (Narrow Tall / Extra Tall) */
     return (
-      <div className="relative flex h-full w-full min-w-0 flex-col gap-2 overflow-hidden text-[var(--color-textPrimary)]">
-        <div className="absolute right-0 top-0">
+      <div className="relative flex h-full w-full min-w-0 flex-col justify-between overflow-hidden text-[var(--color-textPrimary)] p-4 gap-3">
+        {/* Header Zone */}
+        <div className="flex shrink-0 min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1 text-xs font-bold text-[var(--color-textPrimary)]" title={weather.placeLabel}>
+            <LuMapPin size={12} className="shrink-0 text-[var(--color-iconDefault)]" />
+            <span className="truncate">{weather.placeLabel}</span>
+          </div>
           <button
             type="button"
             data-no-widget-drag="true"
@@ -515,52 +720,123 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
             onMouseDown={stopWidgetInteraction}
             onTouchStart={stopWidgetInteraction}
             onClick={handleLocationClick}
-            className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)]">
-            <LuRefreshCw size={13} />
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)] cursor-pointer">
+            <LuRefreshCw size={12} />
           </button>
         </div>
 
-        <div className="flex min-w-0 items-center gap-2.5 pr-8">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)]">
-            <WeatherIcon code={weather.weatherCode} size={22} />
+        {/* Flexible Middle Summary Zone */}
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 my-auto">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textPrimary)] shadow-sm">
+            <WeatherIcon code={weather.weatherCode} size={32} />
           </div>
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="shrink-0 text-3xl font-bold leading-none">{weather.temperature}&deg;</span>
-              <span className="truncate text-[11px] font-bold text-[var(--color-textSecondary)]">
-                {getWeatherDescription(weather.weatherCode)}
-              </span>
+          <div className="text-center">
+            <div className="text-4xl font-extrabold leading-none text-[var(--color-textPrimary)]">
+              {weather.temperature}&deg;
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1 text-[9px] font-semibold leading-none text-[var(--color-textMuted)]">
-              <LuMapPin size={10} className="shrink-0" />
-              <span className="min-w-0 truncate">{weather.placeLabel}</span>
-              <span className="shrink-0">&middot; {weather.updatedAtLabel || 'Now'}</span>
+            <div className="mt-1 text-xs font-bold text-[var(--color-textSecondary)]">
+              {getWeatherDescription(weather.weatherCode)}
             </div>
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-4 grid-rows-2 gap-x-2 gap-y-1 text-[10px] leading-none">
-          {compactStats.map(stat => (
-            <div
-              key={stat.label}
-              className={`flex min-w-0 flex-col justify-center px-1 py-1 ${stat.wide ? 'col-span-2' : ''}`}>
-              <div className="whitespace-normal text-[8px] font-bold leading-[1.15] text-[var(--color-textMuted)]">
-                {stat.label}
+        {/* Bottom Metrics 2x3 Grid */}
+        <div className="shrink-0 grid grid-cols-2 gap-2">
+          {compactStats.map(stat => {
+            const IconComponent = stat.icon;
+            return (
+              <div
+                key={stat.label}
+                className="flex min-w-0 flex-col justify-center rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] p-2.5">
+                <div className="flex items-center gap-1 text-[10px] font-semibold text-[var(--color-textSecondary)] min-w-0">
+                  <IconComponent size={11} className="shrink-0 text-[var(--color-iconDefault)]" />
+                  <span className="truncate">{stat.label}</span>
+                </div>
+                <div className="mt-0.5 truncate text-xs font-bold text-[var(--color-textPrimary)]">
+                  {stat.value}
+                </div>
               </div>
-              <div className="mt-1 whitespace-nowrap text-[10px] font-bold text-[var(--color-textPrimary)]">
-                {stat.value}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
   }
 
-  if (isLarge) {
+  /* WIDE (width 12) Layouts */
+  if (isWide) {
+    if (isShort) {
+      /* 12 x 5 */
+      return (
+        <div className="relative flex h-full w-full flex-col justify-center gap-3.5 overflow-hidden p-5">
+          <div className="flex min-w-0 items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <LuMapPin size={15} className="shrink-0 text-[var(--color-iconDefault)]" />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-bold text-[var(--color-textPrimary)]">{weather.placeLabel}</div>
+                <div className="text-[10px] font-semibold text-[var(--color-textMuted)]">
+                  Updated {weather.updatedAtLabel || 'Now'}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textPrimary)]">
+                  <WeatherIcon code={weather.weatherCode} size={20} />
+                </div>
+                <span className="text-2xl font-bold text-[var(--color-textPrimary)]">{weather.temperature}&deg;</span>
+                <span className="text-xs font-bold text-[var(--color-textSecondary)] max-w-[120px] truncate">{getWeatherDescription(weather.weatherCode)}</span>
+              </div>
+              <button
+                type="button"
+                data-no-widget-drag="true"
+                aria-label="Refresh weather"
+                title="Refresh weather"
+                onPointerDown={stopWidgetInteraction}
+                onMouseDown={stopWidgetInteraction}
+                onTouchStart={stopWidgetInteraction}
+                onClick={handleLocationClick}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)] cursor-pointer">
+                <LuRefreshCw size={14} />
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-5 gap-2">
+            {weatherStats.map(stat => {
+              const IconComponent = stat.icon;
+              return (
+                <div
+                  key={stat.label}
+                  className="min-w-0 rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] px-2.5 py-2">
+                  <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-normal text-[var(--color-textMuted)]">
+                    <IconComponent size={12} className="shrink-0" />
+                    <span className="truncate">{stat.label}</span>
+                  </div>
+                  <div className="truncate text-sm font-bold text-[var(--color-textPrimary)]">
+                    {stat.value}
+                    {stat.suffix}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    /* 12 x 10 & 12 x 15 (Wide Tall / Extra Tall) */
     return (
-      <div className="relative flex h-full w-full flex-col justify-center gap-3 overflow-hidden">
-        <div className="absolute right-0 top-0 z-10">
+      <div className="relative flex h-full w-full flex-col justify-between overflow-hidden p-6 gap-4">
+        {/* Header Bar */}
+        <div className="flex min-w-0 items-center justify-between gap-4 max-w-[680px] w-full mx-auto">
+          <div className="flex min-w-0 items-center gap-2 text-xs font-bold text-[var(--color-textPrimary)]" title={weather.placeLabel}>
+            <LuMapPin size={14} className="shrink-0 text-[var(--color-iconDefault)]" />
+            <span className="truncate">{weather.placeLabel}</span>
+            <span className="text-[10px] font-normal text-[var(--color-textMuted)] ml-2">Updated {weather.updatedAtLabel || 'Now'}</span>
+          </div>
+
           <button
             type="button"
             data-no-widget-drag="true"
@@ -570,54 +846,32 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
             onMouseDown={stopWidgetInteraction}
             onTouchStart={stopWidgetInteraction}
             onClick={handleLocationClick}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)]">
-            <LuRefreshCw size={16} />
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)] cursor-pointer">
+            <LuRefreshCw size={14} />
           </button>
         </div>
 
-        <div className="flex min-w-0 items-start gap-2 pr-10 text-[var(--color-textSecondary)]">
-          <LuMapPin size={15} className="mt-0.5 shrink-0 text-[var(--color-iconDefault)]" />
-          <div className="min-w-0">
-            <div className="truncate text-sm font-bold text-[var(--color-textPrimary)]">{weather.placeLabel}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-normal text-[var(--color-textMuted)]">
-              Updated {weather.updatedAtLabel || 'Now'}
+        {/* Centered Primary Weather Summary */}
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 my-auto max-w-[680px] w-full mx-auto">
+          <div className="flex items-center gap-6 rounded-2xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] px-8 py-5 shadow-xs">
+            <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)]">
+              <WeatherIcon code={weather.weatherCode} size={36} />
+            </div>
+            <div>
+              <div className="text-5xl font-extrabold text-[var(--color-textPrimary)] leading-none">{weather.temperature}&deg;</div>
+              <div className="mt-1.5 text-sm font-bold text-[var(--color-textSecondary)]">{getWeatherDescription(weather.weatherCode)}</div>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textPrimary)]">
-              <WeatherIcon code={weather.weatherCode} size={30} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-5xl font-bold leading-none text-[var(--color-textPrimary)]">
-                {weather.temperature}&deg;
-              </div>
-              <div className="mt-1 truncate text-base font-bold text-[var(--color-textSecondary)]">
-                {getWeatherDescription(weather.weatherCode)}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex min-w-[96px] flex-col gap-1 rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] px-3 py-2 text-right">
-            <div className="flex items-center justify-end gap-1 text-xs font-bold text-[var(--color-textPrimary)]">
-              <LuWind size={13} />
-              {weather.windSpeed} km/h
-            </div>
-            <div className="text-[10px] font-semibold text-[var(--color-textMuted)]">
-              Gust {Number.isFinite(weather.windGusts) ? weather.windGusts : weather.windSpeed} km/h
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {/* 5 Metrics Grid */}
+        <div className="shrink-0 grid grid-cols-5 gap-3 max-w-[680px] w-full mx-auto">
           {weatherStats.map(stat => {
             const IconComponent = stat.icon;
             return (
               <div
                 key={stat.label}
-                className="min-w-0 rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] px-2.5 py-2">
+                className="min-w-0 rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] px-3 py-2.5">
                 <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-normal text-[var(--color-textMuted)]">
                   <IconComponent size={12} className="shrink-0" />
                   <span className="truncate">{stat.label}</span>
@@ -634,79 +888,127 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({ sizePreset = 'medium' }) 
     );
   }
 
+  /* MEDIUM (width 8) Layouts */
+  if (isTall || isExtraTall) {
+    /* 8 x 10 & 8 x 15 */
+    return (
+      <div className="relative flex h-full w-full min-w-0 flex-col justify-between overflow-hidden p-5 gap-3">
+        {/* Header */}
+        <div className="flex shrink-0 min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5 text-xs font-bold text-[var(--color-textPrimary)]" title={weather.placeLabel}>
+            <LuMapPin size={12} className="shrink-0 text-[var(--color-iconDefault)]" />
+            <span className="truncate">{weather.placeLabel}</span>
+            <span className="text-[10px] font-normal text-[var(--color-textMuted)] ml-1">({weather.updatedAtLabel || 'Now'})</span>
+          </div>
+          <button
+            type="button"
+            data-no-widget-drag="true"
+            aria-label="Refresh weather"
+            title="Refresh weather"
+            onPointerDown={stopWidgetInteraction}
+            onMouseDown={stopWidgetInteraction}
+            onTouchStart={stopWidgetInteraction}
+            onClick={handleLocationClick}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)] cursor-pointer">
+            <LuRefreshCw size={12} />
+          </button>
+        </div>
+
+        {/* Primary Summary Center */}
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 my-auto">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textPrimary)] shadow-xs">
+            <WeatherIcon code={weather.weatherCode} size={30} />
+          </div>
+          <div className="text-center">
+            <div className="text-4xl font-extrabold leading-none text-[var(--color-textPrimary)]">
+              {weather.temperature}&deg;
+            </div>
+            <div className="mt-1 text-xs font-bold text-[var(--color-textSecondary)]">
+              {getWeatherDescription(weather.weatherCode)}
+            </div>
+          </div>
+        </div>
+
+        {/* 3x2 Metrics Grid */}
+        <div className="shrink-0 grid grid-cols-3 gap-2">
+          {compactStats.map(stat => {
+            const IconComponent = stat.icon;
+            return (
+              <div
+                key={stat.label}
+                className="flex min-w-0 flex-col justify-center rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] p-2">
+                <div className="flex items-center gap-1 text-[10px] font-semibold text-[var(--color-textSecondary)] min-w-0">
+                  <IconComponent size={11} className="shrink-0 text-[var(--color-iconDefault)]" />
+                  <span className="truncate">{stat.label}</span>
+                </div>
+                <div className="mt-0.5 truncate text-xs font-bold text-[var(--color-textPrimary)]">
+                  {stat.value}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  /* 8 x 5 (Medium Short) */
   return (
-    <div className="relative flex h-full w-full min-w-0 flex-col gap-3 overflow-hidden">
-      <div className="absolute right-0 top-0 z-10">
-        <button
-          type="button"
-          data-no-widget-drag="true"
-          aria-label="Refresh weather"
-          title="Refresh weather"
-          onPointerDown={stopWidgetInteraction}
-          onMouseDown={stopWidgetInteraction}
-          onTouchStart={stopWidgetInteraction}
-          onClick={handleLocationClick}
-          className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)]">
-          <LuRefreshCw size={16} />
-        </button>
-      </div>
-
-      <div className="flex min-h-0 flex-[1.15] flex-col justify-center gap-2.5 pr-11">
-        <div className="flex min-w-0 items-center justify-between gap-6">
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textPrimary)]">
-              <WeatherIcon code={weather.weatherCode} size={28} />
-            </div>
-            <div className="flex min-w-0 items-end gap-3">
-              <div className="shrink-0 text-5xl font-bold leading-none text-[var(--color-textPrimary)]">
-                {weather.temperature}&deg;
-              </div>
-              <div className="truncate pb-1 text-base font-bold text-[var(--color-textSecondary)]">
-                {getWeatherDescription(weather.weatherCode)}
-              </div>
-            </div>
+    <div className="relative flex h-full w-full min-w-0 flex-col justify-center gap-3.5 overflow-hidden text-[var(--color-textPrimary)] px-5 py-4">
+      <div className="flex shrink-0 min-w-0 items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textPrimary)] shadow-xs">
+            <WeatherIcon code={weather.weatherCode} size={24} />
           </div>
-
-          <div className="grid w-[34%] min-w-[180px] shrink-0 grid-cols-2 gap-5 pl-4">
-            <div className="min-w-0 py-2">
-              <div className="flex items-center gap-1.5 text-[10px] font-bold text-[var(--color-textMuted)]">
-                <LuWind size={13} className="shrink-0" />
-                <span>Wind</span>
-              </div>
-              <div className="mt-1 truncate text-sm font-bold text-[var(--color-textPrimary)]">
-                {weather.windSpeed} km/h
-              </div>
+          <div className="flex min-w-0 items-baseline gap-2.5">
+            <div className="shrink-0 text-3xl font-bold leading-none text-[var(--color-textPrimary)]">
+              {weather.temperature}&deg;
             </div>
-            <div className="min-w-0 py-2">
-              <div className="text-[10px] font-bold text-[var(--color-textMuted)]">Gust</div>
-              <div className="mt-1 truncate text-sm font-bold text-[var(--color-textPrimary)]">
-                {Number.isFinite(weather.windGusts) ? weather.windGusts : weather.windSpeed} km/h
-              </div>
+            <div className="truncate text-sm font-bold text-[var(--color-textSecondary)]">
+              {getWeatherDescription(weather.weatherCode)}
             </div>
           </div>
         </div>
 
-        <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold text-[var(--color-textMuted)]">
-          <LuMapPin size={12} className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate" title={weather.placeLabel}>
-            {weather.placeLabel}
-          </span>
-          <span className="shrink-0">&middot; {weather.updatedAtLabel || 'Now'}</span>
+        <div className="flex min-w-0 items-center gap-2 text-right">
+          <div className="flex min-w-0 flex-col items-end text-[10px] font-semibold text-[var(--color-textSecondary)]">
+            <div className="flex items-center gap-1 min-w-0" title={weather.placeLabel}>
+              <LuMapPin size={10} className="shrink-0 text-[var(--color-iconDefault)]" />
+              <span className="truncate max-w-[180px]">{weather.placeLabel}</span>
+            </div>
+            <div className="text-[9px] text-[var(--color-textMuted)] mt-0.5">
+              {weather.updatedAtLabel || 'Now'}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            data-no-widget-drag="true"
+            aria-label="Refresh weather"
+            title="Refresh weather"
+            onPointerDown={stopWidgetInteraction}
+            onMouseDown={stopWidgetInteraction}
+            onTouchStart={stopWidgetInteraction}
+            onClick={handleLocationClick}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] text-[var(--color-textSecondary)] transition hover:text-[var(--color-textPrimary)] cursor-pointer">
+            <LuRefreshCw size={13} />
+          </button>
         </div>
       </div>
 
-      <div className="grid min-h-[62px] flex-1 grid-cols-5 gap-4">
-        {weatherStats.map(stat => {
+      <div className="grid shrink-0 min-w-0 grid-cols-6 gap-2">
+        {compactStats.map(stat => {
           const IconComponent = stat.icon;
           return (
-            <div key={stat.label} className="flex min-w-0 flex-col justify-center px-1 py-2">
-              <div className="flex min-w-0 items-start gap-1 text-[9px] font-bold leading-tight text-[var(--color-textMuted)]">
-                <IconComponent size={11} className="mt-px shrink-0" />
-                <span className="whitespace-normal">{stat.label}</span>
+            <div
+              key={stat.label}
+              className="flex min-w-0 flex-col justify-center rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] dark:bg-[var(--color-widgetInnerBg)] px-2 py-2">
+              <div className="flex min-w-0 items-center gap-1 text-[9px] font-semibold text-[var(--color-textSecondary)]">
+                <IconComponent size={10} className="shrink-0 text-[var(--color-iconDefault)]" />
+                <span className="truncate">{stat.label}</span>
               </div>
-              <div className="mt-1.5 whitespace-nowrap text-[13px] font-bold text-[var(--color-textPrimary)]">
+              <div className="mt-0.5 truncate text-xs font-bold text-[var(--color-textPrimary)]">
                 {stat.value}
-                {stat.suffix}
               </div>
             </div>
           );

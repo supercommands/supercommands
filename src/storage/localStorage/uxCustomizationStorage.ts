@@ -3,7 +3,7 @@ export type TodoDisplayMode = 'collapse' | 'data-blur' | 'pin';
 // --- Todo Display Mode Handle Storage ---
 export const getStoredTodoDisplayMode = async (): Promise<TodoDisplayMode> => {
   try {
-    const chromeAny = (window as any).chrome;
+    const chromeAny = (globalThis as any).chrome;
     if (chromeAny?.storage?.local) {
       const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['todo_display_mode'], resolve));
       return result.todo_display_mode || 'collapse';
@@ -16,7 +16,7 @@ export const getStoredTodoDisplayMode = async (): Promise<TodoDisplayMode> => {
 
 export const setStoredTodoDisplayMode = async (mode: TodoDisplayMode): Promise<void> => {
   try {
-    const chromeAny = (window as any).chrome;
+    const chromeAny = (globalThis as any).chrome;
     if (chromeAny?.storage?.local) {
       await new Promise<void>(resolve => chromeAny.storage.local.set({ todo_display_mode: mode }, resolve));
     }
@@ -28,7 +28,7 @@ export const setStoredTodoDisplayMode = async (mode: TodoDisplayMode): Promise<v
 // --- Search Handle Focus Preferences Storage ---
 export const getStoredSearchFocusPreference = async (): Promise<boolean> => {
   try {
-    const chromeAny = (window as any).chrome;
+    const chromeAny = (globalThis as any).chrome;
     if (chromeAny?.storage?.local) {
       const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['rtq_focus_on'], resolve));
       return result.rtq_focus_on !== false; // Default to true
@@ -41,7 +41,7 @@ export const getStoredSearchFocusPreference = async (): Promise<boolean> => {
 
 export const setStoredSearchFocusPreference = async (focusOn: boolean): Promise<void> => {
   try {
-    const chromeAny = (window as any).chrome;
+    const chromeAny = (globalThis as any).chrome;
     if (chromeAny?.storage?.local) {
       await new Promise<void>(resolve => chromeAny.storage.local.set({ rtq_focus_on: focusOn }, resolve));
     }
@@ -54,7 +54,7 @@ export type LayoutViewMode = 'board' | 'sheet';
 
 export const getStoredLayoutViewMode = async (): Promise<LayoutViewMode> => {
   try {
-    const chromeAny = (window as any).chrome;
+    const chromeAny = (globalThis as any).chrome;
     if (chromeAny?.storage?.local) {
       const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['new_tab_view_mode_temp'], resolve));
       return result.new_tab_view_mode_temp || 'board';
@@ -67,7 +67,7 @@ export const getStoredLayoutViewMode = async (): Promise<LayoutViewMode> => {
 
 export const setStoredLayoutViewMode = async (mode: LayoutViewMode): Promise<void> => {
   try {
-    const chromeAny = (window as any).chrome;
+    const chromeAny = (globalThis as any).chrome;
     if (chromeAny?.storage?.local) {
       await new Promise<void>(resolve => chromeAny.storage.local.set({ new_tab_view_mode_temp: mode }, resolve));
     }

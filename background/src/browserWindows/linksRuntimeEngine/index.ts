@@ -5,7 +5,27 @@
 import { pendingAutoSubmitTabs } from '@automation/runtime_Execution_Engine/runner';
 import { tabPromptQueues, processTabQueue } from '@chatAgents/runtimeExecutionEngine';
 import { findMatchingTab } from '../chatRuntimeEngine';
-import { activeSessions } from '@browserWindows/sessions';
+import { activeSessions, getValidatedActiveSessionForWindow } from '@browserWindows/sessions';
+
+const SESSION_REFERENCE_TYPES = new Set(['note', 'link', 'snippet', 'agent']);
+
+const isSessionReferenceUrl = (url?: string): boolean => {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url, 'chrome-extension://session-reference/');
+    const type = parsed.searchParams.get('type');
+    const id =
+      parsed.searchParams.get('id') ||
+      parsed.searchParams.get('entityId') ||
+      parsed.searchParams.get('noteid') ||
+      parsed.searchParams.get('linkid') ||
+      parsed.searchParams.get('snippetid') ||
+      parsed.searchParams.get('agentid');
+    return Boolean(type && id && SESSION_REFERENCE_TYPES.has(type));
+  } catch {
+    return false;
+  }
+};
 
 export function handleLinksMessage(
   request: any,
@@ -194,23 +214,33 @@ export function handleLinksMessage(
 
   if (request.action === 'open_tab_in_session') {
     const { sessionId, url } = request;
-    let matchedSession: any = null;
-    for (const session of activeSessions.values()) {
-      if (session.sessionId === sessionId) {
-        matchedSession = session;
-        break;
-      }
-    }
-
-    if (matchedSession && matchedSession.windowId) {
-      chrome.tabs.create({ windowId: matchedSession.windowId, url, active: true }, tab => {
-        sendResponse({ ok: true, tabId: tab?.id });
-      });
-      return true;
-    } else {
-      sendResponse({ ok: false, error: 'session_not_found' });
+    if (isSessionReferenceUrl(url)) {
+      sendResponse({ ok: false, error: 'session_reference_url_not_openable' });
       return false;
     }
+
+    void (async () => {
+      let matchedSession: any = null;
+      for (const windowId of Array.from(activeSessions.keys())) {
+        const session = await getValidatedActiveSessionForWindow(windowId);
+        if (session?.sessionId === sessionId) {
+          matchedSession = session;
+          break;
+        }
+      }
+
+      if (!matchedSession?.windowId) {
+        sendResponse({ ok: false, error: 'session_not_found' });
+        return;
+      }
+
+      const tab = await chrome.tabs.create({ windowId: matchedSession.windowId, url, active: true });
+      sendResponse({ ok: true, tabId: tab?.id });
+    })().catch(error => {
+      console.error('[LinksRuntime] Failed to open tab in validated session:', error);
+      sendResponse({ ok: false, error: 'open_tab_in_session_failed' });
+    });
+    return true;
   }
 
   return undefined;

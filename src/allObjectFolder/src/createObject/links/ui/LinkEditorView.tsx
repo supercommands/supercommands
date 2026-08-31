@@ -37,12 +37,12 @@ import { FaPlus,
   FaUsers,
   FaStar,
   FaKeyboard,
-  FaRobot,
   FaList,
   FaCopy,
   FaDirections } from 'react-icons/fa';
 import { FiStar, FiChevronLeft, FiChevronRight, FiTag, FiCopy } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
+import { LuSparkles } from 'react-icons/lu';
 import { formatDistanceToNow } from 'date-fns';
 import { saveHotkey as apiSaveHotkey, clearHotkey as apiClearHotkey } from '../../../../../shared-components/hotkeys';
 import { saveShortcut as apiSaveShortcut, clearShortcut as apiClearShortcut } from '../../../../../shared-components/shortcuts';
@@ -56,7 +56,8 @@ import { getUserId } from '../../../../../storage/API/core/api';
 import { deleteUserHotkeyByReference } from '../../../../../shared-components/hotkeys/core/hotkeyDbData';
 import { saveShortcut } from '../../../../../shared-components/shortcuts';
 import { deleteUserShortcutByReference, normalizeShortcutTrigger } from '../../../../../shared-components/shortcuts/core/shortcutDbData';
-import type { BrowserTab, SelectedLink, ContentTab } from '../linkTypes';
+import type { BrowserTab, CreateLinkInput, LinkRecord, SelectedLink, ContentTab, UpdateLinkInput } from '../linkTypes';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
 import { useChromeTabs } from './hooks/useChromeTabs';
 import DeleteConfirmation from '../../../../../shared-components/modals/deleteDialog';
 import { HighlightedInput } from './components/HighlightedInput';
@@ -74,7 +75,22 @@ interface LinkEditorViewProps {
   onClose: () => void;
   link: any | null;
   prefill?: any | null;
+  initialTagIds?: string[];
+  onLinkCreated?: (link: any) => void | Promise<void>;
   reload: () => void; // Kept for compatibility, though we use optimistic updates
+  isFullScreenMode?: boolean;
+  isWidgetMode?: boolean;
+  isOverlay?: boolean;
+  hideRightPanel?: boolean;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
+  onSavedClose?: () => void;
+  saveLinkAdapter?: (args: {
+    mode: 'create' | 'update';
+    linkId?: string;
+    input: CreateLinkInput | UpdateLinkInput;
+  }) => Promise<LinkRecord>;
+  propertyPersistenceAdapter?: React.ComponentProps<typeof SharedPropertiesToolbar>['propertyPersistenceAdapter'];
 }
 
 const LinkDragHandle: React.FC = () => (
@@ -101,8 +117,25 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   onClose,
   link: initialLinkProp,
   prefill,
+  initialTagIds,
+  onLinkCreated,
   reload,
+  isFullScreenMode = false,
+  isWidgetMode = false,
+  isOverlay: propIsOverlay,
+  hideRightPanel = false,
+  appearanceScope = 'default',
+  appearanceTokens,
+  onSavedClose,
+  saveLinkAdapter,
+  propertyPersistenceAdapter,
 }) => {
+  const activeEditor = useUIStore(state => state.activeEditor);
+  const isOverlay = Boolean(propIsOverlay || activeEditor?.props?.isOverlay);
+  const isAltSOverlay = appearanceScope === 'alts';
+  const isFocusMode = useUIStore((s: any) => s.isFocusMode);
+  const isNormalLinkMode = !isWidgetMode && !isFullScreenMode && !isOverlay && !isFocusMode;
+
   useEffect(() => {
     // Portal target for session sidebar removed
   }, []);
@@ -152,15 +185,14 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const initialLink = isForceCreateNew ? null : localLinkOverride || initialLinkProp;
 
   const linkId = initialLink?.id || (initialLink as any)?.snippet_id || null;
-  const isFocusMode = useUIStore((s: any) => s.isFocusMode);
   const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('embed') === 'true';
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   const snippets = useDbStore(state => state.snippets);
-  const automations = useDbStore(state => state.automations);
   const links = useDbStore(state => state.links);
   const workspaces = useDbStore(state => state.workspaces);
   const folders = useDbStore(state => state.folders);
   const tags = useDbStore(state => state.tags);
+  const { isFavorite, toggleFavorite, addFavorite } = useFavorites();
 
   const [isRightPanelExpanded, setIsRightPanelExpanded] = useState(false);
   const rightSideSearchInputRef = useRef<HTMLInputElement>(null);
@@ -234,7 +266,15 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     selectedVersionId,
     setSelectedVersionId,
     isViewingHistory,
-  } = useLinkEditor({ linkId, initialDraftKey: prefill?.key, initialDraftUrls: EMPTY_INITIAL_URLS });
+  } = useLinkEditor({ 
+    linkId, 
+    initialDraftKey: prefill?.key, 
+    initialDraftUrls: EMPTY_INITIAL_URLS,
+    initialTagIds,
+    onLinkCreated,
+    saveLinkAdapter,
+    propertyPersistenceAdapter,
+  });
 
   const tagIdsKey = useMemo(() => [...tagIds].sort().join('|'), [tagIds]);
 
@@ -327,7 +367,15 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
     if (shortcutConflictId) {
       console.log('[ShortcutDebug] Explicitly clearing conflicting shortcut reference:', shortcutConflictId);
-      await apiClearShortcut(shortcutConflictId, shortcutConflictId, 'link');
+      if (propertyPersistenceAdapter?.clearShortcut) {
+        await propertyPersistenceAdapter.clearShortcut({
+          id: shortcutConflictId,
+          referenceId: shortcutConflictId,
+          type: 'link',
+        });
+      } else {
+        await apiClearShortcut(shortcutConflictId, shortcutConflictId, 'link');
+      }
     }
 
     const currentCompound = getItemCompoundId({
@@ -337,13 +385,23 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       snippet: { id: targetId, category: 'link' },
     });
     console.log(`[ShortcutDebug] Saving shortcut "${linkShortcut}" to target ID "${targetId}" (compound: ${currentCompound})...`);
-    await apiSaveShortcut(targetId, currentCompound, linkShortcut, title || 'Link', 'link');
+    if (propertyPersistenceAdapter?.saveShortcut) {
+      await propertyPersistenceAdapter.saveShortcut({
+        id: targetId,
+        referenceId: currentCompound,
+        shortcut: linkShortcut,
+        label: title || 'Link',
+        type: 'link',
+      });
+    } else {
+      await apiSaveShortcut(targetId, currentCompound, linkShortcut, title || 'Link', 'link');
+    }
     console.log('[ShortcutDebug] Shortcut reassignment saved to DB. Clearing validation error.');
     setShortcutError(null);
     setIsShortcutOverrideable(false);
     setShortcutConflictId(null);
     await executeSave(true);
-  }, [linkShortcut, initialLink, activeLinkId, workspaceId, folderId, title, shortcutConflictId, executeSave]);
+  }, [linkShortcut, initialLink, activeLinkId, workspaceId, folderId, title, shortcutConflictId, executeSave, propertyPersistenceAdapter]);
 
   // Determine mode based on whether a snippet is passed or has been saved
   const isEditMode = !!initialLink || !!activeLinkId;
@@ -358,7 +416,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     });
   }, [activeLinkId, workspaceId, folderId]);
 
-  const { tabsByWindow, allTabs, currentWindowId, collapsedWindows, setCollapsedWindows, hasFetchedTabs, fetchTabs } = useChromeTabs(isOpen);
+  const shouldLoadBrowserTabs = isOpen;
+  const { tabsByWindow, allTabs, currentWindowId, collapsedWindows, setCollapsedWindows, hasFetchedTabs, fetchTabs } = useChromeTabs(shouldLoadBrowserTabs);
   const hasPrefilledEditModeRef = useRef(false);
 
   const lastSyncTimeRef = useRef<string | null>(null);
@@ -378,7 +437,11 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   const handleOverwriteHotkey = async (conflictId: string, newValue: string) => {
     try {
-      await deleteUserHotkeyByReference(conflictId);
+      if (propertyPersistenceAdapter?.clearHotkey) {
+        await propertyPersistenceAdapter.clearHotkey({ id: conflictId, referenceId: conflictId, type: 'link' });
+      } else {
+        await deleteUserHotkeyByReference(conflictId);
+      }
       await handleHotkeyChange(newValue);
     } catch (err) {
       console.error('Overwrite hotkey failed:', err);
@@ -387,7 +450,11 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   const handleOverwriteShortcut = async (conflictId: string, newValue: string) => {
     try {
-      await deleteUserShortcutByReference(conflictId);
+      if (propertyPersistenceAdapter?.clearShortcut) {
+        await propertyPersistenceAdapter.clearShortcut({ id: conflictId, referenceId: conflictId, type: 'link' });
+      } else {
+        await deleteUserShortcutByReference(conflictId);
+      }
       await handleShortcutChange(newValue);
     } catch (err) {
       console.error('Overwrite shortcut failed:', err);
@@ -439,7 +506,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       } else {
         setSelectedLinks([
           {
-            id: prefillId || `temp-${Date.now()}`,
+            id: prefillId || generateEntityId('linkItem'),
             url: typeof prefill.value === 'string' ? prefill.value : '',
             name: prefill.key || '',
             source: 'link',
@@ -533,6 +600,33 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     Array<{ title: string; url: string; source: 'history' | 'bookmark' }>
   >([]);
   const [focusedSuggestionIndex, setFocusedSuggestionIndex] = useState(-1);
+  const [suggestionRect, setSuggestionRect] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    if (linkSuggestions.length === 0 || !isLeftCustomLinkFormOpen) {
+      setSuggestionRect(null);
+      return;
+    }
+
+    const updateRect = () => {
+      if (customLinkUrlRef.current) {
+        const rect = customLinkUrlRef.current.getBoundingClientRect();
+        setSuggestionRect({
+          top: rect.bottom + 8,
+          left: rect.left,
+          width: rect.width,
+        });
+      }
+    };
+
+    updateRect();
+    window.addEventListener('scroll', updateRect, true);
+    window.addEventListener('resize', updateRect);
+    return () => {
+      window.removeEventListener('scroll', updateRect, true);
+      window.removeEventListener('resize', updateRect);
+    };
+  }, [linkSuggestions, isLeftCustomLinkFormOpen]);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const shortcutInputRef = useRef<HTMLInputElement>(null);
@@ -607,7 +701,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
   const duplicateLink = useCallback((link: SelectedLink) => {
     setSelectedLinks(prev => {
-      const newId = `duplicate-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const newId = generateEntityId('linkItem');
       return [
         ...prev,
         {
@@ -764,8 +858,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   }, [initialLink, isOpen]);
 
 
-  const { toggleFavorite } = useFavorites();
-  const { isFavorite } = useFavorites();
+
 
   const fetchTableMaps = useCallback(async () => {
     try {
@@ -778,8 +871,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   }, []);
 
   useEffect(() => {
+    if (isAltSOverlay) return;
     void fetchTableMaps();
-  }, [fetchTableMaps, activeLinkId, saveStatus]);
+  }, [fetchTableMaps, activeLinkId, saveStatus, isAltSOverlay]);
 
   const toggleFavoriteLocal = async (item: any) => {
     try {
@@ -809,9 +903,22 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     if (initialLink?.id && !String(initialLink.id).startsWith('temp-')) {
       try {
         if (!newHotkey) {
-          await apiClearHotkey(initialLink.id, compoundId, 'link');
+          if (propertyPersistenceAdapter?.clearHotkey) {
+            await propertyPersistenceAdapter.clearHotkey({ id: initialLink.id, referenceId: compoundId, type: 'link' });
+          } else {
+            await apiClearHotkey(initialLink.id, compoundId, 'link');
+          }
         } else {
-          await apiSaveHotkey(initialLink.id, compoundId, newHotkey, 'link');
+          if (propertyPersistenceAdapter?.saveHotkey) {
+            await propertyPersistenceAdapter.saveHotkey({
+              id: initialLink.id,
+              referenceId: compoundId,
+              hotkey: newHotkey,
+              type: 'link',
+            });
+          } else {
+            await apiSaveHotkey(initialLink.id, compoundId, newHotkey, 'link');
+          }
         }
         showFooterStatus('success', newHotkey ? 'Hotkey updated' : 'Hotkey cleared');
       } catch (error) {
@@ -825,15 +932,29 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     if (initialLink?.id && !String(initialLink.id).startsWith('temp-')) {
       try {
         if (!newShortcut) {
-          await apiClearShortcut(initialLink.id, compoundId, 'link');
+          if (propertyPersistenceAdapter?.clearShortcut) {
+            await propertyPersistenceAdapter.clearShortcut({ id: initialLink.id, referenceId: compoundId, type: 'link' });
+          } else {
+            await apiClearShortcut(initialLink.id, compoundId, 'link');
+          }
         } else {
-          await apiSaveShortcut(
-            initialLink.id,
-            compoundId,
-            newShortcut,
-            title.trim() || initialLink.key || '',
-            'link',
-          );
+          if (propertyPersistenceAdapter?.saveShortcut) {
+            await propertyPersistenceAdapter.saveShortcut({
+              id: initialLink.id,
+              referenceId: compoundId,
+              shortcut: newShortcut,
+              label: title.trim() || initialLink.key || '',
+              type: 'link',
+            });
+          } else {
+            await apiSaveShortcut(
+              initialLink.id,
+              compoundId,
+              newShortcut,
+              title.trim() || initialLink.key || '',
+              'link',
+            );
+          }
         }
         showFooterStatus('success', 'Shortcut updated');
       } catch (error) {
@@ -844,6 +965,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   };
 
   const sortedLinks = useMemo(() => {
+    if (hideRightPanel) return [];
     const query = tableSearchQuery.trim().toLowerCase();
     const sorted = [...links].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     if (!query) return sorted;
@@ -861,7 +983,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         .some((item: any) => `${item.name || ''} ${item.url || ''}`.toLowerCase().includes(query));
       return titleMatch || shortcutMatch || previewMatch;
     });
-  }, [links, shortcutsMap, tableSearchQuery]);
+  }, [hideRightPanel, links, shortcutsMap, tableSearchQuery]);
 
   const handleLoadLinkItem = useCallback((id: string) => {
     const found = links.find(link => link.id === id);
@@ -916,7 +1038,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
           if (lastSavedTitleRef) lastSavedTitleRef.current = updatedTitle;
         }
       } else if (field === 'shortcut') {
-        const finalShortcut = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const finalShortcut = value.toLowerCase().replace(/[^a-z0-9_]/g, '');
         const compound = getItemCompoundId({
           id,
           workspace_id: existing.workspaceId || null,
@@ -1065,7 +1187,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         const finalResults = Array.from(unique.values()).slice(0, 5);
 
         setLinkSuggestions(finalResults);
-        setFocusedSuggestionIndex(finalResults.length > 0 ? 0 : -1);
+        setFocusedSuggestionIndex(-1);
       } catch (e) {
         console.error('[LinkEditModal] Search failed:', e);
       }
@@ -1143,7 +1265,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
             setSelectedLinks(initialLink.urls.map((u: string) => ({
               url: u,
               title: '',
-              id: (window as any).crypto?.randomUUID ? crypto.randomUUID() : `link-${Date.now()}`
+              id: generateEntityId('linkItem')
             })));
           } else {
             setSelectedLinks(initialLink.urls);
@@ -1189,7 +1311,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 url: u,
                 title: names[idx] || (isNote ? 'Note snippet' : ''),
                 name: names[idx] || (isNote ? 'Note snippet' : ''),
-                id: (window as any).crypto?.randomUUID ? crypto.randomUUID() : `link-${Date.now()}-${idx}`
+                id: generateEntityId('linkItem')
               };
             })
           );
@@ -1305,90 +1427,42 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       const processSnippet = (s: any) => {
         const category = String(s.category || "").toLowerCase();
 
-        const isTabGroup = category === 'link' || category === 'link';
         const isLink = category === 'link';
-        const isNote = category === 'snippet';
-
-        if (!isLink && !isNote) return;
+        if (!isLink) return;
 
         let subtitle = '';
-        if (isLink) {
-          try {
-            if (typeof s.value === 'string') {
-              if (s.value.trim().startsWith('{')) {
-                const parsed = JSON.parse(s.value);
-                if (parsed.urls && Array.isArray(parsed.urls) && parsed.urls.length > 0) {
-                  subtitle = parsed.urls[0];
-                } else if (parsed.url) {
-                  subtitle = parsed.url;
-                } else {
-                  subtitle = s.value;
-                }
+        try {
+          if (typeof s.value === 'string') {
+            if (s.value.trim().startsWith('{')) {
+              const parsed = JSON.parse(s.value);
+              if (parsed.urls && Array.isArray(parsed.urls) && parsed.urls.length > 0) {
+                subtitle = parsed.urls[0];
+              } else if (parsed.url) {
+                subtitle = parsed.url;
               } else {
                 subtitle = s.value;
               }
+            } else {
+              subtitle = s.value;
             }
-          } catch {
-            subtitle = '';
           }
-        } else {
-          subtitle = 'Note';
+        } catch {
+          subtitle = '';
         }
 
         items.push({
-          id: s.id || s.snippet_id || `snip-${Math.random()}`,
-          url: isNote ? `note:${s.id || s.snippet_id}` : subtitle,
+          id: s.id || s.snippet_id || generateEntityId('linkItem'),
+          url: subtitle,
           name: s.key || 'Untitled',
-          source: isLink ? 'link' : 'note',
-          favIconUrl: (isLink && subtitle) ? getFaviconUrl(getHostname(subtitle)) : undefined,
+          source: 'link',
+          favIconUrl: subtitle ? getFaviconUrl(getHostname(subtitle)) : undefined,
           originalData: s,
         });
       };
 
-      const processAutomation = (auto: any) => {
-        if (!auto) return;
-        const steps = auto.automation_steps || auto.steps;
-        const isAi =
-          Array.isArray(steps) &&
-          steps.some(
-            (s: any) =>
-              String(s.module_id || s.moduleId) === '5' || s.config?.agentId === 'all_ai' || s.config?.isAllAi,
-          );
-        if (!isAi) return;
-
-        if (items.some(existing => String(existing.id) === String(auto.id || auto.automation_id))) return;
-
-        items.push({
-          id: auto.id || auto.automation_id || `agent-${Math.random()}`,
-          url: 'agent_chat',
-          name: auto.name || auto.title || 'AI Agent',
-          source: 'link',
-          originalData: auto,
-        });
-      };
-
-      // Fetch local automations
-      try {
-        const localData = await new Promise<any>(resolve => {
-          chrome.storage.local.get(['automations', 'saved_automations'], resolve);
-        });
-        const toAutomationArray = (value: any): any[] => {
-          if (Array.isArray(value)) return value;
-          if (value && typeof value === 'object') return Object.values(value);
-          return [];
-        };
-        const syncedAutomations = toAutomationArray(localData?.automations);
-        const legacyAutomations = toAutomationArray(localData?.saved_automations);
-        const localAutos = syncedAutomations.length > 0 ? syncedAutomations : legacyAutomations;
-
-        localAutos.forEach(processAutomation);
-      } catch (e) {
-        console.warn('[LinkEditModal] Failed to load local automations:', e);
-      }
 
       // Links-only architecture: snippets in this view are link records.
       snippets.forEach(processSnippet);
-      automations.forEach(processAutomation);
 
       // Sort items by updated_at or created_at (descending) to show recent items first
       // Note: originalData might not always have updated_at depending on source, fallback to created_at or 0
@@ -1405,7 +1479,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     };
 
     loadItems();
-  }, [isOpen, snippets, automations, tabsByWindow, currentWindowId]);
+  }, [isOpen, snippets, tabsByWindow, currentWindowId]);
 
   // Scroll to top when active tab changes
   useEffect(() => {
@@ -1500,7 +1574,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       const linkName = tab.title || getHostname(tab.url);
 
       setSelectedLinks(prev => {
-        const linkId = `tab-${tab.id}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const linkId = generateEntityId('linkItem');
         return [
           ...prev,
           {
@@ -1525,31 +1599,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   const addItemFromContentBar = useCallback(
     (item: SelectedLink) => {
       hasUserModifiedRef.current = true;
-      if (item.url === 'agent_chat') {
-        const agentId = item.id || item.originalData?.id || item.originalData?.snippet_id;
-
-        setSelectedLinks(prev => {
-          const agentUrl = `agent_chat?id=${agentId}`;
-          if (prev.some(existing => existing.url === agentUrl)) return prev;
-
-          const newId = `agent-${agentId}-${Date.now()}`;
-          return [
-            ...prev,
-            {
-              ...item,
-              id: newId,
-              url: agentUrl,
-              name: `${item.name} (AI Agent)`,
-              source: 'custom',
-              favIconUrl: 'https://chatgpt.com/favicon.ico', // Indicator for AI
-            },
-          ];
-        });
-        return;
-      }
-
       setSelectedLinks(prev => {
-        const newId = `${item.source}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const newId = generateEntityId('linkItem');
         return [
           ...prev,
           {
@@ -1590,7 +1641,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
     }
 
     const name = customLinkName.trim() || getHostname(normalizedUrl);
-    const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const id = generateEntityId('linkItem');
 
     setSelectedLinks(prev => [
       ...prev,
@@ -1631,10 +1682,10 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       const saved = await executeSave(isAutoSave);
 
       if (saved && !isAutoSave) {
-        setTimeout(() => onClose(), 1500);
+        setTimeout(() => (onSavedClose || onClose)(), 1500);
       }
       return saved;
-    }, [executeSave, setTitle, setSelectedLinks, onClose, shortcutError]);
+    }, [executeSave, setTitle, setSelectedLinks, onClose, onSavedClose, shortcutError]);
 
   const parseSnippetValue = useCallback((value: string): SelectedLink[] => {
     if (!value) return [];
@@ -1643,7 +1694,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
         const parsed = JSON.parse(value);
         if (parsed && Array.isArray(parsed.urls)) {
           return parsed.urls.map((url: string, index: number) => ({
-            id: `cloud-${index}-${Date.now()}`,
+            id: generateEntityId('linkItem'),
             url,
             name: parsed.names?.[index] || getHostname(url),
             source: 'link' as const,
@@ -1654,7 +1705,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
       console.warn('[LinkEditModal] Failed to parse snippet value:', e);
     }
     return [{
-      id: `cloud-single-${Date.now()}`,
+    id: generateEntityId('linkItem'),
       url: value,
       name: '',
       source: 'link' as const,
@@ -2017,24 +2068,113 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
   if (!isOpen) return null;
 
   const globalTabRenderIndex = 0;
+  const altSAppearanceStyle = isAltSOverlay
+    ? ({
+        ...appearanceTokens,
+        '--color-editorBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+        '--color-modalBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+        '--color-popupBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+        '--color-inputBg': 'var(--alts-search-bg, var(--color-altsSearchBg))',
+        '--color-containerBg': 'var(--alts-row-hover-bg, var(--color-altsRowHoverBg))',
+        '--color-hoverBg': 'var(--alts-row-hover-bg, var(--color-altsRowHoverBg))',
+        '--color-selectedBg': 'var(--alts-row-selected-bg, var(--color-altsRowSelectedBg))',
+        '--color-borderDefault': 'color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 30%, transparent)',
+        '--color-borderActive': 'color-mix(in srgb, var(--alts-icon-tile-action-bg, var(--color-altsIconTileActionBg)) 44%, var(--alts-border-color, var(--color-altsBorderColor)))',
+        '--color-textPrimary': 'var(--alts-text-primary, var(--color-altsTextPrimary))',
+        '--color-textSecondary': 'var(--alts-text-secondary, var(--color-altsTextSecondary))',
+        '--color-textMuted': 'var(--alts-text-placeholder, var(--color-altsTextPlaceholder))',
+        '--color-textPlaceholder': 'var(--alts-text-placeholder, var(--color-altsTextPlaceholder))',
+        '--color-iconDefault': 'var(--alts-text-secondary, var(--color-altsTextSecondary))',
+        '--color-focusRing': 'color-mix(in srgb, var(--alts-focus-color, var(--color-altsFocusColor)) 18%, transparent)',
+      } as React.CSSProperties & Record<`--${string}`, string>)
+    : appearanceTokens;
 
   return (
     <>
+      {isAltSOverlay && (
+        <style>{`
+          .link-editor-alts-overlay :where(.border, .border-t, .border-r, .border-b, .border-l) {
+            border-color: color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 30%, transparent) !important;
+          }
+          .link-editor-alts-overlay :where(input, button, section, [role="dialog"]) {
+            --tw-ring-color: color-mix(in srgb, var(--alts-focus-color, var(--color-altsFocusColor)) 18%, transparent) !important;
+          }
+          .link-editor-alts-overlay [data-link-editor-surface="alts"] {
+            background: transparent !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+          }
+          .link-editor-alts-overlay :where(
+            [class*="text-neutral-800"],
+            [class*="text-neutral-700"],
+            [class*="dark:text-neutral-300"],
+            [class*="dark:text-neutral-200"],
+            [class*="dark:text-neutral-100"]
+          ) {
+            color: var(--color-textPrimary) !important;
+          }
+          .link-editor-alts-overlay :where(
+            [class*="text-neutral-600"],
+            [class*="text-neutral-500"],
+            [class*="text-neutral-400"],
+            [class*="dark:text-neutral-500"],
+            [class*="dark:text-neutral-400"]
+          ) {
+            color: var(--color-textSecondary) !important;
+          }
+          .link-editor-alts-overlay :where(
+            [class*="bg-white"][class*="dark:bg-neutral-900"],
+            [class*="dark:bg-[#1C1C1E]"]
+          ) {
+            background-color: var(--color-modalBg) !important;
+          }
+          .link-editor-alts-overlay :where([class*="border-black/5"], [class*="dark:border-neutral-700"], [class*="dark:border-white/10"]) {
+            border-color: var(--color-borderDefault) !important;
+          }
+        `}</style>
+      )}
       <EditorContainer
-        className="w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4"
-        innerClassName="flex flex-col relative bg-[var(--color-editorBg)] mx-auto rounded-xl min-h-[450px] h-auto max-h-[860px] max-h-[90vh] overflow-hidden border border-black/5 dark:border-white/10 w-[calc(100%-20px)] max-w-[1800px]"
+        style={altSAppearanceStyle}
+        className={clsx(
+          isAltSOverlay && 'link-editor-alts-overlay',
+          isWidgetMode
+            ? 'w-full h-full flex flex-col text-left text-[var(--color-textPrimary)] bg-transparent overflow-hidden'
+            : isNormalLinkMode
+              ? 'w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-4 md:px-6 py-2'
+              : isAltSOverlay
+                ? 'w-full h-full min-h-0 max-h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent p-0 overflow-hidden'
+                : 'w-full h-full flex flex-col gap-1 text-left text-[var(--color-textPrimary)] bg-transparent px-6 md:px-12 lg:px-24 py-4',
+        )}
+        innerClassName={isWidgetMode
+          ? 'flex flex-col w-full h-full overflow-hidden bg-transparent'
+          : isNormalLinkMode
+            ? 'flex flex-row items-start gap-2 relative bg-transparent w-full h-auto min-h-0 max-h-[85vh] overflow-y-auto custom-scrollbar border-none'
+            : isAltSOverlay
+              ? 'flex flex-col relative bg-transparent mx-auto min-h-0 h-full max-h-full overflow-hidden w-full'
+              : 'flex flex-row items-stretch gap-2 relative bg-transparent mx-auto min-h-[450px] h-auto max-h-[860px] max-h-[90vh] overflow-visible w-[calc(100%-20px)] max-w-[1800px]'
+        }
       >
-        <div className="flex-1 flex flex-row items-stretch min-h-0 relative w-full overflow-hidden">
-          {/* Left Column Workspace */}
-          <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-            <EditorHeader
-              title={isForceCreateNew ? 'Create a link' : activeLinkId ? 'Edit link' : 'Create a link'}
+        {/* Left Editor Surface */}
+        <div
+          data-link-editor-surface={isAltSOverlay ? 'alts' : undefined}
+          className={isWidgetMode
+            ? 'flex-1 min-w-0 flex flex-col h-full overflow-hidden bg-transparent border-none relative'
+            : isNormalLinkMode
+              ? 'flex-1 min-w-0 flex flex-col h-auto min-h-0 max-h-full overflow-hidden rounded-none border-none shadow-none bg-[var(--color-editorBg)] relative'
+              : isAltSOverlay
+                ? 'w-full min-w-0 flex flex-col h-full min-h-0 max-h-full overflow-hidden rounded-none border-none shadow-none bg-transparent relative'
+                : 'flex-1 min-w-0 flex flex-col h-full overflow-hidden rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-editorBg)] relative'
+          }>
+          <EditorHeader
+              hideBorder={isNormalLinkMode}
+              title={isForceCreateNew ? 'Create a link collection' : activeLinkId ? 'Edit link collection' : 'Create a link collection'}
+              titleClassName={isNormalLinkMode ? 'absolute left-1/2 top-1/2 w-full max-w-[740px] -translate-x-1/2 -translate-y-1/2 px-4 md:px-6 text-lg font-bold text-[var(--color-textPrimary)] truncate pointer-events-none' : undefined}
               isDirty={hasUnsavedChanges}
               saveStatus={saveStatus === 'error' && saveError ? 'error' : saveStatus}
               lastSavedAt={lastSavedAt}
               activeId={activeLinkId}
               onCloseClick={onClose}
-              showCloseButton={false}
+              showCloseButton={isAltSOverlay}
               headerActions={
                 <SharedPropertiesToolbar
                   key={activeLinkId || 'new-link'}
@@ -2055,24 +2195,35 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                   selectedVersionId={selectedVersionId}
                   onSelectVersion={setSelectedVersionId}
                   entityType="link"
+                  appearanceScope={appearanceScope}
+                  appearanceTokens={altSAppearanceStyle}
+                  propertyPersistenceAdapter={propertyPersistenceAdapter}
                   showTodo={true}
                   onCreateTodo={async (deadlineVal, isRecurring, recurringCycle) => {
                     console.log('[LinkEditorView:onCreateTodo] Called with:', { deadlineVal, isRecurring, recurringCycle, activeLinkId, title, selectedLinksCount: selectedLinks?.length });
-                    const linkId = activeLinkId || 'link_' + Date.now();
+                    const linkId = activeLinkId || generateEntityId('link');
                     const scheduleTime = deadlineVal ? new Date(deadlineVal).getTime() : Date.now();
                     const todoTitle = title || 'New Link List';
-                    const optionalDescription = selectedLinks?.length
-                      ? selectedLinks.map((l: any) => (l.title && l.title !== l.url ? `• ${l.title}: ${l.url}` : `• ${l.url}`)).join('\n')
-                      : undefined;
                     try {
-                      const newTodo = await createTodo(
-                        todoTitle,
-                        [{ type: 'link', id: linkId, name: todoTitle }],
-                        isRecurring ? 'recurring' : 'one-time',
+                      const scheduleType: 'one-time' | 'recurring' = isRecurring ? 'recurring' : 'one-time';
+                      const todoInput = {
+                        title: todoTitle,
+                        references: [{ type: 'link', id: linkId, name: todoTitle }],
+                        scheduleType,
                         scheduleTime,
-                        isRecurring ? recurringCycle as any : undefined,
-                        optionalDescription
-                      );
+                        recurringCycle: isRecurring ? recurringCycle as any : undefined,
+                        description: '',
+                      };
+                      const newTodo = propertyPersistenceAdapter?.createTodo
+                        ? await propertyPersistenceAdapter.createTodo(todoInput)
+                        : await createTodo(
+                            todoInput.title,
+                            todoInput.references,
+                            todoInput.scheduleType,
+                            todoInput.scheduleTime,
+                            todoInput.recurringCycle,
+                            todoInput.description,
+                          );
                       console.log('[LinkEditorView:onCreateTodo] Successfully created To-Do in Dexie:', newTodo);
 
                       const chromeAny = (window as any).chrome;
@@ -2096,9 +2247,15 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
               }
             />
 
-            <div className="flex-1 flex flex-col min-h-0 relative">
+            <div className={clsx(isAltSOverlay ? 'flex-1 flex flex-col min-h-0 relative overflow-hidden' : 'flex-1 flex flex-col min-h-0 relative')}>
               <div className={clsx(
-                "w-full flex-1 flex flex-col min-h-0 px-6 pt-1 pb-4",
+                isWidgetMode
+                  ? "w-full flex-1 flex flex-col min-h-0 px-3 py-2"
+                  : isNormalLinkMode
+                    ? "w-full max-w-[740px] mx-auto flex-1 flex flex-col min-h-0 px-4 md:px-6 pt-1 pb-4"
+                    : isAltSOverlay
+                      ? "w-full flex-1 flex flex-col min-h-0 overflow-hidden px-2 pt-1 pb-0"
+                      : "w-full flex-1 flex flex-col min-h-0 px-6 pt-1 pb-4",
                 (isLeftCustomLinkFormOpen && linkSuggestions.length > 0) ? "overflow-visible" : "overflow-hidden"
               )}>
 
@@ -2136,7 +2293,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                 }
               }}
               onCopyTitleToShortcut={(isInitialized && isShortcutInitialized) ? () => {
-                const val = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const val = title.toLowerCase().replace(/[^a-z0-9_]/g, '');
                 setLinkShortcut(val);
                 isShortcutManuallyEditedRef.current = true;
                 hasUserModifiedRef.current = true;
@@ -2214,7 +2371,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
             )}
 
             {/* Loading Overlay */}
-            {activeLinkId && liveLink === undefined && !isLinkDeleted && (
+            {activeLinkId && liveLink === undefined && !isLinkDeleted && !isAltSOverlay && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/50 dark:bg-black/50 backdrop-blur-sm">
                 <div className="flex flex-col items-center gap-3">
                   <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
@@ -2224,7 +2381,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
             )}
 
             <div className={clsx(
-              "flex-1 flex flex-col min-w-0 relative h-full max-h-full mt-4",
+              isAltSOverlay
+                ? "flex-1 flex flex-col min-w-0 min-h-0 relative mt-4"
+                : "flex-1 flex flex-col min-w-0 relative h-full max-h-full mt-4",
               (isLeftCustomLinkFormOpen && linkSuggestions.length > 0) ? "overflow-visible" : "overflow-hidden"
             )}>
 
@@ -2236,7 +2395,9 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
               <div
                 ref={listContainerRef}
                 className={clsx(
-                  "flex-1 min-h-0 w-full relative",
+                  isAltSOverlay
+                    ? "flex-1 min-h-0 w-full relative"
+                    : "flex-1 min-h-0 w-full relative",
                   "rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm",
                   (isLeftCustomLinkFormOpen && linkSuggestions.length > 0)
                     ? "overflow-visible"
@@ -2258,41 +2419,6 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                       };
 
                       const itemIcon = (() => {
-                        if (item.url === 'agent_chat') {
-                          const step = (item.originalData?.automation_steps || item.originalData?.steps)?.[0];
-                          let urls: string[] = [];
-                          if (step?.config?.allAiUrls) {
-                            urls = Object.values(step.config.allAiUrls as Record<string, string>)
-                              .map(u => String(u))
-                              .filter(u => !u.includes('cmd_select_status=false'));
-                          } else if (step?.config?.url) {
-                            urls = [step.config.url].filter(u => !u.includes('cmd_select_status=false'));
-                          }
-
-                          if (urls.length > 0) {
-                            return (
-                              <div className="flex -space-x-1.5 items-center w-8">
-                                {urls.slice(0, 3).map((url, i) => (
-                                  <div
-                                    key={`agent-icon-${item.id}-${i}`}
-                                    className="w-4 h-4 rounded-full flex items-center justify-center ring-1 ring-white dark:ring-[#1C1C1E] overflow-hidden shadow-sm bg-white flex-shrink-0">
-                                    <img
-                                      src={getFaviconUrl(getHostname(url))}
-                                      alt=""
-                                      className="w-4 h-4 object-cover"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            );
-                          }
-                          return (
-                            <div className="w-5 h-5 rounded flex items-center justify-center bg-black/5 dark:bg-neutral-800 text-neutral-500">
-                              <FaRobot size={12} />
-                            </div>
-                          );
-                        }
-
                         if (item.favIconUrl) {
                           return <img src={item.favIconUrl} className="w-5 h-5 object-contain" alt="" />;
                         }
@@ -2310,18 +2436,12 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                         }
                         return (
                           <div className="w-5 h-5 rounded flex items-center justify-center bg-black/5 dark:bg-neutral-800 text-neutral-500">
-                            {item.source === 'note' ? <FaFileAlt size={12} /> : <FaLink size={12} />}
+                            <FaLink size={12} />
                           </div>
                         );
                       })();
 
                       const itemLabel = (() => {
-                        if (item.source === 'note' || item.url?.startsWith('note:')) {
-                          return 'Note';
-                        }
-                        if (item.url === 'agent_chat') {
-                          return 'AI Agent';
-                        }
                         return (item.url || '').replace(/^https?:\/\/(www\.)?/i, '');
                       })();
 
@@ -2343,20 +2463,20 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
 
                           <div
                             className={clsx(
-                              "text-[13px] font-medium tracking-tight truncate min-w-0 w-[180px] md:w-[200px] lg:w-[220px] shrink",
-                              isAdded ? "text-neutral-800 dark:text-neutral-300" : "text-neutral-500 dark:text-neutral-400"
-                            )}
-                            style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
-                            {item.name || item.title || item.url}
-                          </div>
-
-                          <div
-                            className={clsx(
                               'text-[11px] font-normal truncate transition-opacity duration-200 text-left min-w-0 flex-1 pr-3',
                               focusedTabIndex === globalIdx ? 'opacity-100' : 'opacity-80 group-hover:opacity-100',
                               'text-neutral-500 dark:text-neutral-400',
                             )}>
                             {itemLabel}
+                          </div>
+
+                          <div
+                            className={clsx(
+                              "text-[13px] font-medium tracking-tight truncate min-w-0 w-[180px] md:w-[200px] lg:w-[220px] shrink",
+                              isAdded ? "text-neutral-800 dark:text-neutral-300" : "text-neutral-500 dark:text-neutral-400"
+                            )}
+                            style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
+                            {item.name || item.title || item.url}
                           </div>
 
                           <div className="flex items-center justify-end gap-1.5 shrink-0 min-w-[112px] md:min-w-[132px]">
@@ -2553,7 +2673,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                                         setSelectedLinks(prev => [
                                           ...prev,
                                           {
-                                            id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                                            id: generateEntityId('linkItem'),
                                             url: item.url,
                                             name: item.title || getHostname(item.url),
                                             source: 'custom',
@@ -2590,8 +2710,11 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                                   className="w-full bg-transparent border-none text-[13.5px] font-normal text-neutral-800 dark:text-neutral-100 placeholder-[var(--color-textPlaceholder)]/50 focus:outline-none h-6"
                                   style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}
                                 />
-                                {linkSuggestions.length > 0 && (
-                                  <div className="absolute top-full left-0 mt-2 w-full bg-white dark:bg-[#1C1C1E] border border-black/5 dark:border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[99] overflow-hidden max-h-[250px] flex flex-col">
+                                {linkSuggestions.length > 0 && suggestionRect && createPortal(
+                                  <div
+                                    className="fixed bg-white dark:bg-[#1C1C1E] border border-black/5 dark:border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[999999] overflow-hidden max-h-[250px] flex flex-col"
+                                    style={{ top: suggestionRect.top, left: suggestionRect.left, width: suggestionRect.width }}
+                                  >
                                     <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 dark:text-neutral-500  tracking-wider bg-white/50 dark:bg-black/20 border-b border-black/5 dark:border-white/5">
                                       Suggestions
                                     </div>
@@ -2604,7 +2727,7 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                                             : 'hover:bg-white dark:hover:bg-white/5 text-neutral-800 dark:text-neutral-200'
                                             }`}
                                           onClick={() => {
-                                            const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                                            const id = generateEntityId('linkItem');
                                             setSelectedLinks(prev => [
                                               ...prev,
                                               {
@@ -2649,7 +2772,8 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                                         </div>
                                       ))}
                                     </div>
-                                  </div>
+                                  </div>,
+                                  document.body
                                 )}
                               </div>
                             </div>
@@ -2709,75 +2833,136 @@ const LinkEditorView: React.FC<LinkEditorViewProps> = ({
                     <span>Create another</span>
                   </button>
                 )}
+                {showTooltip &&
+                  createPortal(
+                    <div
+                      style={{
+                        ...(isAltSOverlay ? altSAppearanceStyle : undefined),
+                        position: 'absolute',
+                        top: `${tooltipPos.top}px`,
+                        left: `${tooltipPos.left}px`,
+                        zIndex: 2147483647,
+                        color: 'var(--color-textPrimary)',
+                      }}
+                      className="rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-modalBg)] px-3 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.6)] flex items-center gap-3 text-[12px] font-sans text-[var(--color-textPrimary)] pointer-events-none">
+                      <div className="flex items-center gap-1">
+                        <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-hoverBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textSecondary)]">
+                          Ctrl
+                        </kbd>
+                        <span className="text-[10px] text-[var(--color-textMuted)] font-bold">+</span>
+                        <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-hoverBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textSecondary)]">
+                          Shift
+                        </kbd>
+                        <span className="text-[10px] text-[var(--color-textMuted)] font-bold">+</span>
+                        <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-hoverBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textSecondary)]">
+                          Enter
+                        </kbd>
+                      </div>
+                      <span className="font-medium text-[var(--color-textSecondary)]">to save and create another</span>
+                    </div>,
+                    isAltSOverlay
+                      ? (window as any).__ALTS_MODAL_PORTAL_HOST__ ||
+                        (window as any).__ALTQ_MODAL_PORTAL_HOST__ ||
+                        (window as any).__ALTS_PORTAL_HOST__ ||
+                        (window as any).__ALTQ_PORTAL_HOST__ ||
+                        document.body
+                      : document.body,
+                  )}
               </div>
             </div>
           </div>
         </div>
       </div>
 
-          {/* Right Column: Full-Height Sibling Column (Top Edge to Bottom Edge) */}
-          <RightSideItemsPanel<any>
-            items={sortedLinks}
-            activeItemId={activeLinkId}
-            searchQuery={tableSearchQuery}
-            onSearchChange={setTableSearchQuery}
-            onCloseClick={onClose}
-            searchPlaceholder="Search links..."
-            getItemTitle={item => item.title || 'Untitled Link'}
-            getItemPreview={item =>
-              (item.urls || [])
-                .map((link: any) => link.name || link.title || link.url || '')
-                .filter(Boolean)
-                .join(', ')
-            }
-            getItemCompoundId={item =>
-              getItemCompoundId({
-                id: item.id,
-                workspace_id: item.workspaceId || null,
-                folder_id: item.folderId || null,
-                snippet: { id: item.id, category: 'link' },
-              })
-            }
-            getItemType={() => 'link'}
-            getItemWorkspaceId={item => item.workspaceId || null}
-            getItemFolderId={item => item.folderId || null}
-            getItemTagIds={item => item.tagIds || []}
-            shortcutPrefix="c"
-            shortcutsMap={shortcutsMap}
-            hotkeysMap={hotkeysMap}
-            workspaceNamesMap={workspaceNamesMap}
-            folderNamesMap={folderNamesMap}
-            tagNamesMap={tagNamesMap}
-            onLoadItem={id => handleLoadLinkItem(id)}
-            onDeleteItem={id => {
-              setLinkToDeleteId(id);
-              setIsDeleteDialogOpen(true);
-            }}
-            onOpenerClick={item => {
-              (item.urls || []).forEach((u: any, idx: number) => {
-                const cleanUrl = typeof u === 'string' ? u : u?.url || '';
-                if (cleanUrl) {
-                  const urlWithProtocol = cleanUrl.startsWith('//') ? `https:${cleanUrl}` : cleanUrl;
-                  const chromeAny = (window as any)?.chrome;
-                  if (chromeAny?.tabs?.create) {
-                    chromeAny.tabs.create({ url: urlWithProtocol, active: idx === 0 });
-                  } else {
-                    window.open(urlWithProtocol, '_blank', 'noopener');
-                  }
-                }
+      {/* Right Column: Full-Height Sibling Column (Top Edge to Bottom Edge) */}
+      {!hideRightPanel && (
+      <RightSideItemsPanel<any>
+          hideBorder={isNormalLinkMode}
+          items={sortedLinks}
+          activeItemId={activeLinkId}
+          searchQuery={tableSearchQuery}
+          onSearchChange={setTableSearchQuery}
+          onCloseClick={onClose}
+          searchPlaceholder="Search links..."
+          getItemTitle={item => item.title || 'Untitled Link'}
+          getItemPreview={item =>
+            (item.urls || [])
+              .map((link: any) => link.name || link.title || link.url || '')
+              .filter(Boolean)
+              .join(', ')
+          }
+          getItemCompoundId={item =>
+            getItemCompoundId({
+              id: item.id,
+              workspace_id: item.workspaceId || null,
+              folder_id: item.folderId || null,
+              snippet: { id: item.id, category: 'link' },
+            })
+          }
+          getItemType={() => 'link'}
+          getItemWorkspaceId={item => item.workspaceId || null}
+          getItemFolderId={item => item.folderId || null}
+          getItemTagIds={item => item.tagIds || []}
+          shortcutPrefix="c"
+          shortcutsMap={shortcutsMap}
+          hotkeysMap={hotkeysMap}
+          workspaceNamesMap={workspaceNamesMap}
+          folderNamesMap={folderNamesMap}
+          tagNamesMap={tagNamesMap}
+          onLoadItem={id => handleLoadLinkItem(id)}
+          onDeleteItem={async id => {
+            try {
+              const target = sortedLinks.find((l: any) => l.id === id);
+              const compoundId = getItemCompoundId({
+                id,
+                workspace_id: target?.workspaceId || null,
+                folder_id: target?.folderId || null,
+                snippet: { id, category: 'link' },
               });
-            }}
-            onUpdateShortcut={async (id, val) => { await handleUpdateItemField(id, 'shortcut', val); }}
-            onUpdateTitle={async (id, val) => { await handleUpdateItemField(id, 'title', val); }}
-            onUpdateTags={async (id, tagText) => { await handleUpdateItemField(id, 'tags', tagText); }}
-            isFavorite={isFavorite}
-            toggleFavorite={toggleFavorite}
-            isExpanded={isRightPanelExpanded}
-            onExpandChange={setIsRightPanelExpanded}
-            searchInputRef={rightSideSearchInputRef}
-            emptyStateMessage="No links found"
-          />
-        </div>
+              await apiClearShortcut(id, compoundId, 'link');
+              await deleteLink(id);
+              const isCurrentItem =
+                id === activeLinkId ||
+                id === (initialLink as any)?.id ||
+                String(id) === String(activeLinkId || '') ||
+                String(id) === String((initialLink as any)?.id || '');
+
+              if (isCurrentItem) {
+                resetEditor();
+                setTitle('');
+                setSelectedLinks([]);
+                setLinkShortcut('');
+              }
+            } catch (err) {
+              console.error('Delete link failed:', err);
+            }
+          }}
+          onOpenerClick={item => {
+            (item.urls || []).forEach((u: any, idx: number) => {
+              const cleanUrl = typeof u === 'string' ? u : u?.url || '';
+              if (cleanUrl) {
+                const urlWithProtocol = cleanUrl.startsWith('//') ? `https:${cleanUrl}` : cleanUrl;
+                const chromeAny = (window as any)?.chrome;
+                if (chromeAny?.tabs?.create) {
+                  chromeAny.tabs.create({ url: urlWithProtocol, active: idx === 0 });
+                } else {
+                  window.open(urlWithProtocol, '_blank', 'noopener');
+                }
+              }
+            });
+          }}
+          onUpdateShortcut={async (id, val) => { await handleUpdateItemField(id, 'shortcut', val); }}
+          onUpdateTitle={async (id, val) => { await handleUpdateItemField(id, 'title', val); }}
+          onUpdateTags={async (id, tagText) => { await handleUpdateItemField(id, 'tags', tagText); }}
+          isFavorite={isFavorite}
+          toggleFavorite={toggleFavorite}
+          addFavorite={addFavorite}
+          isExpanded={isRightPanelExpanded}
+          onExpandChange={setIsRightPanelExpanded}
+          searchInputRef={rightSideSearchInputRef}
+          emptyStateMessage="No links found"
+        />
+      )}
       </EditorContainer>
 
       {/* Link Edit Popup */}

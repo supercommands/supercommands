@@ -24,6 +24,8 @@ export interface VersionHistoryComparisonModalProps {
   versionHistory?: any;
   isDraftUnsaved?: boolean;
   triggerRef?: React.RefObject<HTMLElement | null>;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
 }
 
 export function getNoteBody(snapshot: unknown): string {
@@ -48,10 +50,57 @@ export const VersionHistoryComparisonModal: React.FC<VersionHistoryComparisonMod
   versionHistory,
   isDraftUnsaved = false,
   triggerRef,
+  appearanceScope = 'default',
+  appearanceTokens,
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
   const type = String(entityType).toLowerCase();
   const isNote = type.includes('note');
+  const isAltSAppearance = appearanceScope === 'alts';
+  const appearanceStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!isAltSAppearance) return appearanceTokens;
+    return {
+      ...appearanceTokens,
+      '--color-modalBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-popupBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-panelBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-sidebarBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-contextMenuBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-containerBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-editorBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-inputBg': 'var(--alts-input-bg, var(--color-altsInputBg))',
+      '--color-hoverBg': 'var(--alts-row-hover-bg, var(--color-altsRowHoverBg))',
+      '--color-selectedBg': 'var(--alts-selected-bg, var(--color-altsSelectedBg))',
+      '--color-borderDefault': 'var(--alts-border-color, var(--color-altsBorderColor))',
+      '--color-borderActive': 'var(--alts-focus-ring, var(--color-altsFocusRing))',
+      '--color-textPrimary': 'var(--alts-text-primary, var(--color-altsTextPrimary))',
+      '--color-textSecondary': 'var(--alts-text-secondary, var(--color-altsTextSecondary))',
+      '--color-textMuted': 'var(--alts-text-muted, var(--color-altsTextMuted))',
+      '--color-textPlaceholder': 'var(--alts-text-placeholder, var(--color-altsTextPlaceholder))',
+      '--color-iconDefault': 'var(--alts-icon-fg, var(--color-altsIconFg))',
+      '--color-diffAddedBg': 'color-mix(in srgb, var(--alts-icon-tile-action-bg, var(--color-altsIconTileActionBg)) 18%, transparent)',
+      '--color-diffAddedBorder': 'color-mix(in srgb, var(--alts-icon-tile-action-bg, var(--color-altsIconTileActionBg)) 34%, transparent)',
+      '--color-diffAddedText': 'var(--alts-icon-tile-action-bg, var(--color-altsIconTileActionBg))',
+      '--color-diffRemovedBg': 'color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 18%, transparent)',
+      '--color-diffRemovedBorder': 'color-mix(in srgb, var(--alts-border-color, var(--color-altsBorderColor)) 36%, transparent)',
+      '--color-diffRemovedText': 'var(--alts-text-secondary, var(--color-altsTextSecondary))',
+      '--color-diffModifiedBg': 'var(--alts-row-hover-bg, var(--color-altsRowHoverBg))',
+      '--color-diffModifiedBorder': 'var(--alts-border-color, var(--color-altsBorderColor))',
+      '--color-diffModifiedText': 'var(--alts-text-primary, var(--color-altsTextPrimary))',
+    } as React.CSSProperties;
+  }, [appearanceTokens, isAltSAppearance]);
+  const portalTarget = useMemo<HTMLElement | null>(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+    if (isAltSAppearance) {
+      const modalHost =
+        (window as any).__ALTS_MODAL_PORTAL_HOST__ ||
+        (window as any).__ALTQ_MODAL_PORTAL_HOST__ ||
+        (window as any).__ALTS_PORTAL_HOST__ ||
+        (window as any).__ALTQ_PORTAL_HOST__;
+      if (modalHost instanceof HTMLElement) return modalHost;
+    }
+    return document.body;
+  }, [isAltSAppearance]);
 
   const timelineItems = useMemo<TimelineVersionItem[]>(() => {
     const items: TimelineVersionItem[] = [];
@@ -279,9 +328,38 @@ export const VersionHistoryComparisonModal: React.FC<VersionHistoryComparisonMod
 
   return createPortal(
     <AnimatePresence>
+      {isAltSAppearance && (
+        <style>{`
+          .version-history-alts-modal,
+          .version-history-alts-modal * {
+            color-scheme: inherit;
+          }
+          .version-history-alts-modal {
+            color: var(--color-textPrimary);
+          }
+          .version-history-alts-modal :where(button) {
+            color: var(--color-textSecondary);
+          }
+          .version-history-alts-modal :where(button:hover, button[aria-selected="true"]) {
+            background: var(--color-hoverBg);
+            color: var(--color-textPrimary);
+          }
+          .version-history-alts-modal :where(input, textarea, select) {
+            background: var(--color-inputBg);
+            color: var(--color-textPrimary);
+            border-color: var(--color-borderDefault);
+          }
+        `}</style>
+      )}
       <div
-        className="fixed inset-0 flex items-center justify-center p-6 bg-black/60 backdrop-blur-md select-none animate-in fade-in duration-200"
-        style={{ zIndex: 2147483647 }}
+        className={`${isAltSAppearance ? 'z-alts-subpopup version-history-alts-modal' : 'bg-black/60'} fixed inset-0 flex items-center justify-center p-6 backdrop-blur-md select-none animate-in fade-in duration-200`}
+        style={{
+          ...appearanceStyle,
+          zIndex: 2147483647,
+          backgroundColor: isAltSAppearance
+            ? 'color-mix(in srgb, var(--alts-popup-bg, var(--color-altsPopupBg)) 50%, transparent)'
+            : undefined,
+        }}
         onClick={e => {
           e.stopPropagation();
           onClose();
@@ -325,6 +403,6 @@ export const VersionHistoryComparisonModal: React.FC<VersionHistoryComparisonMod
         </motion.div>
       </div>
     </AnimatePresence>,
-    document.body,
+    portalTarget || document.body,
   );
 };

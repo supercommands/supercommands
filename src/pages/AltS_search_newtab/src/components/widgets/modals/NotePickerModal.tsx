@@ -19,6 +19,17 @@ export const NotePickerModal: React.FC<NotePickerModalProps> = ({ isOpen, onClos
   const getWorkspaceById = useDbStore(state => state.getWorkspaceById);
   const getFolderById = useDbStore(state => state.getFolderById);
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const filteredNotes = notes.filter(note => {
@@ -30,10 +41,12 @@ export const NotePickerModal: React.FC<NotePickerModalProps> = ({ isOpen, onClos
 
   return ReactDOM.createPortal(
     <div
-      className="fixed top-0 bottom-0 z-[999999] flex items-center justify-start pointer-events-auto animate-in fade-in duration-150"
-      style={{ left: '280px' }}>
+      className="fixed inset-0 z-[999999] flex items-center justify-end pointer-events-auto animate-in fade-in duration-150 pr-[290px]"
+      onClick={e => {
+        if (e.target === e.currentTarget) onClose();
+      }}>
       <div
-        className="flex flex-col w-[320px] h-[460px] rounded-2xl border shadow-2xl overflow-hidden transition-colors ml-1"
+        className="flex flex-col w-[320px] h-[460px] rounded-2xl border shadow-2xl overflow-hidden transition-colors"
         style={{
           backgroundColor: 'var(--color-editorBg)',
           borderColor: 'var(--color-borderDefault)',
@@ -45,7 +58,7 @@ export const NotePickerModal: React.FC<NotePickerModalProps> = ({ isOpen, onClos
           className="flex items-center justify-between px-5 py-4 border-b"
           style={{ borderColor: 'var(--color-borderDefault)' }}>
           <div className="flex items-center gap-2">
-            <LuFileText size={20} style={{ color: 'var(--color-iconDefault)' }} />
+            <LuFileText size={20} style={{ color: 'var(--color-noteLibraryIcon)' }} />
             <h3 className="text-sm font-bold tracking-wide" style={{ color: 'var(--color-textPrimary)' }}>
               Select Note to add Widget
             </h3>

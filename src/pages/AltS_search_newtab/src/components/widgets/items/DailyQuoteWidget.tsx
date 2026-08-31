@@ -1,18 +1,29 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type * as React from 'react';
-import type { WidgetSizePreset } from '../widgetDashboard.types';
+import type { WidgetInstance, WidgetSizePreset } from '../widgetDashboard.types';
+import { widgetPerf } from '../utils/widgetPerf';
 
 interface QuoteEntry {
   text: string;
   author: string;
 }
 
+interface CachedQuoteEntry extends QuoteEntry {
+  dateKey: string;
+}
+
+import type { WidgetLayoutInfo } from '../utils/widgetLayoutInfo';
+import { getWidgetLayoutInfo } from '../utils/widgetLayoutInfo';
+
 interface DailyQuoteWidgetProps {
+  widget?: WidgetInstance;
   sizePreset?: WidgetSizePreset;
   isEditMode?: boolean;
+  layoutInfo?: WidgetLayoutInfo;
 }
 
 let quotesRequest: Promise<QuoteEntry[]> | null = null;
+const DAILY_QUOTE_CACHE_KEY = 'cmdos_daily_quote_widget_cache_v1';
 
 const getLocalDateKey = () => {
   const now = new Date();
@@ -31,9 +42,64 @@ const hashDateKey = (dateKey: string) => {
   return hash >>> 0;
 };
 
+const isQuoteEntry = (quote: Partial<QuoteEntry> | null | undefined): quote is QuoteEntry => {
+  if (!quote) return false;
+  return (
+    typeof quote.text === 'string' &&
+    quote.text.trim().length > 0 &&
+    typeof quote.author === 'string' &&
+    quote.author.trim().length > 0
+  );
+};
+
+const readCachedQuote = (dateKey: string): CachedQuoteEntry | null => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const storage = window.localStorage;
+    if (!storage) return null;
+    const raw = storage.getItem(DAILY_QUOTE_CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as Partial<CachedQuoteEntry>;
+    if (cached.dateKey !== dateKey || !isQuoteEntry(cached)) return null;
+    widgetPerf('cache:hit', {
+      widgetType: 'daily-quote',
+      dateKey,
+      source: 'localStorage',
+    });
+    return { dateKey, text: cached.text, author: cached.author };
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedQuote = (dateKey: string, quote: QuoteEntry) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const storage = window.localStorage;
+    if (!storage) return;
+    storage.setItem(
+      DAILY_QUOTE_CACHE_KEY,
+      JSON.stringify({
+        dateKey,
+        text: quote.text,
+        author: quote.author,
+      } satisfies CachedQuoteEntry),
+    );
+    widgetPerf('cache:write', {
+      widgetType: 'daily-quote',
+      dateKey,
+      source: 'localStorage',
+    });
+  } catch {
+    // localStorage may be unavailable in private or restricted extension contexts.
+  }
+};
+
 const loadQuotes = () => {
   if (quotesRequest) {
-    console.info('[DailyQuoteWidget] Reusing cached quote request.');
+    widgetPerf('cache:request:reuse', { widgetType: 'daily-quote' });
     return quotesRequest;
   }
 
@@ -42,28 +108,23 @@ const loadQuotes = () => {
       ? chrome.runtime.getURL('static/quotes.json')
       : '/static/quotes.json';
 
-  console.info('[DailyQuoteWidget] Loading quote collection:', quotesUrl);
+  widgetPerf('data:fetch:start', {
+    widgetType: 'daily-quote',
+    source: quotesUrl,
+  });
+  const startedAt = performance.now();
 
   quotesRequest = fetch(quotesUrl)
     .then(async response => {
-      console.info('[DailyQuoteWidget] Quote collection response:', {
-        ok: response.ok,
-        status: response.status,
-        url: response.url,
-      });
       if (!response.ok) throw new Error('Quote collection could not be loaded.');
       const data = (await response.json()) as Array<Partial<QuoteEntry>>;
       if (!Array.isArray(data)) throw new Error('Quote collection is invalid.');
 
-      const validQuotes = data.filter(
-        (quote): quote is QuoteEntry =>
-          typeof quote.text === 'string' &&
-          quote.text.trim().length > 0 &&
-          typeof quote.author === 'string' &&
-          quote.author.trim().length > 0,
-      );
+      const validQuotes = data.filter(isQuoteEntry);
       if (validQuotes.length === 0) throw new Error('Quote collection is empty.');
-      console.info('[DailyQuoteWidget] Quote collection ready:', {
+      widgetPerf('data:fetch:end', {
+        widgetType: 'daily-quote',
+        durationMs: Math.round(performance.now() - startedAt),
         received: data.length,
         valid: validQuotes.length,
       });
@@ -78,20 +139,54 @@ const loadQuotes = () => {
   return quotesRequest;
 };
 
-const DailyQuoteWidget: React.FC<DailyQuoteWidgetProps> = ({ sizePreset = 'small', isEditMode = false }) => {
+const DailyQuoteWidget: React.FC<DailyQuoteWidgetProps> = ({
+  widget,
+  sizePreset = 'small',
+  isEditMode = false,
+  layoutInfo: providedLayoutInfo,
+}) => {
+  const layout = providedLayoutInfo || getWidgetLayoutInfo(sizePreset === 'large' ? 12 : sizePreset === 'medium' ? 8 : 4, 5);
+  const { isNarrow, isWide } = layout;
+
   const [quotes, setQuotes] = useState<QuoteEntry[]>([]);
   const [dateKey, setDateKey] = useState(getLocalDateKey);
+  const [cachedQuote, setCachedQuote] = useState<CachedQuoteEntry | null>(() => readCachedQuote(getLocalDateKey()));
   const [error, setError] = useState('');
+  const firstContentLoggedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
-    console.info('[DailyQuoteWidget] Mounted:', { sizePreset, dateKey });
+    widgetPerf('body:mounted', {
+      widgetType: widget?.type || 'daily-quote',
+      widgetId: widget?.id || 'unknown',
+      sizePreset,
+      dateKey,
+    });
+
+    if (cachedQuote?.dateKey === dateKey) {
+      widgetPerf('data:fetch:skip', {
+        widgetType: 'daily-quote',
+        dateKey,
+        reason: 'daily-localStorage-cache',
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
 
     loadQuotes()
       .then(loadedQuotes => {
         if (!cancelled) {
           setQuotes(loadedQuotes);
+          const quoteIndex = hashDateKey(dateKey) % loadedQuotes.length;
+          const selectedQuote = loadedQuotes[quoteIndex];
+          writeCachedQuote(dateKey, selectedQuote);
+          setCachedQuote(prev =>
+            prev?.dateKey === dateKey && prev?.text === selectedQuote.text && prev?.author === selectedQuote.author
+              ? prev
+              : { dateKey, ...selectedQuote },
+          );
         }
       })
       .catch(loadError => {
@@ -103,9 +198,12 @@ const DailyQuoteWidget: React.FC<DailyQuoteWidgetProps> = ({ sizePreset = 'small
 
     return () => {
       cancelled = true;
-      console.info('[DailyQuoteWidget] Unmounted.');
     };
-  }, [dateKey, sizePreset]);
+  }, [cachedQuote?.dateKey, dateKey, sizePreset, widget?.id, widget?.type]);
+
+  useEffect(() => {
+    setCachedQuote(readCachedQuote(dateKey));
+  }, [dateKey]);
 
   useEffect(() => {
     const now = new Date();
@@ -118,17 +216,33 @@ const DailyQuoteWidget: React.FC<DailyQuoteWidgetProps> = ({ sizePreset = 'small
   }, [dateKey]);
 
   const quote = useMemo(() => {
-    if (quotes.length === 0) return null;
+    if (quotes.length === 0) {
+      if (cachedQuote?.dateKey !== dateKey) return null;
+      return cachedQuote;
+    }
     const quoteIndex = hashDateKey(dateKey) % quotes.length;
     const selectedQuote = quotes[quoteIndex];
-    console.info('[DailyQuoteWidget] Daily quote selected:', {
+    widgetPerf('data:selected', {
+      widgetType: widget?.type || 'daily-quote',
+      widgetId: widget?.id || 'unknown',
       dateKey,
       quoteIndex,
-      quoteCount: quotes.length,
-      author: selectedQuote.author,
+      recordsReturned: quotes.length,
+      recordsDisplayed: 1,
     });
     return selectedQuote;
-  }, [dateKey, quotes]);
+  }, [cachedQuote, dateKey, quotes, widget?.id, widget?.type]);
+
+  useEffect(() => {
+    if (firstContentLoggedRef.current || !quote) return;
+    firstContentLoggedRef.current = true;
+    widgetPerf('content:firstReady', {
+      widgetType: widget?.type || 'daily-quote',
+      widgetId: widget?.id || 'unknown',
+      recordsReturned: quotes.length,
+      recordsDisplayed: 1,
+    });
+  }, [quote, quotes.length, widget?.id, widget?.type]);
 
   if (error) {
     return (
@@ -146,32 +260,29 @@ const DailyQuoteWidget: React.FC<DailyQuoteWidgetProps> = ({ sizePreset = 'small
     );
   }
 
-  const isSmall = sizePreset === 'small';
-  const isLarge = sizePreset === 'large';
   const shouldShowAuthor = !/^(anonymous|anon\.?|unknown)$/i.test(quote.author.trim());
 
+  const textSizeClass = isNarrow
+    ? 'text-sm leading-relaxed max-w-[280px]'
+    : isWide
+      ? 'text-xl leading-relaxed max-w-[620px]'
+      : 'text-base leading-relaxed max-w-[460px]';
+
+  const authorSizeClass = isNarrow ? 'text-xs' : 'text-sm';
+
   return (
-    <div className={`flex h-full min-h-0 flex-col justify-center ${isEditMode ? 'pb-9' : ''}`}>
-      <blockquote
-        className={`min-h-0 w-full text-left font-semibold not-italic text-[var(--color-textPrimary)] ${
-          isSmall
-            ? 'text-[13px] leading-[1.45]'
-            : isLarge
-              ? 'text-[28px] leading-[1.32]'
-              : 'text-[22px] leading-[1.35]'
-        }`}>
-        &ldquo;
-        {quote.text}
-        &rdquo;
-      </blockquote>
-      {shouldShowAuthor && (
-        <div
-          className={`mt-4 shrink-0 text-left font-semibold text-[var(--color-textMuted)] ${
-            isSmall ? 'text-[10px]' : isLarge ? 'text-base' : 'text-sm'
-          }`}>
-          - {quote.author}
-        </div>
-      )}
+    <div className={`flex h-full w-full min-h-0 flex-col items-center justify-center text-center p-4 overflow-y-auto ${isEditMode ? 'pb-8' : ''}`}>
+      <div className="my-auto flex flex-col items-center justify-center max-w-full">
+        <blockquote
+          className={`min-h-0 font-semibold not-italic text-[var(--color-textPrimary)] mx-auto ${textSizeClass}`}>
+          &ldquo;{quote.text}&rdquo;
+        </blockquote>
+        {shouldShowAuthor && (
+          <div className={`mt-3 shrink-0 font-bold text-[var(--color-textMuted)] ${authorSizeClass}`}>
+            &mdash; {quote.author}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

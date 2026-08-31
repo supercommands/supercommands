@@ -9,11 +9,22 @@ import { migrateLocalStorageToChromeStorage } from '@extension/shared/lib/utils'
 import { useEffect, Suspense } from 'react';
 import { AppearanceProvider } from '@extension/ui';
 import { reduxStore } from './redux/store';
+import { startupPerf } from './startupPerf';
 
 function AppBootstrapper() {
+  startupPerf('AppBootstrapper:render');
+
   useEffect(() => {
+    startupPerf('AppBootstrapper:commit');
     // Run migration in background on mount
-    migrateLocalStorageToChromeStorage().catch(err => console.error('[Migration] Background error:', err));
+    const startedAt = performance.now();
+    migrateLocalStorageToChromeStorage()
+      .then(() => {
+        startupPerf('localStorageMigration:done', {
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+      })
+      .catch(err => console.error('[Migration] Background error:', err));
   }, []);
 
   return (
@@ -30,13 +41,16 @@ function AppBootstrapper() {
 }
 
 function init() {
+  startupPerf('init:start');
   const appContainer = document.querySelector('#app-container');
   if (!appContainer) {
     throw new Error('Can not find #app-container');
   }
   const root = createRoot(appContainer);
 
+  startupPerf('root:render:start');
   root.render(<AppBootstrapper />);
+  startupPerf('root:render:scheduled');
 }
 
 init();

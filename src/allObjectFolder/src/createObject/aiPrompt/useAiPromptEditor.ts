@@ -13,24 +13,35 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
+import type { SetStateAction } from 'react';
 
 import { getItemCompoundId, readAllShortcuts } from '../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { saveShortcut, clearShortcut } from '../../../../shared-components/shortcuts';
 import { normalizeShortcutTrigger } from '../../../../shared-components/shortcuts/core/shortcutDbData';
-
 import { createAiPrompt, updateAiPrompt, deleteAiPrompt } from './aiPromptData';
+import { createTag } from '../tags/tagData';
 import { useShortcutValidation } from '../../../../shared-components/shortcuts/hooks/useShortcutValidation';
 import type { AiPromptRecord, CreateAiPromptInput, UpdateAiPromptInput, CustomModelConfig } from './aiPromptTypes';
 import { useAiPrompt } from './aiPromptHooks';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
 import { StorageManager } from '../../../../storage/localStorage/storageManager';
 import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
+import type { SharedPropertiesToolbarProps } from '../../../../shared-components/editorToolbar/types';
 
 export interface AiPromptEditorProps {
   aiPromptId?: string | null;
   onBack?: () => void;
   initialTitle?: string;
   initialPrompt?: string;
+  initialModelUrls?: Record<string, string>;
+  initialTagIds?: string[];
+  onAiPromptCreated?: (prompt: AiPromptRecord) => void | Promise<void>;
+  saveAiPromptAdapter?: (args: {
+    mode: 'create' | 'update';
+    aiPromptId?: string;
+    input: CreateAiPromptInput | UpdateAiPromptInput;
+  }) => Promise<AiPromptRecord>;
+  propertyPersistenceAdapter?: SharedPropertiesToolbarProps['propertyPersistenceAdapter'];
 }
 
 const DRAFT_KEY = 'aiPrompt_draft';
@@ -73,6 +84,9 @@ const defaultModelUrls = {
   perplexity: 'https://www.perplexity.ai',
 };
 
+const DEFAULT_ENABLED_AI_PROMPT_MODEL_IDS = ['gpt', 'claude'];
+const MODEL_SELECTION_REQUIRED_MESSAGE = 'At least one model must be selected.';
+
 function resolveItemShortcut(
   shortcutsMap: Record<string, string>,
   compoundId: string,
@@ -94,8 +108,27 @@ function resolveItemShortcut(
   return shortcut;
 }
 
+function haveSameModelIds(a: readonly string[], b: readonly string[]): boolean {
+  return [...a].sort().join('\u0000') === [...b].sort().join('\u0000');
+}
+
 export function useAiPromptEditor(props: AiPromptEditorProps) {
-  const { aiPromptId, onBack, initialTitle, initialPrompt } = props;
+  const {
+    aiPromptId,
+    onBack,
+    initialTitle,
+    initialPrompt,
+    initialModelUrls,
+    initialTagIds,
+    onAiPromptCreated,
+    saveAiPromptAdapter,
+    propertyPersistenceAdapter,
+  } = props;
+
+  const onAiPromptCreatedRef = useRef(onAiPromptCreated);
+  onAiPromptCreatedRef.current = onAiPromptCreated;
+  const propertyPersistenceAdapterRef = useRef(propertyPersistenceAdapter);
+  propertyPersistenceAdapterRef.current = propertyPersistenceAdapter;
 
   const resolvedAiPromptId = useMemo(() => {
     return (aiPromptId && aiPromptId !== 'new') ? aiPromptId : null;
@@ -110,8 +143,12 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
-  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [tagIds, setTagIds] = useState<string[]>(
+    !resolvedAiPromptId && Array.isArray(initialTagIds) ? Array.from(new Set(initialTagIds)) : []
+  );
   const [customModels, setCustomModels] = useState<CustomModelConfig[]>([]);
+  const [enabledModelIds, setEnabledModelIds] = useState<string[]>(DEFAULT_ENABLED_AI_PROMPT_MODEL_IDS);
+  const [modelSelectionError, setModelSelectionError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState<boolean>(!resolvedAiPromptId);
   const [isShortcutInitialized, setIsShortcutInitialized] = useState<boolean>(!resolvedAiPromptId);
 
@@ -134,6 +171,50 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   const updatePromptShortcut = useCallback((value: string) => {
     isShortcutManuallyEditedRef.current = true;
     setPromptShortcut(value);
+  }, []);
+
+  const enabledModelIdsRef = useRef<string[]>(enabledModelIds);
+  const hasUserEditedModelsRef = useRef<boolean>(false);
+  const saveRevisionRef = useRef<number>(0);
+  const latestCompletedRevisionRef = useRef<number>(0);
+  const saveInFlightRef = useRef<boolean>(false);
+  const pendingSaveRef = useRef<boolean>(false);
+  const editorSessionRef = useRef<number>(0);
+  const createPromiseRef = useRef<Promise<AiPromptRecord> | null>(null);
+  const activeSavePromiseRef = useRef<Promise<string | false> | null>(null);
+
+  useEffect(() => {
+    enabledModelIdsRef.current = enabledModelIds;
+  }, [enabledModelIds]);
+
+  const toggleModelEnabled = useCallback((modelId: string) => {
+    hasUserEditedModelsRef.current = true;
+    setEnabledModelIds(prev => {
+      if (prev.includes(modelId)) {
+        const next = prev.filter(id => id !== modelId);
+        if (next.length === 0) {
+          setModelSelectionError(MODEL_SELECTION_REQUIRED_MESSAGE);
+          return prev;
+        }
+        setModelSelectionError(null);
+        return next;
+      }
+      setModelSelectionError(null);
+      return [...prev, modelId];
+    });
+  }, []);
+
+  const setEnabledModelIdsControlled = useCallback((action: SetStateAction<string[]>) => {
+    hasUserEditedModelsRef.current = true;
+    setEnabledModelIds(prev => {
+      const next = typeof action === 'function' ? action(prev) : action;
+      if (next.length === 0) {
+        setModelSelectionError(MODEL_SELECTION_REQUIRED_MESSAGE);
+        return prev;
+      }
+      setModelSelectionError(null);
+      return next;
+    });
   }, []);
 
   const { validateShortcut } = useShortcutValidation();
@@ -193,12 +274,12 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
 
-  const [modelUrls, setModelUrls] = useState<Record<string, string>>({
-    gpt: 'https://chatgpt.com',
-    claude: 'https://claude.ai/new',
-    gemini: 'https://gemini.google.com/app',
-    perplexity: 'https://www.perplexity.ai',
-  });
+  const initialMergedModelUrls = useMemo(
+    () => ({ ...defaultModelUrls, ...(initialModelUrls || {}) }),
+    [initialModelUrls],
+  );
+
+  const [modelUrls, setModelUrls] = useState<Record<string, string>>(initialMergedModelUrls);
 
   const setModelUrl = useCallback((modelId: string, url: string) => {
     setModelUrls(prev => ({ ...prev, [modelId]: url }));
@@ -215,28 +296,43 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   const lastSavedFolderIdRef = useRef<string | null>(null);
   const lastSavedTagIdsRef = useRef<string[]>([]);
   const lastSavedCustomModelsRef = useRef<CustomModelConfig[]>([]);
+  const lastSavedEnabledModelIdsRef = useRef<string[] | undefined>(undefined);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const initDefaults = useCallback(async () => {
-    const smartWs = await getSmartDefaultWorkspace();
-    if (smartWs) {
-      setWorkspaceId(smartWs.id);
-      lastSavedWorkspaceIdRef.current = smartWs.id;
-      const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
-      setFolderId(savedFolderId || null);
-      lastSavedFolderIdRef.current = savedFolderId || null;
+  const initDefaults = useCallback(async (initialEnabledModelIds = DEFAULT_ENABLED_AI_PROMPT_MODEL_IDS) => {
+    const savedWsId = await StorageManager.getItem('lastUsedWorkspaceId');
+    if (savedWsId) {
+      setWorkspaceId(savedWsId);
+      lastSavedWorkspaceIdRef.current = savedWsId;
     } else {
-      setWorkspaceId(null);
-      lastSavedWorkspaceIdRef.current = null;
-      setFolderId(null);
-      lastSavedFolderIdRef.current = null;
+      const smartWs = await getSmartDefaultWorkspace();
+      if (smartWs) {
+        setWorkspaceId(smartWs.id);
+        lastSavedWorkspaceIdRef.current = smartWs.id;
+      } else {
+        setWorkspaceId(null);
+        lastSavedWorkspaceIdRef.current = null;
+      }
     }
+    
+    const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
+    setFolderId(savedFolderId || null);
+    lastSavedFolderIdRef.current = savedFolderId || null;
+
+    if (!hasUserEditedModelsRef.current) {
+      setEnabledModelIds(initialEnabledModelIds);
+      setModelSelectionError(null);
+    }
+    lastSavedEnabledModelIdsRef.current = initialEnabledModelIds;
   }, []);
 
   // Initialize defaults for new prompt
   useEffect(() => {
+    editorSessionRef.current += 1;
+    createPromiseRef.current = null;
+    hasUserEditedModelsRef.current = false;
     if (resolvedAiPromptId) {
       clearDraft();
       activeAiPromptIdRef.current = resolvedAiPromptId;
@@ -252,19 +348,27 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     setPromptBody(initialPrompt || '');
     setPromptRules('');
     setSelectedModel(null);
+    setModelSelectionError(null);
+    setModelUrls(initialMergedModelUrls);
 
-    void initDefaults();
-
-    setTagIds([]);
+    const initTagIds = !resolvedAiPromptId && Array.isArray(initialTagIds) ? Array.from(new Set(initialTagIds)) : [];
+    setTagIds(initTagIds);
     setCustomModels([]);
+    const initialEnabledModelIds = Array.from(new Set([
+      ...DEFAULT_ENABLED_AI_PROMPT_MODEL_IDS,
+      ...Object.keys(initialModelUrls || {}).filter(modelId => Boolean(initialModelUrls?.[modelId])),
+    ]));
+    void initDefaults(initialEnabledModelIds);
+    setEnabledModelIds(initialEnabledModelIds);
     lastSavedTitleRef.current = initialTitle || '';
     lastSavedPromptRef.current = initialPrompt || '';
     lastSavedRulesRef.current = '';
-    lastSavedModelUrlsRef.current = defaultModelUrls;
+    lastSavedModelUrlsRef.current = initialMergedModelUrls;
     lastSavedWorkspaceIdRef.current = null;
     lastSavedFolderIdRef.current = null;
-    lastSavedTagIdsRef.current = [];
+    lastSavedTagIdsRef.current = initTagIds;
     lastSavedCustomModelsRef.current = [];
+    lastSavedEnabledModelIdsRef.current = initialEnabledModelIds;
     lastSavedShortcutRef.current = '';
     isShortcutManuallyEditedRef.current = false;
     setPromptShortcut('');
@@ -278,9 +382,9 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       if (draft.promptTitle) setPromptTitle(draft.promptTitle);
       if (draft.promptBody) setPromptBody(draft.promptBody);
       if (draft.promptRules) setPromptRules(draft.promptRules);
-      if (draft.modelUrls) setModelUrls(draft.modelUrls);
+      if (draft.modelUrls && !initialModelUrls) setModelUrls(draft.modelUrls);
     }
-  }, [resolvedAiPromptId, initialTitle, initialPrompt, initDefaults]);
+  }, [resolvedAiPromptId, initialTitle, initialPrompt, initialModelUrls, initialMergedModelUrls, initDefaults]);
 
   // Load existing record
   const liveAiPrompt = useAiPrompt(activeAiPromptId);
@@ -295,10 +399,11 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     const folderChanged = folderId !== lastSavedFolderIdRef.current;
     const tagsChanged = [...tagIds].sort().join(',') !== [...lastSavedTagIdsRef.current].sort().join(',');
     const customModelsChanged = JSON.stringify(customModels) !== JSON.stringify(lastSavedCustomModelsRef.current);
+    const enabledModelsChanged = !haveSameModelIds(enabledModelIds, lastSavedEnabledModelIdsRef.current || []);
     const shortcutChanged = isShortcutInitialized && promptShortcut !== lastSavedShortcutRef.current;
 
-    return titleChanged || promptChanged || rulesChanged || modelUrlsChanged || workspaceChanged || folderChanged || tagsChanged || customModelsChanged || shortcutChanged;
-  }, [promptTitle, promptBody, promptRules, modelUrls, workspaceId, folderId, tagIds, customModels, promptShortcut, isInitialized, isShortcutInitialized]);
+    return titleChanged || promptChanged || rulesChanged || modelUrlsChanged || workspaceChanged || folderChanged || tagsChanged || customModelsChanged || enabledModelsChanged || shortcutChanged;
+  }, [promptTitle, promptBody, promptRules, modelUrls, workspaceId, folderId, tagIds, customModels, enabledModelIds, promptShortcut, isInitialized, isShortcutInitialized]);
 
 
   // Synchronize shortcut from DB on load or activeAiPromptId changes
@@ -370,6 +475,31 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
         setCustomModels([]);
       }
 
+      let loadedEnabledModelIds: string[];
+      if (liveAiPrompt.enabledModelIds !== undefined) {
+        loadedEnabledModelIds = liveAiPrompt.enabledModelIds;
+      } else {
+        StorageManager.getItem('aiPrompt_excludedModels').then((stored: any) => {
+          let excludedList: string[] = [];
+          try {
+            if (Array.isArray(stored)) excludedList = stored.map(String);
+            else if (typeof stored === 'string') excludedList = JSON.parse(stored);
+          } catch { /* ignore */ }
+
+          const allPromptModels = ['gpt', 'claude', 'gemini', 'perplexity', ...(liveAiPrompt.customModels || []).map(m => m.id)];
+          const derived = allPromptModels.filter(id => !excludedList.includes(id));
+          if (!hasUserEditedModelsRef.current) {
+            setEnabledModelIds(derived);
+          }
+          lastSavedEnabledModelIdsRef.current = derived;
+        });
+        loadedEnabledModelIds = ['gpt', 'claude', 'gemini', 'perplexity', ...(liveAiPrompt.customModels || []).map(m => m.id)];
+      }
+
+      if (!hasUserEditedModelsRef.current) {
+        setEnabledModelIds(loadedEnabledModelIds);
+      }
+
       lastSavedTitleRef.current = liveAiPrompt.title;
       lastSavedPromptRef.current = liveAiPrompt.prompt;
       lastSavedRulesRef.current = liveAiPrompt.rules || '';
@@ -378,6 +508,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       lastSavedFolderIdRef.current = liveAiPrompt.folderId;
       lastSavedTagIdsRef.current = liveAiPrompt.tagIds;
       lastSavedCustomModelsRef.current = liveAiPrompt.customModels || [];
+      lastSavedEnabledModelIdsRef.current = loadedEnabledModelIds;
 
       setLastSavedAt(new Date(liveAiPrompt.updatedAt));
       setSaveStatus('saved');
@@ -519,133 +650,278 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     folderId?: string | null;
     tagIds?: string[];
   }): Promise<string | false> => {
+    if (activeSavePromiseRef.current) {
+      pendingSaveRef.current = true;
+      const result = await activeSavePromiseRef.current;
+      if (activeAiPromptIdRef.current) {
+        return activeAiPromptIdRef.current;
+      }
+      return result;
+    }
+
+    const currentSession = editorSessionRef.current;
     const currentPromptId = activeAiPromptIdRef.current;
-    const saveWorkspaceId = overrides?.workspaceId !== undefined ? overrides.workspaceId : workspaceId;
-    const saveFolderId = overrides?.folderId !== undefined ? overrides.folderId : folderId;
-    const saveTagIds = overrides?.tagIds !== undefined ? overrides.tagIds : tagIds;
+    const saveRevision = ++saveRevisionRef.current;
+
+    const snapshot = {
+      title: promptTitle,
+      prompt: promptBody,
+      rules: promptRules,
+      modelUrls: { ...modelUrls },
+      workspaceId: overrides?.workspaceId !== undefined ? overrides.workspaceId : workspaceId,
+      folderId: overrides?.folderId !== undefined ? overrides.folderId : folderId,
+      tagIds: overrides?.tagIds !== undefined ? [...overrides.tagIds] : [...tagIds],
+      customModels: [...customModels],
+      enabledModelIds: [...enabledModelIds],
+      shortcut: promptShortcut,
+    };
 
     if (shortcutError) {
       setSaveStatus('error');
       return false;
     }
 
-    if (!promptTitle.trim()) {
-      return false;
-    }
-
-    if (!promptTitle.trim() && !promptBody.trim()) {
-      return false;
-    }
-
-
-    setSaveStatus('saving');
-    try {
-      let savedRecord: AiPromptRecord;
-
-      if (currentPromptId) {
-        const input: UpdateAiPromptInput = {
-          workspaceId: saveWorkspaceId || undefined,
-          folderId: saveFolderId,
-          title: promptTitle || 'AI Generated Link',
-          prompt: promptBody,
-          rules: promptRules,
-          modelUrls: modelUrls,
-          tagIds: saveTagIds,
-          customModels: customModels,
-        };
-        savedRecord = await updateAiPrompt(currentPromptId!, input);
-      } else {
-        const input: CreateAiPromptInput = {
-          workspaceId: saveWorkspaceId || undefined,
-          folderId: saveFolderId,
-          title: promptTitle || 'AI Generated Link',
-          prompt: promptBody,
-          rules: promptRules,
-          modelUrls: modelUrls,
-          tagIds: saveTagIds,
-          customModels: customModels,
-        };
-        savedRecord = await createAiPrompt(input);
-      }
-
-      activeAiPromptIdRef.current = savedRecord.id;
-      setActiveAiPromptId(savedRecord.id);
-
-      setWorkspaceId(savedRecord.workspaceId);
-      setFolderId(savedRecord.folderId);
-      setTagIds(savedRecord.tagIds);
-      if (savedRecord.customModels) {
-        setCustomModels(savedRecord.customModels);
-      }
-
-      const oldWsId = lastSavedWorkspaceIdRef.current;
-      const oldFldId = lastSavedFolderIdRef.current;
-
-      clearDraft();
-      lastSavedTitleRef.current = savedRecord.title;
-      lastSavedPromptRef.current = savedRecord.prompt;
-      lastSavedRulesRef.current = savedRecord.rules || '';
-      lastSavedModelUrlsRef.current = savedRecord.modelUrls || {};
-      lastSavedWorkspaceIdRef.current = savedRecord.workspaceId;
-      lastSavedFolderIdRef.current = savedRecord.folderId;
-      lastSavedTagIdsRef.current = savedRecord.tagIds;
-      lastSavedCustomModelsRef.current = savedRecord.customModels || [];
-
-      const wId = savedRecord.workspaceId;
-      const fId = savedRecord.folderId;
-
-      const targetCompoundId = getItemCompoundId({
-        id: savedRecord.id,
-        workspace_id: wId || null,
-        folder_id: fId || null,
-        snippet: { id: savedRecord.id, category: 'aiPrompt' }
-      });
-
-      if (activeAiPromptIdRef.current) {
-        const oldWsObj = oldWsId ? { workspace_id: oldWsId } : null;
-        const oldFldObj = oldFldId ? { folder_id: oldFldId } : null;
-        const oldCompoundId = getItemCompoundId({
-          id: activeAiPromptIdRef.current,
-          workspace_id: oldWsObj?.workspace_id || null,
-          folder_id: oldFldObj?.folder_id || null,
-          snippet: { id: activeAiPromptIdRef.current, category: 'aiPrompt' }
-        });
-
-        if (oldCompoundId && targetCompoundId && oldCompoundId !== targetCompoundId) {
-          await migrateItemCompoundId(oldCompoundId, targetCompoundId, 'aiPrompt');
-        }
-      }
-
-      const finalShortcut = promptShortcut.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (finalShortcut) {
-        const valRes = await validateShortcut(finalShortcut, savedRecord.id);
-        if (valRes.isValid) {
-          console.log(`[ShortcutDebug][AiPromptEditor] handleSave: Valid shortcut "${finalShortcut}", saving to DB for prompt "${savedRecord.id}"...`);
-          await saveShortcut(savedRecord.id, targetCompoundId, finalShortcut, savedRecord.title, 'aiPrompt');
-        } else {
-          console.warn(`[ShortcutDebug][AiPromptEditor] handleSave: Shortcut "${finalShortcut}" has validation error "${valRes.errorMessage}". SKIPPING DB save on background autosave.`);
-        }
-        // Always update the ref to prevent infinite autosave loops
-        lastSavedShortcutRef.current = finalShortcut;
-      } else if (lastSavedShortcutRef.current !== '') {
-        console.log(`[ShortcutDebug][AiPromptEditor] handleSave: Clearing shortcut for prompt "${savedRecord.id}"...`);
-        await clearShortcut(savedRecord.id, targetCompoundId, 'aiPrompt');
-        lastSavedShortcutRef.current = '';
-      }
-
-      if (wId) void StorageManager.setItem('lastUsedWorkspaceId', wId);
-      if (fId) void StorageManager.setItem('lastUsedFolderId', fId);
-      else void StorageManager.removeItem('lastUsedFolderId');
-
-      setSaveStatus('saved');
-      setLastSavedAt(new Date(savedRecord.updatedAt));
-      return savedRecord.id;
-    } catch (err) {
-      console.error('Save failed:', err);
+    if (snapshot.enabledModelIds.length === 0) {
+      setModelSelectionError(MODEL_SELECTION_REQUIRED_MESSAGE);
       setSaveStatus('error');
       return false;
     }
-  }, [promptTitle, promptBody, promptRules, modelUrls, selectedModel, generatedUrl, workspaceId, folderId, tagIds, customModels, shortcutError, promptShortcut]);
+
+    if (!snapshot.title.trim()) {
+      return false;
+    }
+
+    if (!snapshot.title.trim() && !snapshot.prompt.trim()) {
+      return false;
+    }
+
+    const runSaveTask = async (): Promise<string | false> => {
+      saveInFlightRef.current = true;
+      pendingSaveRef.current = false;
+      setSaveStatus('saving');
+      try {
+        // Convert any temp tags into real tags before saving
+        const finalWorkspaceId = snapshot.workspaceId || (await getSmartDefaultWorkspace())?.id;
+        if (finalWorkspaceId) {
+          const resolvedTagIds: string[] = [];
+          for (const tId of snapshot.tagIds) {
+            if (tId.startsWith('temp_')) {
+              const tagName = tId.replace('temp_', '');
+              try {
+                const newTag = propertyPersistenceAdapterRef.current?.createTag
+                  ? await propertyPersistenceAdapterRef.current.createTag({ name: tagName, workspaceId: finalWorkspaceId })
+                  : await createTag(tagName, finalWorkspaceId);
+                resolvedTagIds.push(newTag.id);
+              } catch (e) {
+                console.error('Failed to create temp tag', e);
+                resolvedTagIds.push(tId);
+              }
+            } else {
+              resolvedTagIds.push(tId);
+            }
+          }
+          snapshot.tagIds = resolvedTagIds;
+        }
+
+        let savedRecord: AiPromptRecord;
+
+        if (currentPromptId) {
+          const input: UpdateAiPromptInput = {
+            workspaceId: snapshot.workspaceId || undefined,
+            folderId: snapshot.folderId,
+            title: snapshot.title || 'AI Generated Link',
+            prompt: snapshot.prompt,
+            rules: snapshot.rules,
+            modelUrls: snapshot.modelUrls,
+            tagIds: snapshot.tagIds,
+            customModels: snapshot.customModels,
+            enabledModelIds: snapshot.enabledModelIds,
+          };
+          savedRecord = saveAiPromptAdapter
+            ? await saveAiPromptAdapter({ mode: 'update', aiPromptId: currentPromptId, input })
+            : await updateAiPrompt(currentPromptId, input);
+        } else {
+          const input: CreateAiPromptInput = {
+            workspaceId: snapshot.workspaceId || undefined,
+            folderId: snapshot.folderId,
+            title: snapshot.title || 'AI Generated Link',
+            prompt: snapshot.prompt,
+            rules: snapshot.rules,
+            modelUrls: snapshot.modelUrls,
+            tagIds: snapshot.tagIds,
+            customModels: snapshot.customModels,
+            enabledModelIds: snapshot.enabledModelIds,
+          };
+          if (!createPromiseRef.current) {
+            createPromiseRef.current = saveAiPromptAdapter
+              ? saveAiPromptAdapter({ mode: 'create', input })
+              : createAiPrompt(input);
+          }
+          try {
+            savedRecord = await createPromiseRef.current;
+            if (onAiPromptCreatedRef.current) {
+              try {
+                await onAiPromptCreatedRef.current(savedRecord);
+              } catch (err) {
+                console.error('[useAiPromptEditor] onAiPromptCreated callback failed:', err);
+              }
+            }
+          } finally {
+            createPromiseRef.current = null;
+          }
+        }
+
+        if (!isMounted.current || editorSessionRef.current !== currentSession) {
+          // Editor session switched or unmounted during async save
+          saveInFlightRef.current = false;
+          return savedRecord.id;
+        }
+
+        if (currentPromptId !== null && activeAiPromptIdRef.current !== currentPromptId) {
+          // Switched away from existing prompt while saving
+          saveInFlightRef.current = false;
+          return savedRecord.id;
+        }
+
+        if (currentPromptId === null && activeAiPromptIdRef.current !== null) {
+          // Another creation or prompt switch established a different identity
+          saveInFlightRef.current = false;
+          return savedRecord.id;
+        }
+
+        activeAiPromptIdRef.current = savedRecord.id;
+        setActiveAiPromptId(savedRecord.id);
+
+        const isLatestRevision = saveRevision >= latestCompletedRevisionRef.current;
+        if (isLatestRevision) {
+          latestCompletedRevisionRef.current = saveRevision;
+
+          setWorkspaceId(savedRecord.workspaceId);
+          setFolderId(savedRecord.folderId);
+          setTagIds(savedRecord.tagIds);
+          if (savedRecord.customModels) {
+            setCustomModels(savedRecord.customModels);
+          }
+
+          const modelSelectionIsStillCurrent = haveSameModelIds(
+            enabledModelIdsRef.current,
+            snapshot.enabledModelIds,
+          );
+
+          if (modelSelectionIsStillCurrent && savedRecord.enabledModelIds !== undefined) {
+            setEnabledModelIds(savedRecord.enabledModelIds);
+          }
+        }
+
+        const oldWsId = lastSavedWorkspaceIdRef.current;
+        const oldFldId = lastSavedFolderIdRef.current;
+
+        clearDraft();
+        lastSavedTitleRef.current = savedRecord.title;
+        lastSavedPromptRef.current = savedRecord.prompt;
+        lastSavedRulesRef.current = savedRecord.rules || '';
+        lastSavedModelUrlsRef.current = savedRecord.modelUrls || {};
+        lastSavedWorkspaceIdRef.current = savedRecord.workspaceId;
+        lastSavedFolderIdRef.current = savedRecord.folderId;
+        lastSavedTagIdsRef.current = savedRecord.tagIds;
+        lastSavedCustomModelsRef.current = savedRecord.customModels || [];
+        lastSavedEnabledModelIdsRef.current = savedRecord.enabledModelIds;
+
+        const wId = savedRecord.workspaceId;
+        const fId = savedRecord.folderId;
+
+        const targetCompoundId = getItemCompoundId({
+          id: savedRecord.id,
+          workspace_id: wId || null,
+          folder_id: fId || null,
+          snippet: { id: savedRecord.id, category: 'aiPrompt' }
+        });
+
+        if (currentPromptId) {
+          const oldWsObj = oldWsId ? { workspace_id: oldWsId } : null;
+          const oldFldObj = oldFldId ? { folder_id: oldFldId } : null;
+          const oldCompoundId = getItemCompoundId({
+            id: currentPromptId,
+            workspace_id: oldWsObj?.workspace_id || null,
+            folder_id: oldFldObj?.folder_id || null,
+            snippet: { id: currentPromptId, category: 'aiPrompt' }
+          });
+
+          if (oldCompoundId && targetCompoundId && oldCompoundId !== targetCompoundId) {
+            await migrateItemCompoundId(oldCompoundId, targetCompoundId, 'aiPrompt');
+          }
+        }
+
+        const finalShortcut = snapshot.shortcut.toLowerCase().replace(/[^a-z0-9_]/g, '');
+        if (finalShortcut) {
+          const valRes = await validateShortcut(finalShortcut, savedRecord.id);
+          if (valRes.isValid) {
+            console.log(`[ShortcutDebug][AiPromptEditor] handleSave: Valid shortcut "${finalShortcut}", saving to DB for prompt "${savedRecord.id}"...`);
+            if (propertyPersistenceAdapterRef.current?.saveShortcut) {
+              await propertyPersistenceAdapterRef.current.saveShortcut({
+                id: savedRecord.id,
+                referenceId: targetCompoundId,
+                shortcut: finalShortcut,
+                label: savedRecord.title,
+                type: 'aiPrompt',
+              });
+            } else {
+              await saveShortcut(savedRecord.id, targetCompoundId, finalShortcut, savedRecord.title, 'aiPrompt');
+            }
+          } else {
+            console.warn(`[ShortcutDebug][AiPromptEditor] handleSave: Shortcut "${finalShortcut}" has validation error "${valRes.errorMessage}". SKIPPING DB save on background autosave.`);
+          }
+          lastSavedShortcutRef.current = finalShortcut;
+        } else if (lastSavedShortcutRef.current !== '') {
+          console.log(`[ShortcutDebug][AiPromptEditor] handleSave: Clearing shortcut for prompt "${savedRecord.id}"...`);
+          if (propertyPersistenceAdapterRef.current?.clearShortcut) {
+            await propertyPersistenceAdapterRef.current.clearShortcut({
+              id: savedRecord.id,
+              referenceId: targetCompoundId,
+              type: 'aiPrompt',
+            });
+          } else {
+            await clearShortcut(savedRecord.id, targetCompoundId, 'aiPrompt');
+          }
+          lastSavedShortcutRef.current = '';
+        }
+
+        if (wId) void StorageManager.setItem('lastUsedWorkspaceId', wId);
+        if (fId) void StorageManager.setItem('lastUsedFolderId', fId);
+        else void StorageManager.removeItem('lastUsedFolderId');
+
+        if (isLatestRevision) {
+          setSaveStatus('saved');
+          setLastSavedAt(new Date(savedRecord.updatedAt));
+        }
+        return savedRecord.id;
+      } catch (err) {
+        console.error('Save failed:', err);
+        setSaveStatus('error');
+        return false;
+      } finally {
+        saveInFlightRef.current = false;
+        if (pendingSaveRef.current) {
+          pendingSaveRef.current = false;
+          setTimeout(() => {
+            void handleSaveRef.current();
+          }, 0);
+        }
+      }
+    };
+
+    activeSavePromiseRef.current = runSaveTask();
+    try {
+      return await activeSavePromiseRef.current;
+    } finally {
+      activeSavePromiseRef.current = null;
+    }
+  }, [promptTitle, promptBody, promptRules, modelUrls, selectedModel, generatedUrl, workspaceId, folderId, tagIds, customModels, enabledModelIds, shortcutError, promptShortcut, validateShortcut, saveAiPromptAdapter]);
+
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+  }, [handleSave]);
 
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState<boolean>(false);
   const [isUnsavedChangesDialogOpen, setIsUnsavedChangesDialogOpen] = useState<boolean>(false);
@@ -658,8 +934,6 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     }
     setIsDeleteDialogOpen(false);
     try {
-      const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
-      const fldObj = folderId ? { folder_id: folderId } : null;
       const compoundId = getItemCompoundId({
         id: currentId,
         workspace_id: workspaceId || null,
@@ -683,6 +957,9 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
   }, [isDirty, onBack]);
 
   const loadPrompt = useCallback((promptRecord: AiPromptRecord | null) => {
+    editorSessionRef.current += 1;
+    createPromiseRef.current = null;
+    hasUserEditedModelsRef.current = false;
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
     }
@@ -696,8 +973,11 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       setPromptTitle('');
       setPromptBody('');
       setPromptRules('');
-      setTagIds([]);
+      const initTagIds = !resolvedAiPromptId && Array.isArray(initialTagIds) ? Array.from(new Set(initialTagIds)) : [];
+      setTagIds(initTagIds);
       setCustomModels([]);
+      setEnabledModelIds(DEFAULT_ENABLED_AI_PROMPT_MODEL_IDS);
+      setModelSelectionError(null);
       setModelUrls({
         gpt: 'https://chatgpt.com',
         claude: 'https://claude.ai/new',
@@ -709,8 +989,9 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       lastSavedRulesRef.current = '';
       lastSavedModelUrlsRef.current = defaultModelUrls;
       void initDefaults();
-      lastSavedTagIdsRef.current = [];
+      lastSavedTagIdsRef.current = initTagIds;
       lastSavedCustomModelsRef.current = [];
+      lastSavedEnabledModelIdsRef.current = DEFAULT_ENABLED_AI_PROMPT_MODEL_IDS;
       setPromptShortcut('');
       lastSavedShortcutRef.current = '';
       isShortcutManuallyEditedRef.current = false;
@@ -745,7 +1026,35 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
 
       setIsInitialized(false);
     }
-  }, []);
+  }, [initDefaults]);
+
+  const autosaveSignature = useMemo(
+    () =>
+      JSON.stringify({
+        promptTitle,
+        promptBody,
+        promptRules,
+        modelUrls,
+        workspaceId,
+        folderId,
+        tagIds,
+        customModels,
+        enabledModelIds,
+        promptShortcut,
+      }),
+    [
+      promptTitle,
+      promptBody,
+      promptRules,
+      modelUrls,
+      workspaceId,
+      folderId,
+      tagIds,
+      customModels,
+      enabledModelIds,
+      promptShortcut,
+    ],
+  );
 
   // Autosave effect triggered by input changes
   useEffect(() => {
@@ -755,14 +1064,14 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     }
     const delay = 400;
     autosaveTimerRef.current = setTimeout(() => {
-      handleSave();
+      void handleSaveRef.current();
     }, delay);
     return () => {
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
       }
     };
-  }, [promptTitle, promptBody, promptRules, modelUrls, workspaceId, folderId, tagIds, promptShortcut, handleSave, isDirty]);
+  }, [autosaveSignature, isDirty]);
 
   // Sync loaded state when liveAiPrompt changes from db
   useEffect(() => {
@@ -771,8 +1080,6 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     const fetchShortcut = async () => {
       const requestedPromptId = liveAiPrompt.id;
       try {
-        const wsObj = liveAiPrompt.workspaceId ? { workspace_id: liveAiPrompt.workspaceId } : null;
-        const fldObj = liveAiPrompt.folderId ? { folder_id: liveAiPrompt.folderId } : null;
         const compoundId = getItemCompoundId({
           id: liveAiPrompt.id,
           workspace_id: liveAiPrompt.workspaceId || null,
@@ -812,6 +1119,18 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       setCustomModels(liveAiPrompt.customModels || []);
       setModelUrls(liveAiPrompt.modelUrls || {});
 
+      let loadedEnabledModelIds: string[];
+      if (liveAiPrompt.enabledModelIds !== undefined) {
+        loadedEnabledModelIds = liveAiPrompt.enabledModelIds;
+      } else {
+        loadedEnabledModelIds = ['gpt', 'claude', 'gemini', 'perplexity', ...(liveAiPrompt.customModels || []).map(m => m.id)];
+      }
+
+      const modelMatchesSaved = haveSameModelIds(enabledModelIdsRef.current, lastSavedEnabledModelIdsRef.current || []);
+      if (!hasUserEditedModelsRef.current || modelMatchesSaved) {
+        setEnabledModelIds(loadedEnabledModelIds);
+      }
+
       lastSavedTitleRef.current = liveAiPrompt.title;
       lastSavedPromptRef.current = liveAiPrompt.prompt;
       lastSavedRulesRef.current = liveAiPrompt.rules || '';
@@ -820,6 +1139,7 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       lastSavedFolderIdRef.current = liveAiPrompt.folderId;
       lastSavedTagIdsRef.current = liveAiPrompt.tagIds;
       lastSavedCustomModelsRef.current = liveAiPrompt.customModels || [];
+      lastSavedEnabledModelIdsRef.current = loadedEnabledModelIds;
 
       setLastSavedAt(new Date(liveAiPrompt.updatedAt));
       setSaveStatus('saved');
@@ -846,13 +1166,11 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       }
     }
 
-    if (activeAiPromptIdRef.current) {
-      void handleSave({
-        workspaceId: nextWorkspaceId,
-        folderId: nextFolderId,
-        tagIds: nextTagIds,
-      });
-    }
+    void handleSave({
+      workspaceId: nextWorkspaceId,
+      folderId: nextFolderId,
+      tagIds: nextTagIds,
+    });
   }, [workspaceId, folderId, tagIds, handleSave]);
 
   const handleOverrideShortcut = useCallback(async () => {
@@ -868,7 +1186,15 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
 
     if (shortcutConflictId) {
       console.log('[ShortcutDebug][AiPromptEditor] Explicitly clearing conflicting shortcut reference:', shortcutConflictId);
-      await clearShortcut(shortcutConflictId, shortcutConflictId, 'aiPrompt');
+      if (propertyPersistenceAdapterRef.current?.clearShortcut) {
+        await propertyPersistenceAdapterRef.current.clearShortcut({
+          id: shortcutConflictId,
+          referenceId: shortcutConflictId,
+          type: 'aiPrompt',
+        });
+      } else {
+        await clearShortcut(shortcutConflictId, shortcutConflictId, 'aiPrompt');
+      }
     }
 
     const targetCompoundId = getItemCompoundId({
@@ -878,7 +1204,17 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
       snippet: { id: targetId, category: 'aiPrompt' }
     });
     console.log(`[ShortcutDebug][AiPromptEditor] Saving shortcut "${promptShortcut}" to target ID "${targetId}" (compound: ${targetCompoundId})...`);
-    await saveShortcut(targetId, targetCompoundId, promptShortcut, promptTitle || 'AI Prompt', 'aiPrompt');
+    if (propertyPersistenceAdapterRef.current?.saveShortcut) {
+      await propertyPersistenceAdapterRef.current.saveShortcut({
+        id: targetId,
+        referenceId: targetCompoundId,
+        shortcut: promptShortcut,
+        label: promptTitle || 'Chat Agent',
+        type: 'aiPrompt',
+      });
+    } else {
+      await saveShortcut(targetId, targetCompoundId, promptShortcut, promptTitle || 'Chat Agent', 'aiPrompt');
+    }
     console.log('[ShortcutDebug][AiPromptEditor] Shortcut reassignment saved to DB. Clearing validation error.');
     setShortcutError(null);
     setIsShortcutOverrideable(false);
@@ -896,6 +1232,10 @@ export function useAiPromptEditor(props: AiPromptEditorProps) {
     activeAiPromptId: aiPromptId || activeAiPromptId,
     customModels,
     setCustomModels,
+    enabledModelIds,
+    setEnabledModelIds,
+    toggleModelEnabled,
+    modelSelectionError,
     promptShortcut,
     setPromptShortcut: updatePromptShortcut,
     shortcutError,

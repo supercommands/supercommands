@@ -23,6 +23,7 @@ import {
 } from '../../../../shared-components/versionHistory/structuredVersionHistory';
 
 import { getSessionTabTitle } from './sessionHelpers';
+import { normalizeSessionOpenSettings } from './sessionSettings';
 
 function extractSessionSnapshot(session: SessionRecord): SessionSnapshot {
   return {
@@ -35,7 +36,7 @@ function extractSessionSnapshot(session: SessionRecord): SessionSnapshot {
     workspaceId: session.workspaceId,
     folderId: session.folderId,
     tagIds: [...(session.tagIds || [])],
-    sessionOpenSettings: session.sessionOpenSettings ? { ...session.sessionOpenSettings } : undefined,
+    sessionOpenSettings: session.sessionOpenSettings ? normalizeSessionOpenSettings(session.sessionOpenSettings) : undefined,
     windowId: session.windowId,
     shortcut: session.shortcut || '',
   };
@@ -70,7 +71,7 @@ export async function createSession(input: CreateSessionInput): Promise<SessionR
       title: getSessionTabTitle(u),
     })),
     tagIds: input.tagIds ?? [],
-    sessionOpenSettings: input.sessionOpenSettings,
+    sessionOpenSettings: normalizeSessionOpenSettings(input.sessionOpenSettings),
     windowId: input.windowId,
     shortcut: input.shortcut || '',
 
@@ -129,7 +130,7 @@ export async function updateSession(sessionId: string, input: UpdateSessionInput
   if (input.workspaceId !== undefined) changes.workspaceId = input.workspaceId;
   if (input.folderId !== undefined) changes.folderId = input.folderId;
   if (input.tagIds !== undefined) changes.tagIds = input.tagIds;
-  if (input.sessionOpenSettings !== undefined) changes.sessionOpenSettings = input.sessionOpenSettings;
+  if (input.sessionOpenSettings !== undefined) changes.sessionOpenSettings = normalizeSessionOpenSettings(input.sessionOpenSettings);
   if (input.windowId !== undefined) changes.windowId = input.windowId;
   if (input.shortcut !== undefined) changes.shortcut = input.shortcut;
 

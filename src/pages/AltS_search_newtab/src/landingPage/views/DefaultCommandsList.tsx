@@ -31,7 +31,6 @@ const COMMAND_DESCRIPTIONS: Partial<Record<string, string>> = {
   event: 'Create a Google Calendar event quickly.',
   createnotes: 'Capture a reusable snippet right from search.',
   createlinks: 'Group your go-to websites and launch in a click.',
-  createsession: 'Save and manage multiple tabs in a Tab Session.',
   agent: 'Open the AI agent interface.',
   todo: 'Manage your personal tasks and reminders.',
   collections: 'Access all your saved collections and snippets.',

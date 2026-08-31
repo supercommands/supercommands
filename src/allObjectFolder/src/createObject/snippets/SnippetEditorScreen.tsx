@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { FaFolder, FaTimes, FaCheckCircle, FaStar, FaKeyboard } from 'react-icons/fa';
 import { FiStar, FiTag, FiChevronLeft, FiChevronRight, FiLoader, FiCopy } from 'react-icons/fi';
-import type { SnippetRecord } from './snippetTypes';
+import type { CreateSnippetInput, SnippetRecord, UpdateSnippetInput } from './snippetTypes';
 import type { WorkspaceData } from '../../../../settings/allWorkspaceManager/workspaces/workspaceTypes';
 import type { FolderData } from '../../../../settings/allWorkspaceManager/folders/folderTypes';
 import type { NewSnippetBreadCrum, Tag } from '../../../../pages/popup/types/popupType';
@@ -103,7 +103,19 @@ interface EditSnippetScreenProps {
   onBack?: () => void;
   initialDraftKey?: string;
   initialDraftContent?: string;
+  initialTagIds?: string[];
+  onSnippetCreated?: (snippet: SnippetRecord) => void | Promise<void>;
   isFullScreenMode?: boolean; // True when rendered in FullScreenNoteView
+  isOverlay?: boolean;
+  hideRightPanel?: boolean;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
+  saveSnippetAdapter?: (args: {
+    mode: 'create' | 'update';
+    snippetId?: string;
+    input: CreateSnippetInput | UpdateSnippetInput;
+  }) => Promise<SnippetRecord>;
+  propertyPersistenceAdapter?: React.ComponentProps<typeof SharedPropertiesToolbar>['propertyPersistenceAdapter'];
   category?: string; // 'note' or 'snippet'
 }
 
@@ -117,9 +129,23 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   onBack,
   initialDraftKey = '',
   initialDraftContent = '',
+  initialTagIds,
+  onSnippetCreated,
   isFullScreenMode = false,
+  isOverlay: propIsOverlay,
+  hideRightPanel = false,
+  appearanceScope = 'default',
+  appearanceTokens,
+  saveSnippetAdapter,
+  propertyPersistenceAdapter,
   category,
 }) => {
+  const activeEditor = useUIStore(state => state.activeEditor);
+  const isFocusMode = useUIStore(state => state.isFocusMode);
+  const isOverlay = Boolean(propIsOverlay || activeEditor?.props?.isOverlay);
+  const isNormalSnippetMode = !isFullScreenMode && !isOverlay && !isFocusMode;
+  const isAltSAppearance = appearanceScope === 'alts';
+
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   const snippets = useDbStore(state => state.snippets);
   const workspaces = useDbStore(state => state.workspaces);
@@ -191,6 +217,10 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     onBack,
     initialDraftKey,
     initialDraftConfig: initialDraftContent,
+    initialTagIds,
+    onSnippetCreated,
+    saveSnippetAdapter,
+    propertyPersistenceAdapter,
   });
 
 
@@ -209,7 +239,6 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   const editorRef = useRef<any>(null); // Quill instance ref
   const quillToolbarRef = useRef<HTMLElement | null>(null);
 
-  const isFocusMode = useUIStore((s: any) => s.isFocusMode);
   const isLinkEditModalOpen = useUIStore((s: any) => s.activeEditor?.type === 'link');
 
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
@@ -217,7 +246,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
   const [isToolbarVisible, setIsToolbarVisible] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false); // Sidebar always visible
 
-  const { isFavorite, toggleFavorite } = useFavorites();
+  const { isFavorite, toggleFavorite, addFavorite } = useFavorites();
   const [shortcutsMap, setShortcutsMap] = useState<Record<string, string>>({});
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -320,7 +349,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
           if (lastSavedTitleRef) lastSavedTitleRef.current = updatedTitle;
         }
       } else if (field === 'shortcut') {
-        const finalShortcut = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const finalShortcut = value.toLowerCase().replace(/[^a-z0-9_]/g, '');
 
         const wsObj = existing.workspaceId ? { workspace_id: existing.workspaceId } : null;
         const fldObj = existing.folderId ? { folder_id: existing.folderId } : null;
@@ -370,7 +399,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
 
   const handleCopyTitleToShortcut = useCallback(() => {
     if (!snippetTitle.trim()) return;
-    const sanitized = snippetTitle.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sanitized = snippetTitle.toLowerCase().replace(/[^a-z0-9_]/g, '');
     setSnippetShortcut(sanitized);
 
     setTimeout(() => {
@@ -442,7 +471,15 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
 
     if (shortcutConflictId) {
       console.log('[ShortcutDebug][SnippetEditor] Explicitly clearing conflicting shortcut reference:', shortcutConflictId);
-      await clearShortcut(shortcutConflictId, shortcutConflictId, 'snippet');
+      if (propertyPersistenceAdapter?.clearShortcut) {
+        await propertyPersistenceAdapter.clearShortcut({
+          id: shortcutConflictId,
+          referenceId: shortcutConflictId,
+          type: 'snippet',
+        });
+      } else {
+        await clearShortcut(shortcutConflictId, shortcutConflictId, 'snippet');
+      }
     }
 
     const currentCompound = getItemCompoundId({
@@ -452,14 +489,24 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
       snippet: { id: targetId, category: 'snippet' },
     });
     console.log(`[ShortcutDebug][SnippetEditor] Saving shortcut "${snippetShortcut}" to target ID "${targetId}" (compound: ${currentCompound})...`);
-    await saveShortcut(targetId, currentCompound, snippetShortcut, snippetTitle || 'Snippet', 'snippet');
+    if (propertyPersistenceAdapter?.saveShortcut) {
+      await propertyPersistenceAdapter.saveShortcut({
+        id: targetId,
+        referenceId: currentCompound,
+        shortcut: snippetShortcut,
+        label: snippetTitle || 'Snippet',
+        type: 'snippet',
+      });
+    } else {
+      await saveShortcut(targetId, currentCompound, snippetShortcut, snippetTitle || 'Snippet', 'snippet');
+    }
     console.log('[ShortcutDebug][SnippetEditor] Shortcut reassignment saved to DB. Clearing validation error.');
     setShortcutError(null);
     setIsShortcutOverrideable(false);
     setShortcutConflictId(null);
     const saved = await handleSave();
     if (saved) fetchAllShortcuts();
-  }, [snippetShortcut, activeSnippetId, workspaceId, folderId, snippetTitle, shortcutConflictId, handleSave, fetchAllShortcuts]);
+  }, [snippetShortcut, activeSnippetId, workspaceId, folderId, snippetTitle, shortcutConflictId, handleSave, fetchAllShortcuts, propertyPersistenceAdapter]);
 
 
 
@@ -579,7 +626,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
       initialDraftKey: null,
       initialDraftConfig: null,
     };
-    useUIStore.getState().openEditor({ type: 'note', id: 'new', props: cleanProps });
+    useUIStore.getState().openEditor({ type: 'snippet', id: 'new', props: cleanProps });
     if (titleInputRef.current) {
       titleInputRef.current.focus();
     }
@@ -618,7 +665,19 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
         useUIStore.getState().toggleFocusMode(false);
         return true;
       }
-      if (isUnsavedChangesDialogOpen || isLocationPickerOpen || isDeleteDialogOpen || isShareDialogOpen || isLinkEditModalOpen || document.getElementById('hotkey-assignment-popup')) {
+      if (isLocationPickerOpen) {
+        setIsLocationPickerOpen(false);
+        return true;
+      }
+      if (isDeleteDialogOpen) {
+        setIsDeleteDialogOpen(false);
+        return true;
+      }
+      if (isShareDialogOpen) {
+        setIsShareDialogOpen(false);
+        return true;
+      }
+      if (isUnsavedChangesDialogOpen || isLinkEditModalOpen || document.getElementById('hotkey-assignment-popup')) {
         return true;
       }
       const handled = handleEscapeSaveAndClose();
@@ -857,7 +916,9 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
 
   const editorContentNode = (
     <WorkspaceEditorLayout
+      isNormalMode={isNormalSnippetMode}
       title={activeSnippetId ? 'Edit snippet' : 'Create a snippet'}
+      titleClassName={isNormalSnippetMode ? 'absolute left-1/2 top-1/2 w-full max-w-[740px] -translate-x-1/2 -translate-y-1/2 px-4 md:px-6 text-lg font-bold text-[var(--color-textPrimary)] truncate pointer-events-none' : undefined}
       isDirty={isDirty}
       saveStatus={saveStatus}
       lastSavedAt={lastSavedAt}
@@ -865,6 +926,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
       isFocusMode={isFocusMode}
       showConfigureHeader={true}
       hideRightColumnBorder={category !== 'snippet'}
+      embeddedFullBleed={isAltSAppearance}
       headerActions={
         <SharedPropertiesToolbar
           key={activeSnippetId || 'new-snippet'}
@@ -890,6 +952,9 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
           entityType="snippet"
           onChange={handlePropertiesChange}
           openPopupsToBottom={true}
+          appearanceScope={appearanceScope}
+          appearanceTokens={appearanceTokens}
+          propertyPersistenceAdapter={propertyPersistenceAdapter}
         />
       }
       onSave={async () => {
@@ -901,7 +966,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
       }}
       onCloseCallback={onBack}
       isRightSiblingExpanded={isRightPanelExpanded}
-      rightSiblingPanel={
+      rightSiblingPanel={!hideRightPanel ? (
         <RightSideItemsPanel<SnippetRecord>
           items={filteredSnippets}
           activeItemId={activeSnippetId}
@@ -928,9 +993,24 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
           folderNamesMap={folderNamesMap}
           tagNamesMap={tagNamesMap}
           onLoadItem={loadSnippet}
-          onDeleteItem={id => {
-            setSnippetToDeleteId(id);
-            setIsDeleteDialogOpen(true);
+          onDeleteItem={async id => {
+            try {
+              const targetSnip = snippets.find(s => s.id === id);
+              const wsObj = targetSnip?.workspaceId ? { workspace_id: targetSnip.workspaceId } : (workspaceId ? { workspace_id: workspaceId } : null);
+              const fldObj = targetSnip?.folderId ? { folder_id: targetSnip.folderId } : (folderId ? { folder_id: folderId } : null);
+              const compoundId = getItemCompoundId({ snippet: { id }, workspace: wsObj, folder: fldObj });
+              await clearShortcut(id, compoundId, 'snippet');
+              const { deleteSnippet } = await import('./snippetData');
+              await deleteSnippet(id);
+              if (id === activeSnippetId || id === (selectedSnippet as any)?.id) {
+                loadSnippet(null);
+                setSnippetTitle('');
+                setSnippetConfig('');
+                setSnippetShortcut('');
+              }
+            } catch (err) {
+              console.error('Delete snippet failed:', err);
+            }
           }}
           onUpdateShortcut={async (id, val) => {
             await handleUpdateItemField(id, 'shortcut', val);
@@ -943,12 +1023,13 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
           }}
           isFavorite={isFavorite}
           toggleFavorite={toggleFavorite}
+          addFavorite={addFavorite}
           isExpanded={isRightPanelExpanded}
           onExpandChange={setIsRightPanelExpanded}
           searchInputRef={rightSideSearchInputRef}
           emptyStateMessage="No text expanders found"
         />
-      }
+      ) : null}
       deleteModalProps={{
         isOpen: isDeleteDialogOpen,
         onClose: () => {
@@ -1000,7 +1081,7 @@ const EditSnippetScreenComponent: React.FC<EditSnippetScreenProps> = ({
     >
       {/* Center Column: Snippet content */}
       <div className="flex-1 flex flex-col min-h-0 relative">
-        <div className="w-full flex-1 flex flex-col min-h-0 px-3 pt-0.5 pb-2">
+        <div className={`w-full flex-1 flex flex-col min-h-0 pt-0.5 pb-2 ${isAltSAppearance ? 'px-3' : isNormalSnippetMode ? 'max-w-[740px] mx-auto px-4 md:px-6' : 'px-3'}`}>
           <EditorTitleShortcutInput
             title={snippetTitle}
             setTitle={(val) => {

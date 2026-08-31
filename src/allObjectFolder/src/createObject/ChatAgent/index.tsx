@@ -33,6 +33,7 @@ import AutomationCapabilitiesMenu from '../automationBeta/searchIntegration/auto
 import { AutomationSaveNotification } from '../automationBeta/searchIntegration/automationSaveNotification';
 
 import { useUIStore } from '../../../../shared-components/uiStateManager';
+import { generateEntityId } from '../../../../shared-components/utils/idGenerator';
 const DoubleTick = ({ size = 14 }: { size?: number }) => (
   <div className="relative inline-flex items-center justify-center shrink-0" style={{ width: size, height: size }}>
     {/* First Tick (Left) */}
@@ -239,7 +240,7 @@ const ChatAgent: React.FC<ChatAgentProps> = ({
        else if (url.includes('claude.ai')) modelId = 'claude';
        else if (url.includes('gemini.google')) modelId = 'gemini';
        else if (url.includes('perplexity.ai')) modelId = 'perplexity';
-       else modelId = 'custom-' + Math.random().toString(36).substring(7);
+       else modelId = generateEntityId('customModel');
        
        allAiUrls[modelId] = url;
     });

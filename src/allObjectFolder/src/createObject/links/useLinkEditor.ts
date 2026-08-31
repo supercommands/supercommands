@@ -13,6 +13,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import { createLink, updateLink, deleteLink } from './linkData';
+import { createTag } from '../tags/tagData';
 import type { LinkRecord, CreateLinkInput, UpdateLinkInput, LinkItem } from './linkTypes';
 import type { SharedProperties } from '../../../../shared-components/editorToolbar/types';
 import { useDbStore } from '../../../../storage/store/useDbStore';
@@ -25,10 +26,24 @@ import { normalizeShortcutTrigger } from '../../../../shared-components/shortcut
 import { migrateItemCompoundId } from '../../../../shared-components/utils/metadataMigration';
 import { getVersionsNewestFirst, getSnapshotById } from '../../../../shared-components/versionHistory/structuredVersionHistory';
 
+type LinkPropertyPersistenceAdapter = {
+  saveShortcut?: (args: { id: string; referenceId: string; shortcut: string; label: string; type: string }) => Promise<void>;
+  clearShortcut?: (args: { id: string; referenceId: string; type: string }) => Promise<void>;
+  createTag?: (args: { name: string; workspaceId: string }) => Promise<{ id: string; name?: string }>;
+};
+
 export interface UseLinkEditorParams {
   linkId?: string; // If provided, load this link
   initialDraftKey?: string; // Optional initial title for a new link
   initialDraftUrls?: LinkItem[]; // Optional initial urls for a new link
+  initialTagIds?: string[];
+  onLinkCreated?: (link: LinkRecord) => void | Promise<void>;
+  saveLinkAdapter?: (args: {
+    mode: 'create' | 'update';
+    linkId?: string;
+    input: CreateLinkInput | UpdateLinkInput;
+  }) => Promise<LinkRecord>;
+  propertyPersistenceAdapter?: LinkPropertyPersistenceAdapter;
 }
 
 export interface LinkEditorProps extends UseLinkEditorParams {
@@ -49,7 +64,7 @@ const areStringArraysEqual = (a: string[], b: string[]) => {
 const normalizeEditorShortcut = (value: string) =>
   String(value || '')
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+    .replace(/[^a-z0-9_]/g, '');
 
 const getDirtyDebugSnapshot = ({
   activeLinkId,
@@ -118,11 +133,21 @@ export function useLinkEditor(props: LinkEditorProps) {
     onBack,
     initialDraftKey,
     initialDraftUrls,
+    initialTagIds,
+    onLinkCreated,
+    saveLinkAdapter,
+    propertyPersistenceAdapter,
   } = props;
 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMounted = useRef(true);
+  const onLinkCreatedRef = useRef(onLinkCreated);
+  onLinkCreatedRef.current = onLinkCreated;
+  const saveLinkAdapterRef = useRef(saveLinkAdapter);
+  saveLinkAdapterRef.current = saveLinkAdapter;
+  const propertyPersistenceAdapterRef = useRef(propertyPersistenceAdapter);
+  propertyPersistenceAdapterRef.current = propertyPersistenceAdapter;
 
   useEffect(() => {
     isMounted.current = true;
@@ -150,7 +175,7 @@ export function useLinkEditor(props: LinkEditorProps) {
   // Editor state tracking for location and tags
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
-  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [tagIds, setTagIds] = useState<string[]>(!linkId && Array.isArray(initialTagIds) ? [...initialTagIds] : []);
   const [isInitialized, setIsInitialized] = useState<boolean>(!linkId);
   const [isShortcutInitialized, setIsShortcutInitialized] = useState<boolean>(!linkId);
 
@@ -210,19 +235,23 @@ export function useLinkEditor(props: LinkEditorProps) {
 
     // Load default workspace (falling back to smart default) and folder
     const initDefaults = async () => {
-      const smartWs = await getSmartDefaultWorkspace();
-      if (smartWs) {
-        setWorkspaceId(smartWs.id);
-        const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
-        setFolderId(savedFolderId || null);
+      const savedWsId = await StorageManager.getItem('lastUsedWorkspaceId');
+      if (savedWsId) {
+        setWorkspaceId(savedWsId);
       } else {
-        setWorkspaceId(null);
-        setFolderId(null);
+        const smartWs = await getSmartDefaultWorkspace();
+        if (smartWs) {
+          setWorkspaceId(smartWs.id);
+        } else {
+          setWorkspaceId(null);
+        }
       }
+      const savedFolderId = await StorageManager.getItem('lastUsedFolderId');
+      setFolderId(savedFolderId || null);
     };
     void initDefaults();
 
-    setTagIds([]);
+    setTagIds(!linkId && Array.isArray(initialTagIds) ? [...initialTagIds] : []);
 
     lastSavedTitleRef.current = initialDraftKey || '';
     lastSavedUrlsRef.current = initialDraftUrls || [];
@@ -547,7 +576,7 @@ export function useLinkEditor(props: LinkEditorProps) {
       // Re-read latest inputs inside the loop to avoid stale data
       const loopWsId = overrideProps && overrideProps.workspaceId !== undefined ? overrideProps.workspaceId : currentInputsRef.current.workspaceId;
       const loopFId = overrideProps && overrideProps.folderId !== undefined ? overrideProps.folderId : currentInputsRef.current.folderId;
-      const loopTagIds = overrideProps && overrideProps.selectedTags ? overrideProps.selectedTags.map((t: { id: string }) => t.id) : currentInputsRef.current.tagIds;
+      let loopTagIds = overrideProps && overrideProps.selectedTags ? overrideProps.selectedTags.map((t: { id: string }) => t.id) : currentInputsRef.current.tagIds;
       const loopTitle = currentInputsRef.current.linkTitle;
       const loopUrls = currentInputsRef.current.linkUrls;
       const loopShortcut = currentInputsRef.current.linkShortcut;
@@ -575,6 +604,29 @@ export function useLinkEditor(props: LinkEditorProps) {
       });
 
       try {
+        // Convert any temp tags into real tags before saving
+        const finalWorkspaceId = loopWsId || (await getSmartDefaultWorkspace())?.id;
+        if (finalWorkspaceId) {
+          const resolvedTagIds: string[] = [];
+          for (const tId of loopTagIds) {
+            if (tId.startsWith('temp_')) {
+              const tagName = tId.replace('temp_', '');
+              try {
+                const newTag = propertyPersistenceAdapterRef.current?.createTag
+                  ? await propertyPersistenceAdapterRef.current.createTag({ name: tagName, workspaceId: finalWorkspaceId })
+                  : await createTag(tagName, finalWorkspaceId);
+                resolvedTagIds.push(newTag.id);
+              } catch (e) {
+                console.error('Failed to create temp tag', e);
+                resolvedTagIds.push(tId);
+              }
+            } else {
+              resolvedTagIds.push(tId);
+            }
+          }
+          loopTagIds = resolvedTagIds;
+        }
+
         let savedLink: LinkRecord;
         const isCreating = !currentLinkId || isImportedCloudSnippetRef.current;
         const previousCompoundId =
@@ -598,8 +650,17 @@ export function useLinkEditor(props: LinkEditorProps) {
             shortcut: loopShortcut,
           };
 
-          savedLink = await createLink(input);
+          savedLink = saveLinkAdapterRef.current
+            ? await saveLinkAdapterRef.current({ mode: 'create', input })
+            : await createLink(input);
           isImportedCloudSnippetRef.current = false;
+          if (onLinkCreatedRef.current) {
+            try {
+              await onLinkCreatedRef.current(savedLink);
+            } catch (err) {
+              console.error('[useLinkEditor] onLinkCreated callback failed:', err);
+            }
+          }
         } else {
           // UPDATE LINK
           const input: UpdateLinkInput = {
@@ -630,7 +691,9 @@ export function useLinkEditor(props: LinkEditorProps) {
             return true;
           }
 
-          savedLink = await updateLink(currentLinkId, input);
+          savedLink = saveLinkAdapterRef.current
+            ? await saveLinkAdapterRef.current({ mode: 'update', linkId: currentLinkId, input })
+            : await updateLink(currentLinkId, input);
         }
 
         if (activeLinkIdRef.current !== savingLinkId) {
@@ -696,7 +759,17 @@ export function useLinkEditor(props: LinkEditorProps) {
           const valRes = await validateShortcut(finalShortcut, savedLink.id);
           if (valRes.isValid) {
             console.log(`[ShortcutDebug] handleSave: Valid shortcut "${finalShortcut}", saving to DB for item "${savedLink.id}"...`);
-            await saveShortcut(savedLink.id, targetCompoundId, finalShortcut, savedLink.title, 'link');
+            if (propertyPersistenceAdapterRef.current?.saveShortcut) {
+              await propertyPersistenceAdapterRef.current.saveShortcut({
+                id: savedLink.id,
+                referenceId: targetCompoundId,
+                shortcut: finalShortcut,
+                label: savedLink.title,
+                type: 'link',
+              });
+            } else {
+              await saveShortcut(savedLink.id, targetCompoundId, finalShortcut, savedLink.title, 'link');
+            }
           } else {
             console.warn(`[ShortcutDebug] handleSave: Shortcut "${finalShortcut}" has validation error "${valRes.errorMessage}". SKIPPING DB save on background autosave.`);
           }
@@ -704,7 +777,15 @@ export function useLinkEditor(props: LinkEditorProps) {
           lastSavedShortcutRef.current = finalShortcut;
         } else if (lastSavedShortcutRef.current !== '') {
           console.log(`[ShortcutDebug] handleSave: Clearing shortcut for item "${savedLink.id}"...`);
-          await clearShortcut(savedLink.id, targetCompoundId, 'link');
+          if (propertyPersistenceAdapterRef.current?.clearShortcut) {
+            await propertyPersistenceAdapterRef.current.clearShortcut({
+              id: savedLink.id,
+              referenceId: targetCompoundId,
+              type: 'link',
+            });
+          } else {
+            await clearShortcut(savedLink.id, targetCompoundId, 'link');
+          }
           lastSavedShortcutRef.current = '';
         }
         hasLoadedShortcutRef.current = true;

@@ -47,6 +47,8 @@ export interface SessionRecord {
   versionHistory?: StructuredVersionHistory<SessionSnapshot>;
 }
 
+export const SESSION_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderId', 'title', 'description', 'urls', 'tagIds', 'sessionOpenSettings', 'windowId', 'shortcut', 'deletedAt'] as const satisfies readonly (keyof SessionRecord)[];
+
 export interface CreateSessionInput {
   id?: string;
   workspaceId?: string;

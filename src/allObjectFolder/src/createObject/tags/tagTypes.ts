@@ -17,3 +17,5 @@ export interface TagRecord {
   createdAt: number;
   updatedAt: number;
 }
+
+export const TAG_COMPARISON_FIELDS = ['id', 'name', 'workspaceId'] as const satisfies readonly (keyof TagRecord)[];

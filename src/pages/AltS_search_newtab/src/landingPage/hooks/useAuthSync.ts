@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getUserId } from '../../../../../storage/API/core/api';
+import { startupPerf } from '../../startupPerf';
 
 export const useAuthSync = () => {
   const [authChecked, setAuthChecked] = useState(false);
@@ -14,13 +15,19 @@ export const useAuthSync = () => {
         const currentUserId = await getUserId();
         if (!alive) return;
         if (currentUserId) {
+          startupPerf('auth:userIdResolved', {
+            isLocalUser: currentUserId === 'local_user',
+          });
           userIdRef.current = currentUserId;
           setUserId(currentUserId);
         }
       } catch (error) {
         console.error('[useAuthSync] Initial user ID lookup failed', error);
       } finally {
-        if (alive) setAuthChecked(true);
+        if (alive) {
+          startupPerf('auth:checked');
+          setAuthChecked(true);
+        }
       }
     };
 

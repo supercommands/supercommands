@@ -31,6 +31,21 @@ export function AutoSaveIndicator({
   const [hasChanges, setHasChanges] = React.useState(false);
   const prevIdRef = React.useRef<string | null | undefined>(activeId);
 
+  const [showSaved, setShowSaved] = React.useState(true);
+
+  React.useEffect(() => {
+    if (saveStatus === 'saved' || saveStatus === 'success') {
+      setShowSaved(true);
+      const timer = setTimeout(() => {
+        setShowSaved(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowSaved(true);
+      return undefined;
+    }
+  }, [saveStatus, lastSavedAt]);
+
   // Reset change tracker if we switch to a different item
   if (activeId !== prevIdRef.current) {
     const wasExistingItem = prevIdRef.current !== undefined && prevIdRef.current !== null && prevIdRef.current !== '' && prevIdRef.current !== 'new';
@@ -76,7 +91,7 @@ export function AutoSaveIndicator({
 
 
   // Handle saved status
-  if ((saveStatus === 'saved' || saveStatus === 'success') && hasChanges) {
+  if ((saveStatus === 'saved' || saveStatus === 'success') && hasChanges && showSaved) {
     return (
       <span className={`text-sm font-medium text-neutral-400 dark:text-neutral-500 flex items-center gap-1.5 whitespace-nowrap ${className}`}>
         <FaCheckCircle className="opacity-70 text-xs text-emerald-500" /> {lastSavedMessage}

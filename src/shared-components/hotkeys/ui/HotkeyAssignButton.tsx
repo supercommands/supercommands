@@ -27,6 +27,9 @@ export interface HotkeyAssignButtonProps {
   openToLeft?: boolean;
   openToBottom?: boolean;
   title?: string;
+  portalContainer?: HTMLElement | null;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
 }
 
 export const HotkeyAssignButton = forwardRef<HTMLButtonElement, HotkeyAssignButtonProps>(
@@ -50,6 +53,9 @@ export const HotkeyAssignButton = forwardRef<HTMLButtonElement, HotkeyAssignButt
     openToLeft = false,
     openToBottom = false,
     title,
+    portalContainer,
+    appearanceScope = 'default',
+    appearanceTokens,
   }, ref) => {
     const [isOpen, setIsOpen] = useState(false);
     const [editValue, setEditValue] = useState(currentHotkey);
@@ -251,6 +257,9 @@ export const HotkeyAssignButton = forwardRef<HTMLButtonElement, HotkeyAssignButt
             x={popupPosition.x}
             y={popupPosition.y}
             onClose={closeMenu}
+            portalContainer={portalContainer}
+            appearanceScope={appearanceScope}
+            appearanceTokens={appearanceTokens}
             {...popupProps}
           />
         )}

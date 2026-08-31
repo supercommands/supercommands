@@ -1,6 +1,4 @@
 import * as React from 'react';
-import { useAppearance } from '@extension/ui';
-
 
 interface FeaturePresentationCardProps {
   onClose: () => void;
@@ -8,7 +6,6 @@ interface FeaturePresentationCardProps {
 }
 
 export const FeaturePresentationCard: React.FC<FeaturePresentationCardProps> = ({ onClose, onBack }) => {
-  const { theme } = useAppearance();
 
   const containerStyle = {
     '--bg': '#080b12',
@@ -35,9 +32,8 @@ export const FeaturePresentationCard: React.FC<FeaturePresentationCardProps> = (
   return (
     <div className="presentation-container tutorial-overlay-scroll relative" style={containerStyle}>
 
-      {/* Sticky X close button — always visible at top-right while scrolling */}
-      <button
-        onClick={onClose}
+      {/* Sticky top-right action controls (Docs & Close button) */}
+      <div
         style={{
           position: 'sticky',
           top: '16px',
@@ -45,27 +41,91 @@ export const FeaturePresentationCard: React.FC<FeaturePresentationCardProps> = (
           marginRight: '20px',
           marginTop: '16px',
           zIndex: 1000,
-          background: 'rgba(255,255,255,0.06)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: '50%',
-          width: '32px',
-          height: '32px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          color: '#9ca3af',
-          fontSize: '16px',
-          lineHeight: 1,
-          transition: 'color 0.15s, background 0.15s',
-          flexShrink: 0,
+          gap: '8px',
         }}
-        onMouseEnter={e => { e.currentTarget.style.color = '#f3f4f6'; e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
-        onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
-        aria-label="Close"
       >
-        ✕
-      </button>
+        <a
+          href="https://www.cmdos.app/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open cmdOS documentation"
+          title="Open cmdOS documentation"
+          style={{
+            background: 'linear-gradient(135deg, rgba(165,124,255,0.18) 0%, rgba(121,81,232,0.15) 100%)',
+            border: '1px solid rgba(165,124,255,0.38)',
+            borderRadius: '20px',
+            padding: '6px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            color: '#f4f5f7',
+            fontSize: '13px',
+            fontWeight: 600,
+            textDecoration: 'none',
+            lineHeight: 1,
+            boxShadow: '0 4px 14px rgba(165,124,255,0.15)',
+            transition: 'color 0.15s, background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.color = '#ffffff';
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(165,124,255,0.28) 0%, rgba(121,81,232,0.25) 100%)';
+            e.currentTarget.style.borderColor = 'rgba(165,124,255,0.6)';
+            e.currentTarget.style.boxShadow = '0 6px 20px rgba(165,124,255,0.3)';
+            e.currentTarget.style.transform = 'translateY(-1px)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.color = '#f4f5f7';
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(165,124,255,0.18) 0%, rgba(121,81,232,0.15) 100%)';
+            e.currentTarget.style.borderColor = 'rgba(165,124,255,0.38)';
+            e.currentTarget.style.boxShadow = '0 4px 14px rgba(165,124,255,0.15)';
+            e.currentTarget.style.transform = 'translateY(0)';
+          }}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="#d2baff"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+          <span>Docs</span>
+        </a>
+
+        <button
+          onClick={onClose}
+          style={{
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '50%',
+            width: '32px',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            color: '#9ca3af',
+            fontSize: '16px',
+            lineHeight: 1,
+            transition: 'color 0.15s, background 0.15s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#f3f4f6'; e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+          aria-label="Close"
+        >
+          ✕
+        </button>
+      </div>
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -74,7 +134,7 @@ export const FeaturePresentationCard: React.FC<FeaturePresentationCardProps> = (
         .presentation-container .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 50px; font-size: 22px; font-weight: 800; letter-spacing: -.025em; }
         .presentation-container .brand-mark { width: 30px; height: 30px; display: block; flex: none; border-radius: 8px; object-fit: cover; }
         .presentation-container .hero { display: grid; grid-template-columns: 1.15fr .85fr; gap: 44px; align-items: start; margin-bottom: 34px; }
-        .presentation-container h1 { max-width: 760px; margin: 0 0 22px; font-size: clamp(48px, 6vw, 76px); line-height: 1.01; letter-spacing: -.058em; font-weight: 800; }
+        .presentation-container h1 { max-width: 760px; margin: 0 0 22px; font-size: clamp(40px, 5vw, 62px); line-height: 1.05; letter-spacing: -.05em; font-weight: 800; }
         .presentation-container .hero p { max-width: 680px; margin: 0 0 12px; color: var(--muted); font-size: 16px; }
         .presentation-container .hero strong { color: #ddd0ff; font-weight: 700; }
         .presentation-container .section-label { margin-bottom: 10px; color: #d4d7dd; font-size: 13px; font-weight: 700; letter-spacing: .01em; }
@@ -86,59 +146,8 @@ export const FeaturePresentationCard: React.FC<FeaturePresentationCardProps> = (
         .presentation-container .object-icon { width: 22px; flex: none; color: var(--accent); text-align: center; font-size: 14px; }
         .presentation-container .object-list .beta { color: var(--muted-2); font-size: 12px; }
         .presentation-container .command-showcase { width: 100%; margin: 0 0 34px; overflow: hidden; border-radius: 18px; background: #050812; }
-        .presentation-container .command-showcase iframe { display: block; width: 100%; height: 620px; border: 0; background: #050812; }
+        .presentation-container .command-showcase iframe { display: block; width: 100%; height: 410px; border: 0; background: #050812; }
         @media(max-width:980px) { .presentation-container .command-showcase { overflow-x: auto; } .presentation-container .command-showcase iframe { min-width: 1079px; } }
-        .presentation-container .feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
-        .presentation-container .feature { min-height: 560px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: linear-gradient(180deg, rgba(17,22,36,.98), rgba(10,14,24,.98)); display: flex; flex-direction: column; }
-        .presentation-container .feature-top { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-        .presentation-container .number { width: 32px; height: 32px; display: grid; place-items: center; flex: none; border: 1px solid rgba(165,124,255,.34); border-radius: 9px; background: var(--accent-soft); color: #eee7ff; font-size: 13px; font-weight: 800; }
-        .presentation-container .feature h3 { margin: 2px 0 0; font-size: 21px; line-height: 1.15; letter-spacing: -.028em; }
-        .presentation-container .feature > p { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
-        .presentation-container .bullet-list { display: grid; gap: 10px; margin-bottom: 18px; }
-        .presentation-container .bullet { display: grid; grid-template-columns: 16px 1fr; gap: 8px; color: #d7dbe2; font-size: 13px; }
-        .presentation-container .bullet-mark { width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; margin-top: 2px; background: #a57cff; color: #0a0d14; font-size: 9px; font-weight: 900; }
-        .presentation-container .command-structure-cards { display: grid; gap: 8px; margin-bottom: 15px; }
-        .presentation-container .command-structure-card { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.018); }
-        .presentation-container .command-structure-card code { color: #d2baff; font: 700 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
-        .presentation-container .command-structure-card span { color: #9ea6b3; font-size: 12px; line-height: 1.4; }
-        .presentation-container .object-filter-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 15px; }
-        .presentation-container .object-filter-card { display: flex; align-items: center; gap: 7px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.018); color: #b6bdc8; font-size: 12px; }
-        .presentation-container .object-filter-card code { color: #d2baff; font: 800 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-        .presentation-container .example-title { margin: 0 0 8px; color: #9f79f3; font-size: 10px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
-        .presentation-container .example-list { display: grid; gap: 0; border-top: 1px solid var(--line); }
-        .presentation-container .example-row { padding: 11px 0; border-bottom: 1px solid var(--line); }
-        .presentation-container .example-row code { display: block; margin-bottom: 3px; color: #d2baff; font: 700 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
-        .presentation-container .example-row span { display: block; color: #9ea6b3; font-size: 12px; line-height: 1.45; }
-        .presentation-container .browser-demo { margin-top: 14px; padding-top: 0; }
-        .presentation-container .browser-copy { margin-bottom: 10px; }
-        .presentation-container .browser-copy strong { display: block; margin-bottom: 3px; font-size: 15px; letter-spacing: -.015em; }
-        .presentation-container .browser-copy span { display: block; color: var(--muted); font-size: 12px; }
-        .presentation-container .browser { overflow: hidden; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: #0a0d14; box-shadow: 0 14px 34px rgba(0,0,0,.30); }
-        .presentation-container .browser-head { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 10px; border-bottom: 1px solid rgba(255,255,255,.075); background: #161a22; color: #9aa2af; font-size: 10px; }
-        .presentation-container .dots { display: flex; gap: 5px; }
-        .presentation-container .dots i { width: 7px; height: 7px; border-radius: 50%; background: #565d69; }
-        .presentation-container .new-tab { min-width: 116px; margin-left: 6px; padding: 8px 12px 7px; border-radius: 9px 9px 0 0; background: #20242d; color: #d1d5dc; }
-        .presentation-container .browser-toolbar { display: flex; align-items: center; gap: 10px; padding: 9px 10px 8px; background: #11151d; }
-        .presentation-container .omnibox { display: flex; align-items: center; gap: 8px; flex: 1; min-height: 38px; padding: 0 13px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; background: #0c1017; color: #eef0f3; font-size: 13px; box-shadow: inset 0 1px 0 rgba(255,255,255,.015); }
-        .presentation-container .omnibox .command { font-weight: 800; color: #f4f5f7; }
-        .presentation-container .omnibox-star { margin-left: auto; color: #737c89; font-size: 15px; }
-        .presentation-container .key { margin-left: auto; padding: 4px 7px; border: 1px solid rgba(255,255,255,.10); border-radius: 7px; background: #171b25; color: #bfc5cf; font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-        .presentation-container .browser-actions { margin: 0 10px 10px; overflow: hidden; border: 1px solid rgba(255,255,255,.075); border-radius: 9px; background: #090d15; }
-        .presentation-container .browser-action { min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.065); color: #c8cdd5; font-size: 11px; }
-        .presentation-container .browser-action:last-child { border-bottom: none; }
-        .presentation-container .browser-action:first-child { background: rgba(255,255,255,.035); }
-        .presentation-container .browser-action-icon { width: 18px; flex: none; color: #a98bff; text-align: center; font-size: 14px; display: grid; place-items: center; }
-        .presentation-container .browser-action strong { display: block; margin-bottom: 2px; color: #e9ebef; font-size: 11px; font-weight: 650; }
-        .presentation-container .browser-action small { display: block; color: #828b99; font-size: 9px; line-height: 1.35; }
-        .presentation-container .browser-tab-close { margin-left: auto; color: #89919e; font-size: 12px; }
-        .presentation-container .browser-result { display: flex; justify-content: space-between; gap: 12px; margin: 0 10px 10px; padding: 10px 11px; border-top: 1px solid var(--line); }
-        .presentation-container .browser-result strong { display: block; margin-bottom: 2px; font-size: 12px; }
-        .presentation-container .browser-result span { display: block; color: #858e9c; font-size: 10px; line-height: 1.35; }
-        .presentation-container .open { flex: none; color: #ad88ff !important; padding-top: 1px; }
-        .presentation-container .command-explainer { margin-bottom: 14px; color: #d8dce3; font-size: 13px; }
-        .presentation-container .command-explainer code { padding: 2px 5px; border-radius: 5px; background: var(--accent-soft); color: #d8c3ff; font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-        .presentation-container .filter-line { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 14px; color: #9ca4b1; font-size: 12px; }
-        .presentation-container .filter-line b { color: #d1b8ff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
         .presentation-container .footer-everywhere { display: grid; grid-template-columns: 1.7fr repeat(4, 1fr); align-items: center; row-gap: 0; margin: 0 0 18px; padding: 12px 20px; overflow: hidden; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: radial-gradient(360px 110px at 0% 50%, rgba(87,72,170,.13), transparent 72%), linear-gradient(180deg, #101626 0%, #0b101c 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.018), 0 14px 34px rgba(0,0,0,.16); }
         .presentation-container .footer-everywhere__title, .presentation-container .footer-everywhere__item { min-height: 32px; display: flex; align-items: center; }
         .presentation-container .footer-everywhere__title { justify-content: flex-start; padding-right: 18px; color: #f5f6f8; font-size: 15px; font-weight: 750; letter-spacing: -.02em; white-space: nowrap; line-height: 1; }
@@ -154,7 +163,7 @@ export const FeaturePresentationCard: React.FC<FeaturePresentationCardProps> = (
         .presentation-container .footer-cta__copy h3 { margin: 0 0 12px; color: #f6f7f9; font-size: 36px; line-height: 1.08; font-weight: 650; letter-spacing: -.045em; }
         .presentation-container .footer-cta__copy p { margin: 0 0 24px; color: #b7bec9; font-size: 17px; }
         .presentation-container .footer-cta__button { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 50px; padding: 0 22px; border: 1px solid rgba(255,255,255,.15); border-radius: 10px; background: linear-gradient(90deg, #6541da 0%, #9b6df0 100%); box-shadow: 0 12px 30px rgba(89,51,183,.28); color: #fff; text-decoration: none; font-size: 15px; font-weight: 750; }
-        @media(max-width:980px) { .presentation-container .hero { grid-template-columns: 1fr; } .presentation-container .feature-grid { grid-template-columns: 1fr; } .presentation-container .feature { min-height: auto; } .presentation-container .footer-everywhere { grid-template-columns: 1fr 1fr; padding: 14px 18px 12px; } .presentation-container .footer-everywhere__title { grid-column: 1/-1; } .presentation-container .footer-everywhere__item { justify-content: flex-start; padding: 4px 0; } .presentation-container .footer-cta { min-height: auto; padding: 32px; } .presentation-container .footer-cta__terminal { width: 122px; height: 122px; border-radius: 28px; } .presentation-container .footer-cta__copy h3 { font-size: 30px; } }
+        @media(max-width:980px) { .presentation-container .hero { grid-template-columns: 1fr; } .presentation-container .footer-everywhere { grid-template-columns: 1fr 1fr; padding: 14px 18px 12px; } .presentation-container .footer-everywhere__title { grid-column: 1/-1; } .presentation-container .footer-everywhere__item { justify-content: flex-start; padding: 4px 0; } .presentation-container .footer-cta { min-height: auto; padding: 32px; } .presentation-container .footer-cta__terminal { width: 122px; height: 122px; border-radius: 28px; } .presentation-container .footer-cta__copy h3 { font-size: 30px; } }
         @media(max-width:620px) { .presentation-container .page { width: min(var(--max), calc(100% - 24px)); padding-top: 20px; } .presentation-container .brand { margin-bottom: 34px; } .presentation-container .footer-everywhere { grid-template-columns: 1fr; } .presentation-container .footer-everywhere__title { grid-column: auto; } .presentation-container .footer-cta { padding: 26px; } .presentation-container .footer-cta__inner { flex-direction: column; align-items: flex-start; gap: 26px; } .presentation-container .footer-cta__terminal { width: 100px; height: 100px; border-radius: 24px; } .presentation-container .footer-cta__terminal svg { width: 56px; height: 56px; } .presentation-container .footer-cta__copy h3 { font-size: 27px; } .presentation-container .footer-cta__copy p { font-size: 15px; } .presentation-container .footer-cta__button { width: 100%; } }
       `}</style>
 
@@ -170,7 +179,6 @@ export const FeaturePresentationCard: React.FC<FeaturePresentationCardProps> = (
     <section className="hero">
       <div>
         <h1>The fastest way to access everything on the web</h1>
-        <div className="section-label">Why we are building cmdOS</div>
         <p>Our knowledge and work are scattered across notes, files, links, tab sessions, AI chats, tasks, bookmarks, documents, and more.</p>
         <p>We spend 3–4 hours every week searching, switching between tools, and navigating the web.</p>
         <p><strong>cmdOS turns every part of your work into a command.</strong></p>
@@ -225,7 +233,7 @@ body {
 }
 .stage {
   width:1079px;
-  min-height:620px;
+  min-height:410px;
   position:relative;
   overflow:hidden;
   background:
@@ -447,84 +455,10 @@ body {
   font-size:15px;
 }
 
-.connector-layer {
-  position:absolute;
-  left:55px;
-  top:319px;
-  width:970px;
-  height:78px;
-  pointer-events:none;
-}
-.connector-layer path {
-  fill:none;
-  stroke:#563f9f;
-  stroke-width:1.2;
-  stroke-dasharray:5 5;
-  opacity:.72;
-}
-.connector-layer circle {
-  fill:#9158ff;
-}
-
-.cards {
-  position:absolute;
-  left:16px;
-  top:377px;
-  width:1047px;
-  display:grid;
-  grid-template-columns:repeat(7,1fr);
-  gap:17px;
-}
-.card {
-  text-align:center;
-}
-.app-icon {
-  width:48px;
-  height:48px;
-  margin:0 auto 10px;
-  border-radius:12px;
-  background:#fff;
-  display:grid;
-  place-items:center;
-  overflow:hidden;
-  box-shadow:0 10px 26px rgba(0,0,0,.35),0 0 18px rgba(134,82,255,.16);
-}
-.app-icon img {
-  width:31px;
-  height:31px;
-  object-fit:contain;
-}
-.command-card {
-  height:61px;
-  border:1px solid #3a2f61;
-  border-radius:12px;
-  background:linear-gradient(180deg,#101725,#0b111d);
-  padding:10px 8px;
-}
-.card-title {
-  font-size:12px;
-  font-weight:650;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-.card-title .c {
-  color:#ffffff;
-  margin-right:4px;
-}
-.card-sub {
-  margin-top:5px;
-  font-size:10px;
-  color:#9099aa;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-
 .advanced-strip {
   position:absolute;
   left:16px;
-  top:533px;
+  top:334px;
   width:1047px;
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
@@ -699,75 +633,6 @@ body {
     </div>
   </section>
 
-  <svg class="connector-layer" viewBox="0 0 970 78" preserveAspectRatio="none">
-    <path d="M0,77 C20,30 78,15 104,5"></path>
-    <path d="M140,77 C150,34 190,18 244,5"></path>
-    <path d="M282,77 C304,30 331,15 385,5"></path>
-    <path d="M423,77 C438,32 470,18 526,5"></path>
-    <path d="M565,77 C575,33 617,17 667,5"></path>
-    <path d="M706,77 C724,31 756,15 809,5"></path>
-    <path d="M847,77 C870,31 908,17 950,5"></path>
-    <circle cx="0" cy="77" r="4"></circle>
-    <circle cx="140" cy="77" r="4"></circle>
-    <circle cx="282" cy="77" r="4"></circle>
-    <circle cx="423" cy="77" r="4"></circle>
-    <circle cx="565" cy="77" r="4"></circle>
-    <circle cx="706" cy="77" r="4"></circle>
-    <circle cx="847" cy="77" r="4"></circle>
-  </svg>
-
-  <section class="cards">
-    <div class="card">
-      <div class="app-icon"><img src="https://cdn.simpleicons.org/notion/000000" alt="Notion"></div>
-      <div class="command-card">
-        <div class="card-title"><span class="c">c</span>daily task</div>
-        <div class="card-sub">Open in Notion</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="app-icon"><img src="https://cdn.simpleicons.org/linear/5E6AD2" alt="Linear"></div>
-      <div class="command-card">
-        <div class="card-title"><span class="c">c</span>my issues</div>
-        <div class="card-sub">Open in Linear</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="app-icon"><img src="https://cdn.simpleicons.org/googledrive/4285F4" alt="Drive"></div>
-      <div class="command-card">
-        <div class="card-title"><span class="c">c</span>project plan</div>
-        <div class="card-sub">Open in Drive</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="app-icon"><img src="https://www.vectorlogo.zone/logos/slack/slack-icon.svg" alt="Slack"></div>
-      <div class="command-card">
-        <div class="card-title"><span class="c">c</span>team updates</div>
-        <div class="card-sub">Open in Slack</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="app-icon"><img src="https://cdn.simpleicons.org/gmail/EA4335" alt="Gmail"></div>
-      <div class="command-card">
-        <div class="card-title"><span class="c">c</span>inbox unread</div>
-        <div class="card-sub">Open in Gmail</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="app-icon"><img src="https://cdn.simpleicons.org/github/000000" alt="GitHub"></div>
-      <div class="command-card">
-        <div class="card-title"><span class="c">c</span>pull requests</div>
-        <div class="card-sub">Open in GitHub</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="app-icon"><img src="https://cdn.simpleicons.org/clickup/7B68EE" alt="ClickUp"></div>
-      <div class="command-card">
-        <div class="card-title"><span class="c">c</span>sprint tasks</div>
-        <div class="card-sub">Open in ClickUp</div>
-      </div>
-    </div>
-  </section>
-
   <section class="advanced-strip">
     <article class="advanced-card">
       <div class="advanced-icon">
@@ -835,140 +700,7 @@ body {
 </div>
 </body>
 </html>`}
-        loading="eager"
       ></iframe>
-    </section>
-
-    <section className="feature-grid">
-      <article className="feature">
-        <div className="feature-top">
-          <div className="number">1</div>
-          <h3>Search & Commands</h3>
-        </div>
-        <p>Find and access anything using simple commands.</p>
-
-        <div className="bullet-list">
-          <div className="bullet"><span className="bullet-mark">✓</span><span>Search everything saved in your workspace</span></div>
-          <div className="bullet"><span className="bullet-mark">✓</span><span>Open notes, links, tasks, and documents instantly</span></div>
-          <div className="bullet"><span className="bullet-mark">✓</span><span>Launch complete tab sessions with one command</span></div>
-          <div className="bullet"><span className="bullet-mark">✓</span><span>Run actions without switching tabs</span></div>
-        </div>
-
-        <div className="browser-demo">
-          <div className="browser-copy">
-            <strong>One command. Everything you need.</strong>
-            <span>Use cmdOS from the browser omnibox, websites, new tabs, or input fields.</span>
-          </div>
-
-          <div className="browser">
-            <div className="browser-head">
-              <div className="dots"><i></i><i></i><i></i></div>
-              <div className="new-tab">New Tab</div>
-              <div className="browser-tab-close">×</div>
-            </div>
-
-            <div className="browser-toolbar">
-              <div className="omnibox">
-                <span>⌕</span>
-                <span className="command">c</span>
-                <span>daily tasks</span>
-                <span className="omnibox-star">☆</span>
-              </div>
-            </div>
-
-            <div className="browser-actions">
-              <div className="browser-action">
-                <span className="browser-action-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="4" y="4" width="16" height="16" rx="3" />
-                    <path d="m8 12 2.2 2.2L16 9" />
-                  </svg>
-                </span>
-                <span>
-                  <strong>Daily tasks</strong>
-                  <small>Open today’s task list</small>
-                </span>
-              </div>
-              <div className="browser-action">
-                <span className="browser-action-icon">▤</span>
-                <span>
-                  <strong>Daily notes</strong>
-                  <small>Open your daily personal notes</small>
-                </span>
-              </div>
-              <div className="browser-action">
-                <span className="browser-action-icon">⌘</span>
-                <span>
-                  <strong>Daily automation</strong>
-                  <small>Run your saved daily workflow</small>
-                </span>
-              </div>
-              <div className="browser-action">
-                <span className="browser-action-icon">▣</span>
-                <span>
-                  <strong>Daily session</strong>
-                  <small>Open today’s links, notes, and project tools</small>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </article>
-
-      <article className="feature">
-        <div className="feature-top">
-          <div className="number">2</div>
-          <h3>Keyboard Shortcuts</h3>
-        </div>
-        <p>Assign a shortcut to any object or workflow you use often.</p>
-
-        <div className="example-title">Examples of shortcuts you can create</div>
-        <div className="example-list">
-          <div className="example-row"><code>Alt + A</code><span>Open your ChatGPT research agent.</span></div>
-          <div className="example-row"><code>Alt + 1</code><span>Open your work tasks.</span></div>
-          <div className="example-row"><code>Alt + P</code><span>Launch your client project session with notes, tracker, documents, and meeting link.</span></div>
-          <div className="example-row"><code>Alt + 3</code><span>Open all tasks scheduled for today.</span></div>
-          <div className="example-row"><code>Alt + M</code><span>Launch your daily meeting.</span></div>
-          <div className="example-row"><code>Alt + T</code><span>Open everything you need to complete today.</span></div>
-        </div>
-      </article>
-      <article className="feature">
-        <div className="feature-top">
-          <div className="number">3</div>
-          <h3>Assign a command to any object</h3>
-        </div>
-
-        <div className="command-explainer">
-          Assign a command to any object and open it instantly. Type <code>c</code> followed by your command to open anything you have saved.
-        </div>
-
-        <div className="example-title">Command structure</div>
-        <div className="command-structure-cards">
-          <div className="command-structure-card">
-            <code>c [command]</code>
-            <span>Open any saved command.</span>
-          </div>
-          <div className="command-structure-card">
-            <code>c [filter] [command]</code>
-            <span>Search within a specific object type.</span>
-          </div>
-        </div>
-
-        <div className="example-title">Filter by object type</div>
-        <div className="object-filter-cards">
-          <div className="object-filter-card"><code>n</code><span>Notes</span></div>
-          <div className="object-filter-card"><code>l</code><span>Links</span></div>
-          <div className="object-filter-card"><code>t</code><span>Tasks</span></div>
-        </div>
-
-        <div className="example-title">Examples</div>
-        <div className="example-list">
-          <div className="example-row"><code>c daily meeting</code><span>Open your saved daily meeting command.</span></div>
-          <div className="example-row"><code>c n daily</code><span>Search your notes for “daily.”</span></div>
-          <div className="example-row"><code>c l news</code><span>Search your saved news links.</span></div>
-          <div className="example-row"><code>c t today</code><span>Search your tasks for today.</span></div>
-        </div>
-      </article>
     </section>
 
     <section className="footer-everywhere" aria-label="Works everywhere">
@@ -1002,7 +734,7 @@ body {
           <path fill="#FFC107" d="M43.6 20H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-4z"/>
           <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4c-7.7 0-14.4 4.3-17.7 10.7z"/>
           <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.7-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
-          <path fill="#1976D2" d="M43.6 20H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l.1-.1 6.2 5.2C37 39.1 44 34 44 24c0-1.3-.1-2.7-.4-4z"/>
+          <path fill="#1976D2" d="M43.6 20H42V20H24v8h11.3c-.8 2.3-4.2 5.6-4.2 5.6l.1-.1 6.2 5.2C37 39.1 44 34 44 24c0-1.3-.1-2.7-.4-4z"/>
         </svg>
         <span>Browser omnibox</span>
       </div>

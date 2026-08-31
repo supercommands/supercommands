@@ -1,6 +1,6 @@
 import { useDbStore } from '../../../storage/store/useDbStore';
 import { getAllUserHotkeys } from '../core/hotkeyDbData';
-import { getAllUserShortcuts, normalizeShortcutTrigger } from '../../shortcuts/core/shortcutDbData';
+import { getAllUserShortcuts, normalizeShortcutTrigger, saveUserShortcut } from '../../shortcuts/core/shortcutDbData';
 
 export const readAllShortcuts = async (): Promise<Record<string, string>> => {
   const chromeAny = (window as any)?.chrome;
@@ -107,14 +107,19 @@ async function migrateLegacyShortcutsIfNeeded() {
     chromeAny.storage.local.get(
       ['link_commands', 'note_commands', 'session_commands', 'todo_commands', 'alts_automation_shortcuts'],
       async (res: any) => {
-        const hasAnyData = Object.values(res).some(v => v && Object.keys(v as any).length > 0);
+        const migratableBuckets = [
+          res.link_commands,
+          res.note_commands,
+          res.todo_commands,
+          res.alts_automation_shortcuts,
+        ];
+        const hasAnyData = migratableBuckets.some(v => v && Object.keys(v as any).length > 0);
         if (!hasAnyData) {
-          resolve();
+          chromeAny.storage.local.remove(['session_commands'], () => resolve());
           return;
         }
 
         console.info('[migrateLegacyShortcuts] Migrating legacy text shortcuts to IndexedDB...');
-        const { saveUserShortcut } = await import('../../shortcuts/core/shortcutDbData');
         
         const migrateBucket = async (bucket: any, type: string) => {
           if (!bucket) return;
@@ -130,7 +135,6 @@ async function migrateLegacyShortcutsIfNeeded() {
 
         await migrateBucket(res.link_commands, 'link');
         await migrateBucket(res.note_commands, 'note');
-        await migrateBucket(res.session_commands, 'session');
         await migrateBucket(res.todo_commands, 'todo');
         await migrateBucket(res.alts_automation_shortcuts, 'automation');
 

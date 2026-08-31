@@ -5,3 +5,5 @@ export interface FolderData {
   createdAt: number;
   updatedAt: number;
 }
+
+export const FOLDER_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderName'] as const satisfies readonly (keyof FolderData)[];

@@ -13,12 +13,34 @@ import {
 import { createNotification, handleNotificationClick } from '@notifications/notifications';
 import { db } from '../../src/storage/indexDB/dbConfig';
 import { createLink, updateLink } from '../../src/allObjectFolder/src/createObject/links/linkData';
-import { createChatAgent } from '../../src/allObjectFolder/src/createObject/ChatAgent/chatAgentData';
-import { toggleFavoriteRecord } from '../../src/shared-components/favorites/favoriteData';
+import { createChatAgent, updateChatAgent } from '../../src/allObjectFolder/src/createObject/ChatAgent/chatAgentData';
+import { createAiPrompt, updateAiPrompt } from '../../src/allObjectFolder/src/createObject/aiPrompt/aiPromptData';
+import { updateSession } from '../../src/allObjectFolder/src/createObject/session/sessionData';
+import { addFavoriteRecord, removeFavoriteRecord, toggleFavoriteRecord } from '../../src/shared-components/favorites/favoriteData';
+import { createTag, deleteTag, updateTag } from '../../src/allObjectFolder/src/createObject/tags/tagData';
 import { saveUserHotkey, deleteUserHotkeyByReference } from '../../src/shared-components/hotkeys/core/hotkeyDbData';
 import { saveUserShortcut, deleteUserShortcutByReference } from '../../src/shared-components/shortcuts/core/shortcutDbData';
-import { saveShortcut as apiSaveShortcut } from '../../src/shared-components/shortcuts';
-import { handleSessionMessage, activeSessions, persistActiveSessions, saveSessionToDb } from '@browserWindows/sessions';
+import { clearHotkey as apiClearHotkey, saveHotkey as apiSaveHotkey } from '../../src/shared-components/hotkeys';
+import { clearShortcut as apiClearShortcut, saveShortcut as apiSaveShortcut } from '../../src/shared-components/shortcuts';
+import {
+  addWidgetInstanceAsync,
+  createWidgetDashboardViewAsync,
+} from '../../src/storage/localStorage/widgetDashboardStorage';
+import {
+  handleSessionMessage,
+  activeSessions,
+  persistActiveSessions,
+  saveSessionToDb,
+  refreshDeepFocusForRelevantTabs,
+  handleDeepFocusNavigation,
+  handleDeepFocusTabCreated,
+  handleDeepFocusWindowCreated,
+  registerSessionControlPort,
+  isTrackableSessionAutosaveUrl,
+  getTrackableSessionAutosaveTabUrl,
+  getValidatedActiveSessionForWindow,
+  stopActiveSessionRuntimeForWindow,
+} from '@browserWindows/sessions';
 import {
   executeAutomation,
   stopCurrentAutomation,
@@ -41,11 +63,13 @@ import { handleBrowserWindowMessage } from '@browserWindows/index';
 import { setupWindowManager } from './all_PreBuilt_Commands/system/windowManager';
 import { handleSearchMessage } from '@browserData/index';
 import { handleHotkeyMessage, invalidateHotkeysCache } from '@hotkeys/hotkeys';
+import { generateEntityId } from '../../src/shared-components/utils/idGenerator';
+import { createInitialHistory, upsertVersionForChange } from '../../src/shared-components/versionHistory/structuredVersionHistory';
 import { handleExtractorMessage } from '@preBuiltCommands/extraction/index';
 import { handleElementPickerMessage } from '@automation/domSelector/visualPicker';
 import { handleAuthMessage } from '@_authentication/auth';
 import { handleNewTodoAlarm } from './todos/newTodos';
-import { handleBackupAlarm } from '../../src/settings/backup/logic/scheduler';
+import { handleBackupAlarm, reconcileAutoBackupAlarm } from '../../src/settings/backup/logic/scheduler';
 
 let hasStarted = false;
 export function startBackground() {
@@ -53,6 +77,8 @@ export function startBackground() {
   hasStarted = true;
 
   setupWindowManager();
+  reconcileAutoBackupAlarm();
+  cleanupStaleNewTabFocusKeys();
 
 /**
  * @file index.ts
@@ -113,6 +139,12 @@ attachContextMenuListeners();
 const TOGGLE_ALTS_MESSAGE = 'tasklabs:toggle-alts-popup';
 const TOGGLE_ALTQ_MESSAGE = 'tasklabs:toggle-altq-popup';
 
+chrome.runtime.onConnect.addListener(port => {
+  const match = /^session-control:(\d+)$/.exec(port.name || '');
+  if (!match) return;
+  registerSessionControlPort(Number(match[1]), port);
+});
+
 chrome.runtime.onInstalled.addListener(async details => {
   setupContextMenus();
 
@@ -152,6 +184,24 @@ chrome.runtime.onInstalled.addListener(async details => {
 
 // Listen for create actions from the content script overlay
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.action === 'alts_get_chrome_tabs') {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({});
+        let currentWindowId = sender.tab?.windowId ?? null;
+        if (typeof currentWindowId !== 'number') {
+          const currentWindow = await chrome.windows.getLastFocused({ populate: false }).catch(() => null);
+          currentWindowId = currentWindow?.id ?? null;
+        }
+        sendResponse({ success: true, tabs, currentWindowId });
+      } catch (err: any) {
+        console.error('[Background] alts_get_chrome_tabs failed:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
   if (message && message.type === 'tasklabs:execute-create-action') {
     const action = message.action; // e.g., 'createnotes', 'createlinks'
     const extensionUrl = chrome.runtime.getURL(`AltS_search_newtab/index.html?open_sheet=${action}`);
@@ -209,11 +259,125 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // keep channel open for async response
   }
 
+  if (message && message.action === 'db_create_todo') {
+    (async () => {
+      try {
+        const { createTodo } = await import('../../src/allObjectFolder/src/createObject/todos/todoData');
+        const input = message.input || message.payload || {};
+        const todo = await createTodo(
+          input.title || input.name || '',
+          Array.isArray(input.references) ? input.references : [],
+          input.scheduleType || 'one-time',
+          typeof input.scheduleTime === 'number' ? input.scheduleTime : Date.now(),
+          input.recurringCycle,
+          input.description,
+          Array.isArray(input.tagIds) ? input.tagIds : [],
+          input.shortcut || '',
+          input.workspaceId,
+          input.folderId,
+        );
+        sendResponse({ success: true, todo });
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'todos' }).catch(() => {});
+              chrome.tabs.sendMessage(tab.id, { type: 'TODOS_UPDATED' }).catch(() => {});
+            }
+          });
+        });
+      } catch (err: any) {
+        console.error('[Background] db_create_todo failed:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (message && message.action === 'db_update_todo_content') {
+    (async () => {
+      try {
+        const { updateTodoContent } = await import('../../src/allObjectFolder/src/createObject/todos/todoData');
+        const todo = await updateTodoContent(message.todoId, message.updates || {});
+        sendResponse({ success: true, todo });
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'todos' }).catch(() => {});
+              chrome.tabs.sendMessage(tab.id, { type: 'TODOS_UPDATED' }).catch(() => {});
+            }
+          });
+        });
+      } catch (err: any) {
+        console.error('[Background] db_update_todo_content failed:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
   if (message && message.action === 'db_create_note') {
     (async () => {
       try {
-        const { createNote } = await import('../../src/allObjectFolder/src/createObject/notes/noteData');
-        const note = await createNote(message.input);
+        const input = message.input || {};
+        let workspaceId = input.workspaceId;
+        if (!workspaceId) {
+          const workspaces = await db.workspaces.toArray();
+          workspaceId = workspaces
+            .filter((workspace: any) => workspace?.id)
+            .sort((a: any, b: any) => Number(b?.updatedAt || 0) - Number(a?.updatedAt || 0))[0]?.id;
+        }
+        if (!workspaceId) throw new Error('A workspace is required.');
+
+        const now = Date.now();
+        const body = String(input.body || '')
+          .trim()
+          .replace(/(<p><br><\/p>)+$/, '')
+          .replace(/(<br\s*\/?>\s*)+<\/p>$/, '</p>');
+        const title = String(input.title || '').trim() || 'Untitled Note';
+        const noteSnapshot = {
+          entityType: 'note',
+          title,
+          body,
+          shortcut: input.shortcut || '',
+          workspaceId,
+          folderId: input.folderId ?? null,
+          tagIds: Array.isArray(input.tagIds) ? input.tagIds : [],
+        };
+        const note = {
+          id: generateEntityId('note'),
+          workspaceId,
+          folderId: input.folderId ?? null,
+          title,
+          body,
+          shortcut: input.shortcut || '',
+          tagIds: Array.isArray(input.tagIds) ? input.tagIds : [],
+          assetIds: Array.isArray(input.assetIds) ? input.assetIds : [],
+          versionHistory: {
+            lastCheckpointAt: now,
+            lastSavedText: body,
+            historyBuffer: [],
+            structuredHistory: {
+              versions: [
+                {
+                  id: `v_${now}_1`,
+                  label: 'Initial version',
+                  snapshot: noteSnapshot,
+                  savedAt: now,
+                  windowStartedAt: now,
+                  lastUpdatedAt: now,
+                  isInitial: true,
+                },
+              ],
+              maxHistorySize: 25,
+              lastCheckpointAt: now,
+            },
+          },
+          createdAt: now,
+          updatedAt: now,
+          deletedAt: null,
+        };
+
+        await db.notes.add(note as any);
         sendResponse({ success: true, note });
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach(tab => {
@@ -233,8 +397,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.action === 'db_update_note') {
     (async () => {
       try {
-        const { updateNote } = await import('../../src/allObjectFolder/src/createObject/notes/noteData');
-        const note = await updateNote(message.noteId, message.input);
+        const noteId = String(message.noteId || '');
+        if (!noteId) throw new Error('noteId is required');
+
+        const input = message.input || {};
+        const existing = await db.notes.get(noteId);
+        if (!existing) throw new Error('Note not found.');
+        if (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) {
+          const error: any = new Error('Note was modified in another tab.');
+          error.name = 'ConflictError';
+          throw error;
+        }
+
+        const now = Date.now();
+        const changes: any = { updatedAt: now };
+        if (input.title !== undefined) changes.title = String(input.title || '').trim() || 'Untitled Note';
+        if (input.body !== undefined) {
+          changes.body = String(input.body || '')
+            .trim()
+            .replace(/(<p><br><\/p>)+$/, '')
+            .replace(/(<br\s*\/?>\s*)+<\/p>$/, '</p>');
+          changes.assetIds = Array.isArray(input.assetIds) ? input.assetIds : [];
+        }
+        if (input.shortcut !== undefined) changes.shortcut = input.shortcut || '';
+        if (input.workspaceId !== undefined) changes.workspaceId = input.workspaceId;
+        if (input.folderId !== undefined) changes.folderId = input.folderId;
+        if (input.tagIds !== undefined) changes.tagIds = Array.isArray(input.tagIds) ? input.tagIds : [];
+
+        const note = { ...existing, ...changes };
+        await db.notes.put(note);
         sendResponse({ success: true, note });
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach(tab => {
@@ -254,8 +445,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.action === 'db_create_snippet') {
     (async () => {
       try {
-        const { createSnippet } = await import('../../src/allObjectFolder/src/createObject/snippets/snippetData');
-        const snippet = await createSnippet(message.input);
+        const input = message.input || {};
+        let workspaceId = input.workspaceId;
+        if (!workspaceId) {
+          const workspaces = await db.workspaces.toArray();
+          workspaceId = workspaces
+            .filter((workspace: any) => workspace?.id)
+            .sort((a: any, b: any) => Number(b?.updatedAt || 0) - Number(a?.updatedAt || 0))[0]?.id;
+        }
+        if (!workspaceId) throw new Error('A workspace is required.');
+
+        const now = Date.now();
+        const title = String(input.title || '').trim() || 'Untitled Snippet';
+        const folderId = input.folderId ?? null;
+        const config = input.config ?? '';
+        const tagIds = Array.isArray(input.tagIds) ? input.tagIds : [];
+        const shortcut = input.shortcut || '';
+        const snippetSnapshot = {
+          entityType: 'snippet',
+          title,
+          config,
+          workspaceId,
+          folderId,
+          tagIds,
+          shortcut,
+        };
+        const snippet = {
+          id: generateEntityId('snippet'),
+          workspaceId,
+          folderId,
+          title,
+          config,
+          tagIds,
+          shortcut,
+          createdAt: now,
+          updatedAt: now,
+          deletedAt: null,
+          versionHistory: createInitialHistory(snippetSnapshot, now),
+        };
+
+        await db.snippets.add(snippet as any);
         sendResponse({ success: true, snippet });
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach(tab => {
@@ -292,11 +521,117 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message && message.action === 'db_update_chat_agent') {
+    (async () => {
+      try {
+        const agentId = String(message.agentId || '');
+        if (!agentId) throw new Error('agentId is required');
+        const agent = await updateChatAgent(agentId, message.input || {});
+        sendResponse({ success: true, agent });
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'chatAgents' }).catch(() => {});
+            }
+          });
+        });
+      } catch (err: any) {
+        console.error('[Background] db_update_chat_agent failed:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (message && message.action === 'db_update_ai_prompt') {
+    (async () => {
+      try {
+        const aiPromptId = String(message.aiPromptId || '');
+        if (!aiPromptId) throw new Error('aiPromptId is required');
+        const prompt = await updateAiPrompt(aiPromptId, message.input || {});
+        sendResponse({ success: true, prompt });
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'aiPrompts' }).catch(() => {});
+            }
+          });
+        });
+      } catch (err: any) {
+        console.error('[Background] db_update_ai_prompt failed:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (message && message.action === 'db_create_ai_prompt') {
+    (async () => {
+      try {
+        const prompt = await createAiPrompt(message.input || {});
+        sendResponse({ success: true, prompt });
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'aiPrompts' }).catch(() => {});
+            }
+          });
+        });
+      } catch (err: any) {
+        console.error('[Background] db_create_ai_prompt failed:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
   if (message && message.action === 'db_update_snippet') {
     (async () => {
       try {
-        const { updateSnippet } = await import('../../src/allObjectFolder/src/createObject/snippets/snippetData');
-        const snippet = await updateSnippet(message.snippetId, message.input);
+        const snippetId = String(message.snippetId || '');
+        if (!snippetId) throw new Error('snippetId is required');
+
+        const input = message.input || {};
+        const existing = await db.snippets.get(snippetId);
+        if (!existing) throw new Error('Snippet not found.');
+
+        const now = Date.now();
+        const changes: any = { updatedAt: now };
+        if (input.title !== undefined) changes.title = String(input.title || '').trim() || 'Untitled Snippet';
+        if (input.config !== undefined) changes.config = input.config;
+        if (input.workspaceId !== undefined) changes.workspaceId = input.workspaceId;
+        if (input.folderId !== undefined) changes.folderId = input.folderId;
+        if (input.tagIds !== undefined) changes.tagIds = Array.isArray(input.tagIds) ? input.tagIds : [];
+        if (input.shortcut !== undefined) changes.shortcut = input.shortcut || '';
+
+        const snippet = { ...existing, ...changes };
+        const prevSnapshot = {
+          entityType: 'snippet',
+          title: existing.title,
+          config: existing.config,
+          workspaceId: existing.workspaceId,
+          folderId: existing.folderId,
+          tagIds: existing.tagIds || [],
+          shortcut: existing.shortcut || '',
+        };
+        const nextSnapshot = {
+          entityType: 'snippet',
+          title: snippet.title,
+          config: snippet.config,
+          workspaceId: snippet.workspaceId,
+          folderId: snippet.folderId,
+          tagIds: snippet.tagIds || [],
+          shortcut: snippet.shortcut || '',
+        };
+        const { history: nextHistory } = upsertVersionForChange(
+          existing.versionHistory,
+          prevSnapshot,
+          nextSnapshot,
+          now,
+        );
+        snippet.versionHistory = nextHistory;
+
+        await db.snippets.put(snippet as any);
         sendResponse({ success: true, snippet });
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach(tab => {
@@ -367,6 +702,76 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // keep channel open for async response
   }
 
+  if (message && message.action === 'api_add_favorite') {
+    addFavoriteRecord(message.userId || 'local_user', message.payload.referenceId, message.payload.referenceType, message.payload.label)
+      .then(favorite => {
+        sendResponse({ success: true, favorite });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'favorites' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (message && message.action === 'api_remove_favorite') {
+    removeFavoriteRecord(message.userId || 'local_user', message.payload.referenceId)
+      .then(() => {
+        sendResponse({ success: true });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'favorites' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (message && message.action === 'api_create_tag') {
+    createTag(message.payload.name, message.payload.workspaceId)
+      .then(tag => {
+        sendResponse({ success: true, tag });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'tags' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (message && message.action === 'api_update_tag') {
+    updateTag(message.payload.tagId, message.payload.updates || {})
+      .then(() => {
+        sendResponse({ success: true });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'tags' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (message && message.action === 'api_delete_tag') {
+    deleteTag(message.payload.tagId)
+      .then(() => {
+        sendResponse({ success: true });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'tags' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
   if (message && message.action === 'db_update_todo') {
     (async () => {
       try {
@@ -416,7 +821,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           userHotkeys,
           userShortcuts,
           sessions,
-          commands
+          widgets,
+          widgetViews,
+          commands,
+          prefixSettings,
         ] = await Promise.all([
           safeQuery(db.workspaces),
           safeQuery(db.links),
@@ -432,7 +840,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           safeQuery(db.userHotkeys),
           safeQuery(db.userShortcuts),
           safeQuery(db.sessions),
+          safeQuery(db.widgets),
+          safeQuery(db.widgetViews),
           safeQuery(db.commands),
+          safeQuery(db.prefixSettings),
         ]);
         console.log('[Background] db_get_all_records counts:', {
           workspaces: workspaces.length,
@@ -449,7 +860,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           userHotkeys: userHotkeys.length,
           userShortcuts: userShortcuts.length,
           sessions: sessions.length,
+          widgets: widgets.length,
+          widgetViews: widgetViews.length,
           commands: commands.length,
+          prefixSettings: prefixSettings.length,
         });
         sendResponse({
           success: true,
@@ -467,7 +881,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           userHotkeys,
           userShortcuts,
           sessions,
+          widgets,
+          widgetViews,
           commands,
+          prefixSettings,
         });
       } catch (err: any) {
         console.error('[Background] db_get_all_records failed:', err);
@@ -537,7 +954,120 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message && message.action === 'api_save_shortcut') {
-    apiSaveShortcut(message.payload.id, message.payload.referenceId, message.payload.trigger, message.payload.label, message.payload.type, message.userId || 'local_user').then(() => sendResponse({ success: true })).catch((e) => sendResponse({ success: false, error: e.message }));
+    apiSaveShortcut(message.payload.id, message.payload.referenceId, message.payload.trigger, message.payload.label, message.payload.type, message.userId || 'local_user')
+      .then(() => {
+        sendResponse({ success: true });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'shortcutsMap' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (message && message.action === 'api_clear_shortcut') {
+    apiClearShortcut(message.payload.id, message.payload.referenceId, message.payload.type, message.userId || 'local_user')
+      .then(() => {
+        sendResponse({ success: true });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'shortcutsMap' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (message && message.action === 'api_save_hotkey') {
+    apiSaveHotkey(message.payload.id, message.payload.referenceId, message.payload.hotkey, message.payload.type, message.userId || 'local_user')
+      .then(() => {
+        invalidateHotkeysCache();
+        sendResponse({ success: true });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'hotkeysMap' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (message && message.action === 'api_clear_hotkey') {
+    apiClearHotkey(message.payload.id, message.payload.referenceId, message.payload.type, message.userId || 'local_user')
+      .then(() => {
+        invalidateHotkeysCache();
+        sendResponse({ success: true });
+        chrome.tabs.query({}, tabs => {
+          tabs.forEach(tab => {
+            if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table: 'hotkeysMap' }).catch(() => {});
+          });
+        });
+      })
+      .catch((e) => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (message && message.action === 'alts_create_collection_view') {
+    (async () => {
+      try {
+        const payload = message.payload || {};
+        const workspaceId = payload.workspaceId || 'default';
+        const result = await createWidgetDashboardViewAsync(payload.title || 'Untitled View', workspaceId, {
+          viewIconId: payload.viewIconId,
+        });
+        const newViewId = result.state.activeViewId;
+
+        if (payload.shortcut && newViewId) {
+          await saveUserShortcut(payload.shortcut, newViewId, 'collection', message.userId || 'local_user');
+        }
+        if (payload.hotkey && newViewId) {
+          await saveUserHotkey(payload.hotkey, newViewId, 'collection', message.userId || 'local_user');
+          invalidateHotkeysCache();
+        }
+
+        const draftSession = payload.draftSession || {};
+        const hasSessionDraftChanges =
+          (Array.isArray(draftSession.urls) && draftSession.urls.length > 0) ||
+          Boolean(draftSession.sessionOpenSettings);
+        if (result.createdSessionId && hasSessionDraftChanges) {
+          await updateSession(result.createdSessionId, {
+            title: payload.title || draftSession.title || 'Untitled Tab Session',
+            urls: Array.isArray(draftSession.urls) ? draftSession.urls : [],
+            sessionOpenSettings: draftSession.sessionOpenSettings,
+            workspaceId: draftSession.workspaceId || workspaceId,
+            folderId: draftSession.folderId,
+            tagIds: draftSession.tagIds,
+          });
+        }
+
+        const widgets = Array.isArray(payload.widgets) ? payload.widgets : [];
+        for (const widget of widgets) {
+          await addWidgetInstanceAsync(widget.widgetInput, widget.layout, newViewId, workspaceId);
+        }
+
+        sendResponse({
+          success: true,
+          viewId: newViewId,
+          createdSessionId: result.createdSessionId,
+          state: result.state,
+        });
+        chrome.tabs.query({}, tabs => {
+          const changedTables = ['widgetDashboard', 'sessions', 'shortcutsMap', 'hotkeysMap'];
+          tabs.forEach(tab => {
+            changedTables.forEach(table => {
+              if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'db_changed', table }).catch(() => {});
+            });
+          });
+        });
+      } catch (e: any) {
+        console.error('[Background] alts_create_collection_view failed:', e);
+        sendResponse({ success: false, error: e?.message || 'Failed to create collection view' });
+      }
+    })();
     return true;
   }
 
@@ -551,22 +1081,71 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 
 
-// Clean up per-tab focus flags when a temporary New-Tab page is closed
-chrome.tabs.onRemoved.addListener((closedTabId, removeInfo) => {
-  if (!temporaryCommandTabIds.has(closedTabId)) return;
-  temporaryCommandTabIds.delete(closedTabId);
+/**
+ * Safely removes stale per-tab focus keys from chrome.storage.local.
+ * Only keys matching strict /^new_tab_focus_\d+$/ pattern whose numeric tab ID is NOT
+ * currently among open Chrome tabs will be removed.
+ */
+function cleanupStaleNewTabFocusKeys(): void {
+  if (!chrome.storage?.local || !chrome.tabs?.query) return;
 
-  const focusKey = `new_tab_focus_${closedTabId}`;
-  chrome.storage.local.remove(focusKey, () => {
+  chrome.storage.local.get(null, items => {
     if (chrome.runtime.lastError) {
-      console.warn(
-        '[cleanup] error removing focus key for closed tab',
-        closedTabId,
-        ':',
-        chrome.runtime.lastError.message,
-      );
+      console.warn('[cleanup] error reading storage snapshot for stale focus keys:', chrome.runtime.lastError.message);
+      return;
     }
+    if (!items || typeof items !== 'object') return;
+
+    const keyPattern = /^new_tab_focus_\d+$/;
+    const focusKeys = Object.keys(items).filter(key => keyPattern.test(key));
+    if (focusKeys.length === 0) return;
+
+    chrome.tabs.query({}, openTabs => {
+      if (chrome.runtime.lastError) {
+        console.warn('[cleanup] error querying open tabs for stale focus keys:', chrome.runtime.lastError.message);
+        return;
+      }
+      if (!openTabs) return;
+
+      const openTabIdSet = new Set<number>(
+        openTabs.map(tab => tab.id).filter((id): id is number => typeof id === 'number')
+      );
+
+      const staleKeys = focusKeys.filter(key => {
+        const numericTabId = parseInt(key.replace('new_tab_focus_', ''), 10);
+        return !isNaN(numericTabId) && !openTabIdSet.has(numericTabId);
+      });
+
+      if (staleKeys.length > 0) {
+        chrome.storage.local.remove(staleKeys, () => {
+          if (chrome.runtime.lastError) {
+            console.warn('[cleanup] error removing stale focus keys:', chrome.runtime.lastError.message);
+          } else {
+            console.log(`[cleanup] successfully removed ${staleKeys.length} stale focus key(s).`);
+          }
+        });
+      }
+    });
   });
+}
+
+// Clean up per-tab focus flags whenever any tab is closed
+chrome.tabs.onRemoved.addListener((closedTabId, _removeInfo) => {
+  if (typeof closedTabId === 'number') {
+    temporaryCommandTabIds.delete(closedTabId);
+
+    const focusKey = `new_tab_focus_${closedTabId}`;
+    chrome.storage.local.remove(focusKey, () => {
+      if (chrome.runtime.lastError) {
+        console.warn(
+          '[cleanup] error removing focus key for closed tab',
+          closedTabId,
+          ':',
+          chrome.runtime.lastError.message,
+        );
+      }
+    });
+  }
 });
 
 chrome.commands?.onCommand?.addListener(command => {
@@ -674,7 +1253,20 @@ function normalizeUrlForComparison(urlStr: string): string {
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   await ensureStateRestored();
 
+  if (changeInfo.pinned === false) {
+    const session = activeSessions.get(tab.windowId);
+    if (session?.pinnedTabId === tabId) {
+      await stopActiveSessionRuntimeForWindow(tab.windowId, 'control_tab_unpinned');
+    }
+    return;
+  }
+
   if (!changeInfo.url && !changeInfo.status) return; // Early return for irrelevant changes
+
+  const navigationUrl = changeInfo.url || tab.url || '';
+  if (navigationUrl && await handleDeepFocusNavigation(tabId, navigationUrl)) {
+    return;
+  }
 
   // 1. AI Chat History Tracking logic (ALWAYS run for registered sessions)
   if ((changeInfo.url || changeInfo.status) && pendingAiSessions.size > 0) {
@@ -764,7 +1356,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const hasNewUrl = !!changeInfo.url;
 
   if ((isComplete || hasNewUrl) && tab.url && tab.windowId) {
-    const session = activeSessions.get(tab.windowId);
+    const session = await getValidatedActiveSessionForWindow(tab.windowId);
     if (session) {
       // Skip the pinned tracker tab itself
       if (tabId === session.pinnedTabId) return;
@@ -791,14 +1383,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         }
       }
 
-      // Skip all non-real URLs
-      if (
-        tab.url.startsWith('chrome-extension://') ||
-        tab.url.startsWith('chrome://') ||
-        tab.url.startsWith('about:') ||
-        tab.url === 'chrome://newtab/'
-      )
-        return;
+      if (!isTrackableSessionAutosaveUrl(tab.windowId, tab.url)) return;
 
       const title = tab.title || new URL(tab.url).hostname;
 
@@ -809,21 +1394,29 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       }
 
       if (mode === 'auto_save') {
-        chrome.tabs.query({ windowId: tab.windowId }, (tabs) => {
-          const nonPinnedTabs = tabs.filter(t => t.id !== session.pinnedTabId && !t.url?.startsWith('chrome'));
-          session.capturedUrls = nonPinnedTabs.map(t => t.url || '');
-          session.capturedNames = nonPinnedTabs.map(t => t.title || (t.url ? new URL(t.url).hostname : ''));
-          activeSessions.set(tab.windowId, session);
+        chrome.tabs.query({ windowId: tab.windowId }, async tabs => {
+          const currentSession = await getValidatedActiveSessionForWindow(tab.windowId);
+          if (!currentSession || currentSession.sessionId !== session.sessionId) return;
+          const capturedTabs = tabs
+            .filter(t => t.id !== currentSession.pinnedTabId)
+            .map(t => ({ tab: t, url: getTrackableSessionAutosaveTabUrl(tab.windowId, t) }))
+            .filter(entry => Boolean(entry.url));
+          currentSession.capturedUrls = capturedTabs.map(entry => entry.url);
+          currentSession.capturedNames = capturedTabs.map(entry => entry.tab.title || new URL(entry.url).hostname || entry.url);
+          currentSession.capturedTabIds = capturedTabs.map(entry => entry.tab.id ?? -1);
+          activeSessions.set(tab.windowId, currentSession);
           persistActiveSessions();
+          void saveSessionToDb(currentSession);
           chrome.runtime.sendMessage({
             action: 'session_tab_captured',
-            sessionId: session.sessionId,
+            sessionId: currentSession.sessionId,
+            windowId: tab.windowId,
             tabId,
             url: tab.url,
             title: title,
             favIconUrl: tab.favIconUrl,
-            capturedUrls: session.capturedUrls,
-            capturedNames: session.capturedNames,
+            capturedUrls: currentSession.capturedUrls,
+            capturedNames: currentSession.capturedNames,
           }).catch(() => {});
         });
         return;
@@ -831,6 +1424,50 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
   }
   // ─── End Session Tab Capture ──────────────────────────────────────────────────
+});
+
+chrome.tabs.onCreated.addListener(tab => {
+  void ensureStateRestored()
+    .then(() => handleDeepFocusTabCreated(tab))
+    .catch(error => console.error('[DeepFocus] tabs.onCreated failed:', error));
+});
+
+chrome.windows.onCreated.addListener(window => {
+  void ensureStateRestored()
+    .then(() => handleDeepFocusWindowCreated(window))
+    .catch(error => console.error('[DeepFocus] windows.onCreated failed:', error));
+});
+
+chrome.windows.onFocusChanged.addListener(windowId => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+
+  void (async () => {
+    try {
+      const storageKey = 'widget-dashboard-window-views-v1';
+      const stored = await chrome.storage.local.get(storageKey);
+      const current = stored[storageKey];
+      const activeViewByWindow =
+        current?.activeViewByWindow &&
+        typeof current.activeViewByWindow === 'object' &&
+        !Array.isArray(current.activeViewByWindow)
+          ? current.activeViewByWindow
+          : {};
+      const focusedWindowView = activeViewByWindow[String(windowId)];
+      if (!focusedWindowView) return;
+
+      await chrome.storage.local.set({
+        [storageKey]: {
+          activeViewByWindow,
+          lastKnownView: {
+            ...focusedWindowView,
+            updatedAt: Date.now(),
+          },
+        },
+      });
+    } catch (error) {
+      console.error('[WidgetDashboardWindowView] failed to promote focused window view:', error);
+    }
+  })();
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
@@ -844,36 +1481,45 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
   // Check if this was a session's pinned tab
   for (const [windowId, session] of activeSessions.entries()) {
     if (session.pinnedTabId === tabId) {
-      saveSessionToDb(session);
-      activeSessions.delete(windowId);
-      persistActiveSessions();
+      await stopActiveSessionRuntimeForWindow(windowId, 'control_tab_closed');
       break;
     }
   }
 
+  if (removeInfo?.isWindowClosing) return;
+
   // Handle 'last_saved' live tracking when a normal tab is closed
   if (removeInfo && removeInfo.windowId) {
-    const session = activeSessions.get(removeInfo.windowId);
+    const session = await getValidatedActiveSessionForWindow(removeInfo.windowId);
     if (session) {
+      if (session.snapshotItemsByTabId?.[tabId]) {
+        delete session.snapshotItemsByTabId[tabId];
+      }
       const mode = session.openSettings?.autoSaveMode;
       if (mode === 'auto_save') {
-      chrome.tabs.query({ windowId: removeInfo.windowId }, (tabs) => {
-        // Ensure the session is still active and hasn't been closed by the pinned tab check above
-        if (!activeSessions.has(removeInfo.windowId)) return;
-        
-        const nonPinnedTabs = tabs.filter(t => t.id !== session.pinnedTabId && !t.url?.startsWith('chrome'));
-        session.capturedUrls = nonPinnedTabs.map(t => t.url || '');
-        session.capturedNames = nonPinnedTabs.map(t => t.title || (t.url ? new URL(t.url).hostname : ''));
-        activeSessions.set(removeInfo.windowId, session);
+      chrome.tabs.query({ windowId: removeInfo.windowId }, async tabs => {
+        const currentSession = await getValidatedActiveSessionForWindow(removeInfo.windowId);
+        if (!currentSession || currentSession.sessionId !== session.sessionId) return;
+
+        const capturedTabs = tabs
+          .filter(t => t.id !== currentSession.pinnedTabId)
+          .map(t => ({ tab: t, url: getTrackableSessionAutosaveTabUrl(removeInfo.windowId, t) }))
+          .filter(entry => Boolean(entry.url));
+        currentSession.capturedUrls = capturedTabs.map(entry => entry.url);
+        currentSession.capturedNames = capturedTabs.map(entry => entry.tab.title || new URL(entry.url).hostname || entry.url);
+        currentSession.capturedTabIds = capturedTabs.map(entry => entry.tab.id ?? -1);
+        activeSessions.set(removeInfo.windowId, currentSession);
         persistActiveSessions();
+        void saveSessionToDb(currentSession);
         chrome.runtime.sendMessage({
           action: 'session_tab_captured',
-          sessionId: session.sessionId,
+          sessionId: currentSession.sessionId,
+          windowId: removeInfo.windowId,
           url: '',
           title: '',
           favIconUrl: '',
-          capturedUrls: session.capturedUrls,
-          capturedNames: session.capturedNames,
+          capturedUrls: currentSession.capturedUrls,
+          capturedNames: currentSession.capturedNames,
         }).catch(() => {});
       });
       }
@@ -883,12 +1529,31 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
 
 chrome.windows.onRemoved.addListener(async windowId => {
   await ensureStateRestored();
-  const session = activeSessions.get(windowId);
-  if (!session) return;
+  try {
+    const storageKey = 'widget-dashboard-window-views-v1';
+    const stored = await chrome.storage.local.get(storageKey);
+    const current = stored[storageKey];
+    const activeViewByWindow =
+      current?.activeViewByWindow &&
+      typeof current.activeViewByWindow === 'object' &&
+      !Array.isArray(current.activeViewByWindow)
+        ? { ...current.activeViewByWindow }
+        : {};
 
-  saveSessionToDb(session);
-  activeSessions.delete(windowId);
-  persistActiveSessions();
+    if (Object.prototype.hasOwnProperty.call(activeViewByWindow, String(windowId))) {
+      delete activeViewByWindow[String(windowId)];
+      await chrome.storage.local.set({
+        [storageKey]: {
+          activeViewByWindow,
+          lastKnownView: current?.lastKnownView,
+        },
+      });
+    }
+  } catch (error) {
+    console.error('[WidgetDashboardWindowView] failed to cleanup removed window view:', error);
+  }
+
+  await stopActiveSessionRuntimeForWindow(windowId, 'window_closed');
 });
 
 // Internal message listener for the popup to check auth
@@ -945,7 +1610,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'track_ai_session') {
     const { prompt, tabIds, models, aiPromptId } = request;
-    const sessionId = Date.now().toString();
+    const sessionId = generateEntityId('aiSession');
     const session: PendingAiSession = {
       id: sessionId,
       prompt,

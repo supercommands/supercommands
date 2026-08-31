@@ -1,16 +1,18 @@
 /**
  * @file favoriteCategoryHooks.ts
- * @description React hooks for reading Favorite Category records from the shared store.
+ * @description Provides React hook (`useFavoriteCategories`) for retrieving favorite categories from the DB store.
  */
 
 import { useMemo } from 'react';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 
 export const useFavoriteCategories = (userId?: string) => {
-  const allFavoriteCategories = useDbStore(state => state.favoriteCategories);
+  const allCategories = useDbStore(state => state.favoriteCategories);
 
   return useMemo(() => {
-    if (!userId) return allFavoriteCategories;
-    return allFavoriteCategories.filter(category => category.userId === userId);
-  }, [allFavoriteCategories, userId]);
+    if (!userId) {
+      return allCategories;
+    }
+    return allCategories.filter(category => category.userId === userId || category.user_id === userId);
+  }, [allCategories, userId]);
 };

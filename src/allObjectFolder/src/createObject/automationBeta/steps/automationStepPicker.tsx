@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactDOM, { createPortal } from 'react-dom';
 import AutomationStore from '../utilities/automationStore';
 import { useUIStore } from '../../../../../shared-components/uiStateManager';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
 import {
   FaTimes,
   FaPlus,
@@ -449,7 +450,7 @@ const ParamBadge: React.FC<{
     }));
 
     isHydratingDropdownRowsRef.current = true;
-    setDropdownRows(rows.length > 0 ? rows : [{ id: `dropdown-row-${Date.now()}`, name: '', value: '' }]);
+    setDropdownRows(rows.length > 0 ? rows : [{ id: generateEntityId('automationDropdownRow'), name: '', value: '' }]);
     requestAnimationFrame(() => {
       isHydratingDropdownRowsRef.current = false;
     });
@@ -494,7 +495,7 @@ const ParamBadge: React.FC<{
 
   const addDropdownRow = useCallback((insertIndex?: number) => {
     const newRow = {
-      id: `dropdown-row-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: generateEntityId('automationDropdownRow'),
       name: '',
       value: '',
     };

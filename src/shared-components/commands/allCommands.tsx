@@ -69,27 +69,11 @@ export const CreateLinkCommand: CommandModule = {
   },
 };
 
-export const CreateSessionCommand: CommandModule = {
-  id: 'createsession',
-  label: 'Create Tab session',
-  prefix: 'createsession',
-  keywords: ['create Tab Session', 'new Tab Session', 'Tab Session', 'Tab Sessions', 'session', 'sessions'],
-  behavior: 'instant',
-  execute: context => {
-    context.services.navigation({
-      kind: 'sessionEditor',
-      sessionProps: {
-        onClose: () => context.services.navigation({ kind: 'home' }),
-      },
-    });
-  },
-};
-
 export const CreatePromptCommand: CommandModule = {
   id: 'createprompt',
-  label: 'Create AI Prompt',
+  label: 'Create Chat Agent',
   prefix: 'createprompt',
-  keywords: ['create prompt', 'new prompt', 'prompt', 'prompts', 'ai prompt'],
+  keywords: ['create chat agent', 'chat agent', 'agent', 'agents', 'create prompt', 'new prompt', 'prompt', 'prompts', 'ai prompt'],
   behavior: 'instant',
   surface: 'both',
   execute: context => {
@@ -117,35 +101,36 @@ export const CreateTodoCommand: CommandModule = {
   },
 };
 
-export const CreateFolderCommand: CommandModule = {
-  id: 'createfolder',
-  label: 'Create Folder',
-  prefix: 'createfolder',
-  keywords: ['create folder', 'new folder', 'folder', 'folders'],
-  behavior: 'instant',
-  surface: 'both',
-  execute: context => {
-    context.services.navigation({
-      kind: 'folderEditor',
-      folderProps: {
-        onClose: () => context.services.navigation({ kind: 'home' }),
-        reload: context.services.reload,
-      },
-    });
-  },
-};
+// Workspace/folder creation is only allowed from onboarding for now.
+// export const CreateFolderCommand: CommandModule = {
+//   id: 'createfolder',
+//   label: 'Create Folder',
+//   prefix: 'createfolder',
+//   keywords: ['create folder', 'new folder', 'folder', 'folders'],
+//   behavior: 'instant',
+//   surface: 'both',
+//   execute: context => {
+//     context.services.navigation({
+//       kind: 'folderEditor',
+//       folderProps: {
+//         onClose: () => context.services.navigation({ kind: 'home' }),
+//         reload: context.services.reload,
+//       },
+//     });
+//   },
+// };
 
-export const CreateWorkspaceCommand: CommandModule = {
-  id: 'createworkspace',
-  label: 'Create Workspace',
-  prefix: 'createworkspace',
-  keywords: ['create workspace', 'new workspace', 'workspace', 'workspaces'],
-  behavior: 'instant',
-  surface: 'both',
-  execute: context => {
-    context.services.navigation({ kind: 'createWorkspace' });
-  },
-};
+// export const CreateWorkspaceCommand: CommandModule = {
+//   id: 'createworkspace',
+//   label: 'Create Workspace',
+//   prefix: 'createworkspace',
+//   keywords: ['create workspace', 'new workspace', 'workspace', 'workspaces'],
+//   behavior: 'instant',
+//   surface: 'both',
+//   execute: context => {
+//     context.services.navigation({ kind: 'createWorkspace' });
+//   },
+// };
 
 export const CreateAutomationAgentCommand: CommandModule = {
   id: 'agent',
@@ -291,11 +276,11 @@ export const INSTANT_COMMANDS: CommandModule[] = [
   CreateNoteCommand,
   CreateSnippetCommand,
   CreateLinkCommand,
-  CreateSessionCommand,
   CreatePromptCommand,
   CreateTodoCommand,
-  CreateFolderCommand,
-  CreateWorkspaceCommand,
+  // Workspace/folder creation is only allowed from onboarding for now.
+  // CreateFolderCommand,
+  // CreateWorkspaceCommand,
   CreateAutomationAgentCommand,
   AiAllCommand,
   ChatGPTCommand,

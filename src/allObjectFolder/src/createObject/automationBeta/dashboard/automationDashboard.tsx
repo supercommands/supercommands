@@ -14,7 +14,6 @@ import {
   FaSearch,
   FaCloud,
   FaCheck,
-  FaFolder,
 } from 'react-icons/fa';
 import { CiWarning } from 'react-icons/ci';
 import AutomationStepPicker from '../steps/automationStepPicker';
@@ -44,6 +43,7 @@ import { normalizeShortcutTrigger } from '../../../../../shared-components/short
 import { readAllHotkeys, readAllShortcuts, getItemCompoundId } from '../../../../../shared-components/hotkeys/utils/hotkeyUtils';
 import { useShortcutValidation } from '../../../../../shared-components/shortcuts';
 import { useFavorites } from '../../../../../shared-components/favorites/favoriteHooks';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
 
 // New Imports
 import type { AgentPanelProps, CloudModule } from '../utilities/automationTypes';
@@ -862,18 +862,16 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
   };
 
   const getWorkspaceById = useDbStore(state => state.getWorkspaceById);
-  const getFolderById = useDbStore(state => state.getFolderById);
 
   // Resolve the display name and details for the destination button
   const destinationDetails = useMemo(() => {
     const displayWorkspace = getWorkspaceById(targetWorkspaceId || '');
-    const displayFolder = getFolderById(folderIdForSave || '');
     let pathText = 'Select Destination';
     if (displayWorkspace) {
-      pathText = displayFolder ? `${displayWorkspace.workspaceName} / ${displayFolder.folderName}` : displayWorkspace.workspaceName;
+      pathText = displayWorkspace.workspaceName;
     }
     return { pathText };
-  }, [targetWorkspaceId, folderIdForSave, getWorkspaceById, getFolderById]);
+  }, [targetWorkspaceId, getWorkspaceById]);
 
   const handleClosePanel = useCallback(() => {
     if (!skipDraftPersistRef.current && !editMode && steps.length > 0) {
@@ -947,7 +945,7 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
   }, [isOpen, handleClosePanel]);
 
   const handleAddStepIndex = (moduleId: string, index: number, config?: any) => {
-    const newStep: AutomationStep = { id: `step-${Date.now()}`, moduleId, config: config || {} };
+    const newStep: AutomationStep = { id: generateEntityId('automationStep'), moduleId, config: config || {} };
     setSteps(prev => {
       const next = [...prev];
       next.splice(index, 0, newStep);
@@ -965,7 +963,7 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
     const idx = steps.findIndex(s => s.id === id);
     if (idx === -1) return;
     const original = steps[idx];
-    const duplicate = { ...original, id: `step-${Date.now()}` };
+    const duplicate = { ...original, id: generateEntityId('automationStep') };
     setSteps(prev => {
       const next = [...prev];
       next.splice(idx + 1, 0, duplicate);
@@ -1329,7 +1327,9 @@ const AutomationDashboard: React.FC<AgentPanelProps> = ({
                   onClick={() => setIsLocationPickerOpen(true)}
                   title={destinationDetails.pathText}
                   className="flex items-center gap-2 rounded-xl border border-white/10 bg-[var(--color-editorBg)] px-2 py-1 text-xs font-semibold text-neutral-200 hover:bg-white/5 transition-colors">
-                  <FaFolder className="text-neutral-400 group-hover:text-neutral-200 transition-colors" size={14} />
+                  <span className="flex h-3.5 w-3.5 items-center justify-center text-[10px] font-bold leading-none text-neutral-400 group-hover:text-neutral-200 transition-colors">
+                    W
+                  </span>
                   {hasDestination ? (
                     <span className="truncate max-w-[200px] text-white/80">
                       {destinationDetails.pathText}

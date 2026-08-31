@@ -239,7 +239,7 @@ export const useFavorites = () => {
 
   const setFavoriteCategory = async (referenceId: string, favoriteCategoryId: string | null) => {
     if (!userId) return null;
-    const rawId = extractSessionFavoriteId(referenceId);
+    const rawId = extractSnippetIdFromCompoundId(referenceId);
     return updateFavoriteRecordCategory(userId, rawId, favoriteCategoryId);
   };
 

@@ -35,9 +35,16 @@ export const EditorContentWorkspace: React.FC<EditorContentWorkspaceProps> = ({
             Content <span className="text-red-500">*</span>
           </label>
           <div
-            className="flex-1 min-h-[120px] relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm overflow-hidden px-3.5 py-2"
+            className="relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm overflow-y-auto custom-scrollbar px-3.5 py-2 cursor-text"
+            style={{ minHeight: '220px', maxHeight: 'clamp(280px, 35vh, 400px)' }}
             ref={containerRef as any}
             onBlurCapture={onBlurCapture}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                const editorDom = e.currentTarget.querySelector('.ProseMirror') as HTMLElement | null;
+                editorDom?.focus();
+              }
+            }}
           >
             <SnippetBuilderMainViewEditor />
 

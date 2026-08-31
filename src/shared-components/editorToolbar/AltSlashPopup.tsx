@@ -1,8 +1,8 @@
 /**
  * @file AltSlashPopup.tsx
- * @description Fixed 550px Alt+/ Command Palette with zero shrinking or position shifting.
- * Sub-popovers (NewDueDateDropdown for Todo, DestinationPicker for Folder, Tag Selector for Tags)
- * open INSTANTLY (0 transitions, 0 animations, 0 slide/fade) outside to the right of the active row.
+ * @description Fixed 550px Alt+/ Command Palette with theme integration,
+ * correct portal target resolution, clean single-star Favorite action UI,
+ * and instant sub-popover placement.
  */
 
 import * as React from 'react';
@@ -10,7 +10,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { format } from 'date-fns';
 import { useAppearance } from '@extension/ui';
-import { FaStar, FaFolder } from 'react-icons/fa';
+import { FaStar } from 'react-icons/fa';
 import { FiStar, FiZap, FiTag, FiTerminal, FiZapOff, FiChevronRight, FiX, FiCheck } from 'react-icons/fi';
 import { BsCalendarCheck } from 'react-icons/bs';
 import { useUIStore } from '../uiStateManager';
@@ -18,6 +18,7 @@ import { DestinationPicker } from './DestinationPicker';
 import { VisualKeyDisplay } from '../hotkeys/ui/VisualKeyDisplay';
 import type { TagRecord } from '../../allObjectFolder/src/createObject/tags';
 import { NewDueDateDropdown } from '../../allObjectFolder/src/createObject/todos/ui/newDueDateDropdown';
+import { TagSelector } from './TagSelector';
 
 const getTagColor = (tagName: string) => {
   const colors = [
@@ -62,11 +63,10 @@ export interface AltSlashPopupProps {
   recurringCycle?: string | null;
   onTodoScheduleChange?: (data: { date: string; time: string; isRecurring: boolean; cycle: string | null }) => void;
 
-  // Destination / Folder
+  // Destination / Workspace
   workspaceId?: string | null;
   folderId?: string | null;
   onDestinationChange?: (workspaceId: string | null, folderId: string | null) => void;
-  folderNamesMap?: Record<string, string>;
   workspaceNamesMap?: Record<string, string>;
 
   // Tags
@@ -77,9 +77,22 @@ export interface AltSlashPopupProps {
 
   // Visibility Flags
   showTodo?: boolean;
+  showHotkey?: boolean;
   showShortcut?: boolean;
   showLocationPicker?: boolean;
   showTags?: boolean;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
+}
+
+interface CommandToolItem {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  badge: React.ReactNode;
+  action: () => void;
+  ariaLabel?: string;
+  ariaPressed?: boolean;
 }
 
 export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
@@ -99,28 +112,41 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
   workspaceId = null,
   folderId = null,
   onDestinationChange,
-  folderNamesMap,
   workspaceNamesMap,
   selectedTags = [],
   dbTags = [],
   onTagSelect,
   onCreateTag,
   showTodo = true,
+  showHotkey = true,
   showShortcut = true,
   showLocationPicker = true,
   showTags = true,
+  appearanceScope = 'default',
+  appearanceTokens,
 }) => {
-  let isDark = true;
-  try {
-    const appearance = useAppearance();
-    if (appearance?.theme) {
-      isDark = appearance.theme.isDark;
-    }
-  } catch {
-    if (typeof document !== 'undefined') {
-      isDark = document.documentElement.classList.contains('dark');
-    }
-  }
+  const isAltSAppearance = appearanceScope === 'alts';
+  const appearanceStyle = React.useMemo<React.CSSProperties | undefined>(() => {
+    if (!isAltSAppearance) return appearanceTokens;
+    return {
+      ...appearanceTokens,
+      '--color-contextMenuBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-modalBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-popupBg': 'var(--alts-popup-bg, var(--color-altsPopupBg))',
+      '--color-inputBg': 'var(--alts-input-bg, var(--color-altsInputBg))',
+      '--color-hoverBg': 'var(--alts-row-hover-bg, var(--color-altsRowHoverBg))',
+      '--color-selectedBg': 'var(--alts-selected-bg, var(--color-altsSelectedBg))',
+      '--color-borderDefault': 'var(--alts-border-color, var(--color-altsBorderColor))',
+      '--color-borderActive': 'var(--alts-focus-ring, var(--color-altsFocusRing))',
+      '--color-textPrimary': 'var(--alts-text-primary, var(--color-altsTextPrimary))',
+      '--color-textSecondary': 'var(--alts-text-secondary, var(--color-altsTextSecondary))',
+      '--color-textMuted': 'var(--alts-text-muted, var(--color-altsTextMuted))',
+      '--color-textPlaceholder': 'var(--alts-text-placeholder, var(--color-altsTextPlaceholder))',
+      '--color-iconDefault': 'var(--alts-icon-fg, var(--color-altsIconFg))',
+    } as React.CSSProperties;
+  }, [appearanceTokens, isAltSAppearance]);
+
+  const { theme } = useAppearance();
 
   const [selectedMenuIndex, setSelectedMenuIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -133,6 +159,29 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
   const tagSearchInputRef = useRef<HTMLInputElement>(null);
   const menuCardRef = useRef<HTMLDivElement>(null);
   const floatingLayerRef = useRef<HTMLDivElement>(null);
+
+  // Resolve themed portal host container. In Alt+S, use the modal portal inside
+  // the Shadow DOM so the extracted Alt+S Tailwind CSS applies to sub-popups.
+  const portalTarget = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      const host = isAltSAppearance
+        ? (
+            (window as any).__ALTS_MODAL_PORTAL_HOST__ ||
+            (window as any).__ALTQ_MODAL_PORTAL_HOST__ ||
+            (window as any).__ALTS_PORTAL_HOST__ ||
+            (window as any).__ALTQ_PORTAL_HOST__
+          )
+        : ((window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__);
+      if (host && host instanceof HTMLElement) return host;
+    }
+    return document.body;
+  }, [isAltSAppearance]);
+
+  useEffect(() => {
+    if (!showLocationPicker && activeSubPopover === 'folder') {
+      setActiveSubPopover(null);
+    }
+  }, [showLocationPicker, activeSubPopover]);
 
   // Local state for editing values
   const [localHotkey, setLocalHotkey] = useState(pendingHotkey);
@@ -198,14 +247,11 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
 
   // Derived location name label
   const locationLabel = useMemo(() => {
-    if (folderId && folderNamesMap?.[folderId]) {
-      return folderNamesMap[folderId];
-    }
     if (workspaceId && workspaceNamesMap?.[workspaceId]) {
       return workspaceNamesMap[workspaceId];
     }
-    return 'Select Location';
-  }, [folderId, workspaceId, folderNamesMap, workspaceNamesMap]);
+    return 'Select Workspace';
+  }, [workspaceId, workspaceNamesMap]);
 
   // Derived schedule label for Todo
   const scheduleLabel = useMemo(() => {
@@ -244,36 +290,27 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
   }, [localDate, localTime, localRecurring]);
 
   const toolsList = useMemo(() => {
-    const items: Array<any> = [];
+    const items: CommandToolItem[] = [];
 
     if (onToggleFav) {
       items.push({
         id: 'favorite',
-        label: 'Favorite',
+        label: 'Favourite',
         icon: isFav ? (
-          <FaStar size={15} className="text-amber-400 shrink-0" />
+          <FaStar size={15} className="text-[#eab308] shrink-0" />
         ) : (
-          <FiStar size={15} className="shrink-0 text-neutral-400" />
+          <FiStar size={15} className="shrink-0 text-[var(--color-iconDefault)]" />
         ),
+        ariaLabel: isFav ? 'Remove from favourites' : 'Add to favourites',
+        ariaPressed: isFav,
         badge: (
-          <button
-            type="button"
-            onClick={e => {
-              e.stopPropagation();
-              onToggleFav();
-            }}
-            className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-semibold border border-transparent hover:border-amber-400/30"
-          >
+          <span className="flex items-center justify-center w-6 h-6 shrink-0 pointer-events-none">
             {isFav ? (
-              <span className="text-amber-400 font-bold flex items-center gap-1">
-                <FaStar size={13} /> Favorited
-              </span>
+              <FaStar size={14} className="text-[#eab308]" aria-hidden="true" />
             ) : (
-              <span className="text-neutral-400 flex items-center gap-1 hover:text-white">
-                <FiStar size={13} /> Favorite
-              </span>
+              <FiStar size={14} className="text-[var(--color-iconDefault)] hover:text-[#eab308]" aria-hidden="true" />
             )}
-          </button>
+          </span>
         ),
         action: () => {
           onToggleFav();
@@ -281,11 +318,11 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
       });
     }
 
-    if (onHotkeyChange) {
+    if (showHotkey && onHotkeyChange) {
       items.push({
         id: 'hotkey',
         label: 'Assign Hotkey',
-        icon: <FiZap size={15} className="shrink-0 text-neutral-400" />,
+        icon: <FiZap size={15} className="shrink-0 text-[var(--color-iconDefault)]" />,
         badge: isRecordingHotkey ? (
           <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
             {localHotkey && <VisualKeyDisplay hotkey={localHotkey} size="sm" />}
@@ -304,7 +341,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
                 onHotkeyChange?.('');
                 setIsRecordingHotkey(false);
               }}
-              className="text-neutral-400 hover:text-red-400 p-0.5 rounded hover:bg-red-500/10"
+              className="text-[var(--color-iconDefault)] hover:text-[var(--color-error)] p-0.5 rounded hover:bg-[var(--color-error)]/10"
               title="Clear hotkey"
             >
               <FiX size={13} />
@@ -317,7 +354,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
               e.stopPropagation();
               setIsRecordingHotkey(true);
             }}
-            className="text-[11px] font-medium flex items-center gap-1 px-2 py-0.5 rounded border bg-black/10 dark:bg-white/5 text-neutral-400 hover:text-white border-black/10 dark:border-white/10"
+            className="text-[11px] font-medium flex items-center gap-1 px-2 py-0.5 rounded border bg-[var(--color-inputBg)] text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)] border-[var(--color-borderDefault)]"
           >
             <FiZap size={11} /> Record Key
           </button>
@@ -332,9 +369,9 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
       items.push({
         id: 'shortcut',
         label: 'Text Command',
-        icon: <FiTerminal size={15} className="shrink-0 text-neutral-400" />,
+        icon: <FiTerminal size={15} className="shrink-0 text-[var(--color-iconDefault)]" />,
         badge: isEditingShortcut ? (
-          <div className="flex items-center gap-1 bg-black/20 px-1.5 py-0.5 rounded border border-white/10" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1 bg-[var(--color-inputBg)] px-1.5 py-0.5 rounded border border-[var(--color-borderDefault)]" onClick={e => e.stopPropagation()}>
             <input
               ref={shortcutInputRef}
               type="text"
@@ -359,7 +396,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
                 onShortcutChange?.(localShortcut);
                 setIsEditingShortcut(false);
               }}
-              className="text-emerald-400 hover:text-emerald-300 p-0.5"
+              className="text-[var(--color-success)] hover:opacity-80 p-0.5"
             >
               <FiCheck size={12} />
             </button>
@@ -384,7 +421,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
                 onShortcutChange?.('');
                 setIsEditingShortcut(false);
               }}
-              className="text-neutral-400 hover:text-red-400 p-0.5 rounded hover:bg-red-500/10"
+              className="text-[var(--color-iconDefault)] hover:text-[var(--color-error)] p-0.5 rounded hover:bg-[var(--color-error)]/10"
               title="Clear shortcut"
             >
               <FiX size={13} />
@@ -398,7 +435,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
               setIsEditingShortcut(true);
               setTimeout(() => shortcutInputRef.current?.focus(), 50);
             }}
-            className="text-[11px] font-medium text-neutral-400 hover:text-white flex items-center gap-1 px-2 py-0.5 rounded bg-black/10 dark:bg-white/5 border border-black/10 dark:border-white/10"
+            className="text-[11px] font-medium text-[var(--color-textMuted)] hover:text-[var(--color-textPrimary)] flex items-center gap-1 px-2 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)]"
           >
             <FiTerminal size={11} /> Add Command
           </button>
@@ -416,13 +453,13 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
       items.push({
         id: 'todo',
         label: 'Create Todo',
-        icon: <BsCalendarCheck size={15} className="shrink-0 text-neutral-400" />,
+        icon: <BsCalendarCheck size={15} className="shrink-0 text-[var(--color-iconDefault)]" />,
         badge: (
           <div className="flex items-center gap-1">
-            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded flex items-center gap-1 ${localDate || localTime ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-black/10 dark:bg-white/5 text-neutral-400 border border-black/10 dark:border-white/10'}`}>
+            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded flex items-center gap-1 ${localDate || localTime ? 'bg-[var(--color-success)]/10 text-[var(--color-success)] border border-[var(--color-success)]/20' : 'bg-[var(--color-inputBg)] text-[var(--color-textMuted)] border border-[var(--color-borderDefault)]'}`}>
               {scheduleLabel}
             </span>
-            <FiChevronRight size={13} className="text-neutral-400" />
+            <FiChevronRight size={13} className="text-[var(--color-iconDefault)]" />
           </div>
         ),
         action: () => {
@@ -434,14 +471,18 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
     if (showLocationPicker && onDestinationChange) {
       items.push({
         id: 'folder',
-        label: 'Folder',
-        icon: <FaFolder size={14} className="shrink-0 text-neutral-400" />,
+        label: 'Workspace',
+        icon: (
+          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[11px] font-bold leading-none text-[var(--color-iconDefault)]">
+            W
+          </span>
+        ),
         badge: (
           <div className="flex items-center gap-1">
-            <span className="text-[11px] font-medium text-neutral-400 max-w-[120px] truncate px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/5 border border-black/10 dark:border-white/10">
+            <span className="text-[11px] font-medium text-[var(--color-textSecondary)] max-w-[120px] truncate px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)]">
               {locationLabel}
             </span>
-            <FiChevronRight size={13} className="text-neutral-400" />
+            <FiChevronRight size={13} className="text-[var(--color-iconDefault)]" />
           </div>
         ),
         action: () => {
@@ -454,7 +495,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
       items.push({
         id: 'tags',
         label: 'Tags',
-        icon: <FiTag size={15} className="shrink-0 text-neutral-400" />,
+        icon: <FiTag size={15} className="shrink-0 text-[var(--color-iconDefault)]" />,
         badge: (
           <div className="flex items-center gap-1">
             {selectedTags.length > 0 ? (
@@ -465,15 +506,15 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
                   </span>
                 ))}
                 {selectedTags.length > 2 && (
-                  <span className="text-[10px] text-neutral-400 font-bold">+{selectedTags.length - 2}</span>
+                  <span className="text-[10px] text-[var(--color-textMuted)] font-bold">+{selectedTags.length - 2}</span>
                 )}
               </div>
             ) : (
-              <span className="text-[11px] font-medium text-neutral-400 px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/5 border border-black/10 dark:border-white/10">
+              <span className="text-[11px] font-medium text-[var(--color-textMuted)] px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)]">
                 Select Tags
               </span>
             )}
-            <FiChevronRight size={13} className="text-neutral-400" />
+            <FiChevronRight size={13} className="text-[var(--color-iconDefault)]" />
           </div>
         ),
         action: () => {
@@ -492,6 +533,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
     localHotkey,
     isRecordingHotkey,
     onHotkeyChange,
+    showHotkey,
     showShortcut,
     isEditingShortcut,
     localShortcut,
@@ -514,7 +556,11 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
   const filteredItems = useMemo(() => {
     if (!searchQuery.trim()) return toolsList;
     const query = searchQuery.toLowerCase().trim();
-    return toolsList.filter(item => item.label.toLowerCase().includes(query));
+    return toolsList.filter(item => {
+      const labelMatch = item.label.toLowerCase().includes(query);
+      const aliasMatch = item.id === 'favorite' && ('favorite'.includes(query) || 'favourite'.includes(query));
+      return labelMatch || aliasMatch;
+    });
   }, [toolsList, searchQuery]);
 
   useEffect(() => {
@@ -614,46 +660,9 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
         return;
       }
 
-      // 4. Tag sub-popover Navigation & Enter handling
+      // 4. Tag sub-popover Navigation
       if (activeSubPopover === 'tags') {
-        const trimmed = newTagName.trim();
-        const tagList = dbTags;
-        const totalItems = (trimmed ? 1 : 0) + tagList.length;
-
-        if (e.key === 'ArrowDown') {
-          setTagActiveIndex(prev => (totalItems > 0 ? (prev + 1) % totalItems : 0));
-          return;
-        }
-        if (e.key === 'ArrowUp') {
-          setTagActiveIndex(prev => (totalItems > 0 ? (prev - 1 + totalItems) % totalItems : 0));
-          return;
-        }
-        if (e.key === 'Enter') {
-          if (trimmed && tagActiveIndex === 0) {
-            const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
-            if (existing) {
-              onTagSelect?.({ id: existing.id, name: existing.name });
-            } else if (onCreateTag) {
-              void onCreateTag(trimmed);
-            }
-            setNewTagName('');
-          } else {
-            const actualIndex = trimmed ? tagActiveIndex - 1 : tagActiveIndex;
-            if (actualIndex >= 0 && actualIndex < tagList.length) {
-              const selectedTag = tagList[actualIndex];
-              onTagSelect?.({ id: selectedTag.id, name: selectedTag.name });
-            } else if (trimmed) {
-              const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
-              if (existing) {
-                onTagSelect?.({ id: existing.id, name: existing.name });
-              } else if (onCreateTag) {
-                void onCreateTag(trimmed);
-              }
-              setNewTagName('');
-            }
-          }
-          return;
-        }
+        return;
       }
 
       // 5. If floating sub-popover or text input is active, allow text input inside sub-popover
@@ -696,7 +705,8 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/30 backdrop-blur-[2px] pointer-events-auto"
+      style={appearanceStyle}
+      className={`${isAltSAppearance ? 'z-alts-subpopup' : 'z-[100000]'} fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[var(--glass-blur,4px)] pointer-events-auto`}
       onClick={e => {
         e.stopPropagation();
         if (activeSubPopover !== null) {
@@ -707,27 +717,17 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
       }}
     >
       <div className="relative flex items-start gap-4 select-none">
-        {/* Main Fixed 550px Command Palette Menu Card (Locked Dimensions: Never Shrinks, Never Shifts) */}
+        {/* Main Fixed 550px Command Palette Menu Card */}
         <div
           ref={menuCardRef}
           onClick={e => e.stopPropagation()}
-          className={`relative rounded-2xl border flex flex-col w-[550px] min-w-[550px] max-w-[550px] h-auto shadow-2xl pb-2 shrink-0 select-none overflow-hidden
-            ${
-              isDark
-                ? 'bg-[#171821] border-white/10 text-neutral-300'
-                : 'bg-[#fdf6e3] border-[#eee8d5] text-[#586e75]'
-            }`}
+          className="relative rounded-2xl border border-[var(--color-borderDefault)] bg-[var(--color-modalBg)] text-[var(--color-textPrimary)] flex flex-col w-[550px] min-w-[550px] max-w-[550px] h-auto shadow-2xl pb-2 shrink-0 select-none overflow-hidden backdrop-blur-xl"
           style={{
-            boxShadow: isDark
-              ? '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08)'
-              : '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--color-borderDefault)',
           }}
         >
           {/* Search Header */}
-          <div
-            className={`relative flex items-center px-4 py-3 border-b shrink-0 mb-1
-            ${isDark ? 'border-white/5 bg-[#171821]' : 'border-black/5 bg-[#fdf6e3]'} rounded-t-2xl`}
-          >
+          <div className="relative flex items-center px-4 py-3 border-b border-[var(--color-borderDefault)] bg-[var(--color-popupBg)] rounded-t-2xl shrink-0 mb-1">
             <input
               type="text"
               ref={searchInputRef}
@@ -737,18 +737,10 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
                 setSearchQuery(e.target.value);
                 setSelectedMenuIndex(0);
               }}
-              className={`w-full bg-transparent outline-none border-none text-[13px] pr-16
-                ${isDark ? 'text-white placeholder-neutral-500' : 'text-neutral-800 placeholder-[#93a1a1]'}`}
+              className="w-full bg-transparent outline-none border-none text-[13px] text-[var(--color-textPrimary)] placeholder-[var(--color-textPlaceholder)] pr-16"
             />
             <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
-              <span
-                className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border select-none tracking-wider
-                ${
-                  isDark
-                    ? 'border-white/10 bg-white/5 text-neutral-400'
-                    : 'border-black/10 bg-black/5 text-[#586e75]'
-                }`}
-              >
+              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textMuted)] select-none tracking-wider">
                 ALT + /
               </span>
             </div>
@@ -757,7 +749,7 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
           {/* Menu Items List */}
           <div className="flex flex-col max-h-[60vh] overflow-y-auto custom-scrollbar px-2 py-1">
             {filteredItems.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-neutral-500">
+              <div className="px-3 py-4 text-center text-xs text-[var(--color-textMuted)]">
                 No matching properties
               </div>
             ) : (
@@ -767,35 +759,27 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
 
                 return (
                   <div key={item.id} id={`alt-slash-item-${item.id}`} className="px-1 mb-1 flex flex-col">
-                    {/* Item Row (Title on Left, Badge on Right) */}
+                    {/* Item Row */}
                     <button
                       type="button"
+                      aria-label={item.ariaLabel}
+                      aria-pressed={item.ariaPressed}
                       onClick={e => {
                         e.stopPropagation();
                         setSelectedMenuIndex(idx);
                         item.action();
                       }}
-                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left ${
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors ${
                         isHighlighted || isSubExpanded
-                          ? isDark
-                            ? 'bg-white/10 text-white'
-                            : 'bg-black/10 text-[#073642]'
-                          : isDark
-                          ? 'hover:bg-white/5 text-neutral-300 hover:text-white'
-                          : 'hover:bg-black/5 text-[#586e75] hover:text-[#073642]'
+                          ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] font-medium'
+                          : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]'
                       }`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div
-                          className={`w-5 h-5 flex items-center justify-center shrink-0 ${
-                            isDark
-                              ? 'text-neutral-400 group-hover:text-white'
-                              : 'text-neutral-500 group-hover:text-[#073642]'
-                          }`}
-                        >
+                        <div className="w-5 h-5 flex items-center justify-center shrink-0 text-[var(--color-iconDefault)]">
                           {item.icon}
                         </div>
-                        <span className="text-[13px] font-medium tracking-tight truncate">
+                        <span className="text-[13px] font-medium tracking-tight truncate text-[var(--color-textPrimary)]">
                           {item.label}
                         </span>
                       </div>
@@ -842,9 +826,9 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
               />
             )}
 
-            {/* Outside Floating Sub-Panel 2: Workspace & Folder Picker */}
+            {/* Outside Floating Sub-Panel 2: Workspace Picker */}
             {activeSubPopover === 'folder' && (
-              <div className="w-[270px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] rounded-2xl shadow-2xl overflow-hidden p-1">
+              <div className="w-[270px] bg-[var(--color-contextMenuBg)] backdrop-blur-xl border border-[var(--color-borderDefault)] rounded-2xl shadow-2xl overflow-hidden p-1">
                 <DestinationPicker
                   selectedWorkspaceId={workspaceId}
                   selectedFolderId={folderId}
@@ -867,155 +851,34 @@ export const AltSlashPopup: React.FC<AltSlashPopupProps> = ({
 
             {/* Outside Floating Sub-Panel 3: Tag Search & Selector */}
             {activeSubPopover === 'tags' && (
-              <div className="w-[260px] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] rounded-2xl shadow-2xl overflow-hidden flex flex-col p-2">
-                <div className="border-b border-white/5 flex items-center mb-1 pb-1">
-                  <form
-                    onSubmit={async e => {
-                      e.preventDefault();
-                      if (!newTagName.trim()) return;
-                      const trimmed = newTagName.trim();
-                      const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
-                      if (existing) {
-                        onTagSelect?.({ id: existing.id, name: existing.name });
-                      } else if (onCreateTag) {
-                        await onCreateTag(trimmed);
-                      }
-                      setNewTagName('');
-                    }}
-                    className="flex-1 flex"
-                  >
-                    <input
-                      ref={tagSearchInputRef}
-                      type="text"
-                      placeholder="Type to search or create..."
-                      value={newTagName}
-                      onChange={e => setNewTagName(e.target.value)}
-                      className="w-full bg-transparent px-2.5 py-1 text-xs outline-none text-white placeholder-neutral-500"
-                      autoFocus
-                    />
-                  </form>
-                  <button
-                    type="button"
-                    onClick={() => setActiveSubPopover(null)}
-                    className="text-neutral-400 hover:text-white p-0.5"
-                  >
-                    <FiX size={13} />
-                  </button>
-                </div>
-
-                {selectedTags.length > 0 && (
-                  <div className="px-2 py-1 flex flex-wrap gap-1 border-b border-white/5 bg-white/5 mb-1 rounded-lg">
-                    {selectedTags.map(st => (
-                      <span
-                        key={st.id}
-                        className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium border border-blue-500/20"
-                      >
-                        {st.name}
-                        <button
-                          type="button"
-                          onClick={() => onTagSelect?.(st)}
-                          className="hover:text-blue-200 opacity-70 hover:opacity-100"
-                        >
-                          <FiZapOff size={10} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="p-1 flex flex-col gap-1 max-h-[180px] overflow-y-auto custom-scrollbar">
-                  {selectedTags.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        selectedTags.forEach(st => onTagSelect?.(st));
-                      }}
-                      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-left text-xs text-red-400 hover:bg-red-500/20 mb-1"
-                    >
-                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-red-500" />
-                      <span className="font-medium flex-1">Clear Tags</span>
-                      <FiZapOff size={10} className="opacity-75" />
-                    </button>
-                  )}
-
-                  {newTagName.trim() && (
-                    <button
-                      type="button"
-                      onMouseEnter={() => setTagActiveIndex(0)}
-                      onClick={async e => {
-                        e.stopPropagation();
-                        const trimmed = newTagName.trim();
-                        const existing = dbTags.find(t => t.name.toLowerCase() === trimmed.toLowerCase());
-                        if (existing) {
-                          onTagSelect?.({ id: existing.id, name: existing.name });
-                        } else if (onCreateTag) {
-                          await onCreateTag(trimmed);
-                        }
-                        setNewTagName('');
-                      }}
-                      className={`flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs border border-dashed mb-1 ${
-                        tagActiveIndex === 0
-                          ? 'bg-white/15 text-white border-white/30 font-medium'
-                          : 'text-neutral-400 hover:bg-white/5 hover:text-white border-white/10'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="12" cy="12" r="10" />
-                          <line x1="12" y1="8" x2="12" y2="16" />
-                          <line x1="8" y1="12" x2="16" y2="12" />
-                        </svg>
-                        <span>Create "{newTagName.trim()}"</span>
-                      </div>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-neutral-400 font-mono scale-90">
-                        Enter
-                      </span>
-                    </button>
-                  )}
-
-                  {dbTags.map((tag, tagIdx) => {
-                    const isSelected = selectedTags.some(t => t.id === tag.id);
-                    const itemIdx = newTagName.trim() ? tagIdx + 1 : tagIdx;
-                    const isHighlighted = tagActiveIndex === itemIdx;
-                    const dotColor = getTagColor(tag.name);
-                    return (
-                      <button
-                        key={tag.id || tagIdx}
-                        type="button"
-                        onMouseEnter={() => setTagActiveIndex(itemIdx)}
-                        onClick={() => onTagSelect?.({ id: tag.id, name: tag.name })}
-                        className={`flex items-center justify-between w-full px-2 py-1.5 rounded-lg text-left text-xs ${
-                          isHighlighted
-                            ? 'bg-white/15 text-white font-medium'
-                            : isSelected
-                            ? 'bg-white/10 text-white font-medium'
-                            : 'text-neutral-400 hover:bg-white/5 hover:text-white'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dotColor }} />
-                          <span>{tag.name}</span>
-                        </div>
-                        {isSelected && (
-                          <span
-                            className="text-red-400 hover:text-red-300 p-0.5 rounded flex items-center justify-center bg-red-500/10"
-                            title="Remove tag"
-                          >
-                            <FiZapOff size={10} />
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+              <div className="w-[280px] p-2 bg-[var(--color-contextMenuBg)] backdrop-blur-xl border border-[var(--color-borderDefault)] rounded-2xl shadow-2xl flex flex-col">
+                <TagSelector
+                  selectedTags={selectedTags}
+                  dbTags={dbTags}
+                  onTagSelect={tag => onTagSelect?.(tag)}
+                  onRemoveTag={tagId => {
+                    const tag = selectedTags.find(t => t.id === tagId);
+                    if (tag) onTagSelect?.(tag);
+                  }}
+                  onCreateTag={onCreateTag}
+                  onClearTags={() => {
+                    selectedTags.forEach(st => onTagSelect?.(st));
+                  }}
+                  workspaceId={workspaceId}
+                  isOpen={true}
+                  appearanceScope={appearanceScope}
+                  appearanceTokens={appearanceStyle}
+                  onOpenChange={open => {
+                    if (!open) setActiveSubPopover(null);
+                  }}
+                />
               </div>
             )}
           </div>
         )}
       </div>
     </div>,
-    document.body
+    portalTarget
   );
 };
 

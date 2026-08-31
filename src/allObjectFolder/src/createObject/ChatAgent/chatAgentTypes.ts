@@ -24,6 +24,8 @@ export interface ChatAgentRecord {
   deletedAt: number | null;
 }
 
+export const CHAT_AGENT_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderId', 'title', 'urls', 'tagIds', 'deletedAt'] as const satisfies readonly (keyof ChatAgentRecord)[];
+
 export interface CreateChatAgentInput {
   workspaceId?: string;
   folderId?: string | null;

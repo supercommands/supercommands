@@ -14,6 +14,8 @@ import {
   useState,
   forwardRef,
   useLayoutEffect,
+  lazy,
+  Suspense,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUIStore } from '../../../shared-components/uiStateManager';
@@ -33,7 +35,7 @@ import { FaSearch, FaFileImage, FaLink, FaTimes, FaBookmark, FaHistory, FaGlobe,
 
 import { LuSparkles, LuPlus, LuX } from 'react-icons/lu';
 import { GoPaperclip } from 'react-icons/go';
-import { SiOpenai, SiPerplexity } from 'react-icons/si';
+import { SiPerplexity } from 'react-icons/si';
 import { TbSparkles } from 'react-icons/tb';
 
 import { createEventUrlFromText } from '../utilityFunctions/eventParser';
@@ -59,6 +61,8 @@ import {
   parseShortcutInvocation,
   recordAssignedTriggerUsage,
 } from '../../../shared-components/triggers';
+import { launchDashboardCollectionView } from '../../../shared-components/dashboardCollections/launchDashboardCollectionView';
+import { launchSessionSmartWithReferences } from '../../../allObjectFolder/src/createObject/session/sessionReferenceActions';
 import { FaArrowLeft, FaArrowUp } from 'react-icons/fa';
 import { buildCommonCommandEntries } from '../searchLogicAndAlgorithms/commonResults';
 import CmdIcon from '../../../shared-components/icons/cmdIcon';
@@ -88,22 +92,21 @@ import {
 } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
 import useNotification from '../../../shared-components/notifications/useNotification';
 
-import { detectPinnedCommand } from '../searchLogicAndAlgorithms/searchEngine';
 import AtCommandPopup, { getFilteredAtCommands } from './atCommandPopup';
 
 
 
 
 import ContextualCommandPopup, { ContextualMatch } from './contextualCommandPopup';
-import { searchDedicatedPanel, type InstalledModule } from '../searchLogicAndAlgorithms/searchEngine';
+import type { InstalledModule } from '../searchLogicAndAlgorithms/searchEngine';
 import AutomationDynamicIcon from '../../../shared-components/icons/automationDynamicIcon';
 import { useChromeStorage } from '@extension/shared/lib/hooks';
-import ModelSelector from '../../../allObjectFolder/src/createObject/ChatAgent/ModelSelector';
 import { useAttachmentState } from '../keyboardAndUiHooks/useAttachmentState';
 import { useSearchbarSuggestions } from '../keyboardAndUiHooks/useSearchbarSuggestions';
 import { useKeyboardNavigation } from '../keyboardAndUiHooks/useKeyboardNavigation';
 import { AttachmentManager } from './components/AttachmentManager';
 import { InlineAutocomplete } from './components/InlineAutocomplete';
+import { startupPerf } from '../../../pages/AltS_search_newtab/src/startupPerf';
 import type {
   Attachment,
   AnyCommandId,
@@ -133,6 +136,8 @@ import type {
   AutoSubmitRequest,
   LinkToOpen,
 } from '../utilityFunctions/types';
+
+const ModelSelector = lazy(() => import('../../../allObjectFolder/src/createObject/ChatAgent/ModelSelector'));
 
 export type {
   Attachment,
@@ -291,6 +296,8 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     },
     ref,
   ) => {
+    const renderCountRef = useRef(0);
+    renderCountRef.current += 1;
 
     // --- Refs for Suggestion State ---
     const suggestionVisibilityRef = useRef(false);
@@ -311,7 +318,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       [commands],
     );
     const hasCommandById = useCallback((commandId: string | null | undefined) => Boolean(getCommandById(commandId)), [getCommandById]);
-    // Command index for '/' prefix mode only
+    // Command index for '/' prefix mode only.
     const commandIndex = useMemo(() => createCommandIndex(commands), [commands]);
 
     const [lockedCommand, setLockedCommand] = useState<AnyCommandId | null>(propLockedCommand || null);
@@ -331,7 +338,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
     const [value, setValueRaw] = useState('');
     const lastLocalValueRef = useRef('');
 
-    const [selectedAIs, setSelectedAIs] = useState<string[]>([]);
+    const [selectedAIs, setSelectedAIs] = useState<string[]>(() => DEFAULT_SELECTED_AIS);
     const [isAiEditMode, setIsAiEditMode] = useState<boolean>(false);
     const [isModelPopupOpen, setIsModelPopupOpen] = useState(false);
     const [modelWarning, setModelWarning] = useState<string | null>(null);
@@ -365,7 +372,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
       const bKey = String(prefixes.bookmark || 'bm').trim().toLowerCase();
       const nKey = String(prefixes.note || 'n').trim().toLowerCase();
       const snKey = String(prefixes.snippet || 'sn').trim().toLowerCase();
-      const sKey = String(prefixes.session || 's').trim().toLowerCase();
+      const sKey = String(prefixes.collection || 'co').trim().toLowerCase();
       const lKey = String(prefixes.link || 'l').trim().toLowerCase();
       const cKey = String(prefixes.command || 'c').trim().toLowerCase();
       const tKey = String(prefixes.todo || 't').trim().toLowerCase();
@@ -383,7 +390,7 @@ export const Searchbar = forwardRef<SearchbarHandle, SearchbarProps>(
         [cKey]: { label: 'Commands' },
         [bKey]: { label: 'Bookmarks' },
         [tKey]: { label: 'Todos' },
-        [sKey]: { label: 'Tab Sessions' },
+        [sKey]: { label: 'Collections' },
         [auKey]: { label: 'Automations' },
         [agentKey]: { label: 'Chat Agents' },
         [scKey]: { label: 'System Commands' },
@@ -1183,6 +1190,21 @@ const checkLocalCommandAuth = useCallback(
     const [isSearchFocusEnabled, setIsSearchFocusEnabled] = useState(true);
 
     useEffect(() => {
+      startupPerf('Searchbar:commit', {
+        renderCount: renderCountRef.current,
+        valueLength: value.length,
+        lockedCommand,
+        commandCount: commands.length,
+        commandIndexCount: commandIndex.length,
+        isFocused,
+        isSearchFocusEnabled,
+        selectedImageCount: selectedImages.length,
+        selectedAICount: selectedAIs.length,
+        agentCollectionSuggestionCount: agentCollectionSuggestions.length,
+      });
+    });
+
+    useEffect(() => {
       if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
 
       chrome.storage.local.get(['omnibox_override_enabled'], result => {
@@ -1204,9 +1226,17 @@ const checkLocalCommandAuth = useCallback(
         if (typeof chrome !== 'undefined' && chrome.storage) {
           chrome.storage.local.get(['selectedAIs', 'activeAiSession'], result => {
             if (result.selectedAIs && Array.isArray(result.selectedAIs)) {
-              setSelectedAIs(result.selectedAIs);
+              setSelectedAIs(prev =>
+                prev.length === result.selectedAIs.length && prev.every((id, index) => id === result.selectedAIs[index])
+                  ? prev
+                  : result.selectedAIs,
+              );
             } else {
-              setSelectedAIs(AI_GROUP.members);
+              setSelectedAIs(prev =>
+                prev.length === AI_GROUP.members.length && prev.every((id, index) => id === AI_GROUP.members[index])
+                  ? prev
+                  : AI_GROUP.members,
+              );
             }
 
             if (result.activeAiSession && !isInitialMountRef.current) {
@@ -1215,7 +1245,11 @@ const checkLocalCommandAuth = useCallback(
             }
           });
         } else {
-          setSelectedAIs(AI_GROUP.members);
+          setSelectedAIs(prev =>
+            prev.length === AI_GROUP.members.length && prev.every((id, index) => id === AI_GROUP.members[index])
+              ? prev
+              : AI_GROUP.members,
+          );
         }
       };
 
@@ -1226,7 +1260,9 @@ const checkLocalCommandAuth = useCallback(
         if (areaName === 'local' && changes.selectedAIs) {
           const newValue = changes.selectedAIs.newValue;
           if (newValue && Array.isArray(newValue)) {
-            setSelectedAIs(newValue);
+            setSelectedAIs(prev =>
+              prev.length === newValue.length && prev.every((id, index) => id === newValue[index]) ? prev : newValue,
+            );
           }
         }
       };
@@ -2213,7 +2249,6 @@ await saveRecentCommand(commandId);
         const directLocalCommands = [
           'createnotes',
           'createlinks',
-          'createsession',
           'showallnotes',
           'showalllinks',
           'todo',
@@ -2317,7 +2352,7 @@ await saveRecentCommand(commandId);
       const allowedCategories =
         isSnippetCommand && activeSnippetCommandId
           ? new Set(
-            (activeSnippetCommandId === 'delete_link' ? ['link', 'links', 'tabgroup', 'Tab Session'] : ['snippet']).map(
+            (activeSnippetCommandId === 'delete_link' ? ['link', 'links', 'tabgroup', 'tab session'] : ['snippet']).map(
               entry => entry.toLowerCase(),
             ),
           )
@@ -2771,8 +2806,8 @@ if (items && Array.isArray(items)) {
           if (['link', 'links'].includes(category) && typeof (match.snippet as any).value === 'string') {
             // Open link in new tab or current context based on settings/logic
             openSingleLink((match.snippet as any).value, false, currentTabId);
-          } else if (['tabgroup', 'Tab Session'].includes(category) && typeof (match.snippet as any).value === 'object') {
-            // Handle Tab Session
+          } else if (['tabgroup', 'tab session'].includes(category) && typeof (match.snippet as any).value === 'object') {
+            // Handle collection-style saved tabs
             const tabsData = (match.snippet as any).value as any;
             if (tabsData.tabs && Array.isArray(tabsData.tabs)) {
               const urls = tabsData.tabs
@@ -3300,6 +3335,10 @@ if (items && Array.isArray(items)) {
             }
           } else if (rawValue && typeof rawValue === 'object' && Array.isArray(rawValue.urls)) {
             urls = rawValue.urls;
+          } else if (Array.isArray(snippet.urls)) {
+            urls = snippet.urls
+              .map((item: any) => (typeof item === 'string' ? item : item?.url))
+              .filter(Boolean);
           } else if (snippet.url) {
             urls = [snippet.url];
           }
@@ -5100,7 +5139,7 @@ if (pendingQueryUrls && pendingQueryUrls.length > 0) {
                 let color = 'text-blue-500';
 
                 if (lowerId === 'gpt' || lowerId === 'chatgpt') {
-                  IconComp = SiOpenai;
+                  IconComp = LuSparkles;
                   color = 'text-green-500';
                 } else if (lowerId === 'claude') {
                   IconComp = TbSparkles;
@@ -5306,28 +5345,30 @@ if (pendingQueryUrls && pendingQueryUrls.length > 0) {
                         }
                       }}>
                       <div className="w-[240px]">
-                        <ModelSelector
-                          state={
-                            {
-                              selectedAIs,
-                              onToggleAI: handleToggleAI,
-                              activeAiSession,
-                              updateActiveSessionMetadata: (metadata: { name?: string; id?: string | number }) => {
-                                setActiveAiSession(prev => {
-                                  if (!prev) return metadata.id ? ({ id: metadata.id, ...metadata } as any) : null;
-                                  return { ...prev, ...metadata };
-                                });
-                              },
-                              onUpdateModelUrl,
-                              onUpdateCustomModels,
-                              modelWarning,
-                            } as any
-                          }
-                          isMac={typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0}
-                          savedAgents={savedAiAgents}
-                          onSaveAgent={onSaveAgent || (() => { })}
-                          compact={!theme.isDark}
-                        />
+                        <Suspense fallback={null}>
+                          <ModelSelector
+                            state={
+                              {
+                                selectedAIs,
+                                onToggleAI: handleToggleAI,
+                                activeAiSession,
+                                updateActiveSessionMetadata: (metadata: { name?: string; id?: string | number }) => {
+                                  setActiveAiSession(prev => {
+                                    if (!prev) return metadata.id ? ({ id: metadata.id, ...metadata } as any) : null;
+                                    return { ...prev, ...metadata };
+                                  });
+                                },
+                                onUpdateModelUrl,
+                                onUpdateCustomModels,
+                                modelWarning,
+                              } as any
+                            }
+                            isMac={typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0}
+                            savedAgents={savedAiAgents}
+                            onSaveAgent={onSaveAgent || (() => { })}
+                            compact={!theme.isDark}
+                          />
+                        </Suspense>
                       </div>
                     </div>
                   )}
@@ -5667,7 +5708,7 @@ if (isLocalCommandId(id as string)) {
 
       return (
         <div ref={prefixRef} className="w-5 h-5 flex items-center justify-start">
-          <FaSearch size={14} className="text-[var(--color-iconDefault)]" />
+          <FaSearch size={14} className="text-[var(--color-searchBarIcon,var(--color-iconDefault))]" />
         </div>
       );
     };
@@ -6029,7 +6070,7 @@ if (pendingQueryUrls && pendingQueryUrls.length > 0) {
 
 const selectedLocalLabel = useMemo(() => {
       if (!lockedCommand && selectedCommand?.commandType === 'local') {
-        if (selectedCommand.id === 'createnotes' || selectedCommand.id === 'createlinks' || selectedCommand.id === 'createsession') {
+        if (selectedCommand.id === 'createnotes' || selectedCommand.id === 'createlinks') {
           return null;
         }
         return selectedCommand.label;
@@ -6043,7 +6084,6 @@ const selectedLocalLabel = useMemo(() => {
         selectedCommand &&
         selectedCommand.id !== 'createnotes' &&
         selectedCommand.id !== 'createlinks' &&
-        selectedCommand.id !== 'createsession' &&
         selectedCommand.id !== 'gpt'
         ? resolvePlaceholderFromCmd(selectedCommand.id)
         : STATIC_PLACEHOLDER;
@@ -6167,6 +6207,26 @@ const selectedLocalLabel = useMemo(() => {
     ]);
 
     useEffect(() => {
+      let isCancelled = false;
+
+      const applyContextualMatches = (allMatches: ContextualMatch[]) => {
+        if (isCancelled) return;
+
+        const nextMatchIds = allMatches.map(m => String(m.id)).join(',');
+
+        if (nextMatchIds !== contextualMatchIdsRef.current) {
+          contextualMatchIdsRef.current = nextMatchIds;
+          setContextualMatches(allMatches);
+          setContextualPopupIndex(-1);
+        }
+
+        const nextPopupOpen = allMatches.length > 0;
+        setIsContextualPopupOpen(prev => (prev === nextPopupOpen ? prev : nextPopupOpen));
+        if (!nextPopupOpen) {
+          setContextualPopupIndex(prev => (prev !== -1 ? -1 : prev));
+        }
+      };
+
       // 1. Reset state for new suggestions
       if (!isSuggestionVisible || lockedCommand) {
         if (selectionSourceRef.current !== null) {
@@ -6201,32 +6261,38 @@ const selectedLocalLabel = useMemo(() => {
 
       // 3. Dedicated Search for the side panel (Commands, Automations, Agents)
       // Take search query from the main searchbar only (value)
-      const dedicatedMatches =
-        value.trim().length >= 3
-          ? searchDedicatedPanel(value, commands, automationSuggestions, agentCollectionSuggestions, moduleSuggestions)
-          : [];
-
-      // Add workspace item matches for links and Tab Sessions from matchingSnippets
-      const snippetMatches: ContextualMatch[] = [];
-      if (value.trim().length >= 3) {
-        // ... (removed matchingSnippets usage)
+      if (value.trim().length < 3) {
+        applyContextualMatches([]);
+        return () => {
+          isCancelled = true;
+        };
       }
 
-      // Merge matches from searchDedicatedPanel (cast as compatible type) with workspace item matches
-      const allMatches: ContextualMatch[] = [...(dedicatedMatches as ContextualMatch[]), ...snippetMatches];
-      const nextMatchIds = allMatches.map(m => String(m.id)).join(',');
+      import('../searchLogicAndAlgorithms/searchEngine')
+        .then(({ searchDedicatedPanel }) => {
+          if (isCancelled) return;
 
-      if (nextMatchIds !== contextualMatchIdsRef.current) {
-        contextualMatchIdsRef.current = nextMatchIds;
-        setContextualMatches(allMatches);
-        setContextualPopupIndex(-1);
-      }
+          const dedicatedMatches = searchDedicatedPanel(
+            value,
+            commands,
+            automationSuggestions,
+            agentCollectionSuggestions,
+            moduleSuggestions,
+          );
 
-      const nextPopupOpen = allMatches.length > 0;
-      setIsContextualPopupOpen(prev => (prev === nextPopupOpen ? prev : nextPopupOpen));
-      if (!nextPopupOpen) {
-        setContextualPopupIndex(prev => (prev !== -1 ? -1 : prev));
-      }
+          // Add workspace item matches for links and collections from matchingSnippets
+          const snippetMatches: ContextualMatch[] = [];
+
+          // Merge matches from searchDedicatedPanel (cast as compatible type) with workspace item matches
+          applyContextualMatches([...(dedicatedMatches as ContextualMatch[]), ...snippetMatches]);
+        })
+        .catch(() => {
+          applyContextualMatches([]);
+        });
+
+      return () => {
+        isCancelled = true;
+      };
     }, [
       value,
       commands,
@@ -6347,6 +6413,34 @@ const selectedLocalLabel = useMemo(() => {
               resetAfterCommandExecution();
               useUIStore.getState().openEditor({ type: referenceType as any, id: referenceId });
               recordShortcutUse();
+              return;
+            }
+
+            if (['collection', 'collections', 'collection_view'].includes(normalizedShortcutReferenceType)) {
+              resetAfterCommandExecution();
+              const didLaunch = await launchDashboardCollectionView(String(referenceId), { mode: 'open' });
+              recordShortcutUse(didLaunch, didLaunch ? undefined : 'collection_view_not_found');
+              return;
+            }
+
+            if (normalizedShortcutReferenceType === 'session') {
+              resetAfterCommandExecution();
+              const sessionRecord = useDbStore
+                .getState()
+                .sessions.find((session: any) => String(session.id) === String(referenceId));
+              if (!sessionRecord) {
+                recordShortcutUse(false, 'entity_not_found');
+                return;
+              }
+
+              const response = await launchSessionSmartWithReferences(sessionRecord, {
+                source: 'shortcut',
+                requireAutoSave: false,
+              });
+              recordShortcutUse(
+                response?.ok && !response?.skipped,
+                response?.skipped ? response.reason : response?.ok ? undefined : response?.error || 'session_launch_failed',
+              );
               return;
             }
 
@@ -6791,6 +6885,7 @@ if (trimmedValue || trimmedPrompt || lockedCommand || selected || selectedComman
               promptForExecution = extraction.matched ? extraction.prompt : trimmedValue;
 
               if (!extraction.matched) {
+                const { detectPinnedCommand } = await import('../searchLogicAndAlgorithms/searchEngine');
                 const pinInfo = detectPinnedCommand(trimmedValue, commands);
                 if (pinInfo.pinned && pinInfo.pinned.id === selected.id) {
                   promptForExecution = pinInfo.searchQuery.trim();
@@ -7905,8 +8000,9 @@ document.documentElement.classList.add('is-searchbar-focused');
                 data-suggestion-visible={isSuggestionVisible}
                 id="searchbar-input"
                 data-searchbar-input="true"
-                className={`${activeCollection ? 'opacity-0 w-[1px] h-[1px] overflow-hidden absolute -z-10' : ''} w-full ${inputRightPadding} py-3 rounded-t-xl bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[var(--color-textPrimary)] caret-auto focus:ring-0 focus:outline-none shadow-none backdrop-blur-xl resize-none overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-400/50 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-600/50 [&::-webkit-scrollbar-track]:bg-transparent text-[16px] min-[1680px]:text-[18px] min-[1880px]:text-[20px] min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px] empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--color-textPlaceholder)] empty:before:absolute empty:before:pointer-events-none`}
+                className={`${activeCollection ? 'opacity-0 w-[1px] h-[1px] overflow-hidden absolute -z-10' : ''} w-full ${inputRightPadding} py-3 rounded-xl border border-[var(--color-searchBarBorder,var(--color-borderDefault))] text-[var(--color-searchBarText,var(--color-textPrimary))] caret-auto focus:ring-0 focus:outline-none shadow-[var(--color-searchBarShadow,none)] backdrop-blur-[var(--color-searchBarBlur,14px)] resize-none overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-400/50 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-600/50 [&::-webkit-scrollbar-track]:bg-transparent text-[16px] min-[1680px]:text-[18px] min-[1880px]:text-[20px] min-h-[48px] min-[1680px]:min-h-[56px] min-[1880px]:min-h-[60px] empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--color-searchBarPlaceholder,var(--color-textPlaceholder))] empty:before:absolute empty:before:pointer-events-none`}
                 style={{
+                  background: 'var(--color-searchBarBg, var(--color-inputBg))',
                   paddingLeft: inputLeftPaddingPx,
                   ['--placeholder-padding-left' as any]: `${inputLeftPaddingPx}px`,
                   maxHeight: '120px',
@@ -7965,8 +8061,8 @@ document.documentElement.classList.add('is-searchbar-focused');
                   return null;
                 })()}
                 {!isInitialAltSFocus ? (
-                  <div className="flex items-center justify-center px-1.5 py-0.5 rounded border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] pointer-events-none">
-                    <span className="text-[9px] font-bold text-[var(--color-textSecondary)] tracking-widest uppercase">
+                  <div className="flex items-center justify-center px-1.5 py-0.5 rounded border border-[var(--color-searchBarKbdBorder,var(--color-borderDefault))] bg-[var(--color-searchBarKbdBg,var(--color-inputBg))] pointer-events-none">
+                    <span className="text-[9px] font-bold text-[var(--color-searchBarKbdText,var(--color-textSecondary))] tracking-widest uppercase">
                       ALT + S
                     </span>
                   </div>

@@ -38,6 +38,8 @@ export interface SnippetRecord {
   versionHistory?: StructuredVersionHistory<SnippetSnapshot>;
 }
 
+export const SNIPPET_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderId', 'title', 'config', 'tagIds', 'shortcut', 'deletedAt'] as const satisfies readonly (keyof SnippetRecord)[];
+
 export interface CreateSnippetInput {
   workspaceId?: string;
   folderId?: string | null;

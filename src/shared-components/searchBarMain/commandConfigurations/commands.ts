@@ -20,7 +20,6 @@ export type CommandId =
   | 'createnotes'
   | 'createsnippet'
   | 'createlinks'
-  | 'createsession'
   | 'createprompt'
   | 'createfolder'
   | 'capture_screenshot'
@@ -87,9 +86,10 @@ const toCommandDefinition = (record: CommandRecord): CommandDefinition => {
 
 const syncCommandCaches = () => {
   const records = useDbStore.getState().commands || [];
-  const all = records.map(toCommandDefinition);
+  const activeRecords = records.filter(record => record.id !== 'createsession');
+  const all = activeRecords.map(toCommandDefinition);
   ALL_REMOTE_COMMANDS_INTERNAL.splice(0, ALL_REMOTE_COMMANDS_INTERNAL.length, ...all);
-  COMMANDS_INTERNAL.splice(0, COMMANDS_INTERNAL.length, ...all.filter((_cmd, index) => records[index]?.surface !== 'website'));
+  COMMANDS_INTERNAL.splice(0, COMMANDS_INTERNAL.length, ...all.filter((_cmd, index) => activeRecords[index]?.surface !== 'website'));
 };
 
 syncCommandCaches();

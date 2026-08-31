@@ -143,6 +143,37 @@ export class OpfsAssetStore implements AssetStore {
 
 export const assetStore = new OpfsAssetStore();
 
+export async function prepareRestoredAssetRecord(record: AssetRecord, blob: Blob): Promise<AssetRecord> {
+  const mimeType = record.mimeType || blob.type;
+  const byteSize = record.byteSize || blob.size;
+
+  if (isOpfsAvailable()) {
+    try {
+      const opfsFileName = getOpfsFileName(record.id, mimeType);
+      await writeBlobToOpfs(opfsFileName, blob);
+      return {
+        ...record,
+        blob: undefined,
+        mimeType,
+        byteSize,
+        storageDriver: 'opfs',
+        storagePath: `${OPFS_ASSET_DIRECTORY}/${opfsFileName}`,
+      };
+    } catch (error) {
+      console.warn(`[Asset Restore] Failed to restore asset ${record.id} into OPFS; falling back to IndexedDB blob.`, error);
+    }
+  }
+
+  return {
+    ...record,
+    blob,
+    mimeType,
+    byteSize,
+    storageDriver: 'indexeddb',
+    storagePath: undefined,
+  };
+}
+
 export async function getAssetStorageStats(): Promise<AssetStorageStats> {
   const assets = await db.assets.toArray();
   const assetByteSize = assets.reduce((total, asset) => total + (asset.byteSize || asset.blob?.size || 0), 0);

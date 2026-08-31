@@ -8,7 +8,7 @@ export type TriggerReferenceType =
   | 'note'
   | 'link'
   | 'snippet'
-  | 'session'
+  | 'collection'
   | 'command'
   | 'automation'
   | 'module'
@@ -31,6 +31,8 @@ export interface TriggerDailySummaryRecord {
   updatedAt: number;
 }
 
+export const TRIGGER_DAILY_SUMMARY_COMPARISON_FIELDS = ['id', 'dateKey', 'userId', 'shortcutUses', 'hotkeyUses', 'successCount', 'failureCount', 'uniqueTargets', 'targetIds', 'firstUsedAt', 'lastUsedAt'] as const satisfies readonly (keyof TriggerDailySummaryRecord)[];
+
 export interface TriggerDailyBreakdownRecord {
   id: string;
   dateKey: string;
@@ -51,6 +53,8 @@ export interface TriggerDailyBreakdownRecord {
   lastUsedAt: number;
   updatedAt: number;
 }
+
+export const TRIGGER_DAILY_BREAKDOWN_COMPARISON_FIELDS = ['id', 'dateKey', 'userId', 'triggerKind', 'triggerValue', 'triggerSource', 'referenceId', 'referenceType', 'targetLabelSnapshot', 'triggerLabelSnapshot', 'surface', 'urlHost', 'successCount', 'lastErrorCode', 'firstUsedAt', 'lastUsedAt'] as const satisfies readonly (keyof TriggerDailyBreakdownRecord)[];
 
 export interface RecordAssignedTriggerUsageInput {
   triggerKind: AssignedTriggerKind;

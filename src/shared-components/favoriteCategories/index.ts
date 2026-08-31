@@ -1,2 +1,6 @@
-export { default as FavoriteCategoryManager } from './ui/FavoriteCategoryManager';
-export * from '../../allObjectFolder/src/createObject/favoriteCategory';
+/**
+ * @file index.ts
+ * @description Barrel export for favorite categories / group UI components.
+ */
+
+export { default as FavoriteGroupTagFilterPopover } from './ui/FavoriteGroupTagFilterPopover';

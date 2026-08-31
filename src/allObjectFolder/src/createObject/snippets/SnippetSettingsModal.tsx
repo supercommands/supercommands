@@ -206,7 +206,7 @@ const SnippetSettingsModal: React.FC<SnippetSettingsModalProps> = ({
     : category.includes('tabgroup')
       ? 'Link Group'
       : category.includes('prompt')
-        ? 'AI Prompt'
+        ? 'Chat Agent'
         : 'Note';
 
   const getDeleteDescription = () => {

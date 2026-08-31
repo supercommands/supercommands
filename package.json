@@ -1,6 +1,6 @@
 {
   "name": "cmdos",
-  "version": "0.3.60",
+  "version": "0.3.62",
   "description": "cmdOS Chrome Extension",
   "license": "MIT",
   "private": true,
@@ -20,9 +20,11 @@
     "base-build": "pnpm clean:bundle && turbo build",
     "build": "cross-env WXT_ARTIFACT_VARIANT=chrome-saas wxt build -b chrome --mv3 && node scripts/manage-extension-artifacts.mjs chrome-saas build",
     "build:legacy": "pnpm base-build",
+    "upload:dropbox": "pnpm wxt:build:chrome:saas && node scripts/upload-to-dropbox.mjs",
     "build:firefox": "set CLI_CEB_FIREFOX=true && pnpm base-build",
     "base-dev": "pnpm clean:bundle && turbo ready && turbo dev --concurrency 20",
     "dev": "node -e \"require('fs').mkdirSync('.wxt/chrome-data',{recursive:true})\" && cross-env WXT_ARTIFACT_VARIANT=development wxt -b chrome --mv3",
+    "dev:oss": "node -e \"require('fs').mkdirSync('.wxt/chrome-data',{recursive:true})\" && cross-env WXT_ARTIFACT_VARIANT=chrome-oss ENV_FILE=env.oss VITE_ENABLE_SHARING=false wxt -b chrome --mv3",
     "dev:legacy": "set CLI_CEB_DEV=true && pnpm base-dev",
     "dev:firefox": "set CLI_CEB_DEV=true && set CLI_CEB_FIREFOX=true && pnpm base-dev",
     "dev:website": "pnpm --filter @extension/AltS_search_websites dev",
@@ -53,7 +55,8 @@
     "wxt:zip:firefox": "cross-env WXT_ARTIFACT_VARIANT=firefox wxt zip -b firefox && node scripts/manage-extension-artifacts.mjs firefox zip",
     "test:e2e:build": "pnpm run wxt:build:chrome:saas",
     "test:e2e": "playwright test --config=e2e/playwright.config.ts",
-    "test:e2e:smoke": "playwright test e2e/test-scripts/smoke --config=e2e/playwright.config.ts",
+    "test:e2e:smoke": "playwright test e2e/scenarios/core-workflows/verify-extension-loads.test.ts --config=e2e/playwright.config.ts",
+    "test:e2e:notes": "playwright test --config=e2e/playwright.config.ts e2e/scenarios/notes --headed",
     "test:e2e:debug": "playwright test --config=e2e/playwright.config.ts --debug"
   },
   "dependencies": {
@@ -154,6 +157,11 @@
     "endOfLine": "lf"
   },
   "packageManager": "pnpm@9.15.1",
+  "pnpm": {
+    "overrides": {
+      "@vitejs/plugin-react": "5.1.1"
+    }
+  },
   "engines": {
     "node": ">=22.12.0"
   }

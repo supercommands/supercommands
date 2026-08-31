@@ -15,7 +15,6 @@ export type LocalCommandId =
   | 'delete_link'
   | 'createnotes'
   | 'createlinks'
-  | 'createsession'
   | 'createprompt'
   | 'createfolder'
   | 'createworkspace'
@@ -70,7 +69,8 @@ export const LOCAL_COMMANDS: LocalCommandDefinition[] = LOCAL_COMMANDS_INTERNAL;
 
 const syncLocalCommandCaches = () => {
   const records = useDbStore.getState().commands || [];
-  const recordMap = new Map(records.map(r => [r.id, r]));
+  const activeRecords = records.filter(record => record.id !== 'createsession');
+  const recordMap = new Map(activeRecords.map(r => [r.id, r]));
 
   // Start with all base commands and override with custom records
   const allBase = Array.from(BASE_LOCAL_COMMANDS_BY_ID.values()).map(base => {
@@ -97,7 +97,7 @@ const syncLocalCommandCaches = () => {
 
   // Append any custom records that are not in base
   const customOnly = records
-    .filter(r => !BASE_LOCAL_COMMANDS_BY_ID.has(r.id))
+    .filter(r => r.id !== 'createsession' && !BASE_LOCAL_COMMANDS_BY_ID.has(r.id))
     .map(
       record =>
         ({
@@ -111,7 +111,7 @@ const syncLocalCommandCaches = () => {
         }) as LocalCommandDefinition,
     );
 
-  const all = [...allBase, ...customOnly];
+  const all = [...allBase, ...customOnly].filter(cmd => cmd.id !== 'createsession');
 
   ALL_LOCAL_COMMANDS_INTERNAL.splice(0, ALL_LOCAL_COMMANDS_INTERNAL.length, ...all);
   LOCAL_COMMANDS_INTERNAL.splice(

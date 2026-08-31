@@ -30,7 +30,10 @@ export interface AiPromptRecord {
   updatedAt: number;
   deletedAt: number | null;
   customModels?: CustomModelConfig[];
+  enabledModelIds?: string[];
 }
+
+export const AI_PROMPT_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderId', 'title', 'prompt', 'rules', 'modelUrls', 'favIconUrl', 'tagIds', 'customModels', 'enabledModelIds', 'deletedAt'] as const satisfies readonly (keyof AiPromptRecord)[];
 
 export interface CreateAiPromptInput {
   workspaceId?: string;
@@ -42,6 +45,7 @@ export interface CreateAiPromptInput {
   favIconUrl?: string;
   tagIds?: string[];
   customModels?: CustomModelConfig[];
+  enabledModelIds?: string[];
 }
 
 export interface UpdateAiPromptInput {
@@ -54,4 +58,5 @@ export interface UpdateAiPromptInput {
   folderId?: string | null;
   tagIds?: string[];
   customModels?: CustomModelConfig[];
+  enabledModelIds?: string[];
 }

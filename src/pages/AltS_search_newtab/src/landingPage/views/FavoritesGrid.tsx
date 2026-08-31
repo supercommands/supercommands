@@ -25,7 +25,42 @@ import {
   createFavoriteCategory,
   deleteFavoriteCategory,
   updateFavoriteCategory,
+  useFavoriteCategories,
 } from '../../../../../allObjectFolder/src/createObject/favoriteCategory';
+import { FavoriteGroupTagFilterPopover } from '../../../../../shared-components/favoriteCategories';
+import { useWidgetPopoverPosition } from '../../components/widgets/engine/useWidgetPopoverPosition';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
+
+export function getFavoriteTagIds(favorite: any, allTags: any[] = []): string[] {
+  const rawTags = Array.isArray(favorite?.tagIds)
+    ? favorite.tagIds
+    : Array.isArray(favorite?.tags)
+      ? favorite.tags
+      : Array.isArray(favorite?.tag_ids)
+        ? favorite.tag_ids
+        : [];
+
+  const tagIdSet = new Set<string>();
+
+  rawTags.forEach((tag: any) => {
+    if (typeof tag === 'string') {
+      tagIdSet.add(tag);
+      const matchedByName = allTags.find(t => t.name === tag || t.id === tag);
+      if (matchedByName?.id) tagIdSet.add(matchedByName.id);
+    } else if (tag && typeof tag === 'object') {
+      if (tag.id) tagIdSet.add(String(tag.id));
+      if (tag.tag_id) tagIdSet.add(String(tag.tag_id));
+      if (tag._id) tagIdSet.add(String(tag._id));
+      if (tag.name) {
+        const matchedByName = allTags.find(t => t.name === tag.name || t.id === tag.name);
+        if (matchedByName?.id) tagIdSet.add(matchedByName.id);
+      }
+    }
+  });
+
+  return Array.from(tagIdSet);
+}
+
 import { UnifiedContextMenu, type MenuAction } from '../../../../../shared-components/ui/UnifiedContextMenu';
 import {
   FaRegFolder,
@@ -45,12 +80,11 @@ import {
   FaKey,
   FaQuestionCircle,
   FaCheck,
-  FaRobot,
   FaStar,
 } from 'react-icons/fa';
-import { FiMoreHorizontal, FiLink, FiFileText, FiZap, FiLayers, FiMoreVertical, FiCode, FiEdit2, FiExternalLink, FiPlay, FiTrash2, FiStar } from 'react-icons/fi';
+import { FiMoreHorizontal, FiLink, FiFileText, FiZap, FiLayers, FiMoreVertical, FiCode, FiEdit2, FiExternalLink, FiPlay, FiTrash2, FiStar, FiFilter } from 'react-icons/fi';
 import type { WidgetSizePreset } from '../../components/widgets/widgetDashboard.types';
-import { LuBot, LuStar } from 'react-icons/lu';
+import { LuBot, LuStar, LuSparkles } from 'react-icons/lu';
 import { BsCalendarCheck, BsKeyboard } from 'react-icons/bs';
 import { MdOutlineShortcut } from 'react-icons/md';
 import { db } from '../../../../../storage/indexDB/dbConfig';
@@ -147,8 +181,11 @@ interface SectionHeaderProps {
   dragControls?: any;
   onRename?: (newName: string) => void;
   onDelete?: () => void;
+  onOpenFilterTags?: (e: React.MouseEvent) => void;
   autoFocusEdit?: boolean;
   onCancelEdit?: () => void;
+  validationError?: string | null;
+  editInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
 const SectionHeader: React.FC<SectionHeaderProps> = ({
@@ -159,24 +196,44 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   dragControls,
   onRename,
   onDelete,
+  onOpenFilterTags,
   autoFocusEdit,
   onCancelEdit,
+  validationError,
+  editInputRef,
 }) => {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(autoFocusEdit || false);
-  const [editValue, setEditValue] = React.useState(label);
+  const isDraftRow = Boolean(id?.includes('draft-') || autoFocusEdit);
+  const [editValue, setEditValue] = React.useState(isDraftRow ? '' : (label.startsWith('custom_') ? '' : label));
   const [menuCoords, setMenuCoords] = React.useState({ top: 0, left: 0 });
   const dotsRef = React.useRef<HTMLDivElement>(null);
+  const internalInputRef = React.useRef<HTMLInputElement>(null);
+  const activeInputRef = editInputRef || internalInputRef;
+  const isSubmittingRef = React.useRef(false);
 
   const handleRenameSubmit = () => {
-    if (editValue.trim() && onRename) {
-      onRename(editValue.trim());
-    } else {
-      if (onCancelEdit) {
-        onCancelEdit();
-      }
+    if (isSubmittingRef.current) return;
+    const trimmed = editValue.trim();
+    if (!trimmed) return; // keep input open if empty
+    if (onRename) {
+      isSubmittingRef.current = true;
+      onRename(trimmed);
+      setTimeout(() => {
+        isSubmittingRef.current = false;
+      }, 300);
+      setIsEditing(false);
+      setMenuOpen(false);
     }
-    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    if (isDraftRow && onCancelEdit) {
+      onCancelEdit();
+    } else {
+      setEditValue(label.startsWith('custom_') ? '' : label);
+      setIsEditing(false);
+    }
     setMenuOpen(false);
   };
 
@@ -202,90 +259,138 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   React.useEffect(() => {
     if (autoFocusEdit) {
       setIsEditing(true);
-      setEditValue(label);
+      if (id?.includes('draft-') || label.startsWith('custom_')) {
+        setEditValue('');
+      } else {
+        setEditValue(label);
+      }
+      requestAnimationFrame(() => {
+        activeInputRef.current?.focus();
+        activeInputRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
     }
-  }, [autoFocusEdit, label]);
+  }, [autoFocusEdit, id, label]);
+
+  const displayLabel = (label.startsWith('draft-') || label.startsWith('custom_')) ? '' : label;
 
   return (
-    <div className="flex items-center justify-between px-2 py-1 mb-1.5 relative group rounded border bg-white/[0.04] border-white/5">
-      <div className="flex items-center gap-1 flex-1 min-w-0">
-        <div
-          className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300 shrink-0"
-          onPointerDown={e => {
-            if (dragControls) dragControls.start(e);
-            else e.stopPropagation();
-          }}>
-          <DragHandleIcon />
+    <div className="flex flex-col mb-1.5">
+      <div className="flex items-center justify-between px-2 py-1 relative group rounded border bg-white/[0.04] border-white/5">
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          {!isDraftRow && (
+            <div
+              className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-500 hover:text-neutral-300 shrink-0"
+              onPointerDown={e => {
+                if (dragControls) dragControls.start(e);
+                else e.stopPropagation();
+              }}>
+              <DragHandleIcon />
+            </div>
+          )}
+          {isEditing || autoFocusEdit ? (
+            <div className="flex items-center gap-1 flex-1 min-w-0">
+              <input
+                ref={activeInputRef}
+                autoFocus
+                value={editValue}
+                placeholder="Enter group name"
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleRenameSubmit();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleCancelEdit();
+                  }
+                }}
+                className="flex-1 bg-transparent border-b border-[#268bd2] outline-none text-[10px] font-bold tracking-wider normal-case placeholder:normal-case text-neutral-300 px-1 min-w-0"
+              />
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleRenameSubmit(); }}
+                className="text-[#268bd2] text-[9px] font-bold px-1 py-0.5 rounded hover:bg-[#268bd2]/20 shrink-0 leading-none"
+              >✓</button>
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleCancelEdit(); }}
+                className="text-neutral-500 text-[9px] font-bold px-1 py-0.5 rounded hover:bg-white/10 shrink-0 leading-none"
+              >✕</button>
+            </div>
+          ) : (
+            <span className="text-[10px] font-bold tracking-wider uppercase truncate text-neutral-400">{displayLabel}</span>
+          )}
         </div>
-        {isEditing ? (
-          <input
-            autoFocus
-            value={editValue}
-            onChange={e => setEditValue(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                handleRenameSubmit();
-              } else if (e.key === 'Escape') {
-                setIsEditing(false);
-                if (onCancelEdit) onCancelEdit();
-              }
-            }}
-            onBlur={handleRenameSubmit}
-            className="flex-1 bg-transparent border-b border-[#268bd2] outline-none text-[10px] font-bold tracking-wider uppercase text-neutral-300 px-1 w-full"
-          />
-        ) : (
-          <span className="text-[10px] font-bold tracking-wider uppercase truncate text-neutral-400">{label}</span>
-        )}
-      </div>
 
-      <div className="flex items-center gap-2 shrink-0">
-        <div
-          className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all duration-150 shrink-0 cursor-pointer ${isOn ? 'bg-[#268bd2] border-[#268bd2] text-white' : 'border-neutral-600'}`}
-          onClick={e => {
-            e.stopPropagation();
-            onToggle();
-          }}>
-          {isOn && <FaCheck size={7} />}
-        </div>
+        {!isDraftRow && (
+          <div className="flex items-center gap-2 shrink-0">
+            <div
+              className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all duration-150 shrink-0 cursor-pointer ${isOn ? 'bg-[#268bd2] border-[#268bd2] text-white' : 'border-neutral-600'}`}
+              onClick={e => {
+                e.stopPropagation();
+                onToggle();
+              }}>
+              {isOn && <FaCheck size={7} />}
+            </div>
 
-        {onRename && (
-          <div
-            ref={dotsRef}
-            className="relative group/dots cursor-pointer text-neutral-500 hover:text-neutral-300"
-            onClick={handleDotsClick}>
-            <FiMoreVertical size={12} />
-            {menuOpen &&
-              ReactDOM.createPortal(
-                <div
-                  data-portal="true"
-                  className="fixed w-24 flex flex-col bg-[var(--color-popupBg)] border border-white/10 rounded shadow-lg z-[99999] overflow-hidden"
-                  style={{ top: `${menuCoords.top}px`, left: `${menuCoords.left}px` }}>
-                  <button
-                    className="px-2 py-1.5 text-[10px] text-left hover:bg-white/5 text-neutral-300 w-full outline-none border-none cursor-pointer"
-                    onClick={e => {
-                      e.stopPropagation();
-                      setIsEditing(true);
-                      setMenuOpen(false);
-                    }}>
-                    Rename
-                  </button>
-                  {onDelete && (
-                    <button
-                      className="px-2 py-1.5 text-[10px] text-left hover:bg-white/5 text-red-400 w-full outline-none border-none cursor-pointer"
-                      onClick={e => {
-                        e.stopPropagation();
-                        onDelete();
-                        setMenuOpen(false);
-                      }}>
-                      Delete
-                    </button>
+            {onRename && (
+              <div
+                ref={dotsRef}
+                className="relative group/dots cursor-pointer text-neutral-500 hover:text-neutral-300"
+                onClick={handleDotsClick}>
+                <FiMoreVertical size={12} />
+                {menuOpen &&
+                  ReactDOM.createPortal(
+                    <div
+                      data-portal="true"
+                      className="fixed w-24 flex flex-col bg-[var(--color-popupBg)] border border-white/10 rounded shadow-lg z-[99999] overflow-hidden"
+                      style={{ top: `${menuCoords.top}px`, left: `${menuCoords.left}px` }}>
+                      <button
+                        className="px-2 py-1.5 text-[10px] text-left hover:bg-white/5 text-neutral-300 w-full outline-none border-none cursor-pointer"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setIsEditing(true);
+                          setMenuOpen(false);
+                        }}>
+                        Rename
+                      </button>
+                      {onOpenFilterTags && (
+                        <button
+                          className="px-2 py-1.5 text-[10px] text-left hover:bg-white/5 text-neutral-300 w-full outline-none border-none cursor-pointer flex items-center gap-1"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setMenuOpen(false);
+                            if (onOpenFilterTags) onOpenFilterTags(e);
+                          }}>
+                          Filter by tags
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          className="px-2 py-1.5 text-[10px] text-left hover:bg-white/5 text-red-400 w-full outline-none border-none cursor-pointer"
+                          onClick={e => {
+                            e.stopPropagation();
+                            onDelete();
+                            setMenuOpen(false);
+                          }}>
+                          Delete
+                        </button>
+                      )}
+                    </div>,
+                    document.body,
                   )}
-                </div>,
-                document.body,
-              )}
+              </div>
+            )}
           </div>
         )}
       </div>
+      {validationError && (
+        <span className="text-[9px] text-red-400 font-normal normal-case block mt-0.5 px-2">
+          {validationError}
+        </span>
+      )}
     </div>
   );
 };
@@ -297,8 +402,11 @@ interface GroupHeaderItemProps {
   onToggle: () => void;
   onRename: (newName: string) => void;
   onDelete?: () => void;
+  onOpenFilterTags?: (e: React.MouseEvent) => void;
   autoFocusEdit?: boolean;
   onCancelEdit?: () => void;
+  validationError?: string | null;
+  editInputRef?: React.RefObject<HTMLInputElement | null>;
   dragControls?: any;
 }
 
@@ -309,8 +417,11 @@ const GroupHeaderItem: React.FC<GroupHeaderItemProps> = ({
   onToggle,
   onRename,
   onDelete,
+  onOpenFilterTags,
   autoFocusEdit,
   onCancelEdit,
+  validationError,
+  editInputRef,
   dragControls: _ignoredDragControls,
 }) => {
   const dragControls = useDragControls();
@@ -328,8 +439,11 @@ const GroupHeaderItem: React.FC<GroupHeaderItemProps> = ({
         dragControls={dragControls}
         onRename={onRename}
         onDelete={onDelete}
+        onOpenFilterTags={onOpenFilterTags}
         autoFocusEdit={autoFocusEdit}
         onCancelEdit={onCancelEdit}
+        validationError={validationError}
+        editInputRef={editInputRef}
       />
     </Reorder.Item>
   );
@@ -386,8 +500,157 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
   isWidgetEditMode = false,
 }) => {
   const { favorites, toggleFavorite, populatedFavorites, setFavoriteCategory } = useFavorites();
-      const userId = useUser();
-      const favoriteCategories = useDbStore(state => state.favoriteCategories);
+  const userId = useUser();
+  const favoriteCategories = useDbStore(state => state.favoriteCategories);
+  const allTags = useDbStore(state => state.tags);
+  const { computeFromEvent: computePopoverCoords } = useWidgetPopoverPosition();
+
+  const [activeTagFilterGroupId, setActiveTagFilterGroupId] = useState<string | null>(null);
+  const [tagFilterTriggerCoords, setTagFilterTriggerCoords] = useState<{ top: number; left: number } | null>(null);
+  const [validationErrorGroupId, setValidationErrorGroupId] = useState<string | null>(null);
+  const [validationErrorMessage, setValidationErrorMessage] = useState<string | null>(null);
+  const editInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleStartFavoriteGroupCreation = (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+
+    const draftGroupId = generateEntityId('favoriteGroupDraft');
+    const draftHeaderId = `header-${draftGroupId}`;
+
+    setFavGridOrder(prev => [...prev, draftHeaderId]);
+    setFavCustomGroupNames(prev => ({
+      ...prev,
+      [draftGroupId]: '',
+    }));
+    setFavGridVisible(prev => ({
+      ...prev,
+      [draftHeaderId]: true,
+    }));
+    setNewlyCreatedFavGroupId(draftHeaderId);
+    setValidationErrorGroupId(null);
+    setValidationErrorMessage(null);
+
+    requestAnimationFrame(() => {
+      if (popoverRef.current) {
+        popoverRef.current.scrollTop = popoverRef.current.scrollHeight;
+      }
+    });
+  };
+
+  const handleCancelFavoriteGroupDraft = (draftHeaderId: string) => {
+    const draftGroupId = draftHeaderId.replace('header-', '');
+
+    setFavGridOrder(prev => prev.filter(id => id !== draftHeaderId));
+    setFavCustomGroupNames(prev => {
+      const next = { ...prev };
+      delete next[draftGroupId];
+      return next;
+    });
+    setFavGridVisible(prev => {
+      const next = { ...prev };
+      delete next[draftHeaderId];
+      return next;
+    });
+
+    if (newlyCreatedFavGroupId === draftHeaderId) {
+      setNewlyCreatedFavGroupId(null);
+    }
+    setValidationErrorGroupId(null);
+    setValidationErrorMessage(null);
+  };
+
+  const handleCommitFavoriteGroupName = async (
+    headerId: string,
+    submittedName: string,
+  ) => {
+    const trimmed = submittedName.trim();
+    const groupId = headerId.replace('header-', '');
+    const isDraft = headerId.includes('draft-') || headerId.startsWith('header-custom_');
+
+    if (!trimmed) {
+      if (isDraft) {
+        handleCancelFavoriteGroupDraft(headerId);
+      }
+      return;
+    }
+
+    const isDuplicate = favoriteCategories.some(
+      c => c.id !== groupId && c.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+
+    if (isDuplicate) {
+      setValidationErrorGroupId(headerId);
+      setValidationErrorMessage('A group with this name already exists.');
+      return;
+    }
+
+    setValidationErrorGroupId(null);
+    setValidationErrorMessage(null);
+
+    if (isDraft) {
+      const created = await createFavoriteCategory(trimmed, userId || 'local_user');
+      const realHeaderId = `header-${created.id}`;
+
+      const newOrder = favGridOrder.map(id => (id === headerId ? realHeaderId : id));
+      setFavGridOrder(newOrder);
+
+      const newNames = { ...favCustomGroupNames, [created.id]: trimmed };
+      delete newNames[groupId];
+      setFavCustomGroupNames(newNames);
+
+      const newVisible = { ...favGridVisible };
+      if (newVisible[headerId] !== undefined) {
+        newVisible[realHeaderId] = newVisible[headerId];
+        delete newVisible[headerId];
+        setFavGridVisible(newVisible);
+      }
+
+      setNewlyCreatedFavGroupId(null);
+
+      setFavStorage({
+        favorites_items_order: newOrder,
+        favorites_custom_group_names: newNames,
+        favorites_visible_items: newVisible,
+      });
+    } else {
+      const newNames = { ...favCustomGroupNames, [groupId]: trimmed };
+      setFavCustomGroupNames(newNames);
+      setFavStorage({ favorites_custom_group_names: newNames });
+
+      let category = favoriteCategories.find(c => c.id === groupId);
+      if (!category) {
+        category = await createFavoriteCategory(trimmed, userId || 'local_user');
+      } else {
+        await updateFavoriteCategory(groupId, { name: trimmed });
+      }
+
+      if (newlyCreatedFavGroupId === headerId) {
+        setNewlyCreatedFavGroupId(null);
+      }
+    }
+  };
+
+  const handleOpenFilterTagsForGroup = async (groupOptionId: string, e?: React.MouseEvent) => {
+    const gId = groupOptionId.replace('header-', '');
+    let category = favoriteCategories.find(c => c.id === gId);
+    if (!category) {
+      const categoryName = favCustomGroupNames[gId] || 'Group';
+      await createFavoriteCategory(categoryName, userId || 'local_user');
+    }
+
+    // Compute position from the trigger element so the popover always
+    // appears beside the Favorites widget, wherever it is on the grid.
+    if (e) {
+      setTagFilterTriggerCoords(computePopoverCoords(e, { width: 240, height: 340 }));
+    } else {
+      setTagFilterTriggerCoords(null);
+    }
+
+    setActiveTagFilterGroupId(groupOptionId);
+  };
 
       // --- Favorites grid card and popover state ---
       const [favGridOrder, setFavGridOrder] = useState<string[]>([]);
@@ -438,7 +701,8 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
           if (id.startsWith('header-')) {
             currentCategoryId = id.replace('header-', '');
           } else {
-            const fav = favByCompoundId[id];
+            const rawFavId = id.includes('::') ? id.split('::').pop()! : id;
+            const fav = favByCompoundId[rawFavId] || favByCompoundId[id] || populatedFavorites.find(f => f.compoundId === id || f.id === id);
             const existingCat = fav?.favoriteCategoryId || null;
             if (fav && existingCat !== currentCategoryId) {
               const refId = fav.reference_id || fav.id || fav.snippet_id;
@@ -467,36 +731,66 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
       const popoverRef = useRef<HTMLDivElement>(null);
       const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
 
+      // Load saved favorites layout order & custom group names from chrome.storage.local on mount
       useEffect(() => {
-        const orderedCategories = favoriteCategories
-          .slice()
-          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const chromeAny = (window as any)?.chrome;
+        if (chromeAny?.storage?.local) {
+          chromeAny.storage.local.get(
+            ['favorites_items_order', 'favorites_visible_items', 'favorites_custom_group_names'],
+            (result: any) => {
+              if (result?.favorites_visible_items) {
+                setFavGridVisible(result.favorites_visible_items);
+              }
+              if (result?.favorites_custom_group_names) {
+                setFavCustomGroupNames(result.favorites_custom_group_names);
+              }
+              if (Array.isArray(result?.favorites_items_order) && result.favorites_items_order.length > 0) {
+                setFavGridOrder(result.favorites_items_order);
+              }
+              setHasLoadedStorage(true);
+            }
+          );
+        } else {
+          setHasLoadedStorage(true);
+        }
+      }, []);
 
-        const validCategoryIds = new Set(favoriteCategories.map(c => c.id));
+      // Sync populated favorites & DB favorite categories with favGridOrder after storage load
+      useEffect(() => {
+        if (!hasLoadedStorage) return;
 
-        const nextOrder: string[] = [];
+        setFavGridOrder(prevOrder => {
+          const currentFavIds = new Set(populatedFavorites.map(f => f.compoundId));
+          const currentCategoryIds = new Set(favoriteCategories.map(c => `header-${c.id}`));
 
-        // 1. Root items (without category or with orphan category) must come first before any group header
-        populatedFavorites.forEach(fav => {
-          const catId = (fav as any).favoriteCategoryId;
-          if (!catId || !validCategoryIds.has(catId)) {
-            nextOrder.push(fav.compoundId);
-          }
-        });
+          const nextOrder = prevOrder.filter(id => {
+            if (id.startsWith('header-')) {
+              const catId = id.replace('header-', '');
+              // Always keep draft groups (name can be empty during creation)
+              if (catId.includes('draft-')) return true;
+              return currentCategoryIds.has(id) || Boolean(favCustomGroupNames[catId]);
+            }
+            return currentFavIds.has(id);
+          });
 
-        // 2. Group headers and their respective category items
-        orderedCategories.forEach(category => {
-          nextOrder.push(`header-${category.id}`);
+          // Add missing category headers from DB
+          favoriteCategories.forEach(cat => {
+            const headerId = `header-${cat.id}`;
+            if (!nextOrder.includes(headerId)) {
+              nextOrder.push(headerId);
+            }
+          });
+
+          // Add missing favorite items
           populatedFavorites.forEach(fav => {
-            if ((fav as any).favoriteCategoryId === category.id) {
+            if (!nextOrder.includes(fav.compoundId)) {
               nextOrder.push(fav.compoundId);
             }
           });
-        });
 
-        setFavGridOrder(nextOrder);
-        setHasLoadedStorage(true);
-      }, [favoriteCategories, populatedFavorites]);
+          return nextOrder;
+        });
+      }, [populatedFavorites, favoriteCategories, favCustomGroupNames, hasLoadedStorage]);
 
       // Close popover when clicked outside or Escape key pressed
       useEffect(() => {
@@ -549,30 +843,14 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
       };
 
       const toggleGroup = (headerId: string) => {
-        const headerIndex = favGridOrder.indexOf(headerId);
-        if (headerIndex === -1) return;
-
-        const itemsInGroup: string[] = [];
-        for (let i = headerIndex + 1; i < favGridOrder.length; i++) {
-          if (favGridOrder[i].startsWith('header-')) break;
-          itemsInGroup.push(favGridOrder[i]);
-        }
-
-        if (itemsInGroup.length === 0) return;
-
-        const isAnyChecked = itemsInGroup.some(id => favGridVisible[id] !== false);
-        const newVisible = { ...favGridVisible };
-        itemsInGroup.forEach(id => {
-          newVisible[id] = !isAnyChecked;
-        });
-
+        const currentlyVisible = favGridVisible[headerId] !== false;
+        const newVisible = { ...favGridVisible, [headerId]: !currentlyVisible };
         setFavGridVisible(newVisible);
         setFavStorage({ favorites_visible_items: newVisible });
       };
 
       const handleDeleteFavGroup = (headerId: string) => {
         const groupId = headerId.replace('header-', '');
-        void deleteFavoriteCategory(groupId);
 
         const remainingOrder = favGridOrder.filter(id => id !== headerId);
         setFavGridOrder(remainingOrder);
@@ -596,7 +874,59 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
         });
       };
 
-      // Construct ordered list of favorites (including custom headers) for settings popover
+      const favoriteUsageCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        populatedFavorites.forEach(fav => {
+          const tIds = getFavoriteTagIds(fav, allTags);
+          tIds.forEach(id => {
+            counts[id] = (counts[id] || 0) + 1;
+          });
+        });
+        return counts;
+      }, [populatedFavorites, allTags]);
+
+      // Calculate exclusive filtered destination for each favorite
+      const exclusiveFilteredGroupByFavoriteId = useMemo(() => {
+        const map = new Map<string, string>();
+
+        const filterGroups = favoriteCategories.filter(
+          c => Array.isArray(c.filterTagIds) && c.filterTagIds.length > 0,
+        );
+        if (filterGroups.length === 0) return map;
+
+        populatedFavorites.forEach(fav => {
+          const favTags = getFavoriteTagIds(fav, allTags);
+          if (favTags.length === 0) return;
+
+          const matchingGroups = filterGroups.filter(cat =>
+            cat.filterTagIds!.some(tId => favTags.includes(tId)),
+          );
+
+          if (matchingGroups.length === 0) return;
+
+          // Conflict resolution: highest filterUpdatedAt (or updatedAt) wins, tie-breaker header order
+          matchingGroups.sort((a, b) => {
+            const timeA = a.filterUpdatedAt ?? a.updatedAt ?? 0;
+            const timeB = b.filterUpdatedAt ?? b.updatedAt ?? 0;
+            if (timeA !== timeB) {
+              return timeB - timeA;
+            }
+            const orderA = favGridOrder.indexOf(`header-${a.id}`);
+            const orderB = favGridOrder.indexOf(`header-${b.id}`);
+            if (orderA !== -1 && orderB !== -1) {
+              return orderA - orderB;
+            }
+            return 0;
+          });
+
+          const winningCat = matchingGroups[0];
+          map.set(fav.compoundId, `header-${winningCat.id}`);
+        });
+
+        return map;
+      }, [favoriteCategories, populatedFavorites, favGridOrder]);
+
+      // Derived list of favorites for rendering in settings popover matching effective grid placement
       const favoritesOptions = useMemo(() => {
         const map: Record<string, { id: string; label: string; type?: string; originalItem?: any }> = {};
 
@@ -610,7 +940,6 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
         });
 
         const order = [...favGridOrder];
-        // Append missing populated favorites to the order array dynamically
         populatedFavorites.forEach(f => {
           if (f.compoundId && !order.includes(f.compoundId)) {
             order.push(f.compoundId);
@@ -620,85 +949,118 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
         order.forEach(id => {
           if (id.startsWith('header-') && !map[id]) {
             const groupId = id.replace('header-', '');
-            const categoryName = favoriteCategories.find(category => category.id === groupId)?.name;
+            const category = favoriteCategories.find(c => c.id === groupId);
+            const categoryName = category?.name || favCustomGroupNames[groupId];
+            const displayTitle = (categoryName !== undefined && categoryName.trim())
+              ? categoryName.trim()
+              : (groupId.startsWith('custom_') || groupId.includes('draft-') ? '' : groupId);
             map[id] = {
               id,
-              label: categoryName || groupId,
+              label: displayTitle,
             };
           }
         });
 
         return order.map(id => map[id]).filter(Boolean);
-      }, [favGridOrder, populatedFavorites, favoriteCategories]);
+      }, [favGridOrder, populatedFavorites, favCustomGroupNames, favoriteCategories, favByCompoundId]);
 
-      // Grouped list of favorites for rendering in Home View
+      // Grouped list of favorites for rendering in Home View (exclusive placement)
       const groupedFavs = useMemo(() => {
-        const groupsList: Array<{ id: string; title: string | null; items: any[] }> = [];
-        let currentGroup: { id: string; title: string | null; items: any[] } = {
-          id: 'root',
-          title: null,
-          items: [],
-        };
-
+        const groupsList: Array<{ id: string; title: string | null; items: any[]; filterTagIds?: string[] }> = [];
         const processedItemIds = new Set<string>();
+        const groupsMap = new Map<string, { id: string; title: string | null; items: any[]; filterTagIds?: string[] }>();
+
+        // Step 1: Walk favGridOrder sequentially — position-based group assignment
+        // This mirrors exactly what the popover shows
+        let currentGroup: { id: string; title: string | null; items: any[]; filterTagIds?: string[] } | null = null;
 
         favGridOrder.forEach(id => {
           if (id.startsWith('header-')) {
-            if (currentGroup.items.length > 0 || (activeDragId !== null && currentGroup.id.startsWith('header-'))) {
-              groupsList.push(currentGroup);
-            }
             const groupId = id.replace('header-', '');
-            const groupTitle = favoriteCategories.find(category => category.id === groupId)?.name || groupId;
-            const isGroupVisible = favGridVisible[id] !== false;
+            const category = favoriteCategories.find(c => c.id === groupId);
+            const rawTitle = category?.name || favCustomGroupNames[groupId];
+            const groupTitle = (rawTitle !== undefined && rawTitle.trim())
+              ? rawTitle.trim()
+              : (groupId.startsWith('custom_') || groupId.includes('draft-') ? 'New Group' : groupId);
+            const filterTagIds = category?.filterTagIds || [];
 
             currentGroup = {
               id: id,
-              title: (isGroupVisible || activeDragId !== null) ? groupTitle : null,
+              title: groupTitle,
               items: [],
+              filterTagIds,
             };
+            groupsList.push(currentGroup);
+            groupsMap.set(id, currentGroup);
           } else {
-            const isRootGroup = currentGroup.id === 'root';
-            const isVisible = isRootGroup ? true : (favGridVisible[id] !== false || activeDragId !== null);
-            // Only add if group is visible (title is not null) or it's root group
-            if (isVisible) {
-              const fav = favByCompoundId[id];
-              if (fav) {
-                // If group is hidden (title is null), don't show the item
-                if (currentGroup.id === 'root' || currentGroup.title !== null) {
-                  currentGroup.items.push(fav);
-                }
-                processedItemIds.add(id);
+            const fav = favByCompoundId[id] || populatedFavorites.find(f => f.compoundId === id);
+            if (fav) {
+              if (currentGroup) {
+                currentGroup.items.push({ favorite: fav, isAutoMatched: false });
+                processedItemIds.add(fav.compoundId);
               }
             }
           }
         });
 
-        if (currentGroup.items.length > 0 || (activeDragId !== null && currentGroup.id.startsWith('header-'))) {
-          groupsList.push(currentGroup);
-        }
-
-        // Add remaining items to root group
-        const missingItems: any[] = [];
+        // Step 2: Items NOT yet in favGridOrder — route by their favoriteCategoryId from DB
         populatedFavorites.forEach(fav => {
-          if (fav.compoundId && !processedItemIds.has(fav.compoundId)) {
-            missingItems.push(fav);
+          if (processedItemIds.has(fav.compoundId)) return;
+          if (fav.favoriteCategoryId) {
+            const targetGroup = groupsMap.get(`header-${fav.favoriteCategoryId}`);
+            if (targetGroup) {
+              targetGroup.items.push({ favorite: fav, isAutoMatched: false });
+              processedItemIds.add(fav.compoundId);
+            }
           }
         });
 
-        if (missingItems.length > 0) {
-          const rootGroup = groupsList.find(g => g.id === 'root');
-          if (rootGroup) {
-            rootGroup.items.push(...missingItems);
-          } else {
-            groupsList.unshift({
-              id: 'root',
-              title: null,
-              items: missingItems,
-            });
+        // Step 3: Items with neither explicit position nor category — route by tag filter
+        populatedFavorites.forEach(fav => {
+          if (processedItemIds.has(fav.compoundId)) return;
+          const exclusiveGroupHeaderId = exclusiveFilteredGroupByFavoriteId.get(fav.compoundId);
+          if (exclusiveGroupHeaderId && groupsMap.has(exclusiveGroupHeaderId)) {
+            const targetGroup = groupsMap.get(exclusiveGroupHeaderId)!;
+            targetGroup.items.push({ favorite: fav, isAutoMatched: true });
+            processedItemIds.add(fav.compoundId);
           }
+        });
+
+        // Step 4: Root items (no group, no category, no tag filter match)
+        const rootItems: any[] = [];
+        populatedFavorites.forEach(fav => {
+          if (!processedItemIds.has(fav.compoundId)) {
+            rootItems.push({ favorite: fav, isAutoMatched: false });
+          }
+        });
+
+        if (rootItems.length > 0) {
+          groupsList.unshift({
+            id: 'root',
+            title: null,
+            items: rootItems,
+            filterTagIds: [],
+          });
         }
-        return groupsList.filter(g => g.items.length > 0 || (activeDragId !== null && g.id.startsWith('header-')));
-      }, [favGridOrder, favGridVisible, favByCompoundId, populatedFavorites, activeDragId, favoriteCategories]);
+
+        return groupsList
+          .map(group => ({
+            ...group,
+            items: group.items.filter(itemWrap => {
+              const fav = itemWrap.favorite || itemWrap;
+              return favGridVisible[fav.compoundId] !== false;
+            }),
+          }))
+          .filter(group => group.items.length > 0);
+      }, [favGridOrder, favGridVisible, favByCompoundId, populatedFavorites, favCustomGroupNames, favoriteCategories, exclusiveFilteredGroupByFavoriteId]);
+
+      const groupItemCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        groupedFavs.forEach(group => {
+          counts[group.id] = group.items.length;
+        });
+        return counts;
+      }, [groupedFavs]);
 
       const hasAnyFavoriteItems = useMemo(() => {
         return (groupedFavs as any[]).some((group: any) => group.items.length > 0);
@@ -765,7 +1127,7 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
           case 'prompt':
           case 'aiprompt':
           case 'ai_prompt':
-            return 'AI Prompt';
+            return 'Chat Agent';
           case 'automation':
           case 'automations':
             return 'Automation';
@@ -897,7 +1259,8 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
       const handleSaveHotkey = useCallback(async (fav: any, hotkeyValue: string) => {
         const compoundId = fav.compoundId || fav.id;
         const itemId = fav.id || fav.reference_id || fav.snippet_id;
-        const type = fav.type || fav.category || fav.reference_type || 'snippet';
+        const rawType = fav.type || fav.category || fav.reference_type || 'snippet';
+        const type = ['session', 'sessions', 'tabgroup', 'tab session'].includes(String(rawType).toLowerCase()) ? 'collection' : rawType;
         await saveHotkey(itemId || compoundId, compoundId, hotkeyValue, type);
         setEditingHotkeyFor(null);
         setEditValue('');
@@ -906,7 +1269,8 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
       const handleSaveShortcut = useCallback(async (fav: any, shortcutValue: string) => {
         const compoundId = fav.compoundId || fav.id;
         const itemId = fav.id || fav.reference_id || fav.snippet_id;
-        const type = fav.type || fav.category || fav.reference_type || 'snippet';
+        const rawType = fav.type || fav.category || fav.reference_type || 'snippet';
+        const type = ['session', 'sessions', 'tabgroup', 'tab session'].includes(String(rawType).toLowerCase()) ? 'collection' : rawType;
         await saveShortcut(itemId || compoundId, compoundId, shortcutValue, type);
         setEditingShortcutFor(null);
         setEditValue('');
@@ -1158,7 +1522,7 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
         }
 
         if (['aiprompt', 'ai_prompt', 'prompt', 'chatagent', 'chat_agent', 'agent'].includes(type)) {
-          return <FaRobot className={`${iconClass} text-[var(--color-iconDefault)]`} />;
+          return <LuSparkles className={`${iconClass} text-[var(--color-iconDefault)]`} />;
         }
         if (type === 'automation' || type === 'automations') {
           return <FiZap className={`${iconClass} text-[var(--color-iconDefault)]`} />;
@@ -1186,49 +1550,48 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
 
   const renderWidgetHeader = () => (
     <div className="flex items-center justify-between pl-1 pr-1 mb-2 shrink-0 select-none">
-      <div className="text-xs font-bold uppercase tracking-normal text-[var(--color-textMuted)]">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-textMuted)]">
         Favorites
       </div>
-      {isWidgetEditMode && (
-        <button
-          ref={settingsButtonRef}
-          type="button"
-          title="Favorites settings"
-          aria-label="Open Favorites settings"
-          aria-haspopup="menu"
-          aria-expanded={isSettingsOpen}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (settingsButtonRef.current) {
-              const rect = settingsButtonRef.current.getBoundingClientRect();
-              const popoverWidth = 208;
-              let left = rect.right - popoverWidth;
-              if (left < 12) left = Math.max(12, rect.left);
+      <button
+        ref={settingsButtonRef}
+        type="button"
+        title="Favorites settings"
+        aria-label="Open Favorites settings"
+        aria-haspopup="menu"
+        aria-expanded={isSettingsOpen}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (settingsButtonRef.current) {
+            const rect = settingsButtonRef.current.getBoundingClientRect();
+            const popoverWidth = 208;
+            let left = rect.right - popoverWidth;
+            if (left < 12) left = Math.max(12, rect.left);
 
-              const popoverMaxHeight = Math.min(window.innerHeight * 0.5, 300);
-              let top = rect.bottom + 6;
-              if (top + popoverMaxHeight > window.innerHeight - 12) {
-                top = Math.max(12, rect.top - popoverMaxHeight - 6);
-              }
-
-              setSettingsCoords({ top, left });
+            const popoverMaxHeight = Math.min(window.innerHeight * 0.5, 300);
+            let top = rect.bottom + 6;
+            if (top + popoverMaxHeight > window.innerHeight - 12) {
+              top = Math.max(12, rect.top - popoverMaxHeight - 6);
             }
-            setIsSettingsOpen(prev => !prev);
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          className={`p-1 rounded-md text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-bgHover)] cursor-pointer transition-colors border-0 bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focusRing)] ${
-            isSettingsOpen ? 'bg-[var(--color-bgHover)] text-[var(--color-textPrimary)]' : ''
-          }`}
-        >
-          <FiMoreHorizontal size={16} />
-        </button>
-      )}
+
+            setSettingsCoords({ top, left });
+          }
+          setIsSettingsOpen(prev => !prev);
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        className={`p-1 rounded-md text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-bgHover)] cursor-pointer transition-all border-0 bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focusRing)] ${
+          isSettingsOpen || isWidgetEditMode
+            ? 'opacity-100 bg-[var(--color-bgHover)] text-[var(--color-textPrimary)]'
+            : 'opacity-0 group-hover/fav-container:opacity-100'
+        }`}
+      >
+        <FiMoreHorizontal size={16} />
+      </button>
     </div>
   );
 
   const renderSettingsPortal = () =>
-    isWidgetEditMode &&
     isSettingsOpen &&
     ReactDOM.createPortal(
       <div
@@ -1251,16 +1614,8 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
             let hasSeenHeader = false;
             return favoritesOptions.map((option: any) => {
               if (option.id.startsWith('header-')) {
-                const groupId = option.id.replace('header-', '');
-                const headerIndex = favGridOrder.indexOf(option.id);
-                let isOn = false;
-                for (let i = headerIndex + 1; i < favGridOrder.length; i++) {
-                  if (favGridOrder[i].startsWith('header-')) break;
-                  if (favGridVisible[favGridOrder[i]] !== false) {
-                    isOn = true;
-                    break;
-                  }
-                }
+                hasSeenHeader = true;
+                const isOn = favGridVisible[option.id] !== false;
 
                 return (
                   <GroupHeaderItem
@@ -1269,26 +1624,32 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
                     title={option.label}
                     isOn={isOn}
                     onToggle={() => toggleGroup(option.id)}
-                    onRename={newName => {
-                      void updateFavoriteCategory(groupId, { name: newName });
-                      if (newlyCreatedFavGroupId === option.id) {
-                        setNewlyCreatedFavGroupId(null);
-                      }
+                    onOpenFilterTags={(e) => handleOpenFilterTagsForGroup(option.id, e)}
+                    onRename={async newName => {
+                      await handleCommitFavoriteGroupName(option.id, newName);
                     }}
-                    onDelete={() => {
-                      handleDeleteFavGroup(option.id);
-                    }}
-                    autoFocusEdit={newlyCreatedFavGroupId === option.id}
-                    onCancelEdit={() => {
-                      if (newlyCreatedFavGroupId === option.id) {
+                    onDelete={async () => {
+                      if (option.id.includes('draft-')) {
+                        handleCancelFavoriteGroupDraft(option.id);
+                      } else {
+                        const gId = option.id.replace('header-', '');
+                        await deleteFavoriteCategory(gId);
                         handleDeleteFavGroup(option.id);
                       }
                     }}
+                    autoFocusEdit={newlyCreatedFavGroupId === option.id}
+                    validationError={
+                      validationErrorGroupId === option.id ? validationErrorMessage : null
+                    }
+                    onCancelEdit={() => {
+                      if (option.id.includes('draft-') || newlyCreatedFavGroupId === option.id) {
+                        handleCancelFavoriteGroupDraft(option.id);
+                      }
+                    }}
+                    editInputRef={newlyCreatedFavGroupId === option.id ? editInputRef : undefined}
                   />
                 );
               } else {
-                const isVisible = favGridVisible[option.id] !== false;
-                if (!isVisible) return null;
                 return (
                   <FavoriteReorderItem
                     key={option.id}
@@ -1338,20 +1699,8 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
         {/* Add Custom favorites Group Button */}
         <div className="flex justify-center mt-2 px-2">
           <button
-            onClick={async e => {
-              e.stopPropagation();
-              if (!userId) return;
-              const existingNames = new Set(favoriteCategories.map(category => category.name.toLowerCase()));
-              const base = 'New category';
-              let candidate = base;
-              let index = 2;
-              while (existingNames.has(candidate.toLowerCase())) {
-                candidate = `${base} ${index}`;
-                index += 1;
-              }
-              const created = await createFavoriteCategory(candidate, userId);
-              setNewlyCreatedFavGroupId(`header-${created.id}`);
-            }}
+            type="button"
+            onClick={handleStartFavoriteGroupCreation}
             className="p-1 rounded-md hover:bg-[var(--color-bgHover)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] transition-colors flex items-center justify-center cursor-pointer outline-none border-none bg-transparent"
             title="Add Custom Group for Favorites">
             <svg
@@ -1430,7 +1779,7 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
       {/* ── Favorites View ──────────────────── */}
 {hasAnyFavoriteItems && (
         <div className={outerContainerClass}>
-          {isWidget && renderWidgetHeader()}
+          {renderWidgetHeader()}
           {/* Grouped Rows — Scrollable Container */}
           <DndContext
             sensors={sensors}
@@ -1448,19 +1797,23 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
                         {group.title && (
                           <SortableHeader id={group.id}>
                             <div className="flex items-center gap-2 px-0.5 py-0.5 select-none">
-                              <span className="text-[11px] font-bold tracking-wider capitalize text-[var(--color-textSecondary)]">
+                              <span className="text-[10px] font-bold tracking-wider capitalize text-[var(--color-textSecondary)]">
                                 {group.title}
                               </span>
                             </div>
                           </SortableHeader>
                         )}
                         <div className={`grid ${gridColumnsClass} w-full items-start justify-start content-start auto-rows-max`}>
-                          {(group.items as any[]).map((fav: any) => {
+                          {(group.items as any[]).map((itemWrap: any) => {
+                            const fav = itemWrap.favorite || itemWrap;
+                            const isAutoMatched = itemWrap.isAutoMatched || false;
+                            const renderId = `${group.id}::${fav.compoundId}`;
                             const label = fav.title || fav.key || fav.label || fav.name || 'Untitled';
                             return (
                               <SortableFavItem
-                                key={fav.compoundId}
-                                id={fav.compoundId}
+                                key={renderId}
+                                id={renderId}
+                                disabled={isAutoMatched || isWidgetEditMode}
                                 onClick={(e) => handleFavGridClick(fav, e)}
                                 onContextMenu={e => {
                                   e.preventDefault();
@@ -1536,12 +1889,16 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
                         </div>
                       </SortableHeader>
                     ] : []),
-                    ...(group.items as any[]).map((fav: any) => {
+                    ...(group.items as any[]).map((itemWrap: any) => {
+                      const fav = itemWrap.favorite || itemWrap;
+                      const isAutoMatched = itemWrap.isAutoMatched || false;
+                      const renderId = `${group.id}::${fav.compoundId}`;
                       const label = fav.title || fav.key || fav.label || fav.name || 'Untitled';
                       return (
                         <SortableFavItem
-                          key={fav.compoundId}
-                          id={fav.compoundId}
+                          key={renderId}
+                          id={renderId}
+                          disabled={isAutoMatched || isWidgetEditMode}
                           onClick={(e) => handleFavGridClick(fav, e)}
                           onContextMenu={e => {
                             e.preventDefault();
@@ -1629,13 +1986,18 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
                             isOn={isOn}
                             onToggle={() => toggleGroup(option.id)}
                             onRename={newName => {
-                              void updateFavoriteCategory(groupId, { name: newName });
+                              const newNames = { ...favCustomGroupNames, [groupId]: newName };
+                              setFavCustomGroupNames(newNames);
+                              setFavStorage({ favorites_custom_group_names: newNames });
                               if (newlyCreatedFavGroupId === option.id) {
                                 setNewlyCreatedFavGroupId(null);
                               }
                             }}
                             onDelete={() => {
                               handleDeleteFavGroup(option.id);
+                            }}
+                            onOpenFilterTags={(e) => {
+                              handleOpenFilterTagsForGroup(option.id, e);
                             }}
                             autoFocusEdit={newlyCreatedFavGroupId === option.id}
                             onCancelEdit={() => {
@@ -1697,19 +2059,19 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
                 {/* Add Custom favorites Group Button */}
                 <div className="flex justify-center mt-2 px-2">
                   <button
-                    onClick={async e => {
+                    onClick={e => {
                       e.stopPropagation();
-                      if (!userId) return;
-                      const existingNames = new Set(favoriteCategories.map(category => category.name.toLowerCase()));
-                      const base = 'New category';
-                      let candidate = base;
-                      let index = 2;
-                      while (existingNames.has(candidate.toLowerCase())) {
-                        candidate = `${base} ${index}`;
-                        index += 1;
-                      }
-                      const created = await createFavoriteCategory(candidate, userId);
-                      setNewlyCreatedFavGroupId(`header-${created.id}`);
+                      const newGroupId = generateEntityId('favoriteGroup');
+                      const newHeaderId = `header-${newGroupId}`;
+                      const newOrder = [...favGridOrder, newHeaderId];
+                      setFavGridOrder(newOrder);
+                      const newNames = { ...favCustomGroupNames, [newGroupId]: '' };
+                      setFavCustomGroupNames(newNames);
+                      setNewlyCreatedFavGroupId(newHeaderId);
+                      setFavStorage({
+                        favorites_items_order: newOrder,
+                        favorites_custom_group_names: newNames,
+                      });
                     }}
                     className="p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-300 transition-colors flex items-center justify-center cursor-pointer outline-none border-none bg-transparent"
                     title="Add Custom Group for Favorites">
@@ -1777,6 +2139,68 @@ export const FavoritesGrid: React.FC<FavoritesGridProps> = ({
             />
           )}
           {renderSettingsPortal()}
+      <FavoriteGroupTagFilterPopover
+        isOpen={Boolean(activeTagFilterGroupId)}
+        onClose={() => {
+          setActiveTagFilterGroupId(null);
+          setTagFilterTriggerCoords(null);
+        }}
+        popoverCoords={tagFilterTriggerCoords}
+        initialSelectedTagIds={
+          activeTagFilterGroupId
+            ? favoriteCategories.find(c => c.id === activeTagFilterGroupId.replace('header-', ''))?.filterTagIds || []
+            : []
+        }
+        availableTags={allTags}
+        favoriteUsageCounts={favoriteUsageCounts}
+        onApply={async (selectedTagIds) => {
+          if (!activeTagFilterGroupId) return;
+          const gId = activeTagFilterGroupId.replace('header-', '');
+          let category = favoriteCategories.find(c => c.id === gId);
+          if (!category) {
+            const categoryName = favCustomGroupNames[gId] || 'Group';
+            category = await createFavoriteCategory(categoryName, userId || 'local_user');
+          }
+          if (category?.id) {
+            await updateFavoriteCategory(category.id, {
+              filterTagIds: selectedTagIds,
+              filterUpdatedAt: Date.now(),
+            });
+
+            if (selectedTagIds.length > 0) {
+              const matchingFavs = populatedFavorites.filter(fav => {
+                const favTags = getFavoriteTagIds(fav, allTags);
+                return favTags.some(tId => selectedTagIds.includes(tId));
+              });
+
+              for (const fav of matchingFavs) {
+                const refId = fav.reference_id || fav.id || fav.snippet_id;
+                if (refId && setFavoriteCategory) {
+                  await setFavoriteCategory(refId, category.id);
+                  fav.favoriteCategoryId = category.id;
+                }
+              }
+
+              const matchingCompoundIds = new Set(matchingFavs.map(f => f.compoundId));
+              const newOrder = favGridOrder.filter(id => !matchingCompoundIds.has(id));
+              const headerIndex = newOrder.indexOf(activeTagFilterGroupId);
+              if (headerIndex !== -1) {
+                newOrder.splice(headerIndex + 1, 0, ...Array.from(matchingCompoundIds));
+              }
+
+              setFavGridOrder(newOrder);
+
+              const newVisible = { ...favGridVisible, [activeTagFilterGroupId]: true };
+              setFavGridVisible(newVisible);
+
+              setFavStorage({
+                favorites_items_order: newOrder,
+                favorites_visible_items: newVisible,
+              });
+            }
+          }
+        }}
+      />
     </>
   );
 };

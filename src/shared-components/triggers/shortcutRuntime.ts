@@ -9,8 +9,7 @@ export type ShortcutCategoryFilter =
   | 'note'
   | 'link'
   | 'snippet'
-  | 'session'
-  | 'automation'
+  | 'collection'
   | 'agent'
   | 'prompt'
   | 'todo'
@@ -44,10 +43,9 @@ export function buildShortcutPrefixRegistry(prefixes?: ShortcutPrefixConfig): Re
   const merged = getPrefixConfig(prefixes);
   const entries: Array<[ShortcutCategoryFilter, string | undefined]> = [
     ['system_command', merged.system_command],
-    ['automation', merged.automation],
     ['bookmark', merged.bookmark],
     ['snippet', merged.snippet],
-    ['session', merged.session],
+    ['collection', merged.collection],
     ['command', merged.command],
     ['prompt', merged.prompt],
     ['agent', merged.agent],
@@ -118,9 +116,8 @@ export function matchesShortcutCategory(referenceType: string, categoryFilter: s
   if (normalizedFilter === 'command') return type === 'command' || type === 'module';
   if (normalizedFilter === 'note') return type === 'note' || type === 'notes';
   if (normalizedFilter === 'link') return type === 'link' || type === 'links';
-  if (normalizedFilter === 'session') return ['session', 'sessions', 'tab session', 'tabgroup'].includes(type);
+  if (normalizedFilter === 'collection') return ['collection', 'collections', 'collection_view'].includes(type);
   if (normalizedFilter === 'snippet') return type === 'snippet' || type === 'snippets';
-  if (normalizedFilter === 'automation') return type === 'automation' || type === 'automations';
   if (normalizedFilter === 'todo') return type === 'todo' || type === 'todos';
   if (normalizedFilter === 'bookmark') return type === 'bookmark' || type === 'bookmarks';
   if (normalizedFilter === 'system_command') return type === 'system_command' || type === 'system';

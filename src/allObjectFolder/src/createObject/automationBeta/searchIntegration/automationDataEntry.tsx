@@ -7,6 +7,7 @@ import { GoPaperclip } from 'react-icons/go';
 import { LuInfo } from 'react-icons/lu';
 import { extractFrequentValues } from '../utilities/historyExtractor';
 import AutomationDynamicIcon, { resolveAutomationIconMeta } from '../../../../../shared-components/icons/automationDynamicIcon';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
 import type { AutomationSuggestionsListItem } from './automationSuggestionsList';
 import AutomationSuggestionsList from './automationSuggestionsList';
 import { resolvePlaceholderFromCmd } from '../../../../../shared-components/searchBarMain/userInterfaceComponents/searchBar';
@@ -305,7 +306,7 @@ const AutomationDataEntry: React.FC<AutomationDataEntryProps> = ({
           }));
     setEditingDropdownRows(
       optionPairs.map((pair, idx) => ({
-        id: `edit-row-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+        id: generateEntityId('automationEditRow'),
         key: String(pair?.key || '').trim() || `Option ${idx + 1}`,
         value: String(pair?.value || '').trim(),
       })),
@@ -323,7 +324,7 @@ const AutomationDataEntry: React.FC<AutomationDataEntryProps> = ({
           }));
     setEditingDropdownRows(
       optionPairs.map((pair, idx) => ({
-        id: `edit-row-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+        id: generateEntityId('automationEditRow'),
         key: String(pair?.key || '').trim() || `Option ${idx + 1}`,
         value: String(pair?.value || '').trim(),
       })),
@@ -335,7 +336,7 @@ const AutomationDataEntry: React.FC<AutomationDataEntryProps> = ({
     setEditingDropdownRows(prev => [
       ...prev,
       {
-        id: `edit-row-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: generateEntityId('automationEditRow'),
         key: '',
         value: '',
       },

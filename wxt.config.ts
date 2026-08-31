@@ -3,6 +3,18 @@ dotenvx.config({ path: process.env.ENV_FILE || '.env' });
 import { resolve } from 'node:path';
 import { defineConfig } from 'wxt';
 
+const watchIgnoredDirs = [
+  '**/.git/**',
+  '**/.output/**',
+  '**/.turbo/**',
+  '**/.wxt/**',
+  '**/dist/**',
+  '**/extension-artifacts/**',
+  '**/logs/**',
+  '**/node_modules/**',
+  '**/test-results/**',
+];
+
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   hooks: {
@@ -69,7 +81,7 @@ export default defineConfig({
     name: '__MSG_extensionName__',
     description: '__MSG_extensionDescription__',
     default_locale: 'en',
-    version: '0.3.60',
+    version: '0.3.62',
     icons: {
       '16': 'icons/icon-16.png',
       '32': 'icons/icon-32.png',
@@ -224,11 +236,31 @@ export default defineConfig({
     },
   },
   vite: () => ({
+    cacheDir: resolve('.wxt/vite-cache'),
+    server: {
+      watch: {
+        ignored: watchIgnoredDirs,
+      },
+    },
+    optimizeDeps: {
+      include: [
+        '@vitejs/plugin-react',
+        'dexie',
+        'framer-motion',
+        'react',
+        'react-dom',
+        'react/jsx-runtime',
+        'zustand',
+      ],
+    },
     build: {
       // Chrome warns when eagerly preloaded chunks are not evaluated shortly
       // after the new-tab page loads. Let normal ESM imports fetch the chunks
       // when they are needed instead of emitting <link rel="modulepreload">.
       modulePreload: false,
+      reportCompressedSize: false,
+      sourcemap: false,
+      chunkSizeWarningLimit: 5000,
     },
     esbuild: {
       charset: 'ascii',

@@ -22,6 +22,7 @@ import {
   normalizeHistory,
   upsertVersionForChange,
 } from '../../../../shared-components/versionHistory/structuredVersionHistory';
+import { removeSessionReferencesForEntity } from '../session/sessionReferenceUtils';
 
 function extractLinkSnapshot(link: LinkRecord): LinkSnapshot {
   return {
@@ -220,6 +221,7 @@ export async function deleteLink(linkId: string): Promise<void> {
   try {
     await deleteItemAssociations(linkId);
     await db.links.delete(linkId);
+    await removeSessionReferencesForEntity('link', linkId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';
     console.error('[linkData.deleteLink] Failed:', message);

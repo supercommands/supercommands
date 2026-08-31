@@ -151,8 +151,8 @@ export function handleHotkeyMessage(
   if (request.action === 'trigger_hotkey') {
     const { type, id } = request;
     const senderTabId = sender.tab?.id;
-    // For commands, automations, agents and modules, open the AltS_search_newtab page with trigger params (needs UI)
-    if (['command', 'module', 'automation', 'agent', 'chat_agent'].includes(type)) {
+    // For UI-bound targets, open the AltS_search_newtab page with trigger params.
+    if (['command', 'module', 'automation', 'agent', 'chat_agent', 'collection', 'collections', 'collection_view'].includes(type)) {
       // Normalize ID (strip slashes and all common UI/internal prefixes)
       let normalizedId = String(id || '');
       if (normalizedId.startsWith('/')) normalizedId = normalizedId.substring(1);
@@ -196,6 +196,16 @@ export function handleHotkeyMessage(
         const type = resolved.type;
 
         if (type === 'session') {
+          if (foundEntity.sessionOpenSettings?.autoSaveMode !== 'auto_save') {
+            recordHotkeyUsage(request, false, 'auto_save_off', {
+              referenceId: actualEntityId,
+              referenceType: type,
+              targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+            });
+            sendResponse({ ok: true, skipped: true, reason: 'auto_save_off', sessionId: actualEntityId });
+            return;
+          }
+
           const { initialUrls, initialNames } = extractSessionLaunchPayload(foundEntity);
           const sessionRequest = {
             action: 'start_session',
@@ -208,6 +218,11 @@ export function handleHotkeyMessage(
             initialUrls,
             initialNames,
             openSettings: foundEntity.sessionOpenSettings,
+            currentTabId: request.currentTabId,
+            currentWindowId: request.currentWindowId,
+            currentPageUrl: request.currentPageUrl,
+            sessionLaunchSource: 'hotkey',
+            smartLaunch: true,
             isInlineCreation: true,
           };
 
@@ -339,6 +354,16 @@ export function handleHotkeyMessage(
         const type = resolved.type;
 
         if (type === 'session') {
+          if (foundEntity.sessionOpenSettings?.autoSaveMode !== 'auto_save') {
+            recordHotkeyUsage(request, false, 'auto_save_off', {
+              referenceId: actualEntityId,
+              referenceType: type,
+              targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+            });
+            sendResponse({ ok: true, skipped: true, reason: 'auto_save_off', sessionId: actualEntityId });
+            return;
+          }
+
           const { initialUrls, initialNames } = extractSessionLaunchPayload(foundEntity);
           const sessionRequest = {
             action: 'start_session',
@@ -351,6 +376,11 @@ export function handleHotkeyMessage(
             initialUrls,
             initialNames,
             openSettings: foundEntity.sessionOpenSettings,
+            currentTabId: request.currentTabId,
+            currentWindowId: request.currentWindowId,
+            currentPageUrl: request.currentPageUrl,
+            sessionLaunchSource: 'hotkey',
+            smartLaunch: true,
             isInlineCreation: true,
           };
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type * as React from 'react';
 import { LuCode, LuRefreshCw } from 'react-icons/lu';
 import {
@@ -8,10 +8,14 @@ import {
 } from '../../../../../../storage/localStorage/htmlWidgetContentStorage';
 import HtmlWidgetSetupModal, { makeIframeSrcDoc, type ParsedHtmlWidgetContent } from '../modals/HtmlWidgetSetupModal';
 import type { WidgetInstance } from '../widgetDashboard.types';
+import { widgetPerf } from '../utils/widgetPerf';
+
+import type { WidgetLayoutInfo } from '../utils/widgetLayoutInfo';
 
 interface HtmlWidgetProps {
   widget: WidgetInstance;
   isEditMode?: boolean;
+  layoutInfo?: WidgetLayoutInfo;
 }
 
 const getContentId = (widget: WidgetInstance) => {
@@ -25,6 +29,7 @@ const HtmlWidget: React.FC<HtmlWidgetProps> = ({ widget, isEditMode = false }) =
   const [isLoading, setIsLoading] = useState(Boolean(contentId));
   const [error, setError] = useState('');
   const [isSetupOpen, setIsSetupOpen] = useState(false);
+  const firstContentLoggedRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -37,9 +42,24 @@ const HtmlWidget: React.FC<HtmlWidgetProps> = ({ widget, isEditMode = false }) =
 
     setIsLoading(true);
     setError('');
+    widgetPerf('data:read:start', {
+      widgetType: widget.type,
+      widgetId: widget.id,
+      viewId: widget.viewId,
+      contentId,
+    });
+    const startedAt = performance.now();
     loadHtmlWidgetContentAsync(contentId)
       .then(record => {
         if (!mounted) return;
+        widgetPerf('data:read:end', {
+          widgetType: widget.type,
+          widgetId: widget.id,
+          viewId: widget.viewId,
+          contentId,
+          durationMs: Math.round(performance.now() - startedAt),
+          recordsReturned: record ? 1 : 0,
+        });
         setContent(record);
         setError(record ? '' : 'HTML content was not found.');
       })
@@ -54,9 +74,24 @@ const HtmlWidget: React.FC<HtmlWidgetProps> = ({ widget, isEditMode = false }) =
     return () => {
       mounted = false;
     };
-  }, [contentId]);
+  }, [contentId, widget.id, widget.type, widget.viewId]);
 
   const srcDoc = useMemo(() => (content ? makeIframeSrcDoc(content) : ''), [content]);
+
+  useEffect(() => {
+    if (firstContentLoggedRef.current || !content) return;
+    firstContentLoggedRef.current = true;
+    widgetPerf('content:firstReady', {
+      widgetType: widget.type,
+      widgetId: widget.id,
+      viewId: widget.viewId,
+      recordsReturned: 1,
+      recordsDisplayed: 1,
+      htmlLength: content.html.length,
+      cssLength: content.css.length,
+      jsLength: content.js.length,
+    });
+  }, [content, widget.id, widget.type, widget.viewId]);
 
   const handleReplace = async (nextContent: ParsedHtmlWidgetContent) => {
     if (!contentId) throw new Error('HTML content is missing.');

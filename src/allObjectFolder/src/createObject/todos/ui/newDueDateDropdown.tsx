@@ -25,7 +25,12 @@ interface NewDueDateDropdownProps {
   onOpenCustomNativePicker?: () => void;
   currentTime?: string;
   currentDate?: string;
+  initialQuery?: string;
+  onBackspaceEmpty?: () => boolean;
+  rootDataAttributes?: Record<string, string>;
+  rootStyle?: React.CSSProperties;
   positionClassName?: string;
+  closeOnSelect?: boolean;
 }
 
 export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
@@ -35,7 +40,12 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
   onOpenCustomNativePicker,
   currentTime,
   currentDate,
+  initialQuery = '',
+  onBackspaceEmpty,
+  rootDataAttributes,
+  rootStyle,
   positionClassName = 'absolute bottom-full mb-2 left-0',
+  closeOnSelect = true,
 }) => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,7 +62,7 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
   // Auto focus input on open with initial activeIndex = -1
   useEffect(() => {
     if (!isOpen) return;
-    setQuery('');
+    setQuery(initialQuery);
     setActiveIndex(-1);
     setShowCustomPanel(false);
 
@@ -65,12 +75,17 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
       searchInputRef.current?.focus();
     }, 10);
     return () => clearTimeout(timer);
-  }, [isOpen]);
+  }, [initialQuery, isOpen]);
 
   // Handle outside click
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const path = e.composedPath();
+      const insideDropdown = path.some(node => {
+        if (!(node instanceof Node)) return false;
+        return node === containerRef.current || Boolean(containerRef.current?.contains(node));
+      });
+      if (containerRef.current && !insideDropdown) {
         onClose();
       }
     }
@@ -173,7 +188,9 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
         time: val.time,
         isAnytime: val.time === null,
       });
-      onClose();
+      if (closeOnSelect) {
+        onClose();
+      }
     }
   };
 
@@ -190,33 +207,31 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
 
       if (e.key === 'ArrowDown') {
         setActiveIndex(prev => {
-          let next = prev;
-          do {
-            next += 1;
-          } while (next < options.length && options[next].disabled);
-          return next < options.length ? next : prev;
+          const enabledIndexes = options
+            .map((option, index) => (option.disabled ? -1 : index))
+            .filter(index => index >= 0);
+          if (enabledIndexes.length === 0) return -1;
+          const currentEnabledIndex = enabledIndexes.indexOf(prev);
+          return enabledIndexes[currentEnabledIndex >= 0 ? (currentEnabledIndex + 1) % enabledIndexes.length : 0];
         });
       } else if (e.key === 'ArrowUp') {
         setActiveIndex(prev => {
-          let next = prev;
-          do {
-            next -= 1;
-          } while (next >= 0 && options[next].disabled);
-          return next >= 0 ? next : -1;
+          const enabledIndexes = options
+            .map((option, index) => (option.disabled ? -1 : index))
+            .filter(index => index >= 0);
+          if (enabledIndexes.length === 0) return -1;
+          const currentEnabledIndex = enabledIndexes.indexOf(prev);
+          return enabledIndexes[
+            currentEnabledIndex >= 0
+              ? (currentEnabledIndex - 1 + enabledIndexes.length) % enabledIndexes.length
+              : enabledIndexes.length - 1
+          ];
         });
       } else if (e.key === 'Enter') {
-        setActiveIndex(currentActiveIndex => {
-          if (currentActiveIndex >= 0 && currentActiveIndex < options.length) {
-            if (!options[currentActiveIndex].disabled) {
-              handleSelectOption(options[currentActiveIndex]);
-            }
-          } else if (currentActiveIndex === -1) {
-            if (options.length > 0 && !options[0].disabled && options[0].type === 'parsed') {
-              handleSelectOption(options[0]);
-            }
-          }
-          return currentActiveIndex;
-        });
+        const highlightedOption = activeIndex >= 0 ? options[activeIndex] : null;
+        const firstEnabledOption = options.find(option => !option.disabled);
+        const optionToSelect = highlightedOption && !highlightedOption.disabled ? highlightedOption : firstEnabledOption;
+        if (optionToSelect) handleSelectOption(optionToSelect);
       } else if (e.key === 'Escape') {
         onClose();
       }
@@ -224,7 +239,7 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
 
     window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
-  }, [isOpen, options, onClose]);
+  }, [activeIndex, closeOnSelect, isOpen, options, onClose]);
 
   if (!isOpen) return null;
 
@@ -234,7 +249,10 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
   return (
     <div
       ref={containerRef}
+      {...rootDataAttributes}
+      style={rootStyle}
       className={`${positionClassName} w-[240px] rounded-xl shadow-2xl z-[99999] bg-[var(--color-contextMenuBg,#171821)] supports-[backdrop-filter]:bg-[var(--color-contextMenuBg,#171821)]/90 backdrop-blur-xl border border-[var(--color-borderDefault)] overflow-hidden p-1 flex flex-col gap-1 text-[var(--color-textPrimary)] font-sans`}
+      onMouseDown={e => e.stopPropagation()}
       onClick={e => e.stopPropagation()}>
       {/* Search Input */}
       <div className="relative flex items-center px-2 py-1.5 border-b border-[var(--color-borderDefault)]">
@@ -247,8 +265,14 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
           aria-controls="due-date-options"
           aria-autocomplete="list"
           aria-activedescendant={activeDescendantId}
-          placeholder="Try: 24h, 7 days, Feb 9"
+          placeholder="time and date: eg:10 am tomorrow"
           value={query}
+          onKeyDown={e => {
+            if (e.key === 'Backspace' && query === '' && onBackspaceEmpty?.()) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
           onChange={e => {
             const val = e.target.value;
             setQuery(val);
@@ -286,13 +310,16 @@ export const NewDueDateDropdown: React.FC<NewDueDateDropdownProps> = ({
                 aria-selected={isHighlighted}
                 type="button"
                 onMouseEnter={() => setActiveIndex(idx)}
+                onMouseDown={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
                 onClick={e => {
                   e.stopPropagation();
                   handleSelectOption(opt);
                 }}
-                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-[12.5px] font-medium transition-colors cursor-pointer ${
-                  isHighlighted ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)]' : 'text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
-                }`}>
+                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-[12.5px] font-medium transition-colors cursor-pointer ${isHighlighted ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)]' : 'text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
+                  }`}>
                 <div className="flex items-center gap-2">
                   <FaRegCalendarAlt size={12} className="text-[var(--color-iconDefault)] shrink-0" />
                   <span className="truncate max-w-[130px]">{opt.label}</span>

@@ -17,6 +17,7 @@
 import { createNotification } from '@notifications/notifications';
 import { showInTabToast } from '@notifications/inTabToasts';
 import { db } from '../../../src/storage/indexDB/dbConfig';
+import { generateEntityId } from '../../../src/shared-components/utils/idGenerator';
 
 /**
  * Extract actual snippet ID - safely handles UUIDs and prefixed IDs
@@ -134,10 +135,11 @@ export async function completeTodoInBg(todoId: string) {
       newDoneStatus = false; // Stay active for next cycle (rescheduled)
 
       // 2. Create a "History" task for today's record
+      const historyTaskId = generateEntityId('todo');
       historyTask = {
         ...todo,
-        snippet_id: `hist-${Date.now()}`,
-        id: `hist-${Date.now()}`,
+        snippet_id: historyTaskId,
+        id: historyTaskId,
         is_done: true,
         is_recurring: false, // History item is a one-time record
         event_deadline: todo.event_deadline, // Keep original deadline for today's record

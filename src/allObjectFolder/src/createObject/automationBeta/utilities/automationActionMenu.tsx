@@ -20,6 +20,7 @@ import {
 } from 'react-icons/fa';
 import type { AutomationStep } from './automation';
 import type { ModuleDefinition } from '../../../../../../background/src/automation/runtime_Execution_Engine/runner';
+import { generateEntityId } from '../../../../../shared-components/utils/idGenerator';
 
 export interface CloudModule extends ModuleDefinition {
   module_key: string;
@@ -217,7 +218,7 @@ const AutomationActionMenu: React.FC<AutomationActionMenuProps> = ({
     if (mod.id === 'keystroke') newConfig = { key: '' };
 
     const newStep: AutomationStep = {
-      id: `step-${Date.now()}`,
+      id: generateEntityId('automationStep'),
       moduleId: mod.id,
       config: { ...newConfig, name: mod.name },
     };
@@ -264,7 +265,7 @@ const AutomationActionMenu: React.FC<AutomationActionMenuProps> = ({
 
   const insertCloudModule = (module: CloudModule) => {
     const newStep: AutomationStep = {
-      id: `step-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateEntityId('automationStep'),
       moduleId: module.module_key || String(module.module_id),
       config: {
         name: module.name,

@@ -19,12 +19,13 @@ interface EditorSetupOptions {
   onImageSaveEnd?: () => void;
 }
 
-const resolveToolbarTarget = (selector?: string) => {
+const resolveToolbarTarget = (selector?: string, root?: Document | ShadowRoot) => {
   if (!selector) return null;
-  if (selector.startsWith('#')) {
-    return document.getElementById(selector.slice(1));
-  }
-  return document.querySelector(selector);
+  const rootMatch = root?.querySelector?.(selector);
+  if (rootMatch instanceof HTMLElement) return rootMatch;
+  const documentMatch = document.querySelector(selector);
+  if (documentMatch instanceof HTMLElement) return documentMatch;
+  return null;
 };
 
 export const setupEditor = async (
@@ -219,40 +220,48 @@ export const setupEditor = async (
     }
   };
 
-  quill.root.addEventListener('paste', (e: ClipboardEvent) => {
-    if (e.clipboardData && e.clipboardData.items) {
-      const items = Array.from(e.clipboardData.items);
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          const file = item.getAsFile();
-          if (file) {
-            e.preventDefault();
-            e.stopPropagation();
-            void handleImageFile(file);
-            return;
+  quill.root.addEventListener(
+    'paste',
+    (e: ClipboardEvent) => {
+      if (e.clipboardData && e.clipboardData.items) {
+        const items = Array.from(e.clipboardData.items);
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+              e.preventDefault();
+              e.stopPropagation();
+              e.stopImmediatePropagation();
+              void handleImageFile(file);
+              return;
+            }
           }
         }
       }
-    }
-  });
+    },
+    true,
+  );
 
-  quill.root.addEventListener('drop', (e: DragEvent) => {
-    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      let hasImage = false;
-      const files = Array.from(e.dataTransfer.files);
-      for (const file of files) {
-        if (file.type.startsWith('image/')) {
-          e.preventDefault();
-          e.stopPropagation();
-          hasImage = true;
-          // Note: Quill might change selection on drop before this fires, 
-          // getSelection() above usually works but could be offset.
-          void handleImageFile(file);
+  quill.root.addEventListener(
+    'drop',
+    (e: DragEvent) => {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        let hasImage = false;
+        const files = Array.from(e.dataTransfer.files);
+        for (const file of files) {
+          if (file.type.startsWith('image/')) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            hasImage = true;
+            void handleImageFile(file);
+          }
         }
+        if (hasImage) return;
       }
-      if (hasImage) return;
-    }
-  });
+    },
+    true,
+  );
 
 
   // Helper: apply clean styling to a toolbar element
@@ -313,7 +322,7 @@ export const setupEditor = async (
   // Use a retry loop because React may not have mounted the target div yet.
   if (toolbarSelector) {
     const attemptTeleport = (attemptsLeft: number) => {
-      const target = resolveToolbarTarget(toolbarSelector);
+      const target = resolveToolbarTarget(toolbarSelector, container.getRootNode() as Document | ShadowRoot);
       if (target) {
         target.appendChild(toolbarEl);
         // Re-apply styles after teleport

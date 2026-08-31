@@ -14,3 +14,5 @@ export interface AssetRecord {
   storagePath?: string;
   pendingDeletionAt?: number;
 }
+
+export const ASSET_COMPARISON_FIELDS = ['id', 'mimeType', 'byteSize', 'hash', 'storageDriver', 'storagePath', 'pendingDeletionAt'] as const satisfies readonly (keyof AssetRecord)[];

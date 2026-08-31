@@ -12,7 +12,7 @@ import type { PageActionCommand } from './types';
 export const DownloadAllTablesCommand: PageActionCommand = {
   id: 'downloadalltables',
   label: 'Download All Tables',
-  prefix: 'downloadalltables',
+  prefix: 'tables',
   keywords: ['download', 'tables', 'all', 'save', 'export', 'csv', 'excel', 'data', 'spreadsheet'],
   description: 'Parse all <table> elements and download them as CSV files',
   action: 'execute_table_download',

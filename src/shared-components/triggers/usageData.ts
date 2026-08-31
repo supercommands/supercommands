@@ -66,7 +66,7 @@ const looksLikeRawReferenceId = (value: string, referenceId: string) => {
   const normalized = value.trim();
   if (!normalized) return true;
   if (normalized === referenceId) return true;
-  return /^(workspace|folder|note|snippet|link|session|automation|module|todo|prompt|aiPrompt)_/i.test(normalized);
+  return /^(workspace|folder|note|snippet|link|collection|automation|module|todo|prompt|aiPrompt)_/i.test(normalized);
 };
 
 const getReadableReferenceFallback = (referenceType: string, referenceId: string) => {
@@ -100,7 +100,7 @@ const resolveCurrentTargetLabel = async (row: TriggerDailyBreakdownRecord) => {
   if (referenceType === 'note') return (await lookup(db.notes)) || getReadableReferenceFallback(row.referenceType, row.referenceId);
   if (referenceType === 'link') return (await lookup(db.links)) || getReadableReferenceFallback(row.referenceType, row.referenceId);
   if (referenceType === 'snippet') return (await lookup(db.snippets)) || getReadableReferenceFallback(row.referenceType, row.referenceId);
-  if (referenceType === 'session') return (await lookup(db.sessions)) || getReadableReferenceFallback(row.referenceType, row.referenceId);
+  if (referenceType === 'collection') return (await lookup(db.widgetViews)) || getReadableReferenceFallback(row.referenceType, row.referenceId);
   if (referenceType === 'automation') return (await lookup(db.automations)) || getReadableReferenceFallback(row.referenceType, row.referenceId);
   if (referenceType === 'aiprompt' || referenceType === 'prompt') {
     return (await lookup(db.aiPrompts)) || getReadableReferenceFallback(row.referenceType, row.referenceId);

@@ -14,11 +14,13 @@ import {
   FiX,
 } from 'react-icons/fi';
 import { FaUser, FaPalette, FaGithub } from 'react-icons/fa';
+import { LuBookOpen } from 'react-icons/lu';
 
 import { getFaviconUrl } from '../../shared-components/searchBarMain/utilityFunctions/utils';
 import { StorageManager } from '../../storage/localStorage/storageManager';
 import { FEATURE_FLAGS } from '../../pages/AltS_search_newtab/src/utils/featureFlags';
 import { CMDOS_SIGN_UP_URL, checkHasCloudData } from '../../storage/API/core/api';
+import { CMDOS_DOCS_URL } from '../../storage/API/core/apiConfig';
 
 // Lazy load/import the sub panels to avoid circular dependency or import issues.
 import GeneralSettingsPanel from '../generalSettingsPageUi/generalSettingsPanel';
@@ -29,7 +31,7 @@ import { ImportCloudDataPanel } from '../_private/importCloudData_private/ui/Imp
 export const getDefaultSettingsView = (_isLoggedIn: boolean): { type: 'settings'; section?: 'profile' | 'usage' | 'appearance' | 'searchView' | 'todoSettings' | 'allWorkspaces' | 'workspaceSettings' | 'generalSettings' | 'googleDriveBackup' | 'importCloudData' } => {
   // This helper returns the first item of the first section in the settings sidebar.
   // If the order of sections changes in the future, update this return value to match.
-  return { type: 'settings', section: 'allWorkspaces' };
+  return { type: 'settings', section: 'appearance' };
 };
 
 interface SettingsLayoutProps {
@@ -156,6 +158,13 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
   // ── Sidebar ───────────────────────────────────────────────────────────────
   const sidebarSections = [
     {
+      title: 'UX APPEARANCE',
+      items: [
+        { id: 'appearance', label: 'Theme', icon: FaPalette, active: currentTab === 'generalSettings' && currentSection === 'appearance', onClick: () => useUIStore.getState().setView({ type: 'settings', section: 'appearance' }) },
+        { id: 'searchView', label: 'Settings', icon: FiSearch, active: currentTab === 'generalSettings' && currentSection === 'searchView', onClick: () => useUIStore.getState().setView({ type: 'settings', section: 'searchView' }) },
+      ],
+    },
+    {
       title: 'WORKSPACE',
       items: [
         { id: 'workspaces', label: 'All Workspaces', icon: FiList, active: currentTab === 'allWorkspaces', onClick: () => useUIStore.getState().setView({ type: 'settings', section: 'allWorkspaces' }) },
@@ -163,13 +172,6 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
         ...(isCloudUser && FEATURE_FLAGS.ENABLE_SHARING && hasCloudWorkspaces
           ? [{ id: 'importCloudData', label: 'Import Cloud Data', icon: FiCloud, active: currentTab === 'importCloudData', onClick: () => useUIStore.getState().setView({ type: 'settings', section: 'importCloudData' }) }]
           : []),
-      ],
-    },
-    {
-      title: 'UX APPEARANCE',
-      items: [
-        { id: 'appearance', label: 'Theme', icon: FaPalette, active: currentTab === 'generalSettings' && currentSection === 'appearance', onClick: () => useUIStore.getState().setView({ type: 'settings', section: 'appearance' }) },
-        { id: 'searchView', label: 'Settings', icon: FiSearch, active: currentTab === 'generalSettings' && currentSection === 'searchView', onClick: () => useUIStore.getState().setView({ type: 'settings', section: 'searchView' }) },
       ],
     },
     {
@@ -235,7 +237,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
         <div className="flex flex-col gap-3 w-full mt-auto pt-4">
 
           {/* Profile Card / Login Button & Guest Options */}
-          {isCloudUser ? (
+          {isCloudUser && (
             <div className="relative">
               {/* Logout Popup — appears above the profile card */}
               {showLogoutMenu && (
@@ -277,51 +279,42 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({ view, onClose, i
                 <FiChevronDown size={14} className="text-[var(--color-textMuted)] shrink-0" />
               </div>
             </div>
-          ) : (
-            <div className="flex flex-col gap-2 w-full">
-              {/* Unified Login & GitHub Card Container */}
-              <div className="border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)] rounded-xl p-2 flex flex-col gap-1 shadow-sm">
-                {/* 1. Login Row */}
-                {FEATURE_FLAGS.ENABLE_SHARING && (
-                  <>
-                    <div 
-                      onClick={() => {
-                        const chromeAny = (window as any)?.chrome;
-                        if (chromeAny?.tabs?.create) {
-                          chromeAny.tabs.create({ url: CMDOS_SIGN_UP_URL });
-                        } else {
-                          window.open(CMDOS_SIGN_UP_URL, '_blank');
-                        }
-                      }}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer group hover:bg-[var(--color-hoverBg)] transition-colors text-left w-full"
-                    >
-                      <FaUser size={14} className="text-neutral-500 shrink-0" />
-                      <div className="min-w-0 flex-grow">
-                        <div className="text-xs font-semibold text-[var(--color-textPrimary)]">Login</div>
-                      </div>
-                      <FiChevronRight size={14} className="text-[var(--color-textMuted)] shrink-0" />
-                    </div>
-
-                    {/* Divider */}
-                    <div className="border-t border-[var(--color-borderDefault)] my-0.5" />
-                  </>
-                )}
-
-                {/* 2. GitHub Row */}
-                <a
-                  href="https://github.com/cmdOS-App/cmdOS"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer group hover:bg-[var(--color-hoverBg)] transition-colors text-left w-full"
-                >
-                  <FaGithub size={14} className="text-neutral-500 shrink-0" />
-                  <div className="min-w-0 flex-grow">
-                    <div className="text-xs font-semibold text-[var(--color-textPrimary)]">GitHub</div>
-                  </div>
-                </a>
-              </div>
-            </div>
           )}
+
+          {/* Footer Card Container (Help & GitHub) */}
+          <div className="border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)] rounded-xl p-2 flex flex-col gap-1 shadow-sm">
+            {/* Help Row */}
+            <a
+              href={CMDOS_DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open cmdOS documentation"
+              title="Help and documentation"
+              className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer group hover:bg-[var(--color-hoverBg)] transition-colors text-left w-full"
+            >
+              <div className="flex items-center gap-2 min-w-0 flex-grow">
+                <LuBookOpen size={14} className="text-neutral-500 shrink-0" />
+                <div className="text-xs font-semibold text-[var(--color-textPrimary)]">Help</div>
+              </div>
+              <FiChevronRight size={13} className="text-[var(--color-textMuted)] opacity-60 shrink-0" />
+            </a>
+
+            <div className="border-t border-[var(--color-borderDefault)] my-0.5" />
+
+            {/* GitHub Row */}
+            <a
+              href="https://github.com/cmdOS-App/cmdOS"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub Repository"
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer group hover:bg-[var(--color-hoverBg)] transition-colors text-left w-full"
+            >
+              <FaGithub size={14} className="text-neutral-500 shrink-0" />
+              <div className="min-w-0 flex-grow">
+                <div className="text-xs font-semibold text-[var(--color-textPrimary)]">GitHub</div>
+              </div>
+            </a>
+          </div>
 
           {/* Socials / Connect */}
           <div className="pt-2 border-t border-white/5 space-y-1">

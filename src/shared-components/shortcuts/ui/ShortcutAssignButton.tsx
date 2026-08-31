@@ -23,6 +23,9 @@ export interface ShortcutAssignButtonProps {
   openToLeft?: boolean;
   openToBottom?: boolean;
   title?: string;
+  portalContainer?: HTMLElement | null;
+  appearanceScope?: 'default' | 'alts';
+  appearanceTokens?: React.CSSProperties;
 }
 
 export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssignButtonProps>(
@@ -41,6 +44,9 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
     openToLeft = false,
     openToBottom = false,
     title,
+    portalContainer,
+    appearanceScope = 'default',
+    appearanceTokens,
   }, ref) => {
     const [isOpen, setIsOpen] = useState(false);
     const [shortcutValue, setShortcutValue] = useState(currentShortcut);
@@ -230,6 +236,9 @@ export const ShortcutAssignButton = forwardRef<HTMLButtonElement, ShortcutAssign
             x={popupPosition.x}
             y={popupPosition.y}
             onClose={closeMenu}
+            portalContainer={portalContainer}
+            appearanceScope={appearanceScope}
+            appearanceTokens={appearanceTokens}
             {...popupProps}
           />
         )}

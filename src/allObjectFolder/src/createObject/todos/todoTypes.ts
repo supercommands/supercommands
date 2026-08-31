@@ -73,3 +73,5 @@ export interface TodoRecord {
 
   versionHistory?: StructuredVersionHistory<TodoSnapshot>;
 }
+
+export const TODO_COMPARISON_FIELDS = ['id', 'name', 'description', 'references', 'isDone', 'scheduleType', 'recurringType', 'scheduleTime', 'tags', 'tagIds', 'shortcut', 'workspaceId', 'folderId'] as const satisfies readonly (keyof TodoRecord)[];

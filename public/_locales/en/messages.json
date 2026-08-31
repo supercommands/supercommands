@@ -5,7 +5,7 @@
   },
   "extensionName": {
     "description": "Extension name",
-    "message": "cmdOS Automation"
+    "message": "cmdOS Workspace"
   },
   "toggleTheme": {
     "message": "Toggle theme"

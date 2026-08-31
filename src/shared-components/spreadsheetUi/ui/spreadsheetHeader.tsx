@@ -6,6 +6,7 @@ import type { RowData, AutomationModuleRow } from '../types/spreadsheetTypes';
 import Resizer from './tableColumnResizer';
 import { FiArrowUp, FiArrowDown, FiSearch } from 'react-icons/fi';
 import { useSpreadsheetStore } from '../logic/spreadsheetStateStore';
+import { CUnderscoreIcon } from '../../icons/cUnderscoreIcon';
 
 interface SpreadsheetHeaderProps {
   table: Table<RowData | AutomationModuleRow>;
@@ -25,9 +26,18 @@ const HeaderContent: React.FC<{
   onClose?: () => void;
 }> = ({ header, selectedCell, colIndex, columnFilters, setColumnFilter, setSelectedCell, table, onClose }) => {
   const columnId = header.column.id.toLowerCase();
-  const headerText = String(header.column.columnDef.header || '').toLowerCase();
+  const rawHeader = header.column.columnDef.header;
+  const headerLabel =
+    typeof rawHeader === 'string'
+      ? rawHeader
+      : columnId === 'command'
+        ? 'Command short'
+        : columnId === 'key'
+          ? 'Hotkey short'
+          : String(header.column.id);
+  const headerText = headerLabel.toLowerCase();
   const categoryFilter = useSpreadsheetStore(state => state.categoryFilter) || ['all'];
-  const hasTagSupport = categoryFilter.some(cat => ['all', 'note', 'snippet', 'link'].includes(cat.toLowerCase()));
+  const hasTagSupport = categoryFilter.some(cat => ['all', 'note', 'snippet', 'link', 'automation', 'agent', 'session', 'todo'].includes(cat.toLowerCase()));
 
 
 
@@ -39,7 +49,7 @@ const HeaderContent: React.FC<{
 
   const isFavColumn = columnId.includes('fav');
   const isCompactColumn = columnId === 'key' || columnId === 'fav' || columnId === 'tags';
-  const isColumnActive = selectedCell?.colIndex === colIndex;
+  const isColumnActive = selectedCell?.rowIndex === -1 && selectedCell?.colIndex === colIndex;
   const [isHovered, setIsHovered] = React.useState(false);
   const [isSearching, setIsSearching] = React.useState(false);
   const filterKey = (header.column.columnDef as any).accessorKey || header.column.id;
@@ -53,7 +63,7 @@ const HeaderContent: React.FC<{
   const [isFocused, setIsFocused] = React.useState(false);
 
   const isHeaderRowSelected = selectedCell?.rowIndex === -1 && selectedCell?.colIndex === colIndex;
-  const showSearch = (isColumnActive || localVal.trim().length > 0) && !isActionColumn;
+  const showSearch = (isHeaderRowSelected || isSearching || localVal.trim().length > 0) && !isActionColumn;
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   // 🚀 Auto-focus search bar ONLY when user explicitly navigates to the header row or clicks search
@@ -93,7 +103,7 @@ const HeaderContent: React.FC<{
           id={`sheet-search-${columnId}`}
           type="text"
           value={localVal}
-          placeholder={isFocused || isSearching || localVal ? `Search ${String(header.column.columnDef.header || header.column.id)}...` : String(header.column.columnDef.header || header.column.id)}
+          placeholder={isFocused || isSearching || localVal ? `Search ${headerLabel}...` : headerLabel}
           className={clsx(
             'w-full h-full bg-transparent text-[12px] font-medium capitalize outline-none min-w-[120px]',
             isCompactColumn ? "px-6" : "pl-8 pr-6",
@@ -180,8 +190,11 @@ const HeaderContent: React.FC<{
         setSelectedCell({ rowIndex: -1, colIndex });
         setIsSearching(true);
       }}>
-      <span className={clsx('truncate', isFavColumn ? 'flex-shrink-0' : 'flex-1 text-left')}>
-        {flexRender(header.column.columnDef.header, header.getContext())}
+      <span className={clsx('truncate flex items-center gap-1.5', isFavColumn ? 'flex-shrink-0 justify-center' : 'flex-1 text-left')}>
+        <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
+        {header.column.id.toLowerCase() === 'command' && (
+          <CUnderscoreIcon size={18} className="shrink-0 text-current inline-block align-middle" />
+        )}
       </span>
 
       {header.column.getCanSort() && (
@@ -217,16 +230,16 @@ const SpreadsheetHeader: React.FC<SpreadsheetHeaderProps> = ({ table, tutorialSt
   return (
     <thead
       className={clsx(
-        'sticky top-0 z-[100] bg-[var(--color-sheetBg)] hidden',
+        'sticky top-0 z-[100] bg-[var(--color-sheetBg)] border-b border-[var(--color-borderDefault)]',
       )}>
       {table.getHeaderGroups().map((headerGroup, groupIndex) => {
         const isLeafRow = groupIndex === table.getHeaderGroups().length - 1;
 
         return (
-          <tr key={headerGroup.id}>
+          <tr key={headerGroup.id} className="divide-x divide-[var(--color-borderDefault)]">
             {headerGroup.headers.map((header, index) => {
               const isShortcutsParent = header.id.includes('Shortcuts');
-              const isActiveCol = isLeafRow && selectedCell?.colIndex === index && header.id !== 'id';
+              const isActiveCol = isLeafRow && selectedCell?.rowIndex === -1 && selectedCell?.colIndex === index && header.id !== 'id';
 
               return (
                 <th
@@ -242,7 +255,7 @@ const SpreadsheetHeader: React.FC<SpreadsheetHeaderProps> = ({ table, tutorialSt
                     'group relative transition-colors whitespace-nowrap sticky top-0 z-20',
                     header.id === 'fav' ? 'overflow-visible z-[25]' : 'overflow-hidden',
                     // Rounded corners for the outermost header cells to align with container
-                    index === 0 && 'rounded-tl-2xl overflow-hidden',
+                    index === 0 && 'rounded-tl-2xl overflow-hidden border-l border-[var(--color-borderDefault)]',
                     index === headerGroup.headers.length - 1 && 'rounded-tr-2xl overflow-hidden',
                     // Shortcuts parent level
                     !isLeafRow &&

@@ -16,6 +16,7 @@ import type { ChatAgentRecord, CreateChatAgentInput, UpdateChatAgentInput } from
 import { generateEntityId } from '../../../../shared-components/utils';
 import { db, deleteItemAssociations } from '../../../../storage/indexDB/dbConfig';
 import { getSmartDefaultWorkspace } from '../../../../storage/localStorage/lastUsedWorkspace';
+import { removeSessionReferencesForEntity } from '../session/sessionReferenceUtils';
 
 /**
  * Creates a new chat agent record.
@@ -173,6 +174,7 @@ export async function deleteChatAgent(agentId: string): Promise<void> {
   try {
     await deleteItemAssociations(agentId);
     await db.chatAgents.delete(agentId);
+    await removeSessionReferencesForEntity('agent', agentId);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown database error';
     console.error('[chatAgentData.deleteChatAgent] Failed:', message);

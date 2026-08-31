@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
-import { FaStar, FaFolder, FaKeyboard, FaTag } from 'react-icons/fa';
+import { FaStar, FaKeyboard, FaTag } from 'react-icons/fa';
 import { FiStar, FiChevronRight, FiBookmark, FiExternalLink, FiSearch } from 'react-icons/fi';
 import { saveUserHotkey, deleteUserHotkeyByReference } from '../hotkeys/core/hotkeyDbData';
 import { buildHotkeyString } from '../hotkeys/core/eventParser';
@@ -56,8 +56,6 @@ export function ExistingItemsTable<T extends ExistingItem>({
   isFullScreenMode = false,
   title = 'Existing Items',
   onUpdateItemField,
-  folderNamesMap,
-  workspaceNamesMap,
   tagNamesMap,
   onCollapseStateChange,
   searchQuery,
@@ -428,10 +426,6 @@ export function ExistingItemsTable<T extends ExistingItem>({
                   const isNew = Date.now() - (item.createdAt || 0) < 4000;
 
                   const isExpanded = true;
-                  const wsName = item.workspaceId ? (workspaceNamesMap?.[item.workspaceId] || '') : '';
-                  const folderName = item.folderId ? (folderNamesMap?.[item.folderId] || '') : '';
-                  const folderDisplayName = folderName || wsName;
-
                   return (
                     <tr
                       key={item.id}
@@ -455,7 +449,7 @@ export function ExistingItemsTable<T extends ExistingItem>({
                               type="text"
                               value={editValue}
                               onChange={(e) => {
-                                const val = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                                const val = e.target.value.replace(/[^a-zA-Z0-9_]/g, '');
                                 setEditValue(val);
                               }}
                               onBlur={() => handleSaveEdit(item.id, 'shortcut')}
@@ -485,7 +479,7 @@ export function ExistingItemsTable<T extends ExistingItem>({
                         )}
                       </td>
                       <td
-                        className="px-6 py-2 font-medium text-neutral-700 dark:text-neutral-300 truncate"
+                        className="px-6 py-2 font-medium text-neutral-700 dark:text-neutral-300 opacity-85 dark:opacity-85 text-[12.5px] truncate"
                         style={{ width: '220px' }}
                         onClick={(e) => e.stopPropagation()}
                         onDoubleClick={(e) => {
@@ -527,7 +521,7 @@ export function ExistingItemsTable<T extends ExistingItem>({
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-2 truncate text-neutral-600 dark:text-neutral-400">
+                      <td className="px-6 py-2 truncate text-neutral-600 dark:text-neutral-400 opacity-75 dark:opacity-75 text-[11.5px]">
                         {plainText || '—'}
                       </td>
                       <td className="px-4 py-2" style={{ width: actionsColWidth, transition: 'width 0.2s' }} onClick={(e) => e.stopPropagation()}>
@@ -670,16 +664,7 @@ export function ExistingItemsTable<T extends ExistingItem>({
                               </div>
 
                               {/* Folder Info Slot — only for non-todo types */}
-                              {!isTodoType && (
-                                <div className="w-[72px] shrink-0 flex items-center justify-start gap-1">
-                                  {folderDisplayName ? (
-                                    <div className="flex items-center gap-1 text-neutral-500 dark:text-neutral-400 text-xs max-w-[72px] truncate shrink-0" title={folderDisplayName}>
-                                      <FaFolder size={16} className="text-neutral-400 shrink-0" />
-                                      <span className="text-neutral-600 dark:text-neutral-400 truncate">{folderDisplayName}</span>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              )}
+                              {/* Folder UI is hidden; folder ids are still preserved internally. */}
                             </div>
                           )}
 

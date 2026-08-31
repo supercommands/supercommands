@@ -7,7 +7,7 @@ import type { PageActionCommand } from './types';
 export const UnmuteAllTabsCommand: PageActionCommand = {
   id: 'unmute_all_tabs',
   label: 'Unmute All Tabs',
-  prefix: 'umat',
+  prefix: 'unmute',
   keywords: ['unmute', 'tabs', 'sound', 'umat'],
   description: 'Unmute all open tabs in the current window',
   action: 'execute_unmute_all_tabs',

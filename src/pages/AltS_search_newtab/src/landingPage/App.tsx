@@ -1,18 +1,27 @@
 import { AppModals } from './AppModals';
 import { AppLeftSidebar } from './AppLeftSidebar';
 import { AppMainContent } from './AppMainContent';
+import { OnboardingOverlayController } from './OnboardingOverlayController';
+import { RightSideWidget } from '../components/widgets';
 // import removed
 import { useKeystrokeRecording } from '../../../../shared-components/hotkeys';
 import type * as React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { FiHelpCircle } from 'react-icons/fi';
+import { FiChevronLeft, FiChevronRight } from 'react-icons/fi';
 import { CMDOS_DOCS_URL } from '../../../../storage/API/core/apiConfig';
 
 import Branding from '../../../../shared-components/Branding';
-import { HeaderControls, getDefaultSettingsView } from '../../../../settings';
-import { isOnboardingCompleted } from '../../../../storage/localStorage/onboardingStorage';
-import { TutorialOverlay } from '../../../../welcomeGuide/TutorialOverlay';
+import { HeaderControls, getDefaultSettingsView, WarmTintLayer } from '../../../../settings';
+import {
+  hasOnboardingCompletedHint,
+  isOnboardingCompleted,
+  setOnboardingCompletedHint,
+} from '../../../../storage/localStorage/onboardingStorage';
+import {
+  getLeftSidebarCollapsed,
+  LEFT_SIDEBAR_COLLAPSED_STORAGE_KEY,
+  setLeftSidebarCollapsed,
+} from '../../../../storage/localStorage/leftSidebarCollapseStorage';
 import { useSpreadsheetStore } from '../../../../shared-components/spreadsheetUi/logic/spreadsheetStateStore';
 
 import {
@@ -29,7 +38,6 @@ import {
   useIsLinkEditModalOpen,
 } from '../../../../shared-components/uiStateManager';
 import { detectOS } from '../../../../shared-components/utils/osUtils';
-import { useChromeStorage } from '@extension/shared/lib/hooks';
 import { useDbStore } from '../../../../storage/store/useDbStore';
 
 import { DndProvider } from 'react-dnd';
@@ -41,15 +49,34 @@ import { useAppearance } from '@extension/ui';
 
 import { useAuthSync } from './hooks/useAuthSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { useUrlTriggers } from './hooks/useUrlTriggers';
+import { useUrlTriggers, type MissingAiPromptInputRequest } from './hooks/useUrlTriggers';
+import { MissingAiPromptInputModal } from './MissingAiPromptInputModal';
+import { runAiPrompt } from '../../../../allObjectFolder/src/createObject/aiPrompt/runAiPrompt';
+import {
+  SESSION_MISSING_AI_PROMPT_INPUT_EVENT,
+  type SessionMissingAiPromptInputEventDetail,
+} from '../../../../allObjectFolder/src/createObject/session/sessionReferenceActions';
 
 import {
   useSelectedWorkspace,
   useSelectedFolder,
   useSelectedSnippet,
 } from '../../../../shared-components/localEntitySelectors';
+import { startupPerf } from '../startupPerf';
+
+type OnboardingStatus = 'checking' | 'complete' | 'incomplete';
+type PendingMissingAiPromptInput = {
+  promptRecord?: MissingAiPromptInputRequest['promptRecord'];
+  promptId: string;
+  editorProps?: unknown;
+  title?: string;
+  targets?: SessionMissingAiPromptInputEventDetail['targets'];
+};
 
 const App: React.FC = () => {
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
+
   const { theme, themeId } = useAppearance();
 
   const { isKeystrokeRecordingActive } = useKeystrokeRecording();
@@ -61,6 +88,8 @@ const App: React.FC = () => {
   const [isViewDropdownOpen, setIsViewDropdownOpen] = useState(false);
   const viewDropdownRef = useRef<HTMLDivElement | null>(null);
   const [suggestionState, setSuggestionState] = useState<SuggestionState | null>(null);
+  const [missingAiPromptInput, setMissingAiPromptInput] = useState<PendingMissingAiPromptInput | null>(null);
+  const [isSendingMissingAiPrompt, setIsSendingMissingAiPrompt] = useState(false);
 
   const hasLoadedThemeRef = useRef(false);
   const { authChecked, userId, isLoggedIn } = useAuthSync();
@@ -180,22 +209,41 @@ const App: React.FC = () => {
 
   // Tutorial button visibility is driven by the Dexie workspace list.
   useEffect(() => {
+    startupPerf('App:setShowTutorialButton', {
+      workspaceCount: Array.isArray(dexieWorkspaces) ? dexieWorkspaces.length : 0,
+      isLoggedIn,
+    });
     setShowTutorialButton(true);
   }, [dexieWorkspaces, isLoggedIn]);
 
+  const onboardingCompletedHintOnBoot = useRef(hasOnboardingCompletedHint());
   const [showTutorial, setShowTutorial] = useState(false);
-  const [isOnboardCompleted, setIsOnboardCompleted] = useState<boolean>(true);
+  const [isOnboardCompleted, setIsOnboardCompleted] = useState<boolean>(() => onboardingCompletedHintOnBoot.current);
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus>(() =>
+    onboardingCompletedHintOnBoot.current ? 'complete' : 'checking',
+  );
   const hasEvaluatedCloudData = useRef(false);
 
   useEffect(() => {
-    if (authChecked && !hasEvaluatedCloudData.current) {
-      isOnboardingCompleted().then((completed: boolean) => {
-        setIsOnboardCompleted(completed);
-        setShowTutorial(!completed);
-      });
+    if (!hasEvaluatedCloudData.current) {
       hasEvaluatedCloudData.current = true;
+      isOnboardingCompleted()
+        .then((completed: boolean) => {
+          startupPerf('onboarding:resolved', {
+            completed,
+            hadBootHint: onboardingCompletedHintOnBoot.current,
+          });
+          setIsOnboardCompleted(completed);
+          setOnboardingStatus(completed ? 'complete' : 'incomplete');
+          setShowTutorial(!completed);
+        })
+        .catch(error => {
+          console.error('[App] Error checking onboarding status:', error);
+          startupPerf('onboarding:error');
+          setOnboardingStatus('complete');
+        });
     }
-  }, [authChecked]);
+  }, []);
 
   // Detect OS
   useEffect(() => {
@@ -364,6 +412,80 @@ const App: React.FC = () => {
     [activeView?.type, isSpreadsheetViewOpen],
   );
 
+  const openAllCommandShortcuts = useCallback(() => {
+    openSpreadsheetView('collections');
+  }, [openSpreadsheetView]);
+
+  const requestMissingAiPromptInput = useCallback((request: MissingAiPromptInputRequest) => {
+    setIsSendingMissingAiPrompt(false);
+    setMissingAiPromptInput({
+      ...request,
+      title: String(request.promptRecord?.title || (request.promptRecord as any)?.name || 'AI Prompt'),
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleSessionMissingAiPromptInput = (event: Event) => {
+      const detail = (event as CustomEvent<SessionMissingAiPromptInputEventDetail>).detail;
+      if (!detail?.promptRecord && !detail?.targets?.length) return;
+      if (detail.promptRecord) {
+        requestMissingAiPromptInput({
+          promptRecord: detail.promptRecord,
+          promptId: detail.promptId,
+        });
+        return;
+      }
+      setIsSendingMissingAiPrompt(false);
+      setMissingAiPromptInput({
+        promptId: detail.promptId,
+        title: detail.title || 'Chat Agent',
+        targets: detail.targets,
+      });
+    };
+
+    window.addEventListener(SESSION_MISSING_AI_PROMPT_INPUT_EVENT, handleSessionMissingAiPromptInput);
+    return () => {
+      window.removeEventListener(SESSION_MISSING_AI_PROMPT_INPUT_EVENT, handleSessionMissingAiPromptInput);
+    };
+  }, [requestMissingAiPromptInput]);
+
+  const closeMissingAiPromptInput = useCallback(() => {
+    if (isSendingMissingAiPrompt) return;
+    setMissingAiPromptInput(null);
+  }, [isSendingMissingAiPrompt]);
+
+  const sendMissingAiPromptInput = useCallback(
+    async (promptText: string) => {
+      if (!missingAiPromptInput || isSendingMissingAiPrompt) return;
+      setIsSendingMissingAiPrompt(true);
+      try {
+        if (missingAiPromptInput.targets?.length) {
+          await Promise.all(
+            missingAiPromptInput.targets.map(target =>
+              chrome.runtime.sendMessage({
+                action: 'open_tab_with_auto_submit',
+                url: target.url,
+                targetTabId: target.tabId,
+                active: false,
+                forceNewTab: false,
+                autoSubmit: { kind: target.kind, prompt: promptText.trim() },
+              }),
+            ),
+          );
+        } else if (missingAiPromptInput.promptRecord) {
+          await runAiPrompt(missingAiPromptInput.promptRecord, promptText);
+        }
+        setMissingAiPromptInput(null);
+      } catch (error) {
+        console.error('[App] Failed to run AI prompt from missing prompt popup:', error);
+        triggerNotification('Failed to run AI prompt', 'error');
+      } finally {
+        setIsSendingMissingAiPrompt(false);
+      }
+    },
+    [missingAiPromptInput, isSendingMissingAiPrompt, triggerNotification],
+  );
+
   const selectedSnippet = useSelectedSnippet();
   const snippetBreadCrum = useUIStore((s: any) => s.snippetBreadcrumb);
   const isCreatingNewItem = useUIStore((s: any) => s.activeEditor?.id === 'new');
@@ -396,7 +518,49 @@ const App: React.FC = () => {
   const [isSearchMenuOpen, setIsSearchMenuOpen] = useState(false);
   const [isBoardViewOpen, setIsBoardViewOpen] = useState(false);
   const [isWidgetEditMode, setIsWidgetEditMode] = useState(false);
+  const [pendingSelectedWidgetId, setPendingSelectedWidgetId] = useState<string | null>(null);
+  const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const hideCreatePanelItems = isWidgetEditMode;
+
+  useEffect(() => {
+    let active = true;
+    void getLeftSidebarCollapsed().then(collapsed => {
+      if (active) setIsLeftSidebarCollapsed(collapsed);
+    });
+
+    const chromeAny = (window as any)?.chrome;
+    const handleStorageChange = (changes: { [key: string]: any }) => {
+      if (changes[LEFT_SIDEBAR_COLLAPSED_STORAGE_KEY]) {
+        setIsLeftSidebarCollapsed(changes[LEFT_SIDEBAR_COLLAPSED_STORAGE_KEY].newValue === true);
+      }
+    };
+
+    chromeAny?.storage?.onChanged?.addListener(handleStorageChange);
+    return () => {
+      active = false;
+      chromeAny?.storage?.onChanged?.removeListener(handleStorageChange);
+    };
+  }, []);
+
+  const handleToggleLeftSidebarCollapsed = useCallback(() => {
+    setIsLeftSidebarCollapsed(prev => {
+      const next = !prev;
+      void setLeftSidebarCollapsed(next);
+      return next;
+    });
+  }, []);
+
+  const handleEnterWidgetEditMode = useCallback((widgetId?: string) => {
+    setIsWidgetEditMode(true);
+    if (widgetId) {
+      setPendingSelectedWidgetId(widgetId);
+    }
+  }, []);
+
+  const handleExitWidgetEditMode = useCallback(() => {
+    setIsWidgetEditMode(false);
+    setPendingSelectedWidgetId(null);
+  }, []);
 
   useEffect(() => {
     const isHomeOrDefaultView = !activeView?.type || activeView.type === 'home';
@@ -408,8 +572,53 @@ const App: React.FC = () => {
       isEmbedded ||
       Boolean(activeEditor);
 
-    if (shouldExitWidgetEditMode) setIsWidgetEditMode(false);
+    if (shouldExitWidgetEditMode) {
+      setIsWidgetEditMode(false);
+      setPendingSelectedWidgetId(null);
+    }
   }, [activeEditor, activeView?.type, isEmbedded, isFocusMode, isSpreadsheetViewOpen, showTutorial]);
+
+  // Escape key handler for exiting Widget Edit Mode safely
+  useEffect(() => {
+    if (!isWidgetEditMode) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+
+      // Check if any higher priority overlay or modal is active
+      const hasActiveModalOrOverlay =
+        isSpreadsheetViewOpen ||
+        isFullScreenModalOpen ||
+        isGlobalCreateMenuOpen ||
+        isLinkEditModalOpen ||
+        Boolean(activeEditor) ||
+        Boolean((window as any)?.isGlobalCreateMenuOpen);
+
+      // Check if focus is inside an input, textarea, or contentEditable element
+      const target = event.target as HTMLElement | null;
+      const isInputFocused =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+
+      if (!hasActiveModalOrOverlay && !isInputFocused) {
+        setIsWidgetEditMode(false);
+        setPendingSelectedWidgetId(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    isWidgetEditMode,
+    isSpreadsheetViewOpen,
+    isFullScreenModalOpen,
+    isGlobalCreateMenuOpen,
+    isLinkEditModalOpen,
+    activeEditor,
+  ]);
 
   // Organization panel state - tracks when org panel is open
   const [orgPanelState, setOrgPanelState] = useState<{
@@ -461,6 +670,9 @@ const App: React.FC = () => {
     const chromeAny = (window as any)?.chrome;
     if (chromeAny?.storage?.local) {
       chromeAny.storage.local.get(['omnibox_override_enabled'], (result: any) => {
+        startupPerf('App:omniboxStorageResolved', {
+          enabled: result.omnibox_override_enabled !== false,
+        });
         setIsOmniboxEnabled(result.omnibox_override_enabled !== false);
       });
 
@@ -484,6 +696,7 @@ const App: React.FC = () => {
     setIsGlobalCreateMenuOpen,
     dismissAllViews,
     handleAltSInitialization,
+    requestMissingAiPromptInput,
   });
 
   // Handle lock_command and agent_id from URL (e.g. when opening from a Link Group)
@@ -703,11 +916,17 @@ const App: React.FC = () => {
           'new_tab_collapsed_workspaces',
           'new_tab_collapsed_folders',
           'new_tab_collapsed_sections',
-          'new_tab_is_sidebar_collapsed',
           'new_tab_is_dark_mode',
           'new_tab_is_board_view_enabled',
         ],
         (result: any) => {
+          startupPerf('App:uiStorageResolved', {
+            hasShowFavorites: result.new_tab_show_favorites !== undefined,
+            hasAutoExpand: result.new_tab_is_auto_expand_mode !== undefined,
+            hasCollapsedWorkspaces: Boolean(result.new_tab_collapsed_workspaces),
+            hasCollapsedFolders: Boolean(result.new_tab_collapsed_folders),
+            hasCollapsedSections: Boolean(result.new_tab_collapsed_sections),
+          });
           if (result.new_tab_show_favorites !== undefined) {
             useUIStore.getState().setShowFavorites(result.new_tab_show_favorites);
           }
@@ -1006,6 +1225,11 @@ const App: React.FC = () => {
 
   const handleNavigateToListView = useCallback((type: 'notes' | 'links' | 'commands', section?: string) => {
     setIsSpreadsheetViewOpen(false);
+    
+    // Explicitly wipe reader and editor states on navigation to guarantee a clean view
+    useUIStore.getState().closeSheet();
+    useUIStore.getState().clearEditorStates();
+    useUIStore.getState().setView({ type: 'home' });
 
     setCommandListCategory('commands');
     if (section) {
@@ -1166,8 +1390,6 @@ const App: React.FC = () => {
     useUIStore.getState().setLockedCommand(commandId);
   }, []);
 
-  const [todoDisplayMode] = useChromeStorage<'collapse' | 'data-blur' | 'pin'>('todo_display_mode', 'collapse');
-
   const handleOpenSubscriptions = useCallback(() => {
     useUIStore.getState().setView({ type: 'subscriptions' });
   }, []);
@@ -1181,14 +1403,25 @@ const App: React.FC = () => {
   }, [isLoggedIn]);
 
   const showSidebarColumn = !isFocusMode && !isEmbedded;
+  const isOnboardingDecisionPending = onboardingStatus === 'checking';
+  const isFirstRunOnboarding = !onboardingCompletedHintOnBoot.current && onboardingStatus === 'incomplete' && showTutorial;
+  const shouldRenderMainApp = !isOnboardingDecisionPending && !isFirstRunOnboarding;
 
-  if (!authChecked) {
-    return (
-      <DndProvider backend={HTML5Backend}>
-        <div className="flex h-screen text-[var(--color-textPrimary)] !rounded-none relative overflow-hidden outline-none bg-[var(--color-rootBg)]" />
-      </DndProvider>
-    );
-  }
+  useEffect(() => {
+    startupPerf('App:commit', {
+      renderCount: renderCountRef.current,
+      themeId,
+      authChecked,
+      isLoggedIn,
+      onboardingStatus,
+      showTutorial,
+      shouldRenderMainApp,
+      activeViewType: activeView?.type || 'none',
+      activeEditorType: activeEditor?.type || 'none',
+      isSpreadsheetViewOpen,
+      suggestionVisible: Boolean(suggestionState),
+    });
+  });
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -1216,116 +1449,141 @@ const App: React.FC = () => {
           `}</style>
         )}
         {!isEmbedded && <WallpaperLayer />}
+        {!isEmbedded && <WarmTintLayer />}
         <div id="ai-history-anchor" />
-        {/* Global Branding - Always visible in top left */}
-        {!isEmbedded && !showTutorial && !isSpreadsheetViewOpen && (
-          <div className="absolute top-0 left-0 p-2.5 z-[10000] pointer-events-auto flex items-center">
-            <Branding
-              className="!p-0 !gap-0"
-              showAvatar={false}
-              onClick={() => {
-                if (isSpreadsheetViewOpen) setIsSpreadsheetViewOpen(false);
-              }}
+        {shouldRenderMainApp && (
+          <>
+            {/* Global Branding - Always visible in top left */}
+            {!isEmbedded && !isSpreadsheetViewOpen && (
+              <div className={`absolute top-0 left-0 z-[10000] pointer-events-auto flex items-center ${isLeftSidebarCollapsed ? 'h-12 w-[76px] justify-center' : 'h-12 w-[240px] p-2.5'}`}>
+                <Branding
+                  className="!p-0 !gap-0"
+                  showAvatar={false}
+                  showText={!isLeftSidebarCollapsed}
+                  onClick={() => {
+                    if (isSpreadsheetViewOpen) setIsSpreadsheetViewOpen(false);
+                    useUIStore.getState().closeEditor();
+                    useUIStore.getState().setView({ type: 'home' });
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Floating Right-Center Control Group */}
+            {!isEmbedded && !isSpreadsheetViewOpen && !isFocusMode && !activeEditor && (
+              <HeaderControls
+                isLoggedIn={isLoggedIn && userId !== 'local_user'}
+                isWidgetEditMode={isWidgetEditMode}
+                onToggleWidgetEditMode={() => setIsWidgetEditMode(prev => !prev)}
+                onOpenCommandShortcuts={openAllCommandShortcuts}
+              />
+            )}
+
+            <div className={isSpreadsheetViewOpen ? 'hidden' : 'contents'}>
+              <AppLeftSidebar
+                showSidebarColumn={showSidebarColumn}
+                hasActivePopup={hasActivePopup}
+                backgroundRefresh={backgroundRefresh}
+                openSpreadsheetView={openSpreadsheetView}
+                searchbarRef={searchbarRef}
+                setIsSpreadsheetViewOpen={setIsSpreadsheetViewOpen}
+                savedAgentById={savedAgentById}
+                handleNavigateToListView={handleNavigateToListView}
+                handleFavoriteLinkEdit={handleFavoriteLinkEdit}
+                hideCreatePanelItems={hideCreatePanelItems}
+                isCollapsed={isLeftSidebarCollapsed}
+                onToggleCollapse={handleToggleLeftSidebarCollapsed}
+              />
+            </div>
+
+            <AppMainContent
+              isViewDropdownOpen={isViewDropdownOpen}
+              isFullScreenModalOpen={isFullScreenModalOpen}
+              theme={theme}
+              hasActivePopup={hasActivePopup}
+              isLinkEditModalOpen={isLinkEditModalOpen}
+              setSuggestionState={setSuggestionState}
+              isLoggedIn={isLoggedIn}
+              teams={teamList}
+              backgroundRefresh={backgroundRefresh}
+              searchbarRef={searchbarRef}
+              isSpreadsheetViewOpen={isSpreadsheetViewOpen}
+              openSpreadsheetView={openSpreadsheetView}
+              handleCreateWorkspace={handleCreateWorkspace}
+              closeSpreadsheetView={closeSpreadsheetView}
+              handleBoardViewRedirectFromSheet={handleBoardViewRedirectFromSheet}
+              setIsSearchMenuOpen={setIsSearchMenuOpen}
+              setIsBoardViewOpen={setIsBoardViewOpen}
+              isInitialAltSFocus={isInitialAltSFocus}
+              setIsInitialAltSFocus={setIsInitialAltSFocus}
+              setIsGlobalCreateMenuOpen={setIsGlobalCreateMenuOpen}
+              setIsAutomationActive={setIsAutomationActive}
+              commandListCategory={commandListCategory}
+              setCommandListCategory={setCommandListCategory}
+              activeCommandSection={activeCommandSection}
+              setActiveCommandSection={setActiveCommandSection}
+              handleOrganizationHandlersReady={handleOrganizationHandlersReady}
+              handleOrganizationPanelChange={handleOrganizationPanelChange}
+              handleNavigateToListView={handleNavigateToListView}
+              activeLockedCommand={activeLockedCommand}
+              isSearchMenuOpen={isSearchMenuOpen}
+              handleLockedCommandChange={handleLockedCommandChange}
+              handleSearchbarFocus={handleSearchbarFocus}
+              setIsViewDropdownOpen={setIsViewDropdownOpen}
+              isFocusMode={isFocusMode}
+              isEmbedded={isEmbedded}
+              isCreatingNewItem={isCreatingNewItem}
+              isWidgetEditMode={isWidgetEditMode}
+              onEnterWidgetEditMode={handleEnterWidgetEditMode}
+              onExitWidgetEditMode={handleExitWidgetEditMode}
+              pendingSelectedWidgetId={pendingSelectedWidgetId}
+              selectedSnippet={selectedSnippet}
+              showSidebarColumn={showSidebarColumn}
+              isLeftSidebarCollapsed={isLeftSidebarCollapsed}
             />
-          </div>
+          </>
         )}
 
-        {/* Floating Right-Center Control Group */}
-        {!isEmbedded && !showTutorial && !isSpreadsheetViewOpen && !isFocusMode && !activeEditor && (
-          <HeaderControls
-            isLoggedIn={isLoggedIn && userId !== 'local_user'}
-            isWidgetEditMode={isWidgetEditMode}
-            onToggleWidgetEditMode={() => setIsWidgetEditMode(prev => !prev)}
-          />
-        )}
-
-        {/* Tutorial Button - Top Right */}
-        {!isEmbedded && !showTutorial && showTutorialButton && !isSpreadsheetViewOpen && !activeEditor && activeView?.type === 'home' && (
-          <div className="absolute top-4 right-6 z-[10000] pointer-events-auto">
-            <button
-              onClick={() => setShowTutorial(true)}
-              className="w-8 h-8 flex items-center justify-center rounded-xl bg-[var(--color-inputBg)] hover:bg-[var(--color-hoverBg)] active:bg-[var(--color-selectedBg)] text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] border border-[var(--color-borderDefault)] transition-all shadow-sm cursor-pointer backdrop-blur-md"
-              title="Show Tutorial">
-              <FiHelpCircle size={18} />
-            </button>
-          </div>
-        )}
-
-        {showTutorial && isOnboardCompleted && <TutorialOverlay onClose={() => setShowTutorial(false)} />}
-
-        <div className={showTutorial || isSpreadsheetViewOpen ? 'hidden' : 'contents'}>
-          <AppLeftSidebar
-            showSidebarColumn={showSidebarColumn}
-            hasActivePopup={hasActivePopup}
-            backgroundRefresh={backgroundRefresh}
-            openSpreadsheetView={openSpreadsheetView}
-            searchbarRef={searchbarRef}
-            setIsSpreadsheetViewOpen={setIsSpreadsheetViewOpen}
-            savedAgentById={savedAgentById}
-            handleNavigateToListView={handleNavigateToListView}
-            handleFavoriteLinkEdit={handleFavoriteLinkEdit}
-            hideCreatePanelItems={hideCreatePanelItems}
-          />
-        </div>
-
-        <AppMainContent
-          isViewDropdownOpen={isViewDropdownOpen}
-          isFullScreenModalOpen={isFullScreenModalOpen}
-          theme={theme}
-          hasActivePopup={hasActivePopup}
-          isLinkEditModalOpen={isLinkEditModalOpen}
-          setSuggestionState={setSuggestionState}
+        <OnboardingOverlayController
+          show={showTutorial && !isOnboardingDecisionPending}
           isLoggedIn={isLoggedIn}
-          teams={teamList}
-          backgroundRefresh={backgroundRefresh}
-          searchbarRef={searchbarRef}
-          isSpreadsheetViewOpen={isSpreadsheetViewOpen}
-          openSpreadsheetView={openSpreadsheetView}
-          handleCreateWorkspace={handleCreateWorkspace}
-          closeSpreadsheetView={closeSpreadsheetView}
-          handleBoardViewRedirectFromSheet={handleBoardViewRedirectFromSheet}
-          setIsSearchMenuOpen={setIsSearchMenuOpen}
-          setIsBoardViewOpen={setIsBoardViewOpen}
-          isInitialAltSFocus={isInitialAltSFocus}
-          setIsInitialAltSFocus={setIsInitialAltSFocus}
-          setIsGlobalCreateMenuOpen={setIsGlobalCreateMenuOpen}
-          setIsAutomationActive={setIsAutomationActive}
-          commandListCategory={commandListCategory}
-          setCommandListCategory={setCommandListCategory}
-          activeCommandSection={activeCommandSection}
-          setActiveCommandSection={setActiveCommandSection}
-          handleOrganizationHandlersReady={handleOrganizationHandlersReady}
-          handleOrganizationPanelChange={handleOrganizationPanelChange}
-          handleNavigateToListView={handleNavigateToListView}
-          activeLockedCommand={activeLockedCommand}
-          isSearchMenuOpen={isSearchMenuOpen}
-          handleLockedCommandChange={handleLockedCommandChange}
-          handleSearchbarFocus={handleSearchbarFocus}
-          setIsViewDropdownOpen={setIsViewDropdownOpen}
-          isFocusMode={isFocusMode}
-          isEmbedded={isEmbedded}
-          isCreatingNewItem={isCreatingNewItem}
-          isWidgetEditMode={isWidgetEditMode}
-          selectedSnippet={selectedSnippet}
-          showTutorial={showTutorial}
-          setShowTutorial={setShowTutorial}
-          showSidebarColumn={showSidebarColumn}
+          onboardingCompleted={isOnboardCompleted}
+          onClose={() => setShowTutorial(false)}
+          onMarkCompleted={() => {
+            setOnboardingCompletedHint(true);
+            setIsOnboardCompleted(true);
+            setOnboardingStatus('complete');
+          }}
+          reload={backgroundRefresh}
         />
+
+        {shouldRenderMainApp && !isEmbedded && !isSpreadsheetViewOpen && isWidgetEditMode && (
+          <RightSideWidget />
+        )}
 
         {/* TodoFloatingPreview is now rendered inside CreateTodoSelectionView for perfect vertical alignment */}
       </div>
 
-      <AppModals
-        createWorkspaceModal={createWorkspaceModal}
-        setCreateWorkspaceModal={setCreateWorkspaceModal}
-        backgroundRefresh={backgroundRefresh}
-        isGlobalCreateMenuOpen={isGlobalCreateMenuOpen}
-        setIsGlobalCreateMenuOpen={setIsGlobalCreateMenuOpen}
-        openSpreadsheetView={openSpreadsheetView}
-        searchbarRef={searchbarRef}
-      />
+      {shouldRenderMainApp && (
+        <AppModals
+          createWorkspaceModal={createWorkspaceModal}
+          setCreateWorkspaceModal={setCreateWorkspaceModal}
+          backgroundRefresh={backgroundRefresh}
+          isGlobalCreateMenuOpen={isGlobalCreateMenuOpen}
+          setIsGlobalCreateMenuOpen={setIsGlobalCreateMenuOpen}
+          openSpreadsheetView={openSpreadsheetView}
+          searchbarRef={searchbarRef}
+        />
+      )}
 
-
+      {shouldRenderMainApp && missingAiPromptInput && (
+        <MissingAiPromptInputModal
+          title={missingAiPromptInput.title}
+          isSending={isSendingMissingAiPrompt}
+          onClose={closeMissingAiPromptInput}
+          onSend={sendMissingAiPromptInput}
+        />
+      )}
     </DndProvider>
   );
 };

@@ -1,7 +1,9 @@
 import * as React from 'react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import clsx from 'clsx';
-import { FaFolder, FaSearch, FaBriefcase, FaCheck, FaPlus, FaChevronDown } from 'react-icons/fa';
+import { FaSearch, FaBriefcase, FaCheck, FaChevronDown } from 'react-icons/fa';
+// Folder creation is only allowed from onboarding for now.
+// import { FaPlus } from 'react-icons/fa';
 import { useDestination, DestinationGroup } from './hooks/useDestination';
 import { FiZapOff, FiChevronLeft } from 'react-icons/fi';
 import { createFolder } from '../../settings/allWorkspaceManager/folders/folderData';
@@ -112,14 +114,10 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
       .map(group => {
         const workspaceMatches = group.workspace.workspaceName?.toLowerCase().includes(lowerQuery);
 
-        const matchedFolders = group.folders.filter(f =>
-          f.folderName?.toLowerCase().includes(lowerQuery),
-        );
-
-        if (workspaceMatches || matchedFolders.length > 0) {
+        if (workspaceMatches) {
           return {
             ...group,
-            folders: workspaceMatches ? group.folders : matchedFolders,
+            folders: [],
           } as DestinationGroup;
         }
         return null;
@@ -128,9 +126,7 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
   }, [destinations, query]);
 
   // Build a flat list of selectable items for keyboard navigation
-  type FlatItem =
-    | { id: string; type: 'workspace'; workspaceId: string; label: string }
-    | { id: string; type: 'folder'; workspaceId: string; folderId: string; label: string };
+  type FlatItem = { id: string; type: 'workspace'; workspaceId: string; label: string };
 
   const flatItems = useMemo(() => {
     const items: FlatItem[] = [];
@@ -140,15 +136,6 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
         type: 'workspace',
         workspaceId: group.workspace.id,
         label: group.workspace.workspaceName,
-      });
-      group.folders.forEach(folder => {
-        items.push({
-          id: `folder-${folder.id}`,
-          type: 'folder',
-          workspaceId: group.workspace.id,
-          folderId: folder.id,
-          label: folder.folderName,
-        });
       });
     });
     return items;
@@ -179,11 +166,7 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
       } else if (e.key === 'Enter') {
         const target = flatItems[activeIndex];
         if (target) {
-          if (target.type === 'workspace') {
-            onSelectWorkspace(target.workspaceId);
-          } else {
-            onSelectFolder(target.workspaceId, target.folderId);
-          }
+          onSelectWorkspace(target.workspaceId);
           onClose();
         }
       } else if (e.key === 'Escape') {
@@ -225,19 +208,23 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
         </div>
 
         <div className="flex items-center gap-1">
-          {!isCreatingFolder && (
-            <button
-              type="button"
-              onClick={() => {
-                setIsCreatingFolder(true);
-                setNewFolderName('');
-                setCreateFolderError(null);
-              }}
-              className="p-1 rounded-md text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] transition-colors flex items-center justify-center cursor-pointer"
-              title="Create New Folder">
-              <FaPlus size={11} />
-            </button>
-          )}
+          {/* Folder creation is only allowed from onboarding for now.
+              Previously rendered the Create New Folder button here. */}
+          {/*
+            {!isCreatingFolder && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCreatingFolder(true);
+                  setNewFolderName('');
+                  setCreateFolderError(null);
+                }}
+                className="p-1 rounded-md text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] transition-colors flex items-center justify-center cursor-pointer"
+                title="Create New Folder">
+                <FaPlus size={11} />
+              </button>
+            )}
+          */}
 
           {(selectedWorkspaceId || selectedFolderId) && onClear && !isCreatingFolder && (
             <button
@@ -257,7 +244,8 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
       </div>
 
       {/* Main Content Area */}
-      {isCreatingFolder ? (
+      {/* Folder creation is only allowed from onboarding for now. */}
+      {false && isCreatingFolder ? (
         <form onSubmit={handleCreateFolderSubmit} className="p-2.5 flex flex-col gap-2.5">
           {/* Folder Name Input */}
           <div className="flex flex-col gap-1">
@@ -326,7 +314,7 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
                 'w-full pl-8 pr-3 py-1.5 text-[13px] font-medium rounded-lg focus:outline-none transition-all',
                 'text-[var(--color-textPrimary)] bg-[var(--color-inputBg)] focus:ring-1 focus:ring-[var(--color-borderActive)] placeholder:text-[var(--color-textPlaceholder)] border border-transparent focus:border-[var(--color-borderDefault)]',
               )}
-              placeholder="Find workspace or folder..."
+              placeholder="Find workspace..."
               value={query}
               onChange={e => setQuery(e.target.value)}
             />
@@ -344,7 +332,7 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
                   {(() => {
                     const itemIndex = flatCounter++;
                     const isHighlighted = activeIndex === itemIndex;
-                    const isSelected = selectedWorkspaceId === group.workspace.id && !selectedFolderId;
+                    const isSelected = selectedWorkspaceId === group.workspace.id;
 
                     return (
                       <button
@@ -381,47 +369,7 @@ export const DestinationPicker: React.FC<DestinationPickerProps> = ({
                     );
                   })()}
 
-                  {/* Folders List (Indented) */}
-                  {group.folders.length > 0 && (
-                    <div className="mt-0.5 ml-[11px] pl-4 border-l border-[var(--color-borderDefault)] flex flex-col gap-0.5">
-                      {group.folders.map(folder => {
-                        const itemIndex = flatCounter++;
-                        const isHighlighted = activeIndex === itemIndex;
-                        const isSelected = selectedFolderId === folder.id;
-
-                        return (
-                          <button
-                            key={folder.id}
-                            type="button"
-                            onMouseEnter={() => setActiveIndex(itemIndex)}
-                            onClick={() => {
-                              onSelectFolder(group.workspace.id, folder.id);
-                              onClose();
-                            }}
-                            className={clsx(
-                              'w-full group relative flex items-center gap-2.5 px-2 py-1.5 rounded-md transition-colors text-left cursor-pointer border',
-                              isSelected
-                                ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] border-[var(--color-borderSelected,var(--color-borderDefault))] font-semibold shadow-xs'
-                                : isHighlighted
-                                ? 'bg-[var(--color-hoverBg)] text-[var(--color-textPrimary)] border-transparent'
-                                : 'bg-transparent hover:bg-[var(--color-hoverBg)] text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] border-transparent',
-                            )}>
-                            <FaFolder
-                              size={11}
-                              className={clsx(
-                                'transition-colors shrink-0',
-                                isSelected || isHighlighted ? 'text-[var(--color-textPrimary)]' : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]',
-                              )}
-                            />
-                            <span className="text-[12px] font-medium flex-1 truncate text-[var(--color-textPrimary)]">
-                              {folder.folderName}
-                            </span>
-                            {isSelected && <FaCheck size={12} className="text-[var(--color-textPrimary)] shrink-0 ml-2" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  {/* Folder rows are intentionally hidden in the UI. Folder ids are still preserved internally. */}
                 </div>
               ))
             )}

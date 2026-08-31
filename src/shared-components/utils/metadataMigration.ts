@@ -7,8 +7,8 @@ const syncShortcutMigrationToChromeStorage = async (oldId: string, newId: string
   const storageKey =
     itemType === 'link'
       ? 'link_commands'
-      : itemType === 'session'
-        ? 'session_commands'
+      : itemType === 'collection'
+        ? 'collection_commands'
         : itemType === 'todo'
           ? 'todo_commands'
           : 'note_commands';
