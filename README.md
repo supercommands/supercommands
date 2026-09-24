@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/cmdOS-App/cmdOS/main/src/shared-components/assets/cmdOS_logo.png" alt="cmdOS" width="80" height="80" />
+<img src="https://raw.githubusercontent.com/supercommands-App/supercommands/main/src/shared-components/assets/supercommands_logo.png" alt="supercommands" width="80" height="80" />
 
-# cmdOS
+# supercommands
 
 
 **A keyboard-first command terminal for the browser.**
@@ -14,16 +14,16 @@ Access search, browser commands, and web shortcuts — all from one command bar.
 [![pnpm](https://img.shields.io/badge/pnpm-9.15.1-orange)](https://pnpm.io)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[**Getting Started**](#getting-started) · [**Features**](#features) · [**Contributing**](#contributing) · [**Wiki**](https://github.com/cmdOS-app/cmdOS/wiki) · [**Community**](https://github.com/cmdOS-app/cmdOS/community) · [**Security**](https://github.com/cmdOS-app/cmdOS/security) · [**Code of Conduct**](CODE_OF_CONDUCT.md) · [**License**](#license)
+[**Getting Started**](#getting-started) · [**Features**](#features) · [**Contributing**](#contributing) · [**Wiki**](https://github.com/supercommands-app/supercommands/wiki) · [**Community**](https://github.com/supercommands-app/supercommands/community) · [**Security**](https://github.com/supercommands-app/supercommands/security) · [**Code of Conduct**](CODE_OF_CONDUCT.md) · [**License**](#license)
 
 </div>
 
 
 ---
 
-## What is cmdOS?
+## What is supercommands?
 
-cmdOS is a Chrome extension that replaces repetitive browser actions with keyboard commands. Instead of navigating menus, bookmarks, and tabs manually, you open cmdOS with `Alt + S` and run commands from one place.
+supercommands is a Chrome extension that replaces repetitive browser actions with keyboard commands. Instead of navigating menus, bookmarks, and tabs manually, you open supercommands with `Alt + S` and run commands from one place.
 
 It is entirely **local-first** — your data stays on your machine. No account required to use the core features.
 
@@ -33,7 +33,7 @@ It is entirely **local-first** — your data stays on your machine. No account r
 
 ### ⌨️ Command Palette
 
-Open cmdOS with `Alt + S` from any page and run commands instantly.
+Open supercommands with `Alt + S` from any page and run commands instantly.
 
 ```
 /notes           → Open your notes
@@ -73,7 +73,7 @@ Built-in commands available from the command bar:
 ## Repository Structure
 
 <pre>
-cmdOS/
+supercommands/
 ├── background/                  # Service worker, manifest, extension bootstrap
 ├── packages/                    # Shared internal packages (monorepo)
 │   ├── ui/                      # Design system components
@@ -129,8 +129,8 @@ cmdOS/
 **1. Clone the repository**
 
 ```bash
-git clone https://github.com/cmdOS-App/cmdOS.git
-cd cmdOS
+git clone https://github.com/supercommands-App/supercommands.git
+cd supercommands
 ```
 
 **2. Install dependencies**
