@@ -1,6 +1,8 @@
-# Contributing to cmdOS
+# Contributing to SuperCommands
 
-Thank you for your interest in contributing to cmdOS. This document covers how to get involved, where to look, and how to raise issues or submit changes.
+Thank you for your interest in contributing to SuperCommands. This document covers how to get involved, where to look, and how to raise issues or submit changes.
+
+Read the [Code of Conduct](CODE_OF_CONDUCT.md) and [security policy](SECURITY.md) before reporting an issue. Report suspected vulnerabilities privately as described in the security policy.
 
 ---
 
@@ -54,7 +56,7 @@ Shared utilities, design system, storage helpers, and environment config used ac
 
 Before opening an issue:
 
-- Search [existing issues](https://github.com/cmdOS-App/cmdOS/issues) to avoid duplicates
+- Search [existing issues](https://github.com/supercommands/supercommands/issues) to avoid duplicates
 - Check if there's already a related discussion
 
 When opening a new issue, include:
@@ -78,8 +80,8 @@ For **feature requests**, describe the problem you're facing — not just the so
 **Setup**
 
 ```bash
-git clone https://github.com/cmdOS-App/cmdOS.git
-cd cmdOS
+git clone https://github.com/supercommands/supercommands.git
+cd supercommands
 pnpm install
 pnpm dev
 ```
@@ -144,4 +146,4 @@ refactor: simplify tag filtering logic
 
 ## Questions
 
-If you're unsure about something, open a [GitHub Discussion](https://github.com/cmdOS-App/cmdOS/discussions) or comment on the relevant issue. We're happy to help you get oriented before you start building.
+If you're unsure about something, open a [GitHub Discussion](https://github.com/cmdOS-App/supercommands/discussions) or comment on the relevant issue. We're happy to help you get oriented before you start building.
