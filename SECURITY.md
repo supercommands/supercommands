@@ -2,18 +2,17 @@
 
 ## Supported Versions
 
-Only the latest release of the cmdOS open-source extension is supported for security updates. If you find a security issue, please ensure you are testing against the latest version on the `main` branch.
+Only the latest release of the SuperCommands open-source extension is supported for security updates. If you find a security issue, please ensure you are testing against the latest version on the `main` branch.
 
 ---
 
 ## Reporting a Vulnerability
 
-We take the security of cmdOS seriously. If you find a security vulnerability, please do **NOT** open a public issue. Instead, report it privately.
+We take the security of SuperCommands seriously. If you find a security vulnerability, please do **NOT** open a public issue or post exploit details in a public discussion.
 
-To report a vulnerability:
-* Please raise an issue and tag security: https://github.com/cmdOS-app/cmdOS/community
-* Please also review our Code of Conduct: https://github.com/cmdOS-app/cmdOS/community/code-of-conduct/new
-* Include a detailed description of the issue, steps to reproduce, and any proof of concept (PoC) scripts or screenshots.
+To report a vulnerability, visit the repository's [Security page](https://github.com/supercommands/supercommands/security) and use **Report a vulnerability** if that private-reporting option is available. If it is unavailable, ask the maintainers for a private reporting channel through a [GitHub Discussion](https://github.com/supercommands/supercommands/discussions) without disclosing vulnerability details publicly.
+
+In the private report, include a detailed description, steps to reproduce, the affected version, and any proof-of-concept scripts or screenshots. Please also review our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 We will acknowledge your report within 48 hours and work with you to analyze and patch the vulnerability before releasing a public advisory.
 
