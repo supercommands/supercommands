@@ -1,26 +1,32 @@
-# Security Policy
+# SuperCommands security policy
 
-## Supported Versions
+This policy covers the SuperCommands browser extension, previously cmdOS, in the configured public repository [supercommands/supercommands](https://github.com/supercommands/supercommands).
 
-Only the latest release of the SuperCommands open-source extension is supported for security updates. If you find a security issue, please ensure you are testing against the latest version on the `main` branch.
+## Reporting a vulnerability
 
----
+Do not publish exploit details, access tokens, private records, or credential-bearing logs in a public issue or discussion.
 
-## Reporting a Vulnerability
+Visit the repository's [Security page](https://github.com/supercommands/supercommands/security). If **Report a vulnerability** is enabled, use it to submit a private report. Otherwise, ask maintainers for a private reporting route through an existing public issue without revealing vulnerability details. This repository does not establish a dedicated security email or a response-time commitment.
 
-We take the security of SuperCommands seriously. If you find a security vulnerability, please do **NOT** open a public issue or post exploit details in a public discussion.
+Include the affected version or commit, browser/OS, reproduction steps, expected and actual behavior, impact, and a minimal proof of concept using disposable data. Remove personal records and credentials from attachments.
 
-To report a vulnerability, visit the repository's [Security page](https://github.com/supercommands/supercommands/security) and use **Report a vulnerability** if that private-reporting option is available. If it is unavailable, ask the maintainers for a private reporting channel through a [GitHub Discussion](https://github.com/supercommands/supercommands/discussions) without disclosing vulnerability details publicly.
+## Scope
 
-In the private report, include a detailed description, steps to reproduce, the affected version, and any proof-of-concept scripts or screenshots. Please also review our [Code of Conduct](CODE_OF_CONDUCT.md).
+- Extension permissions, content scripts, message validation, and page isolation.
+- IndexedDB, local storage, migrations, and backup/restore.
+- User-configured integration credentials and Google Drive authorization.
+- Build, export, and dependency changes that could expose private data or credentials.
 
-We will acknowledge your report within 48 hours and work with you to analyze and patch the vulnerability before releasing a public advisory.
+Local-first storage does not claim that every record is encrypted or that integrations work offline. Google Drive backup exchanges backup data with Google; external AI services have their own authorization and data handling.
 
----
+## Versions and disclosure
 
-## Scope of Protection
+Include the exact affected version or commit. If possible, check whether the issue affects current `main` using an isolated profile. This document does not establish an older-version support matrix or guarantee a remediation deadline.
 
-This security policy covers:
-* The core local-first storage and encryption algorithms.
-* Permissions and Content Security Policies (CSP) defined in the extension manifest.
-* Safe handling of credentials and API keys in user-configured integrations.
+Coordinate disclosure privately with maintainers where a private route is available. Avoid publishing sensitive details before affected users can receive a fix.
+
+## Public export configuration
+
+The OSS environment allows a public Google OAuth client ID and a non-secret Drive enable flag. It excludes client secrets, extension signing keys, private environment files, publishing tools, and generated outputs. Never add credentials or personal tokens to source code or sample configuration.
+
+Follow the [Code of Conduct](CODE_OF_CONDUCT.md). Conduct reports and software vulnerability reports are separate processes.

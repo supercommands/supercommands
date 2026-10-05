@@ -1,29 +1,11 @@
-import type * as React from 'react';
+import TextExpanderIcon from '../../icons/TextExpanderIcon';
+import React from 'react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSpreadsheetStore } from '../logic/spreadsheetStateStore';
 import { useDbStore } from '../../../storage/store/useDbStore';
-import { FiHelpCircle, FiX, FiFilter, FiPlus, FiZap, FiSearch, FiSettings, FiLayout, FiList, FiGrid } from 'react-icons/fi';
+import { FiHelpCircle, FiX, FiFilter, FiPlus, FiSearch, FiSettings, FiLayout, FiList, FiGrid } from 'react-icons/fi';
 import Branding from '../../../shared-components/Branding';
-import {
-  FaFilter,
-  FaLock,
-  FaGlobe,
-  FaUsers,
-  FaChevronDown,
-  FaRegStar,
-  FaKeyboard,
-  FaAt,
-  FaTimes,
-  FaCheck,
-  FaLink,
-  FaFolder,
-  FaRegFolder,
-  FaCode,
-  FaTerminal,
-  FaBookmark,
-  FaHistory,
-  FaWindowRestore,
-} from 'react-icons/fa';
+import { FaFilter, FaLock, FaGlobe, FaUsers, FaChevronDown, FaRegStar, FaKeyboard, FaAt, FaTimes, FaCheck, FaLink, FaFolder, FaRegFolder, FaTerminal, FaBookmark, FaHistory, FaWindowRestore } from 'react-icons/fa';
 import { BsStarFill, BsChatDots, BsGrid, BsCalendarCheck } from 'react-icons/bs';
 import NotesIcon from '../../../shared-components/icons/notesIcon';
 import StackedLinkIcon from '../../../shared-components/icons/stackedLinkIcon';
@@ -33,423 +15,341 @@ import { LuArrowRightLeft } from 'react-icons/lu';
 import useNotification from '../../../shared-components/notifications/useNotification';
 import { getAvatarColor, getSingleInitial } from '../../../shared-components/utils/avatarColors';
 import clsx from 'clsx';
-
 interface SpreadsheetToolbarProps {
-  onClose?: () => void;
-  onCreateOrganization?: () => void;
-  onOrganizationSettings?: (orgId: string, orgName: string) => void;
-  onCreateWorkspace?: () => void;
-  onOpenTutorial?: () => void;
-  tutorialStep: number | null;
-  setTutorialStep: (step: number | null) => void;
-  isLoggedIn?: boolean;
-  onRequireLogin?: () => void;
-  onBoardViewRedirect?: () => void;
-  isEmbedded?: boolean;
-  hideHelp?: boolean;
+    onClose?: () => void;
+    onCreateOrganization?: () => void;
+    onOrganizationSettings?: (orgId: string, orgName: string) => void;
+    onCreateOrganisation?: () => void;
+    onOpenTutorial?: () => void;
+    tutorialStep: number | null;
+    setTutorialStep: (step: number | null) => void;
+    onBoardViewRedirect?: () => void;
+    isEmbedded?: boolean;
+    hideHelp?: boolean;
 }
-
 interface FilterOption {
-  type: 'space' | 'category' | 'visibility' | 'feature' | 'separator';
-  id?: string;
-  label?: string;
-  icon?: React.ReactNode;
-  activeIcon?: React.ReactNode;
+    type: 'space' | 'category' | 'visibility' | 'feature' | 'separator';
+    id?: string;
+    label?: string;
+    icon?: React.ReactNode;
+    activeIcon?: React.ReactNode;
 }
-
-const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({
-  onClose,
-  onCreateOrganization,
-  onOrganizationSettings,
-  onCreateWorkspace,
-  onOpenTutorial,
-  tutorialStep,
-  setTutorialStep,
-  isLoggedIn,
-  onRequireLogin,
-  onBoardViewRedirect,
-  isEmbedded,
-  hideHelp = false,
-}) => {
-  const {
-    categoryFilter,
-    setCategoryFilter,
-    visibilityFilter,
-    setVisibilityFilter,
-    showFavoritesOnly,
-    setShowFavoritesOnly,
-    showHotkeysOnly,
-    setShowHotkeysOnly,
-    showShortcutsOnly,
-    setShowShortcutsOnly,
-    showTagsOnly,
-    setShowTagsOnly,
-    spaceFilter,
-    setSpaceFilter,
-    setQuickAddModal,
-  } = useSpreadsheetStore();
+const SpreadsheetToolbar: React.FC<SpreadsheetToolbarProps> = ({ onClose, onCreateOrganization, onOrganizationSettings, onCreateOrganisation, onOpenTutorial, tutorialStep, setTutorialStep, onBoardViewRedirect, isEmbedded, hideHelp = false, }) => {
+    const { categoryFilter, setCategoryFilter, visibilityFilter, setVisibilityFilter, showFavoritesOnly, setShowFavoritesOnly, showHotkeysOnly, setShowHotkeysOnly, showShortcutsOnly, setShowShortcutsOnly, showTagsOnly, setShowTagsOnly, spaceFilter, setSpaceFilter, setQuickAddModal, } = useSpreadsheetStore();
     const [menuOpen, setMenuOpen] = useState(false);
-  const [createMenuOpen, setCreateMenuOpen] = useState(false);
-  const [isFolderSubmenuOpen, setIsFolderSubmenuOpen] = useState(false);
-
-  const [isViewDropdownOpen, setIsViewDropdownOpen] = useState(false);
-  const viewDropdownRef = useRef<HTMLDivElement | null>(null);
-  const [isBoardHovered, setIsBoardHovered] = useState(false);
-  const [isListHovered, setIsListHovered] = useState(false);
-  const [isSheetHovered, setIsSheetHovered] = useState(false);
-  const [autoTriggerDropdown, setAutoTriggerDropdown] = useChromeStorage<boolean>('rtq_focus_on', true);
-  const [isBoardViewEnabled, setIsBoardViewEnabled] = useState(true);
-
-  useEffect(() => {
-    chrome.storage.local.get(['new_tab_is_board_view_enabled'], (res) => {
-      if (res.new_tab_is_board_view_enabled !== undefined) {
-        setIsBoardViewEnabled(res.new_tab_is_board_view_enabled);
-      }
+    const [createMenuOpen, setCreateMenuOpen] = useState(false);
+    const [isViewDropdownOpen, setIsViewDropdownOpen] = useState(false);
+    const viewDropdownRef = useRef<HTMLDivElement | null>(null);
+    const [isBoardHovered, setIsBoardHovered] = useState(false);
+    const [isListHovered, setIsListHovered] = useState(false);
+    const [isSheetHovered, setIsSheetHovered] = useState(false);
+    const [autoTriggerDropdown, setAutoTriggerDropdown] = useChromeStorage<boolean>('rtq_focus_on', true);
+    const [isBoardViewEnabled, setIsBoardViewEnabled] = useState(true);
+    useEffect(() => {
+        chrome.storage.local.get(['new_tab_is_board_view_enabled'], res => {
+            if (res.new_tab_is_board_view_enabled !== undefined) {
+                setIsBoardViewEnabled(res.new_tab_is_board_view_enabled);
+            }
+        });
+    }, []);
+    useEffect(() => {
+        if (!isViewDropdownOpen)
+            return;
+        const handleClickOutside = (event: MouseEvent) => {
+            if (viewDropdownRef.current && !viewDropdownRef.current.contains(event.target as Node)) {
+                setIsViewDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isViewDropdownOpen]);
+    const organisations = useDbStore(state => state.organisations);
+    const triggerNotification = useNotification();
+    const [swapMenuOpen, setSwapMenuOpen] = useState<string | null>(null);
+    // Handle Escape key to close popups without closing the background Sheet UI
+    useEffect(() => {
+        const anyOpen = menuOpen || createMenuOpen || !!swapMenuOpen || isViewDropdownOpen;
+        if (!anyOpen)
+            return;
+        const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
+            // Close our local menus
+            setMenuOpen(false);
+            setCreateMenuOpen(false);
+            setSwapMenuOpen(null);
+            setIsViewDropdownOpen(false);
+            return true;
+        });
+        return unregister;
+    }, [menuOpen, createMenuOpen, swapMenuOpen, isViewDropdownOpen]);
+    const handleToggleMenu = () => {
+        setMenuOpen(!menuOpen);
+    };
+    const handleClearAll = () => {
+        setCategoryFilter(['all']);
+        setVisibilityFilter(['all']);
+        setSpaceFilter(['all']);
+        setShowFavoritesOnly(false);
+        setShowHotkeysOnly(false);
+        setShowShortcutsOnly(false);
+        setShowTagsOnly(false);
+    };
+    const filterOptions: FilterOption[] = [
+        // Categories (Data Types)
+        {
+            type: 'category' as const,
+            id: 'link',
+            label: 'Links',
+            icon: <FaLink className="text-[var(--color-iconDefault)]" size={12}/>,
+        },
+        { type: 'category' as const, id: 'note', label: 'Notes', icon: <NotesIcon size={12}/> },
+        {
+            type: 'category' as const,
+            id: 'todo',
+            label: 'Todo',
+            icon: <BsCalendarCheck className="text-[var(--color-iconDefault)]" size={12}/>,
+        },
+        {
+            type: 'category' as const,
+            id: 'agent',
+            label: 'Chat Agents',
+            icon: (<StackedLinkIcon urls={['chatgpt.com', 'gemini.google.com', 'claude.ai', 'perplexity.ai']} size={12} maxIcons={4}/>),
+        },
+        {
+            type: 'category' as const,
+            id: 'snippet',
+            label: 'Text Expanders',
+            icon: <TextExpanderIcon className="text-[var(--color-iconDefault)]" size={12}/>,
+        },
+        {
+            type: 'category' as const,
+            id: 'session',
+            label: 'Organisations',
+            icon: <FaFolder className="text-[var(--color-iconDefault)]" size={12}/>,
+        },
+        {
+            type: 'category' as const,
+            id: 'commands',
+            label: 'Browser Commands',
+            icon: <FaTerminal className="text-[var(--color-iconDefault)]" size={12}/>,
+        },
+        {
+            type: 'category' as const,
+            id: 'general_commands',
+            label: 'System Commands',
+            icon: <FaTerminal className="text-blue-400" size={12}/>,
+        },
+        // Features (Quick Filters)
+        {
+            type: 'feature' as const,
+            id: 'favorites',
+            label: 'Favorites',
+            icon: <FaRegStar className="text-[11px]"/>,
+            activeIcon: <BsStarFill className="text-[11px]"/>,
+        },
+        { type: 'feature' as const, id: 'hotkeys', label: 'Hotkeys', icon: <FaKeyboard className="text-[11px]"/> },
+        { type: 'feature' as const, id: 'shortcuts', label: 'Shortcuts', icon: <FaAt className="text-[11px]"/> },
+        { type: 'feature' as const, id: 'tags', label: 'Tags', icon: <FiFilter className="text-[11px]"/> }
+    ];
+    const activeFilterCount = useMemo(() => {
+        let count = 0;
+        if (!categoryFilter.includes('all'))
+            count += categoryFilter.length;
+        if (showFavoritesOnly)
+            count++;
+        if (showHotkeysOnly)
+            count++;
+        if (showShortcutsOnly)
+            count++;
+        if (showTagsOnly)
+            count++;
+        return count;
+    }, [categoryFilter, showFavoritesOnly, showHotkeysOnly, showShortcutsOnly, showTagsOnly]);
+    const isSelected = (opt: FilterOption) => {
+        if (opt.type === 'category')
+            return categoryFilter.includes(opt.id!);
+        if (opt.type === 'feature') {
+            if (opt.id === 'favorites')
+                return showFavoritesOnly;
+            if (opt.id === 'hotkeys')
+                return showHotkeysOnly;
+            if (opt.id === 'shortcuts')
+                return showShortcutsOnly;
+            if (opt.id === 'tags')
+                return showTagsOnly;
+        }
+        return false;
+    };
+    const selectedFilters = filterOptions.filter((opt: FilterOption) => {
+        if (opt.type === 'category')
+            return !categoryFilter.includes('all') && categoryFilter.includes(opt.id!);
+        if (opt.type === 'feature') {
+            if (opt.id === 'favorites')
+                return showFavoritesOnly;
+            if (opt.id === 'hotkeys')
+                return showHotkeysOnly;
+            if (opt.id === 'shortcuts')
+                return showShortcutsOnly;
+            if (opt.id === 'tags')
+                return showTagsOnly;
+        }
+        return false;
     });
-  }, []);
-
-  useEffect(() => {
-    if (!isViewDropdownOpen) return;
-    const handleClickOutside = (event: MouseEvent) => {
-      if (viewDropdownRef.current && !viewDropdownRef.current.contains(event.target as Node)) {
-        setIsViewDropdownOpen(false);
-      }
+    const clearFilter = (opt: FilterOption) => {
+        if (opt.type === 'category') {
+            const next = categoryFilter.filter(c => c !== opt.id!);
+            setCategoryFilter(next.length === 0 ? ['all'] : next);
+        }
+        if (opt.type === 'feature') {
+            if (opt.id === 'favorites')
+                setShowFavoritesOnly(false);
+            if (opt.id === 'hotkeys')
+                setShowHotkeysOnly(false);
+            if (opt.id === 'shortcuts')
+                setShowShortcutsOnly(false);
+            if (opt.id === 'tags')
+                setShowTagsOnly(false);
+        }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+    const handleSelect = (opt: FilterOption) => {
+        const toggleArray = (current: string[], id: string) => {
+            if (id === 'all')
+                return ['all'];
+            const next = current.includes('all')
+                ? [id]
+                : current.includes(id)
+                    ? current.filter(x => x !== id)
+                    : [...current, id];
+            return next.length === 0 ? ['all'] : next;
+        };
+        if (opt.type === 'category') {
+            setCategoryFilter(toggleArray(categoryFilter, opt.id!));
+        }
+        else if (opt.type === 'feature') {
+            if (opt.id === 'favorites')
+                setShowFavoritesOnly(!showFavoritesOnly);
+            if (opt.id === 'hotkeys')
+                setShowHotkeysOnly(!showHotkeysOnly);
+            if (opt.id === 'shortcuts')
+                setShowShortcutsOnly(!showShortcutsOnly);
+            if (opt.id === 'tags')
+                setShowTagsOnly(!showTagsOnly);
+        }
     };
-  }, [isViewDropdownOpen]);
-
-  const workspaces = useDbStore((state) => state.workspaces);
-  const triggerNotification = useNotification();
-
-  const [swapMenuOpen, setSwapMenuOpen] = useState<string | null>(null);
-
-  // Handle Escape key to close popups without closing the background Sheet UI
-  useEffect(() => {
-    const anyOpen = menuOpen || createMenuOpen || !!swapMenuOpen || isViewDropdownOpen;
-    if (!anyOpen) return;
-
-    const unregister = useUIStore.getState().registerEscapeInterceptor(() => {
-      // Close our local menus
-      setMenuOpen(false);
-      setCreateMenuOpen(false);
-      setSwapMenuOpen(null);
-      setIsFolderSubmenuOpen(false);
-      setIsViewDropdownOpen(false);
-      return true;
-    });
-
-    return unregister;
-  }, [menuOpen, createMenuOpen, swapMenuOpen, isViewDropdownOpen]);
-
-  const handleToggleMenu = () => {
-    setMenuOpen(!menuOpen);
-  };
-
-  const handleClearAll = () => {
-    setCategoryFilter(['all']);
-    setVisibilityFilter(['all']);
-    setSpaceFilter(['all']);
-    setShowFavoritesOnly(false);
-    setShowHotkeysOnly(false);
-    setShowShortcutsOnly(false);
-    setShowTagsOnly(false);
-  };
-
-  const filterOptions: FilterOption[] = [
-    // Categories (Data Types)
-    { type: 'category' as const, id: 'note', label: 'Notes', icon: <NotesIcon size={14} /> },
-    { type: 'category' as const, id: 'snippet', label: 'Text Expanders', icon: <FaCode className="text-[var(--color-iconDefault)]" size={14} /> },
-    { type: 'category' as const, id: 'todo', label: 'Todos', icon: <BsCalendarCheck className="text-[var(--color-iconDefault)]" size={14} /> },
-    { type: 'category' as const, id: 'link', label: 'Smart Links', icon: <FaLink className="text-[var(--color-iconDefault)]" size={14} /> },
-    { type: 'category' as const, id: 'session', label: 'Collections', icon: <FaFolder className="text-[var(--color-iconDefault)]" size={14} /> },
-    { type: 'category' as const, id: 'general_commands', label: 'System Commands', icon: <FaTerminal className="text-blue-400" size={14} /> },
-    { type: 'category' as const, id: 'commands', label: 'Browser Commands', icon: <FaTerminal className="text-[var(--color-iconDefault)]" size={14} /> },
-    {
-      type: 'category' as const,
-      id: 'automation',
-      label: 'Automations',
-      icon: <FiZap className="text-[var(--color-iconDefault)]" size={14} />,
-    },
-    {
-      type: 'category' as const,
-      id: 'agent',
-      label: 'Chat Agents',
-      icon: (
-        <StackedLinkIcon
-          urls={['chatgpt.com', 'gemini.google.com', 'claude.ai', 'perplexity.ai']}
-          size={14}
-          maxIcons={4}
-        />
-      ),
-    },
-    // Features (Quick Filters)
-    {
-      type: 'feature' as const,
-      id: 'favorites',
-      label: 'Favorites',
-      icon: <FaRegStar className="text-[11px]" />,
-      activeIcon: <BsStarFill className="text-[11px]" />,
-    },
-    { type: 'feature' as const, id: 'hotkeys', label: 'Hotkeys', icon: <FaKeyboard className="text-[11px]" /> },
-    { type: 'feature' as const, id: 'shortcuts', label: 'Shortcuts', icon: <FaAt className="text-[11px]" /> },
-    { type: 'feature' as const, id: 'tags', label: 'Tags', icon: <FiFilter className="text-[11px]" /> },
-  ];
-
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (!categoryFilter.includes('all')) count += categoryFilter.length;
-    if (showFavoritesOnly) count++;
-    if (showHotkeysOnly) count++;
-    if (showShortcutsOnly) count++;
-    if (showTagsOnly) count++;
-    return count;
-  }, [categoryFilter, showFavoritesOnly, showHotkeysOnly, showShortcutsOnly, showTagsOnly]);
-
-  const isSelected = (opt: FilterOption) => {
-    if (opt.type === 'category') return categoryFilter.includes(opt.id!);
-    if (opt.type === 'feature') {
-      if (opt.id === 'favorites') return showFavoritesOnly;
-      if (opt.id === 'hotkeys') return showHotkeysOnly;
-      if (opt.id === 'shortcuts') return showShortcutsOnly;
-      if (opt.id === 'tags') return showTagsOnly;
-    }
-    return false;
-  };
-
-  const selectedFilters = filterOptions.filter((opt: FilterOption) => {
-    if (opt.type === 'category') return !categoryFilter.includes('all') && categoryFilter.includes(opt.id!);
-    if (opt.type === 'feature') {
-      if (opt.id === 'favorites') return showFavoritesOnly;
-      if (opt.id === 'hotkeys') return showHotkeysOnly;
-      if (opt.id === 'shortcuts') return showShortcutsOnly;
-      if (opt.id === 'tags') return showTagsOnly;
-    }
-    return false;
-  });
-
-  const clearFilter = (opt: FilterOption) => {
-    if (opt.type === 'category') {
-      const next = categoryFilter.filter(c => c !== opt.id!);
-      setCategoryFilter(next.length === 0 ? ['all'] : next);
-    }
-    if (opt.type === 'feature') {
-      if (opt.id === 'favorites') setShowFavoritesOnly(false);
-      if (opt.id === 'hotkeys') setShowHotkeysOnly(false);
-      if (opt.id === 'shortcuts') setShowShortcutsOnly(false);
-      if (opt.id === 'tags') setShowTagsOnly(false);
-    }
-  };
-
-  const handleSelect = (opt: FilterOption) => {
-    const toggleArray = (current: string[], id: string) => {
-      if (id === 'all') return ['all'];
-      const next = current.includes('all')
-        ? [id]
-        : current.includes(id)
-          ? current.filter(x => x !== id)
-          : [...current, id];
-      return next.length === 0 ? ['all'] : next;
-    };
-
-    if (opt.type === 'category') {
-      setCategoryFilter(toggleArray(categoryFilter, opt.id!));
-    } else if (opt.type === 'feature') {
-      if (opt.id === 'favorites') setShowFavoritesOnly(!showFavoritesOnly);
-      if (opt.id === 'hotkeys') setShowHotkeysOnly(!showHotkeysOnly);
-      if (opt.id === 'shortcuts') setShowShortcutsOnly(!showShortcutsOnly);
-      if (opt.id === 'tags') setShowTagsOnly(!showTagsOnly);
-    }
-  };
-
-  return (
-    <div className="w-auto flex items-center py-1.5 px-0 z-[100] relative text-inherit">
+    return (<div className="w-auto flex items-center py-1.5 px-0 z-[100] relative text-inherit">
       <div className="flex items-center justify-end gap-3 ml-auto">
-        {!isEmbedded && selectedFilters.length > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap max-w-[440px]">
-            {selectedFilters.map((opt: FilterOption) => (
-              <button
-                key={`chip-${opt.type}-${opt.id}`}
-                onClick={() => {
-                  clearFilter(opt);
-                }}
-                className={clsx(
-                  "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[10px] font-medium transition-colors bg-transparent border-[var(--color-borderActive)] text-[var(--color-textPrimary)]"
-                )}
-                title={`Remove ${opt.label}`}>
-                <FaTimes className="text-[8px] text-[var(--color-iconDefault)]" />
+        {!isEmbedded && selectedFilters.length > 0 && (<div className="flex items-center gap-1.5 flex-wrap max-w-[440px]">
+            {selectedFilters.map((opt: FilterOption) => (<button key={`chip-${opt.type}-${opt.id}`} onClick={() => {
+                    clearFilter(opt);
+                }} className={clsx('flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[10px] font-medium transition-colors bg-transparent border-[var(--color-borderActive)] text-[var(--color-textPrimary)]')} title={`Remove ${opt.label}`}>
+                <FaTimes className="text-[8px] text-[var(--color-iconDefault)]"/>
                 <span>{opt.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
+              </button>))}
+          </div>)}
 
         {/* Filter Button Section */}
-        {!isEmbedded && (
-        <div className="relative">
-          <button
-            onClick={handleToggleMenu}
-            id="sheet-toolbar-filter-btn"
-            className={clsx(
-              "p-1.5 rounded-md transition-all border cursor-pointer flex items-center justify-center gap-1.5 relative",
-              activeFilterCount > 0
+        {!isEmbedded && (<div className="relative">
+            <button onClick={handleToggleMenu} id="sheet-toolbar-filter-btn" className={clsx('p-1 rounded-md transition-all border cursor-pointer flex items-center justify-center gap-1 relative', activeFilterCount > 0
                 ? 'bg-transparent text-[var(--color-textPrimary)] border-[var(--color-borderActive)]'
-                : 'bg-transparent border-transparent text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]'
-            )}
-            title="Filter Options"
-          >
-            <FiFilter size={16} />
-            {activeFilterCount > 0 && (
-              <span className="w-4 h-4 rounded-full border border-[var(--color-borderActive)] bg-transparent text-[var(--color-textPrimary)] text-[10px] font-medium flex items-center justify-center leading-none">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
+                : 'bg-transparent border-transparent text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]')} title="Filter Options">
+              <FiFilter size={13}/>
+              {activeFilterCount > 0 && (<span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-[var(--color-borderActive)] bg-transparent text-[9px] font-medium leading-none text-[var(--color-textPrimary)]">
+                  {activeFilterCount}
+                </span>)}
+            </button>
 
-          {/* Filter Dropdown Popover */}
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-[999]" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-full mt-2 w-[420px] border rounded-lg shadow-[0_8px_30px_rgba(0,0,0,0.3)] z-[1000] p-0.5 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 bg-[var(--color-popupBg)] border-white/10">
-                <div className="flex gap-1 p-2 h-full bg-[var(--color-popupBg)]">
-                  {/* Data Types Column */}
-                  <div className="flex-1 px-1.5">
-                    <div className={clsx(
-                      "px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5", "text-[var(--color-textMuted)] border-[var(--color-borderDefault)]"
-                    )}>
-                      Data Types
+            {/* Filter Dropdown Popover */}
+            {menuOpen && (<>
+                <div className="fixed inset-0 z-[999]" onClick={() => setMenuOpen(false)}/>
+                <div className="absolute right-0 top-full mt-2 w-[420px] border rounded-lg shadow-[0_8px_30px_rgba(0,0,0,0.3)] z-[1000] p-0.5 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 bg-[var(--color-popupBg)] border-[var(--color-borderDefault)]">
+                  <div className="flex gap-1 p-2 h-full bg-[var(--color-popupBg)]">
+                    {/* Data Types Column */}
+                    <div className="flex-1 px-1.5">
+                      <div className={clsx('px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5', 'text-[var(--color-textMuted)] border-[var(--color-borderDefault)]')}>
+                        Data Types
+                      </div>
+                      <div className="space-y-0.5">
+                        {filterOptions
+                    .filter(o => o.type === 'category')
+                    .map(opt => {
+                    const active = isSelected(opt);
+                    return (<div key={`${opt.type}-${opt.id}`} onClick={() => handleSelect(opt)} className={clsx('flex items-center gap-2 w-full px-1.5 py-1 text-[12px] rounded-md transition-all group relative cursor-pointer', active
+                            ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
+                            : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]')}>
+                                <div className={clsx('w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all duration-200', active
+                            ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
+                            : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] group-hover:border-[var(--color-borderActive)]')}>
+                                  {active && <FaCheck className="text-white text-[7px]"/>}
+                                </div>
+                                <span className={clsx('w-4 flex justify-center text-[13px]', active
+                            ? 'text-[var(--color-textPrimary)]'
+                            : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]')}>
+                                  {opt.icon}
+                                </span>
+                                <span className="truncate flex-1 text-left">{opt.label}</span>
+                              </div>);
+                })}
+                      </div>
                     </div>
-                    <div className="space-y-0.5">
-                      {filterOptions
-                        .filter(o => o.type === 'category')
-                        .map(opt => {
-                          const active = isSelected(opt);
-                          return (
-                            <div
-                              key={`${opt.type}-${opt.id}`}
-                              onClick={() => handleSelect(opt)}
-                              className={clsx(
-                                'flex items-center gap-2 w-full px-1.5 py-1 text-[12px] rounded-md transition-all group relative cursor-pointer',
-                                active
-                                  ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
-                                  : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
-                              )}>
-                              <div
-                                className={clsx(
-                                  'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all duration-200',
-                                  active
-                                    ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
-                                    : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] group-hover:border-[var(--color-borderActive)]',
-                                )}>
-                                {active && <FaCheck className="text-white text-[7px]" />}
-                              </div>
-                              <span
-                                className={clsx(
-                                  'w-4 flex justify-center text-[13px]',
-                                  active ? ('text-blue-400') : ('text-neutral-500 group-hover:text-neutral-400'),
-                                )}>
-                                {opt.icon}
-                              </span>
-                              <span className="truncate flex-1 text-left">{opt.label}</span>
-                            </div>
-                          );
-                        })}
+
+                    <div className={clsx('w-px my-1.5', 'bg-[var(--color-borderDefault)]')}/>
+
+                    {/* Quick Filters Column */}
+                    <div className="flex-1 px-1.5 relative">
+                      <div className={clsx('px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5 flex items-center justify-between', 'text-[var(--color-textMuted)] border-[var(--color-borderDefault)]')}>
+                        <span>Quick Filters</span>
+                      </div>
+                      <div className="space-y-0.5">
+                        {filterOptions
+                    .filter(o => o.type === 'feature')
+                    .map(opt => {
+                    const active = isSelected(opt);
+                    return (<div key={`${opt.type}-${opt.id}`} onClick={() => handleSelect(opt)} className={clsx('flex items-center gap-2 w-full px-1.5 py-1 text-[12px] rounded-md transition-all group relative cursor-pointer', active
+                            ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
+                            : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]')}>
+                                <div className={clsx('w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all duration-200', active
+                            ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
+                            : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] group-hover:border-[var(--color-borderActive)]')}>
+                                  {active && <FaCheck className="text-white text-[7px]"/>}
+                                </div>
+                                <span className={clsx('w-4 flex justify-center text-[13px]', active
+                            ? 'text-[var(--color-textPrimary)]'
+                            : 'text-[var(--color-iconDefault)] group-hover:text-[var(--color-textPrimary)]')}>
+                                  {active && opt.activeIcon ? opt.activeIcon : opt.icon}
+                                </span>
+                                <span className="whitespace-nowrap flex-1 text-left">{opt.label}</span>
+                              </div>);
+                })}
+                      </div>
                     </div>
                   </div>
 
-                  <div className={clsx("w-px my-1.5", "bg-[var(--color-borderDefault)]")} />
-
-                  {/* Quick Filters Column */}
-                  <div className="flex-1 px-1.5 relative">
-                    <div className={clsx(
-                      "px-1.5 pb-1.5 text-[11px] font-bold border-b mb-1.5 flex items-center justify-between", "text-[var(--color-textMuted)] border-[var(--color-borderDefault)]"
-                    )}>
-                      <span>Quick Filters</span>
-                    </div>
-                    <div className="space-y-0.5">
-                      {filterOptions
-                        .filter(o => o.type === 'feature')
-                        .map(opt => {
-                          const active = isSelected(opt);
-                          return (
-                            <div
-                              key={`${opt.type}-${opt.id}`}
-                              onClick={() => handleSelect(opt)}
-                              className={clsx(
-                                'flex items-center gap-2 w-full px-1.5 py-1 text-[12px] rounded-md transition-all group relative cursor-pointer',
-                                active
-                                  ? 'bg-[var(--color-selectedBg)] text-[var(--color-accent)] font-semibold'
-                                  : 'text-[var(--color-textSecondary)] hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)]',
-                              )}>
-                              <div
-                                className={clsx(
-                                  'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all duration-200',
-                                  active
-                                    ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
-                                    : 'border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] group-hover:border-[var(--color-borderActive)]',
-                                )}>
-                                {active && <FaCheck className="text-white text-[7px]" />}
-                              </div>
-                              <span
-                                className={clsx(
-                                  'w-4 flex justify-center text-[13px]',
-                                  active ? '' : ('text-neutral-500 group-hover:text-neutral-400'),
-                                )}>
-                                {active && opt.activeIcon ? opt.activeIcon : opt.icon}
-                              </span>
-                              <span className="whitespace-nowrap flex-1 text-left">{opt.label}</span>
-                            </div>
-                          );
-                        })}
+                  <div className="flex items-center justify-between p-2 border-t border-[var(--color-borderDefault)] bg-[var(--color-popupBg)]">
+                    <button onClick={handleClearAll} className={clsx('text-[11px] font-medium transition-colors px-2 py-1 rounded flex items-center gap-1.5 cursor-pointer', 'text-[var(--color-textSecondary)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]')}>
+                      <FaTimes className="text-[9px]"/>
+                      Clear all
+                    </button>
+                    <div className={clsx('flex items-center gap-1.5 text-[11px] mr-1', 'text-[var(--color-textSecondary)]')}>
+                      <span>Press</span>
+                      <kbd className={clsx('px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded border shadow-sm', 'bg-[var(--color-inputBg)] border-[var(--color-borderDefault)] text-[var(--color-textPrimary)]')}>
+                        ESC
+                      </kbd>
+                      <span>to close</span>
                     </div>
                   </div>
                 </div>
-
-                <div className="flex items-center justify-between p-2 border-t border-white/10 bg-[var(--color-popupBg)]">
-                  <button
-                    onClick={handleClearAll}
-                    className={clsx(
-                      "text-[11px] font-medium transition-colors px-2 py-1 rounded flex items-center gap-1.5 cursor-pointer", "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
-                    )}>
-                    <FaTimes className="text-[9px]" />
-                    Clear all
-                  </button>
-                  <div className={clsx(
-                    "flex items-center gap-1.5 text-[11px] mr-1", "text-neutral-500"
-                  )}>
-                    <span>Press</span>
-                    <kbd className={clsx(
-                      "px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded border shadow-sm", "bg-neutral-800 border-neutral-700 text-neutral-300"
-                    )}>ESC</kbd>
-                    <span>to close</span>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-        )}
+              </>)}
+          </div>)}
 
         {/* Help Button Section */}
-        {!isEmbedded && !hideHelp && (
-          <div className="flex items-center gap-1.5 ml-0.5">
-            <div className="h-4 w-px bg-[var(--color-borderDefault)] mx-1 shrink-0 self-center" />
-            <button
-              onClick={onOpenTutorial}
-              className={clsx(
-                "p-1.5 rounded-md transition-colors focus:outline-none flex items-center justify-center text-neutral-500 hover:text-blue-400 hover:bg-blue-400/10"
-              )}
-              aria-label="Help"
-              title="Open Tutorial">
-              <FiHelpCircle size={16} />
+        {!isEmbedded && !hideHelp && (<div className="flex items-center gap-1.5 ml-0.5">
+            <div className="h-4 w-px bg-[var(--color-borderDefault)] mx-1 shrink-0 self-center"/>
+            <button onClick={onOpenTutorial} className={clsx('p-1.5 rounded-md transition-colors focus:outline-none flex items-center justify-center text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]')} aria-label="Help" title="Open Tutorial">
+              <FiHelpCircle size={16}/>
             </button>
-          </div>
-        )}
+          </div>)}
       </div>
-    </div>
-  );
+    </div>);
 };
-
 export default SpreadsheetToolbar;

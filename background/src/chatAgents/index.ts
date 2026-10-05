@@ -9,7 +9,7 @@ import { executeChatGPTSubmit } from './models/chatGpt';
 import { executeClaudeSubmit } from './models/claude';
 import { executeGeminiSubmit } from './models/gemini';
 import { executePerplexitySubmit } from './models/perplexity';
-import type { AutoSubmitRequest } from '@automation/runtime_Execution_Engine/runner';
+import type { AutoSubmitRequest } from './types';
 
 /**
  * Routes an auto-submit request to the specific provider's handler function.

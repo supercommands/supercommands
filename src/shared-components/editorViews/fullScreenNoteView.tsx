@@ -1,38 +1,23 @@
 import * as React from 'react';
 import { useEffect } from 'react';
-import { NoteEditorView } from '../../allObjectFolder/src';
+import { NoteEditorView } from '../../allObjectFolder/src/createObject/notes';
 import { useUIStore } from '../uiStateManager';
-import { useDbStore } from '../../storage/store/useDbStore';
-
+import { FUNCTIONAL_EDITOR_SURFACE_STYLE } from '../editorContainer/functionalEditorSurfaceStyle';
 interface FullScreenNoteViewProps {
-  noteId?: string;
-  onBack?: () => void;
+    onNavigationGuardReady?: (guard: (() => Promise<boolean>) | null) => void;
+    noteId?: string;
+    onBack?: () => void;
 }
-
-const FullScreenNoteView: React.FC<FullScreenNoteViewProps> = ({ noteId, onBack }) => {
-  const isTempNewNote = Boolean(noteId && noteId.startsWith('temp-'));
-
-  useEffect(() => {
-    useDbStore.getState().initDbSync();
-  }, [isTempNewNote]);
-
-  useEffect(() => {
-    useUIStore.getState().toggleFocusMode(true);
-
-    return () => {
-      useUIStore.getState().toggleFocusMode(false);
-    };
-  }, []);
-
-  return (
-    <div className="fixed inset-0 z-[100002] bg-[var(--color-editorBg)] overflow-hidden">
-      <NoteEditorView
-        noteId={isTempNewNote ? null : noteId ?? null}
-        onBack={onBack}
-        isFullScreenMode={true}
-      />
-    </div>
-  );
+const FullScreenNoteView: React.FC<FullScreenNoteViewProps> = ({ noteId, onBack, onNavigationGuardReady }) => {
+    useEffect(() => {
+        const previousFocusMode = useUIStore.getState().isFocusMode;
+        useUIStore.getState().toggleFocusMode(true);
+        return () => {
+            useUIStore.getState().toggleFocusMode(previousFocusMode);
+        };
+    }, []);
+    return (<div className="fixed inset-0 z-[100002] bg-[var(--color-editorBg)] overflow-hidden" style={FUNCTIONAL_EDITOR_SURFACE_STYLE}>
+      <NoteEditorView noteId={noteId ?? null} onBack={onBack} onNavigationGuardReady={onNavigationGuardReady} isFullScreenMode={true} appearanceTokens={FUNCTIONAL_EDITOR_SURFACE_STYLE}/>
+    </div>);
 };
-
 export default FullScreenNoteView;

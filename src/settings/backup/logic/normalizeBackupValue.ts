@@ -23,7 +23,7 @@ export function normalizeBackupValue(value: unknown, path = '', tableName?: stri
   if (isPlainObject(value)) {
     return Object.keys(value)
       .filter(key => !(path === '' && descriptor?.comparisonFields && !descriptor.comparisonFields.includes(key)))
-      .filter(key => !ignoredFields.has(key))
+      .filter(key => path !== '' || !ignoredFields.has(key))
       .sort()
       .reduce<Record<string, unknown>>((result, key) => {
         result[key] = normalizeBackupValue(value[key], path ? `${path}.${key}` : key, tableName);
@@ -34,6 +34,6 @@ export function normalizeBackupValue(value: unknown, path = '', tableName?: stri
   return value;
 }
 
-export function backupValuesAreEqual(left: unknown, right: unknown, tableName?: string): boolean {
-  return JSON.stringify(normalizeBackupValue(left, '', tableName)) === JSON.stringify(normalizeBackupValue(right, '', tableName));
+export function backupValuesAreEqual(left: unknown, right: unknown, tableName?: string, path = ''): boolean {
+  return JSON.stringify(normalizeBackupValue(left, path, tableName)) === JSON.stringify(normalizeBackupValue(right, path, tableName));
 }

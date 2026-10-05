@@ -2,18 +2,18 @@
  * @file index.ts
  * @description Barrel export file for the AI Prompt editor module,
  * exposing the main editor view, hook, and database types/functions.
- * 
+ *
  * @usage
  * ```ts
  * import { AiPromptEditorView, useAiPromptEditor } from './aiPrompt';
  * ```
  */
-
 export { AiPromptEditorView } from './ui/AiPromptEditorView';
-
+export { AiPromptModelSelector } from './ui/AiPromptModelSelector';
 export type { AiPromptEditorViewProps } from './ui/AiPromptEditorView';
+export type { AiPromptModelSelectorValue } from './ui/AiPromptModelSelector';
 export { useAiPromptEditor } from './useAiPromptEditor';
-export { getAiPromptExecutionText, hasRunnableAiPrompt, runAiPrompt } from './runAiPrompt';
+export { composeAiPromptTemporaryPrompt, getAiPromptExecutionText, hasRunnableAiPrompt, runAiPrompt, runDirectAiPrompt } from './runAiPrompt';
 export type { RunAiPromptResult } from './runAiPrompt';
 export * from './aiPromptModelHelpers';
 export { useExcludedAiPromptModels } from './useExcludedAiPromptModels';

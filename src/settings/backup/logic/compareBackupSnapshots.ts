@@ -1,4 +1,5 @@
 import type { BackupData } from './extractData';
+import { prepareBackupSnapshot } from './prepareBackupSnapshot';
 import { LOCAL_SETTINGS_BACKUP_KEYS } from './localSettingsBackup';
 import { BACKUP_TABLE_NAMES } from './backupRegistry';
 import { getBackupRecordIdentity } from './backupIdentity';
@@ -18,7 +19,7 @@ function isDeleted(record: Record<string, unknown> | undefined, tableName: strin
 }
 
 function collectFieldChanges(localValue: unknown, driveValue: unknown, tableName: string, path = ''): BackupFieldChange[] {
-  if (backupValuesAreEqual(localValue, driveValue, tableName)) return [];
+  if (backupValuesAreEqual(localValue, driveValue, tableName, path)) return [];
   if (!localValue || !driveValue || typeof localValue !== 'object' || typeof driveValue !== 'object') {
     return [{
       path,
@@ -36,7 +37,7 @@ function collectFieldChanges(localValue: unknown, driveValue: unknown, tableName
   const keys = new Set(
     [...Object.keys(localObject), ...Object.keys(driveObject)]
       .filter(key => !allowedFields || path !== '' || allowedFields.has(key))
-      .filter(key => !ignoredFields.has(key))
+      .filter(key => path !== '' || !ignoredFields.has(key))
   );
   return [...keys].flatMap(key => collectFieldChanges(localObject[key], driveObject[key], tableName, path ? `${path}.${key}` : key));
 }
@@ -47,7 +48,7 @@ function collectVisibleRecordChanges(localRecord: Record<string, unknown>, drive
   return fields.filter(field => field !== 'id' && !descriptor.ignoredFields?.includes(field)).flatMap(field => {
     const localValue = localRecord[field];
     const driveValue = driveRecord[field];
-    return backupValuesAreEqual(localValue, driveValue, tableName)
+    return backupValuesAreEqual(localValue, driveValue, tableName, field)
       ? []
       : [{ path: field, localValue, driveValue, kind: localValue === undefined ? 'added' as const : driveValue === undefined ? 'removed' as const : 'changed' as const }];
   });
@@ -94,6 +95,8 @@ function compareTable(tableName: string, localRecords: any[], driveRecords: any[
 }
 
 export function compareBackupSnapshots(local: BackupData, drive: BackupData): BackupComparisonResult {
+  local = prepareBackupSnapshot(local);
+  drive = prepareBackupSnapshot(drive);
   const tables: Record<string, BackupTableDifferences> = {};
   let addedCount = 0;
   let removedCount = 0;

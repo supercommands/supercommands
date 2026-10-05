@@ -2,10 +2,10 @@
   "extends": "../../../packages/tsconfig/base.json",
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": {
-      "@private-providers/*": ["storage/providers/*"],
-      "@private-services/*": ["services/*"]
-    }
+    "paths": {}
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ]
 }

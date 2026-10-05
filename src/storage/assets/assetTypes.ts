@@ -2,17 +2,15 @@
  * @file assetTypes.ts
  * @description Defines TypeScript interfaces for the local asset storage.
  */
-
 export interface AssetRecord {
-  id: string;
-  blob?: Blob;
-  mimeType: string;
-  byteSize: number;
-  hash?: string;
-  createdAt: number;
-  storageDriver?: 'indexeddb' | 'opfs';
-  storagePath?: string;
-  pendingDeletionAt?: number;
+    id: string;
+    blob?: Blob;
+    mimeType: string;
+    byteSize: number;
+    hash?: string;
+    createdAt: number;
+    storageDriver?: 'indexeddb' | 'opfs';
+    storagePath?: string;
+    pendingDeletionAt?: number;
 }
-
 export const ASSET_COMPARISON_FIELDS = ['id', 'mimeType', 'byteSize', 'hash', 'storageDriver', 'storagePath', 'pendingDeletionAt'] as const satisfies readonly (keyof AssetRecord)[];

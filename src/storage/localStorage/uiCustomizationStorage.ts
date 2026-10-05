@@ -1,49 +1,53 @@
 // --- Wallpaper Storage ---
 export const getStoredWallpaperId = async (): Promise<string> => {
-  try {
-    const chromeAny = (window as any).chrome;
-    if (chromeAny?.storage?.local) {
-      const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['appearance-wallpaper'], resolve));
-      return result['appearance-wallpaper'] || 'car-race.png';
+    try {
+        const chromeAny = (window as any).chrome;
+        if (chromeAny?.storage?.local) {
+            const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['appearance-wallpaper'], resolve));
+            return result['appearance-wallpaper'] || 'car-race.png';
+        }
     }
-  } catch (e) {
-    console.error('Failed to get stored wallpaper ID:', e);
-  }
-  return 'car-race.png';
+    catch (e) {
+        console.error('Failed to get stored wallpaper ID:', e);
+    }
+    return 'car-race.png';
 };
-
 export const setStoredWallpaperId = async (wallpaperId: string): Promise<void> => {
-  try {
-    const chromeAny = (window as any).chrome;
-    if (chromeAny?.storage?.local) {
-      await new Promise<void>(resolve => chromeAny.storage.local.set({ 'appearance-wallpaper': wallpaperId }, resolve));
+    try {
+        const chromeAny = (window as any).chrome;
+        if (chromeAny?.storage?.local) {
+            await new Promise<void>(resolve => chromeAny.storage.local.set({ 'appearance-wallpaper': wallpaperId }, resolve));
+        }
     }
-  } catch (e) {
-    console.error('Failed to store wallpaper ID:', e);
-  }
+    catch (e) {
+        console.error('Failed to store wallpaper ID:', e);
+    }
 };
-
 // --- Custom Wallpaper Base64 Storage ---
 export const getCustomWallpaperBase64 = async (): Promise<string> => {
-  try {
-    const chromeAny = (window as any).chrome;
-    if (chromeAny?.storage?.local) {
-      const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['custom-wallpaper-base64'], resolve));
-      return result['custom-wallpaper-base64'] || '';
+    try {
+        const chromeAny = (window as any).chrome;
+        if (chromeAny?.storage?.local) {
+            const result = await new Promise<any>(resolve => chromeAny.storage.local.get(['custom-wallpaper-base64'], resolve));
+            return result['custom-wallpaper-base64'] || '';
+        }
     }
-  } catch (e) {
-    console.error('Failed to get custom wallpaper base64:', e);
-  }
-  return '';
+    catch (e) {
+        console.error('Failed to get custom wallpaper base64:', e);
+    }
+    return '';
 };
-
 export const setCustomWallpaperBase64 = async (base64: string): Promise<void> => {
-  try {
     const chromeAny = (window as any).chrome;
-    if (chromeAny?.storage?.local) {
-      await new Promise<void>(resolve => chromeAny.storage.local.set({ 'custom-wallpaper-base64': base64 }, resolve));
-    }
-  } catch (e) {
-    console.error('Failed to store custom wallpaper base64:', e);
-  }
+    if (!chromeAny?.storage?.local)
+        throw new Error('Wallpaper storage is unavailable');
+    await new Promise<void>((resolve, reject) => {
+        chromeAny.storage.local.set({ 'custom-wallpaper-base64': base64 }, () => {
+            const error = chromeAny.runtime?.lastError;
+            if (error)
+                reject(new Error(error.message));
+            else
+                resolve();
+        });
+    });
 };

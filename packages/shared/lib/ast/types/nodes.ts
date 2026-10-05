@@ -34,6 +34,13 @@ export interface ParagraphNode extends BaseASTNode {
   children: ASTNode[];
 }
 
+export interface LinkTextMark {
+  type: 'link';
+  href: string;
+}
+
+export type TextMark = LinkTextMark;
+
 /**
  * Content Node: Text
  * Static text content.
@@ -41,6 +48,7 @@ export interface ParagraphNode extends BaseASTNode {
 export interface TextNode extends BaseASTNode {
   type: 'text';
   value: string;
+  marks?: TextMark[];
 }
 
 /**

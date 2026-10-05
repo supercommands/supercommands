@@ -2,8 +2,7 @@
  * @file index.ts
  * @description Entry point for the chat agent runtime execution engine.
  */
-import { pendingAutoSubmitTabs } from '@automation/runtime_Execution_Engine/runner';
-import { tabPromptQueues, processTabQueue } from '@chatAgents/runtimeExecutionEngine';
+import { pendingAutoSubmitTabs, tabPromptQueues, processTabQueue } from '@chatAgents/runtimeExecutionEngine';
 
 export const extractChatId = (urlString: string): string | null => {
   try {
@@ -76,7 +75,7 @@ export function handleAiTabMessage(
     const rawAutoSubmit = request.autoSubmit;
     const isValidKind = (kind: unknown): kind is string =>
       typeof kind === 'string' &&
-      ['chatgpt', 'claude', 'gemini', 'perplexity', 'mistral', 'copilot', 'google', 'calendar', 'drive'].includes(kind);
+      ['chatgpt', 'claude', 'gemini', 'perplexity', 'mistral', 'copilot', 'google', 'calendar'].includes(kind);
 
     const autoSubmit =
       rawAutoSubmit && typeof rawAutoSubmit === 'object' && isValidKind((rawAutoSubmit as { kind?: unknown }).kind)

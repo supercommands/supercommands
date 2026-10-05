@@ -1,9 +1,9 @@
 /**
  * @file perplexity.ts
- * @description Automation handler for injecting and submitting prompts into Perplexity AI.
+ * @description Handler for injecting and submitting prompts into Perplexity AI.
  */
 
-import type { AutoSubmitRequest } from '@automation/runtime_Execution_Engine/runner';
+import type { AutoSubmitRequest } from '../types';
 
 /**
  * Injects a content script into the specified Perplexity tab to automatically fill
@@ -47,7 +47,7 @@ export async function executePerplexitySubmit(tabId: number, request: AutoSubmit
           }
         };
 
-        const markKey = `tasklabsAutoSubmit-${kind}`;
+        const markKey = `cmdosAutoSubmit-${kind}`;
         const timestampKey = `${markKey}-timestamp`;
 
         const stopMonitoring = () => {

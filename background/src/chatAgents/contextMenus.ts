@@ -3,8 +3,9 @@
  * @description Registers and handles right-click context menus for AI Chat injection.
  */
 import { tabPromptQueues, processTabQueue } from './runtimeExecutionEngine';
+import { BRAND } from '../../../src/shared-components/brandingConfig';
 
-const CONTEXT_MENU_PARENT_ID = 'cmdos_commands';
+const CONTEXT_MENU_PARENT_ID = BRAND.contextMenuId;
 const CONTEXT_MENU_AI_OPTIONS = [
   { id: 'gpt', label: 'ChatGPT', kind: 'chatgpt', url: 'https://chatgpt.com/' },
   { id: 'perplexity', label: 'Perplexity', kind: 'perplexity', url: 'https://www.perplexity.ai/search' },
@@ -22,7 +23,7 @@ export function setupContextMenus() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_PARENT_ID,
-      title: 'cmdOS - Commands',
+      title: BRAND.contextMenuTitle,
       contexts: ['selection'],
     });
 

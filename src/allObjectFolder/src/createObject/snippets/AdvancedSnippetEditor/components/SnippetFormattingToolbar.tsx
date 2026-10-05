@@ -34,7 +34,6 @@ export interface SnippetFormattingToolbarProps {
   activeSnippetId?: string | null;
   snippet?: Snippet | null;
   workspaceId?: string | null;
-  folderId?: string | null;
   tagIds?: string[];
   snippetTitle?: string;
   onChange?: (props: any) => void;
@@ -44,7 +43,6 @@ export const SnippetFormattingToolbar: React.FC<SnippetFormattingToolbarProps> =
   activeSnippetId,
   snippet,
   workspaceId,
-  folderId,
   tagIds,
   snippetTitle = '',
   onChange,
@@ -63,19 +61,17 @@ export const SnippetFormattingToolbar: React.FC<SnippetFormattingToolbarProps> =
       ...base,
       id: activeSnippetId || base.id,
       workspaceId: workspaceId || base.workspaceId,
-      folderId: folderId || base.folderId,
       tagIds: tagIds !== undefined ? tagIds : (base.tagIds || []),
       category: 'snippet',
     };
-  }, [snippet, activeSnippetId, workspaceId, folderId, tagIds]);
+  }, [snippet, activeSnippetId, workspaceId, tagIds]);
 
   const compoundId = useMemo(() => {
     if (!activeSnippetId || activeSnippetId === 'new') return '';
     const wsObj = workspaceId ? { workspace_id: workspaceId } : null;
-    const fldObj = folderId ? { folder_id: folderId } : null;
     const snipObj = snippet || { id: activeSnippetId, category: 'snippet', key: snippetTitle || '' };
-    return getItemCompoundId({ snippet: snipObj as any, workspace: wsObj as any, folder: fldObj as any });
-  }, [activeSnippetId, snippet, workspaceId, folderId, snippetTitle]);
+    return getItemCompoundId({ snippet: snipObj as any, workspace: wsObj as any });
+  }, [activeSnippetId, snippet, workspaceId, snippetTitle]);
 
   if (!editor) return null;
 
@@ -192,22 +188,23 @@ export const SnippetFormattingToolbar: React.FC<SnippetFormattingToolbarProps> =
         <div className="flex flex-col gap-2 pt-0.5 overflow-y-auto custom-scrollbar flex-1 pr-1.5 -mr-1.5 relative z-10">
           {sections.map((section, idx) => (
             <div key={idx} className="flex flex-col gap-2 flex-shrink-0">
-              {section.title && <h4 className="text-[12px] font-normal text-neutral-500 dark:text-neutral-400 opacity-90 px-0.5">{section.title}</h4>}
+              {section.title && <h4 className="px-0.5 text-[12px] font-normal text-[var(--color-textSecondary)] opacity-70">{section.title}</h4>}
               <div className="flex flex-col gap-2">
                 {section.items.map(item => (
                   <button
                     key={item.id}
+                    data-snippet-field-action={['text', 'dropdown', 'toggle', 'date'].includes(item.id) ? 'true' : undefined}
                     onClick={() => item.action(editor)}
-                    className="flex items-start gap-3.5 w-full text-left p-2 -mx-1.5 rounded-xl hover:bg-neutral-100 dark:hover:bg-white/5 transition-all group cursor-pointer"
+                    className="group -mx-1.5 flex w-full items-start gap-3.5 rounded-xl p-2 text-left transition-all hover:bg-[var(--color-hoverBg)] cursor-pointer"
                   >
-                    <div className="mt-0.5 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-200 transition-colors opacity-90">
+                    <div className="mt-0.5 text-[var(--color-iconDefault)] opacity-80 transition-opacity group-hover:opacity-100">
                       {item.icon}
                     </div>
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-xs font-normal text-neutral-700 dark:text-neutral-300 opacity-100 leading-tight">
+                      <span className="text-xs font-normal leading-tight text-[var(--color-textPrimary)]">
                         {item.title}
                       </span>
-                      <span className="text-[11px] font-normal text-neutral-400 dark:text-neutral-500 opacity-85 leading-normal">
+                      <span className="text-[11px] font-normal leading-normal text-[var(--color-textSecondary)] opacity-75">
                         {item.description}
                       </span>
                     </div>
@@ -222,7 +219,7 @@ export const SnippetFormattingToolbar: React.FC<SnippetFormattingToolbarProps> =
         {previewFields.length > 0 && (
           <button
             onClick={() => setIsTestModalOpen(true)}
-            className="w-full py-2 bg-neutral-900 dark:bg-white text-white dark:text-black rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity mt-2 flex-shrink-0 shadow-sm"
+            className="mt-2 w-full flex-shrink-0 rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] py-2 text-sm font-semibold text-[var(--color-textPrimary)] shadow-sm transition-colors hover:bg-[var(--color-hoverBg)]"
           >
             Test
           </button>

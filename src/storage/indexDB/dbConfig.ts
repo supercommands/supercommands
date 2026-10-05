@@ -1,9 +1,21 @@
+import { migrateCollectionItemNotes } from './collectionNoteMigration';
+import { migrateCollectionItemTags } from './collectionTagMigration';
+import { migrateCollectionProperties } from './collectionPropertyMigration';
+import { migrateWebClipPrefixes } from './webClipPrefixMigration';
+import { mergeLegacyImportRows, finalizeLegacyCommandCatalog } from '../migrations/legacyImportPolicy';
+import { repairMigratedWorkspaceCommands } from '../migrations/workspaceCommandProvisioning';
+import { checkShortcutAssignment, saveUserShortcutGuarded } from '../../shared-components/shortcuts/core/shortcutDbData';
+import type { WorkspaceRecord } from '../../allObjectFolder/src/createObject/session/workspaceTypes';
+import type { CollectionRecord, CollectionItemRecord } from '../../allObjectFolder/src/createObject/collections';
+import { projectWorkspaceTable, workspaceToSession, workspaceToView } from './workspaceProjections';
+import { convertPlatformTables, migratePlatformPreferences, PLATFORM_DATABASE_VERSION, PLATFORM_MIGRATION_KEY } from '../migrations/platformMigration';
+import { repairWorkspaceItemTags, type WorkspaceTagBinding } from '../migrations/workspaceTagRepair';
 import Dexie, { type Table } from 'dexie';
-import type { WorkspaceData } from '../../settings/allWorkspaceManager/workspaces/workspaceTypes';
-import type { FolderData } from '../../settings/allWorkspaceManager/folders/folderTypes';
+import type { OrganisationIdMap } from '../migrations/organisationMigration';
+import { BRAND_DB } from '../../shared-components/brandingConfig';
+import type { OrganisationData } from '../../settings/allOrganisationManager/organisations/organisationTypes';
 import type { NoteRecord } from '../../allObjectFolder/src/createObject/notes/noteTypes';
 import type { LinkRecord } from '../../allObjectFolder/src/createObject/links/linkTypes';
-import type { AutomationRecord } from '../../allObjectFolder/src/createObject/automationBeta/automationTypes';
 import type { ChatAgentRecord } from '../../allObjectFolder/src/createObject/ChatAgent/chatAgentTypes';
 import type { AiPromptRecord } from '../../allObjectFolder/src/createObject/aiPrompt/aiPromptTypes';
 import type { SnippetRecord } from '../../allObjectFolder/src/createObject/snippets/snippetTypes';
@@ -21,20 +33,23 @@ import type { FavoriteRecord } from '../../shared-components/favorites/favoriteT
 import type { CommandRecord } from '../../allObjectFolder/src/createObject/commands/commandTypes';
 import type { SessionRecord } from '../../allObjectFolder/src/createObject/session/sessionTypes';
 import type { AssetRecord } from '../assets/assetTypes';
+import type { ElementSnapshotRecord } from '../../allObjectFolder/src/createObject/collections/elementSnapshotTypes';
 import {
   normalizeCollectionLaunchSettings,
   type WidgetRecord,
   type WidgetLayoutRecord,
   type WidgetViewRecord,
+  type WidgetDashboardRecord,
 } from '../../allObjectFolder/src/createObject/widgets/widgetTypes';
 import type { PrefixSettingRecord } from '../../allObjectFolder/src/createObject/prefixSettings/prefixSettingTypes';
+import type { NotificationRecord } from './notificationTypes';
+import type { NotificationDeliveryJob } from './notificationDeliveryTypes';
 
-export class CmdOSDatabase extends Dexie {
-  workspaces!: Table<WorkspaceData, string>;
-  folders!: Table<FolderData, string>;
+export class SuperCommandsDatabase extends Dexie {
+  organisations!: Table<OrganisationData, string>;
+  migrationMetadata!: Table<{ id: string; idMap: OrganisationIdMap; settingsComplete?: boolean; retiredIds?: string[]; organisationId?: string; templateIds?: Record<string, string>; completed?: boolean; bindings?: WorkspaceTagBinding[]; addedMemberships?: number; evidenceCount?: number }, string>;
   notes!: Table<NoteRecord, string>;
   links!: Table<LinkRecord, string>;
-  automations!: Table<AutomationRecord, string>;
   chatAgents!: Table<ChatAgentRecord, string>;
   aiPrompts!: Table<AiPromptRecord, string>;
   snippets!: Table<SnippetRecord, string>;
@@ -47,27 +62,57 @@ export class CmdOSDatabase extends Dexie {
   triggerDailyBreakdown!: Table<TriggerDailyBreakdownRecord, string>;
   favorites!: Table<FavoriteRecord, string>;
   commands!: Table<CommandRecord, string>;
-  sessions!: Table<SessionRecord, string>;
+  workspaces!: Table<WorkspaceRecord, string>;
+  collections!: Table<CollectionRecord, string>;
+  collectionItems!: Table<CollectionItemRecord, string>;
+  collectionElementSnapshots!: Table<ElementSnapshotRecord, string>;
+  get workspaceSessions(): Table<SessionRecord, string> { return projectWorkspaceTable(this.workspaces, workspaceToSession); }
   assets!: Table<AssetRecord, string>;
   widgets!: Table<WidgetRecord, string>;
   widgetLayouts!: Table<WidgetLayoutRecord, string>;
-  widgetViews!: Table<WidgetViewRecord, string>;
+  get workspaceViews(): Table<WidgetViewRecord, string> { return projectWorkspaceTable(this.workspaces, workspaceToView); }
+  widgetDashboards!: Table<WidgetDashboardRecord, string>;
   prefixSettings!: Table<PrefixSettingRecord, string>;
+  notifications!: Table<NotificationRecord, string>;
+  notificationDeliveryJobs!: Table<NotificationDeliveryJob, string>;
 
   constructor() {
-    super('cmdOS');
+    let sourceVersion = 0;
+    let originalPhysicalRecords: Promise<Record<string, any[]>> | undefined;
+    const nativeFactory = typeof indexedDB === 'undefined' ? undefined : indexedDB;
+    const trackedFactory = nativeFactory ? {
+      open: (name: string, version?: number) => {
+        const request = version === undefined ? nativeFactory.open(name) : nativeFactory.open(name, version);
+        request.addEventListener('upgradeneeded', event => {
+          sourceVersion = event.oldVersion / 10;
+          // Capture recorded legacy scope before historical callbacks flatten tag fields.
+          const transaction = request.transaction;
+          if (event.oldVersion && transaction) originalPhysicalRecords = Promise.all(
+            Array.from(transaction.objectStoreNames).map(name => new Promise<[string, any[]]>((resolve, reject) => {
+              const read = transaction.objectStore(name).getAll();
+              read.onsuccess = () => resolve([name, read.result]); read.onerror = () => reject(read.error);
+            }))
+          ).then(rows => Object.fromEntries(rows));
+        });
+        return request;
+      },
+      deleteDatabase: nativeFactory.deleteDatabase.bind(nativeFactory),
+      cmp: nativeFactory.cmp.bind(nativeFactory),
+      databases: typeof nativeFactory.databases === 'function' ? nativeFactory.databases.bind(nativeFactory) : async () => [],
+    } : undefined;
+    // Dexie represents each public schema version as ten native IndexedDB version units.
+    super(BRAND_DB.current, trackedFactory ? {indexedDB: trackedFactory} : undefined);
 
     this.version(1).stores({
       workspaces: 'id, workspaceName, updatedAt',
       folders: 'id, workspaceId, folderName, updatedAt',
       notes: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId]',
       links: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId]',
-      automations: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId]',
       snippets: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId]',
       chatAgents: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId]',
       aiPrompts: 'id, workspaceId, folderId, updatedAt, [workspaceId+updatedAt], [workspaceId+folderId]',
       todos: 'id, scheduleTime, updatedAt',
-      tags: 'id, workspaceId, name, updatedAt, [workspaceId+updatedAt]',
+      tags: 'id, name, dashboardViewId, updatedAt, [dashboardViewId+updatedAt]',
       favoriteCategories: 'id, userId, name, updatedAt, [userId+updatedAt]',
       userHotkeys: 'id, userId, combination, referenceId, referenceType, updatedAt',
       userShortcuts: 'id, userId, trigger, referenceId, referenceType, updatedAt',
@@ -201,7 +246,7 @@ export class CmdOSDatabase extends Dexie {
         'id, workspaceId, viewId, type, referenceId, referenceType, updatedAt, [workspaceId+updatedAt], [workspaceId+viewId], [referenceType+referenceId]',
       widgetLayouts:
         'id, workspaceId, viewId, widgetId, updatedAt, [workspaceId+viewId], [workspaceId+updatedAt]',
-      widgetViews: 'id, workspaceId, isDefault, updatedAt, [workspaceId+updatedAt]',
+      widgetViews: 'id, workspaceId, updatedAt, [workspaceId+updatedAt]',
     });
 
     this.version(13).stores({
@@ -238,8 +283,6 @@ export class CmdOSDatabase extends Dexie {
           'capture_element_screenshot',
           'downloadallimages',
           'downloadalltables',
-          'save_link',
-          'save_todo',
           'save_note',
           'save_snippet',
           'save_chat',
@@ -268,27 +311,202 @@ export class CmdOSDatabase extends Dexie {
           delete view.collectionLaunchSettings.saveBehavior;
         });
     });
+
+    this.version(17).stores({
+      automations: null,
+    });
+
+    this.version(18).stores({
+      notifications:
+        'id, &dedupeKey, ownerId, sourceType, sourceId, status, createdAt, occurrenceAt, [ownerId+status+createdAt], [sourceType+sourceId]',
+    });
+
+    this.version(19).stores({
+      notificationDeliveryJobs:
+        'id, channel, status, createdAt, nextAttemptAt, [status+nextAttemptAt]',
+    });
+
+    this.version(20)
+      .stores({
+        widgetViews: 'id, workspaceId, updatedAt, [workspaceId+updatedAt]',
+      })
+      .upgrade(async tx => {
+        await tx.table('widgetViews').toCollection().modify((view: any) => {
+          delete view.isDefault;
+        });
+      });
+
+    this.version(21)
+      .stores({
+        tags: 'id, name, dashboardViewId, updatedAt, [dashboardViewId+updatedAt]',
+      })
+      .upgrade(async tx => {
+        await tx.table('tags').toCollection().modify((tag: any) => {
+          tag.dashboardViewId = null;
+          delete tag.workspaceId;
+        });
+      });
+    // Keep historical schemas unchanged. One platform upgrade also accepts installed intermediate versions 22–31.
+    this.version(PLATFORM_DATABASE_VERSION).stores({
+      organisations: 'id, organisationName, updatedAt',
+      migrationMetadata: 'id',
+      workspaces: 'id, organisationId, workspaceName, updatedAt, [organisationId+updatedAt]',
+      tags: 'id, name, workspaceId, updatedAt',
+      folders: null,
+      notes: 'id, organisationId, updatedAt, [organisationId+updatedAt], *assetIds',
+      links: 'id, organisationId, updatedAt, [organisationId+updatedAt]',
+      snippets: 'id, organisationId, updatedAt, [organisationId+updatedAt]',
+      chatAgents: 'id, organisationId, updatedAt, [organisationId+updatedAt]',
+      aiPrompts: 'id, organisationId, updatedAt, [organisationId+updatedAt]',
+      sessions: null,
+      widgets: 'id, organisationId, viewId, type, referenceId, referenceType, updatedAt, [organisationId+updatedAt], [organisationId+viewId], [referenceType+referenceId]',
+      widgetLayouts: 'id, organisationId, viewId, widgetId, updatedAt, [organisationId+viewId], [organisationId+updatedAt]',
+      widgetViews: null,
+      widgetDashboards: 'id, organisationId, kind, &[organisationId+kind], updatedAt',
+    }).upgrade(async tx => {
+      const snapshot: Record<string, any[]> = {};
+      // Read physical stores: removed legacy stores are absent from Dexie's final table schema.
+      for (const name of Array.from(tx.idbtrans.objectStoreNames)) {
+        snapshot[name] = await new Promise<any[]>((resolve, reject) => {
+          const request = tx.idbtrans.objectStore(name).getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      }
+      const converted = convertPlatformTables(snapshot, {resetHome: sourceVersion < 30, originalSnapshot: await originalPhysicalRecords, sourceVersion});
+      for (const [name, rows] of Object.entries(converted.tables)) {
+        if (name === 'migrationMetadata') continue;
+        await tx.table(name).clear();
+        if (rows.length) await tx.table(name).bulkAdd(rows);
+      }
+      if (converted.tables.migrationMetadata?.length) await tx.table('migrationMetadata').bulkPut(converted.tables.migrationMetadata);
+      await tx.table('migrationMetadata').put(converted.migration);
+    });
+    // Additive collection foundation; the version-32 platform conversion stays unchanged.
+    this.version(33).stores({
+      collections: 'id, organisationId, updatedAt, [organisationId+updatedAt]',
+      collectionItems: 'id, organisationId, collectionId, type, updatedAt, [organisationId+updatedAt], [organisationId+collectionId], [organisationId+type], [collectionId+updatedAt]',
+    });
+    this.version(34).stores({
+      collectionItems: 'id, organisationId, collectionId, type, updatedAt, [organisationId+updatedAt], [organisationId+collectionId], [organisationId+type], [collectionId+updatedAt]',
+    }).upgrade(migrateCollectionItemNotes);
+    this.version(35).stores({
+      collectionItems: 'id, organisationId, collectionId, type, updatedAt, *tagIds, [organisationId+updatedAt], [organisationId+collectionId], [organisationId+type], [collectionId+updatedAt]',
+    }).upgrade(migrateCollectionItemTags);
+    // Custom properties are unindexed JSON containers; existing table/index schemas carry forward.
+    this.version(36).stores({}).upgrade(migrateCollectionProperties);
+    // Data-only prefix upgrade; all existing table/index schemas carry forward.
+    this.version(37).stores({}).upgrade(migrateWebClipPrefixes);
+    // Visual captures are optional, immutable companions to existing Collection items.
+    this.version(38).stores({
+      collectionElementSnapshots: 'id, captureId, organisationId, collectionId',
+    });
+    this.on('ready', async () => {
+      await migrateIndexedDBIfNeeded(this);
+      await repairWorkspaceItemTags(this, BRAND_DB.legacy);
+      const migration = await this.migrationMetadata.get(PLATFORM_MIGRATION_KEY);
+      if (migration && !migration.settingsComplete) {
+        try {
+          await Dexie.waitFor(migratePlatformPreferences({...migration, retiredIds: migration.retiredIds || []}));
+          await this.migrationMetadata.update(migration.id, {settingsComplete: true});
+        } catch (error) {
+          // Preference cleanup is retryable and must not hide successfully migrated data.
+          console.warn('[Dexie] Platform preference cleanup pending; database remains available.', error);
+        }
+      }
+    });
   }
 }
 
-export const db = new CmdOSDatabase();
+export const db = new SuperCommandsDatabase();
+export const CmdOSDatabase = SuperCommandsDatabase;
+export type CmdOSDatabaseType = SuperCommandsDatabase;
 
 import { migrateWidgetsFromLocalStorageToDexie } from './migrateWidgetsToDexie';
 import { migratePrefixSettingsFromLocalStorageToDexie } from '../../allObjectFolder/src/createObject/prefixSettings/prefixSettingData';
+import { reconcileDashboardViewTags } from '../../allObjectFolder/src/createObject/tags/dashboardTagData';
+
+/**
+ * Transparently migrate all records from the legacy IndexedDB database ('cmdOS')
+ * into the current database (BRAND_DB.current) if the legacy DB exists.
+ * This is a one-time migration; the source database is retained for recovery.
+ */
+async function migrateIndexedDBIfNeeded(database: SuperCommandsDatabase): Promise<void> {
+  if (String(BRAND_DB.legacy) === String(BRAND_DB.current) || typeof indexedDB === 'undefined') return;
+  // Abort creation when there is no legacy database; fresh users do no conversion.
+  if (await database.migrationMetadata.get('legacy-database-import-complete')) return;
+  const legacy = await new Promise<IDBDatabase | null>((resolve, reject) => {
+    const request = indexedDB.open(BRAND_DB.legacy);
+    let absent = false;
+    request.onupgradeneeded = () => { absent = true; request.transaction?.abort(); };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => absent ? resolve(null) : reject(request.error);
+    request.onblocked = () => reject(new Error('Legacy database migration is blocked.'));
+  });
+  if (!legacy) { await database.migrationMetadata.put({id: 'legacy-database-import-complete', idMap: {}}); return; }
+  const legacyVersion = legacy.version / 10;
+  const snapshot: Record<string, any[]> = {};
+  try {
+    for (const name of Array.from(legacy.objectStoreNames)) {
+      snapshot[name] = await new Promise<any[]>((resolve, reject) => {
+        const transaction = legacy.transaction(name, 'readonly');
+        const request = transaction.objectStore(name).getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+  } finally { legacy.close(); }
+  const converted = convertPlatformTables(snapshot, {sourceVersion: legacyVersion, resetHome: legacyVersion < 30});
+  const known = new Set(database.tables.map(table => table.name));
+  const unknown = Object.keys(converted.tables).filter(name => !known.has(name) && converted.tables[name].length);
+  if (unknown.length) throw new Error('Legacy database has unsupported populated stores: ' + unknown.join(', '));
+  await database.transaction('rw', database.tables, async () => {
+    const conflicts = await mergeLegacyImportRows(database, converted.tables, BRAND_DB.legacy);
+    for (const record of converted.tables.migrationMetadata || []) {
+      if (!await database.migrationMetadata.get(record.id)) await database.migrationMetadata.put(record);
+    }
+    const previous = await database.migrationMetadata.get(PLATFORM_MIGRATION_KEY);
+    await database.migrationMetadata.put({...converted.migration,
+      idMap: {...previous?.idMap, ...converted.migration.idMap},
+      retiredIds: [...new Set([...(previous?.retiredIds || []), ...converted.migration.retiredIds])],
+      settingsComplete: false});
+    await database.migrationMetadata.put({ id: 'legacy-database-import-complete', idMap: {},
+      commandCatalogComplete: false, conflictCount: conflicts.length, conflicts } as any);
+  });
+  // Retain the original database as recovery data. Never delete it automatically.
+}
 
 if (typeof indexedDB !== 'undefined') {
-  // Open the database immediately so it creates the schema and is visible in Chrome DevTools
+  // Open the database immediately so it creates the schema and is visible in Chrome DevTools.
   db.open()
-    .then(() => {
+    .then(async () => {
+      console.info('[Dexie] Database ready', { name: db.name, version: db.verno });
       void migrateWidgetsFromLocalStorageToDexie().catch(err => {
         console.error('[Dexie] Widget migration failed:', err);
       });
-      void migratePrefixSettingsFromLocalStorageToDexie().catch(err => {
+      await migratePrefixSettingsFromLocalStorageToDexie().catch(err => {
         console.error('[Dexie] Prefix settings migration failed:', err);
+      });
+      const imported = await db.migrationMetadata.get('legacy-database-import-complete') as any;
+      if (imported?.commandCatalogComplete === false) {
+        // Outside on('ready'): source catalog services use the singleton database connection.
+        try {
+          const { syncCommandsFromSource } = await import('../../allObjectFolder/src/createObject/commands/commandData');
+          await finalizeLegacyCommandCatalog(db, syncCommandsFromSource);
+        } catch (error) {
+          console.warn('[Dexie] Legacy command catalog refresh pending; database remains available.', error);
+        }
+      }
+      if (imported?.conflictCount) console.warn('[Dexie] Legacy import kept current records; legacy copies retained for recovery.', imported.conflicts);
+      await repairMigratedWorkspaceCommands(db, checkShortcutAssignment, (id, value, type) => saveUserShortcutGuarded(value, id, type)).catch(err => {
+        console.error('[Dexie] Workspace text-command repair failed:', err);
+      });
+      void reconcileDashboardViewTags().catch(err => {
+        console.error('[Dexie] Dashboard tag reconciliation failed:', err);
       });
     })
     .catch(err => {
-      console.error('[Dexie] Failed to open database cmdOS:', err);
+      console.error(`[Dexie] Failed to open database "${BRAND_DB.current}":`, err);
     });
 }
 
@@ -352,6 +570,19 @@ export async function deleteItemAssociations(itemId: string): Promise<void> {
         })
       );
     }
+
+    // Dismiss any active notifications associated with this deleted item
+    cleanupPromises.push(
+      db.notifications
+        .where('sourceId')
+        .equals(itemId)
+        .modify({ status: 'dismissed', dismissedAt: Date.now() })
+        .then(count => {
+          if (count > 0 && typeof chrome !== 'undefined' && chrome.notifications) {
+            chrome.notifications.clear(itemId);
+          }
+        })
+    );
 
     await Promise.all(cleanupPromises);
   } catch (error) {

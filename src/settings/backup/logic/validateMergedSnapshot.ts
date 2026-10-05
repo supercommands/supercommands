@@ -1,8 +1,10 @@
+import { validateBackupGraph } from './backupGraphValidation';
 import { BACKUP_TABLE_NAMES } from './backupRegistry';
 import { getBackupRecordIdentity } from './backupIdentity';
 import type { BackupDataLike } from './backupComparisonTypes';
 
 export function validateMergedSnapshot(snapshot: BackupDataLike): void {
+  if (Object.keys(snapshot.tables).some(name => !BACKUP_TABLE_NAMES.includes(name as any))) throw new Error('Merged backup contains unregistered tables.');
   for (const tableName of BACKUP_TABLE_NAMES) {
     const records = snapshot.tables[tableName];
     if (!Array.isArray(records)) {
@@ -19,7 +21,9 @@ export function validateMergedSnapshot(snapshot: BackupDataLike): void {
     }
   }
 
-  if (!snapshot.localSettings || typeof snapshot.localSettings !== 'object') {
+  validateBackupGraph(snapshot.tables);
+
+  if (!snapshot.localSettings || typeof snapshot.localSettings !== 'object' || Array.isArray(snapshot.localSettings)) {
     throw new Error('Merged backup settings must be an object');
   }
 }

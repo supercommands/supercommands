@@ -1,0 +1,92 @@
+// Bundled starter content. Provenance: code structure/research/inspiration/manifest.json.
+export const inspirationCatalog = {
+  quotes: [
+    {
+      id: 'keller-optimism',
+      author: 'Helen Keller',
+      asset: '01-keller-optimism.jpg',
+      sourceUrl: 'https://afb.org/about-afb/history/helen-keller/helen-keller-quotes/helen-keller-quotes-optimism',
+      sourceWork: 'Optimism (1903)',
+      topic: 'Hope',
+    },
+    {
+      id: 'keller-character',
+      author: 'Helen Keller',
+      asset: '02-keller-character.jpg',
+      sourceUrl: 'https://afb.org/about-afb/history/helen-keller/helen-keller-quotes/helen-keller-quotes-optimism',
+      sourceWork: 'Letter to friends, March 30, 1921',
+      topic: 'Perseverance',
+    },
+    {
+      id: 'curie-understanding',
+      author: 'Marie Curie',
+      asset: '03-curie-understanding.jpg',
+      sourceUrl: 'https://www.mariecurie.org.uk/about-us/our-history/marie-curie-the-scientist',
+      sourceWork: 'Marie Curie charity biography; quotation list, original work unspecified',
+      topic: 'Understanding',
+    },
+    {
+      id: 'curie-ideas',
+      author: 'Marie Curie',
+      asset: '04-curie-ideas.jpg',
+      sourceUrl: 'https://www.mariecurie.org.uk/about-us/our-history/marie-curie-the-scientist',
+      sourceWork: 'Marie Curie charity biography; quotation list, original work unspecified',
+      topic: 'Curiosity',
+    },
+    {
+      id: 'pichai-hope',
+      author: 'Sundar Pichai',
+      asset: '05-pichai-hope.jpg',
+      sourceUrl: 'https://india.googleblog.com/2020/06/you-will-prevail-message-to-class-of.html',
+      sourceWork: 'Dear Class of 2020',
+      topic: 'Hope',
+    },
+    {
+      id: 'jobs-time',
+      author: 'Steve Jobs',
+      asset: '06-jobs-time.jpg',
+      sourceUrl: 'https://news.stanford.edu/stories/2005/06/youve-got-find-love-jobs-says',
+      sourceWork: 'Stanford commencement address, 2005',
+      topic: 'Purpose',
+    },
+    {
+      id: 'goodall-difference',
+      author: 'Jane Goodall',
+      asset: '07-goodall-difference.jpg',
+      sourceUrl: 'https://janegoodall.ca/what-we-do/',
+      sourceWork: 'Jane Goodall Institute of Canada',
+      topic: 'Making a difference',
+      captureNote: 'Two source screenshot line crops combined, retaining quotation wording.',
+    },
+    {
+      id: 'roosevelt-courage',
+      author: 'Franklin D. Roosevelt',
+      asset: '08-roosevelt-courage.jpg',
+      sourceUrl: 'https://www.fdrlibrary.org/first-inaugural-curriculum-hub',
+      sourceWork: 'First inaugural address, 1933',
+      topic: 'Courage',
+    },
+  ],
+  videos: [
+    {
+      id: 'jobs-stanford-2005',
+      title: 'Steve Jobs’ 2005 Stanford Commencement Address',
+      url: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
+    },
+    {
+      id: 'pichai-class-2020',
+      title: 'Sundar Pichai Commencement Speech | Dear Class Of 2020',
+      url: 'https://www.youtube.com/watch?v=gEDChDOM1_U',
+    },
+    {
+      id: 'musk-usc-2014',
+      title: 'Elon Musk USC Marshall Commencement Speech, 2014',
+      url: 'https://www.youtube.com/watch?v=e7Qh-vwpYH8',
+    },
+    {
+      id: 'oprah-harvard-2013',
+      title: 'Oprah Winfrey Harvard Commencement Speech, 2013',
+      url: 'https://www.youtube.com/watch?v=GMWFieBGR7c',
+    },
+  ],
+} as const;

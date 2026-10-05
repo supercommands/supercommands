@@ -1,0 +1,4 @@
+/* Utilities for the existing shared notification component inside its Shadow DOM. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

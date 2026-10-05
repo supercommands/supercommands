@@ -1,6 +1,6 @@
 import { createStorage, StorageEnum } from '../base/index.js';
 
-const storage = createStorage<string>('theme-id-storage-key', 'cloud-blue-dark', {
+const storage = createStorage<string>('theme-id-storage-key', 'reflect-new-tab', {
   storageEnum: StorageEnum.Local,
   liveUpdate: true,
 });

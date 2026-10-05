@@ -1,83 +1,26 @@
 # Contributing to SuperCommands
 
-Thank you for your interest in contributing to SuperCommands. This document covers how to get involved, where to look, and how to raise issues or submit changes.
+SuperCommands was previously called cmdOS. The configured public publishing target is [supercommands/supercommands](https://github.com/supercommands/supercommands). Use SuperCommands in product-facing copy; preserve internal compatibility names unless a change explicitly covers migration.
 
-Read the [Code of Conduct](CODE_OF_CONDUCT.md) and [security policy](SECURITY.md) before reporting an issue. Report suspected vulnerabilities privately as described in the security policy.
+Read the [Code of Conduct](CODE_OF_CONDUCT.md) and [security policy](SECURITY.md). Do not publish vulnerabilities or private user data in public issues.
 
----
+## Ways to contribute
 
-## Ways to Contribute
+- Report reproducible bugs with browser, OS, and extension version details.
+- Suggest features by explaining the workflow and problem they address.
+- Improve setup and contributor documentation.
+- Submit focused fixes using existing code patterns.
+- Discuss implementation on a relevant issue, or in Discussions if enabled.
 
-You don't have to write code to contribute. There are many ways to help:
+Search [existing issues](https://github.com/supercommands/supercommands/issues) before opening one. Include expected behavior, actual behavior, reproduction steps, and relevant errors. Remove tokens, private URLs, personal records, and account identifiers from logs and screenshots.
 
-- **Report a bug** — open an issue with steps to reproduce
-- **Suggest a feature** — describe the problem you're trying to solve
-- **Improve documentation** — fix typos, add examples, clarify setup steps
-- **Submit a fix or feature** — open a pull request with a focused change
-- **Share feedback** — comment on open issues or discussions
+Confirm substantial UI or architecture changes with maintainers before implementing them. This document does not imply that Discussions, a wiki, templates, or private security reporting are enabled.
 
----
+This repository includes bug/feature issue forms, a pull request template, and discussion forms for the General and Ideas categories. These files are included in the public export. Discussion forms require GitHub Discussions to be enabled and matching category slugs (`general` and `ideas`). Maintainers configure those repository settings; adding files alone does not enable Discussions.
 
-## Codebase Overview
+## Development setup
 
-Before diving in, here's where the core logic lives:
-
-### `src/allObjectFolder/`
-
-This is the heart of the extension. Every object type (link, note, snippet, command, session, automation, tag, etc.) is structured and managed here.
-
-```
-src/allObjectFolder/src/createObject/
-├── links/          # Link and Tab Session objects
-├── notes/          # Rich note objects
-├── snippets/       # Reusable text snippets
-├── commands/       # Command definitions
-├── session/        # Session tracking
-├── automationBeta/ # Automation workflows
-├── ChatAgent/      # AI agent integration
-├── aiPrompt/       # AI prompt objects
-├── todos/          # Task objects
-└── tags/           # Tag management
-```
-
-If you want to add a new object type, extend an existing one, or fix behaviour in a specific feature — this is where to look first.
-
-### `src/pages/AltS_search_newtab/`
-
-The primary workspace UI — the new tab page where users interact with cmdOS.
-
-### `packages/`
-
-Shared utilities, design system, storage helpers, and environment config used across all entry points.
-
----
-
-## Raising an Issue
-
-Before opening an issue:
-
-- Search [existing issues](https://github.com/supercommands/supercommands/issues) to avoid duplicates
-- Check if there's already a related discussion
-
-When opening a new issue, include:
-
-- **What you expected** to happen
-- **What actually happened**
-- **Steps to reproduce** (browser version, OS, extension version if known)
-- **Screenshots or console errors** if relevant
-
-For **feature requests**, describe the problem you're facing — not just the solution you have in mind. That helps us understand the use case better.
-
----
-
-## Development Setup
-
-**Prerequisites**
-
-- Node.js `>= 22.12.0`
-- pnpm `>= 9.15.1`
-
-**Setup**
+Use Node.js `>=22.12.0` and pnpm `9.15.1`.
 
 ```bash
 git clone https://github.com/supercommands/supercommands.git
@@ -86,64 +29,38 @@ pnpm install
 pnpm dev
 ```
 
-Load the extension in Chrome:
+Load `.output/chrome-mv3/` through Chrome's **Load unpacked** action. Reload the extension and refresh affected website tabs after rebuilding. Check **Alt + S Search** at `chrome://extensions/shortcuts` if Alt+S is not assigned.
 
-1. Open `chrome://extensions/`
-2. Enable **Developer mode**
-3. Click **Load unpacked** → select the `dist/` folder
-
----
-
-## Submitting a Pull Request
-
-1. **Fork** the repository and create a branch from `main`
-
-   ```bash
-   git checkout -b fix/your-fix-name
-   # or
-   git checkout -b feat/your-feature-name
-   ```
-
-2. **Make your change** — keep it focused. One change per PR.
-
-3. **Test it locally** — load the extension and verify your change works as expected.
-
-4. **Lint and format**
-
-   ```bash
-   pnpm lint
-   pnpm prettier
-   ```
-
-5. **Open a PR** against the `main` branch with a clear title and description explaining:
-   - What problem this solves
-   - How you tested it
-   - Any edge cases or limitations
-
----
-
-## Commit Style
-
-Use conventional commits:
-
-```
-feat: add dynamic link placeholder support
-fix: resolve snippet insertion on Firefox
-docs: update getting started guide
-refactor: simplify tag filtering logic
+```bash
+pnpm build
+pnpm zip
 ```
 
----
+Public dev/build/zip commands select the open-source configuration automatically. Private source defaults remain unchanged; use `pnpm dev:oss`, `pnpm build:oss`, or `pnpm run wxt:zip:chrome:oss` there for the public configuration. The public `env.oss` is Google Drive configuration, not a place for secrets.
 
-## Code Style
+## Where to work
 
-- TypeScript is required — no untyped `any` unless absolutely necessary
-- Components use React functional style
-- Keep files focused — one component or module per file
-- Follow the existing folder structure and naming conventions in `allObjectFolder/`
+| Path | Responsibility |
+| --- | --- |
+| `src/pages/AltS_search_newtab/` | New-tab workspace |
+| `src/pages/AltS_search_websites/` | Shared website and New Tab popup |
+| `background/src/websitePopupBridge/` | Background popup handlers |
+| `src/allObjectFolder/` | Record features and domain operations |
+| `src/shared-components/` | Shared UI, search, commands, and branding |
+| `src/storage/` | Schema, migrations, and storage helpers |
+| `src/settings/` | Settings and backup/restore |
+| `packages/` | Shared workspace packages |
 
----
+Keep the current folder structure and reuse registry-owned theme, typography, spacing, and appearance values. Ask before introducing a design token or visual pattern. Preserve saved records, favorites, backup compatibility, and existing workflows.
 
-## Questions
+## Preparing a pull request
 
-If you're unsure about something, open a [GitHub Discussion](https://github.com/cmdOS-App/supercommands/discussions) or comment on the relevant issue. We're happy to help you get oriented before you start building.
+1. Fork the public repository and create a focused branch from `main`.
+2. Explain the problem and keep changes within that scope.
+3. Verify affected website/New Tab flows with an isolated profile and disposable data. Back up data you need to keep.
+4. Run checks appropriate to the change and report their actual results. `pnpm type-check` checks workspace types; `pnpm lint` and `pnpm prettier` can write fixes. Disclose existing unrelated failures.
+5. Open a pull request against `main` describing the behavior change, verification, and remaining limitations. Include sanitized UI evidence when relevant.
+
+The public export does not include private test fixtures, internal documents, or publishing workflows. Do not make unavailable scripts part of public setup instructions. Discuss new test coverage with maintainers when needed.
+
+Use concise messages such as `fix: restore popup focus` or `docs: clarify OSS setup`. Follow existing TypeScript/React patterns and avoid unrelated formatting or renames.

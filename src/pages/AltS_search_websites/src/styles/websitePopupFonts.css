@@ -1,0 +1,31 @@
+/*
+ * popup font boundary.
+ *
+ * The local() sources provide a clean fallback while bundled Inter WOFF2 files
+ * are pending. Replace each src with an extension-owned URL when those assets
+ * are supplied; do not add remote font requests or document-level font rules.
+ */
+@font-face {
+  font-family: 'Website Popup Inter';
+  src: local('Inter Regular'), local('Inter');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Website Popup Inter';
+  src: local('Inter Medium'), local('Inter');
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Website Popup Inter';
+  src: local('Inter SemiBold'), local('Inter');
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+

@@ -1,119 +1,36 @@
 import { useCallback } from 'react';
-import { readAllShortcuts, extractSnippetIdFromCompoundId } from '../../hotkeys/utils/hotkeyUtils';
-import { checkReservedShortcut } from '../core/reservedShortcuts';
-import { getReservedShortcutReason, getShortcutTriggerFormatError, normalizeShortcutTrigger } from '../core/shortcutDbData';
-import { useConflictResolver } from '../../utils/useConflictResolver';
-import { useDbStore } from '../../../storage/store/useDbStore';
-import { findCommandByAnyId } from '../../commands';
+import { checkShortcutAssignment } from '../core/shortcutDbData';
+import type { ShortcutAssignmentApproval } from '../core/shortcutAssignmentTypes';
 import type { ValidationResult } from '../../hotkeys';
-import { CustomSearchPrefixesForOmniboxStorage } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
-
-export const useShortcutValidation = () => {
-  const { findConflictingItemName } = useConflictResolver();
-
-  const normalizeShortcut = (value: string) => {
-    return normalizeShortcutTrigger(value);
-  };
-
-  const validateShortcut = useCallback(
-    async (shortcutValue: string, currentItemId: string): Promise<ValidationResult> => {
-      if (!shortcutValue) {
-        return { isValid: true, conflictId: null, errorMessage: null };
-      }
-
-      const normalized = normalizeShortcut(shortcutValue);
-      if (!normalized) {
-        return {
-          isValid: false,
-          conflictId: null,
-          errorMessage: 'Shortcut cannot be empty',
-        };
-      }
-
-      const formatError = getShortcutTriggerFormatError(shortcutValue);
-      if (formatError) {
-        return {
-          isValid: false,
-          conflictId: null,
-          errorMessage: formatError,
-        };
-      }
-
-      // Fetch dynamic omni prefixes from IndexedDB-backed prefix settings
-      const omniboxPrefixes = await CustomSearchPrefixesForOmniboxStorage.getPrefixes().catch(() => ({}));
-
-      const activePrefixes = Object.values(omniboxPrefixes)
-        .filter((prefix): prefix is string => typeof prefix === 'string' && prefix.trim().length > 0)
-        .map(prefix => prefix.trim().toLowerCase());
-
-      // Block single characters that are exact matches for the main omni prefixes
-      if (activePrefixes.includes(normalized)) {
-        return {
-          isValid: false,
-          conflictId: 'omni-reserved',
-          isOverrideable: false,
-          errorMessage: `The shortcut "${normalized}" is reserved for the omni prefix`,
-        };
-      }
-
-      // Check Omnibox Prefixes (these are system reserved and CANNOT be overridden)
-      const reservedOmniboxReason = await getReservedShortcutReason(shortcutValue);
-      if (reservedOmniboxReason) {
-        return {
-          isValid: false,
-          conflictId: 'omni-reserved',
-          isOverrideable: false,
-          errorMessage: reservedOmniboxReason,
-        };
-      }
-
-      // Check for duplicates dynamically against Commands table & User Shortcuts table
-      const allShortcuts = await readAllShortcuts();
-      const existingEntry = Object.entries(allShortcuts).find(([id, sc]) => {
-        if (normalizeShortcut(sc) !== normalized) return false;
-        
-        const sameItem = 
-          id === currentItemId || 
-          id.endsWith(`-${currentItemId}`) || 
-          (currentItemId && currentItemId !== 'new' && id.includes(currentItemId)) ||
-          extractSnippetIdFromCompoundId(id) === extractSnippetIdFromCompoundId(currentItemId || '');
-          
-        return !sameItem;
-      });
-
-      console.log(`[ShortcutDebug] Validating shortcut "${shortcutValue}" for currentItemId "${currentItemId}"...`);
-
-      if (existingEntry) {
-        const conflictingId = existingEntry[0];
-        const conflictName = findConflictingItemName(conflictingId);
-        if (!conflictName) {
-          // Orphaned reference - treat as safe to override, do NOT auto-delete.
-          // The shortcut may belong to a type that cannot be resolved in the current context (e.g. a view).
-          console.log(`[ShortcutDebug] Found shortcut trigger "${normalized}" for unknown ID ${conflictingId}. Treating as safe-to-override conflict.`);
-          return {
-            isValid: false,
-            conflictId: conflictingId,
-            conflictingItemName: conflictingId,
-            isOverrideable: true,
-            errorMessage: `Shortcut "${normalized}" is already in use`,
-          };
+type ShortcutValidationOptions = {
+    readShortcuts?: () => Promise<Record<string, string>>;
+};
+export type ShortcutValidationResult = ValidationResult & {
+    canShare?: boolean;
+    assignmentConflict?: ShortcutAssignmentApproval;
+};
+export const useShortcutValidation = (options: ShortcutValidationOptions = {}) => {
+    const validateShortcut = useCallback(async (value: string, itemId: string): Promise<ShortcutValidationResult> => {
+        if (!value.trim())
+            return { isValid: true, conflictId: null, errorMessage: null };
+        try {
+            // Embedded website editors must keep database ownership in the background.
+            const check = options.readShortcuts && typeof chrome !== 'undefined'
+                ? await chrome.runtime.sendMessage({ action: 'website_popup:text_command', operation: 'validate', value, currentReferenceId: itemId })
+                    .then(response => { if (!response?.success)
+                    throw new Error(response?.error || 'Could not check Text Command.'); return response.check; })
+                : await checkShortcutAssignment(value, itemId);
+            if (check.status === 'available')
+                return { isValid: true, conflictId: null, errorMessage: null };
+            if (check.status === 'error')
+                return { isValid: false, conflictId: 'omni-reserved', errorMessage: check.message, isOverrideable: false };
+            return { isValid: false, conflictId: check.conflict.id, errorMessage: check.message,
+                conflictingItemName: check.conflict.label, isOverrideable: true, canShare: check.conflict.canShare,
+                assignmentConflict: check.conflict };
         }
-
-        console.log(`[ShortcutDebug] CONFLICT DETECTED: Shortcut "${normalized}" is currently assigned to "${conflictName}" (ID: ${conflictingId}). Override button enabled.`);
-        return {
-          isValid: false,
-          conflictId: conflictingId,
-          conflictingItemName: conflictName,
-          isOverrideable: true,
-          errorMessage: `Shortcut "${normalized}" is already assigned to "${conflictName}"`,
-        };
-      }
-
-      console.log(`[ShortcutDebug] Shortcut "${normalized}" is VALID and available.`);
-      return { isValid: true, conflictId: null, errorMessage: null };
-    },
-    [findConflictingItemName],
-  );
-
-  return { validateShortcut };
+        catch (error) {
+            return { isValid: false, conflictId: null, errorMessage: error instanceof Error ? error.message : String(error), isOverrideable: false };
+        }
+    }, [options.readShortcuts]);
+    return { validateShortcut };
 };

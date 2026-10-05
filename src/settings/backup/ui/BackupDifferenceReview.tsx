@@ -3,6 +3,7 @@ import { FiAlertCircle, FiCheck, FiChevronDown, FiChevronRight, FiEdit3, FiMinus
 import type { DriveFolder } from '../logic/driveApi';
 import type { BackupComparisonResult, BackupDataLike, BackupMergeResult, BackupRecordDifference } from '../logic/backupComparisonTypes';
 import BackupDifferenceDetail from './BackupDifferenceDetail';
+import { backupFieldDisplay, backupTableLabel } from '../logic/backupPresentation';
 
 export interface BackupComparisonSource {
   id: string;
@@ -64,7 +65,7 @@ function DifferenceGroup({ title, icon, items, emptyLabel }: {
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="truncate text-[10px] font-semibold text-[var(--color-textPrimary)]">{recordDisplayName(item)}</div>
-                    <div className="truncate text-[9px] text-[var(--color-textMuted)]">{item.tableName}</div>
+                    <div className="truncate text-[9px] text-[var(--color-textMuted)]">{backupTableLabel(item.tableName)}</div>
                   </div>
                   <span className="max-w-[55%] truncate text-[9px] font-mono text-[var(--color-textMuted)]">ID: {item.identity}</span>
                 </div>
@@ -117,13 +118,16 @@ function recordPreview(item: BackupRecordDifference): string[] {
   const fieldsByTable: Record<string, string[]> = {
     notes: ['title', 'description', 'body', 'content'],
     links: ['title', 'description', 'url', 'urls'],
-    sessions: ['title', 'description', 'urls'],
+    workspaces: ['workspaceName', 'urls'],
+    collections: ['name', 'propertyDefinitions'],
+    collectionItems: ['title', 'note', 'propertyValues', 'url'],
     snippets: ['title', 'description', 'content', 'code'],
     todos: ['title', 'name', 'description'],
   };
   const fields = fieldsByTable[item.tableName] || ['title', 'name', 'label', 'description', 'content', 'url'];
   return fields.map(field => {
-    const value = compactValue(record[field]);
+    const value = item.tableName === 'collections' || item.tableName === 'collectionItems'
+      ? backupFieldDisplay(record[field], item.tableName) : compactValue(record[field]);
     return value ? `${field}: ${value}` : '';
   }).filter(Boolean).slice(0, 3);
 }
@@ -131,7 +135,7 @@ function recordPreview(item: BackupRecordDifference): string[] {
 function recordDisplayName(item: BackupRecordDifference): string {
   const record = item.localRecord || item.driveRecord;
   if (!record) return 'Unnamed record';
-  const value = record.title ?? record.name ?? record.label ?? record.shortcut;
+  const value = record.workspaceName ?? record.organisationName ?? record.dashboardName ?? record.title ?? record.name ?? record.label ?? record.shortcut;
   return compactValue(value) || 'Unnamed record';
 }
 
@@ -154,7 +158,7 @@ function SideRecordPreview({ item, side }: { item: BackupRecordDifference; side:
   const paths = item.fields.map(field => field.path).filter(Boolean).slice(0, 6);
   if (!record) return <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--color-borderDefault)] px-2 py-2 text-[9px] text-[var(--color-textMuted)]">{item.kind === 'removed' ? <FiMinus size={12} /> : <FiPlus size={12} />} Not present in this version</div>;
   return <div className="min-w-0 rounded-md border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/30 px-2 py-2">
-    {paths.length > 0 ? paths.map(path => <div key={path} className="mb-1 last:mb-0"><div className="text-[9px] font-semibold text-[var(--color-textMuted)]">{fieldLabel(item.tableName, path)}</div><div className="truncate text-[9px] text-[var(--color-textPrimary)]">{compactValue(readPath(record, path)) || 'Empty'}</div></div>) : recordPreview(item).map(preview => <div key={preview} className="truncate text-[9px] text-[var(--color-textPrimary)]">{preview}</div>)}
+    {paths.length > 0 ? paths.map(path => <div key={path} className="mb-1 last:mb-0"><div className="text-[9px] font-semibold text-[var(--color-textMuted)]">{fieldLabel(item.tableName, path)}</div><div className="truncate text-[9px] text-[var(--color-textPrimary)]">{item.tableName === 'collections' || item.tableName === 'collectionItems' ? backupFieldDisplay(readPath(record, path), item.tableName) : compactValue(readPath(record, path)) || 'Empty'}</div></div>) : recordPreview(item).map(preview => <div key={preview} className="truncate text-[9px] text-[var(--color-textPrimary)]">{preview}</div>)}
   </div>;
 }
 
@@ -234,7 +238,7 @@ export const BackupDifferenceReview: React.FC<BackupDifferenceReviewProps> = ({ 
               <div className="py-3 text-[10px] font-bold uppercase tracking-wider text-[var(--color-textMuted)]">Data changes</div>
               {changedTables.map(([tableName, table]) => (
                 <div key={tableName} className="border-b border-[var(--color-borderDefault)] py-2">
-                  <div className="mb-1 text-xs font-bold text-[var(--color-textPrimary)]">{tableName}</div>
+                  <div className="mb-1 text-xs font-bold text-[var(--color-textPrimary)]">{backupTableLabel(tableName)}</div>
                   {table.added.length > 0 && <DifferenceGroup title="Added" icon={<FiPlus className="text-[var(--color-success)]" />} items={table.added} emptyLabel="No added records" />}
                   {table.removed.length > 0 && <DifferenceGroup title="Removed" icon={<FiMinus className="text-[var(--color-danger)]" />} items={table.removed} emptyLabel="No removed records" />}
                   {table.deleted.length > 0 && <DifferenceGroup title="Deleted" icon={<FiAlertCircle className="text-[var(--color-danger)]" />} items={table.deleted} emptyLabel="No deleted records" />}

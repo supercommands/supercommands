@@ -18,13 +18,13 @@ export function handleHistorySearch(
   sendResponse: (response: any) => void,
 ): boolean | undefined {
   if (request.action === 'search_history') {
-    // Default to last 30 days if startTime not provided. chrome.history.search defaults to last 24h otherwise.
-    const thirtyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    // Default to last 90 days if startTime not provided. chrome.history.search defaults to last 24h otherwise.
+    const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
     chrome.history.search(
       {
         text: request.query,
         maxResults: request.maxResults || 10,
-        startTime: request.startTime || thirtyDaysAgo,
+        startTime: request.startTime || ninetyDaysAgo,
       },
       results => {
         sendResponse(results || []);
@@ -53,8 +53,15 @@ export function handleHistorySearch(
       return false;
     }
     try {
-      // Search history for the past 90 days by default
-      const startTime = Date.now() - 90 * 24 * 60 * 60 * 1000;
+      // Search history for the past 90 days by default, unless a caller asks for a narrower window.
+      const requestedStartTime = Number(request.startTime);
+      const historyDays = Number(request.historyDays);
+      const defaultStartTime = Date.now() - 90 * 24 * 60 * 60 * 1000;
+      const startTime = Number.isFinite(requestedStartTime) && requestedStartTime > 0
+        ? requestedStartTime
+        : Number.isFinite(historyDays) && historyDays > 0
+          ? Date.now() - historyDays * 24 * 60 * 60 * 1000
+          : defaultStartTime;
       chrome.history.search(
         {
           text: query,

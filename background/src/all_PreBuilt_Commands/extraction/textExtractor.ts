@@ -12,47 +12,20 @@
  * @param cb Callback function to return the scraped content, title, and url.
  */
 export const executeScrapeScript = (tabId: number, cb: (res: any) => void) => {
-  chrome.scripting.executeScript(
-    {
-      target: { tabId },
-      func: () => {
-        const clone = document.body.cloneNode(true) as HTMLElement;
-        const removeElements = clone.querySelectorAll(
-          'script, style, noscript, svg, img, video, audio, iframe, canvas, link, [style*="display: none"], .alts-exclude',
-        );
-        removeElements.forEach(el => el.remove());
+  chrome.tabs.sendMessage(tabId, { action: 'scrape_page_content' }, response => {
+    const lastError = chrome.runtime.lastError;
+    if (lastError) {
+      console.error('[Background] executeScrapeScript content-script error:', lastError);
+      cb({ ok: false, error: lastError.message });
+      return;
+    }
 
-        let text = clone.textContent || '';
-        text = text.replace(/\s+/g, ' ').replace(/\n+/g, '\n').trim();
-
-        const maxLength = 12000;
-        if (text.length > maxLength) {
-          text = text.substring(0, maxLength) + '... [content truncated]';
-        }
-
-        return {
-          content: text,
-          url: window.location.href,
-          title: document.title,
-        };
-      },
-    },
-    results => {
-      const lastError = chrome.runtime.lastError;
-      if (lastError) {
-        console.error('[Background] executeScrapeScript error:', lastError);
-        cb({ ok: false, error: lastError.message });
-        return;
-      }
-
-      const result = results?.[0]?.result;
-      if (result) {
-        cb({ ok: true, ...result });
-      } else {
-        cb({ ok: false, error: 'no_content_extracted' });
-      }
-    },
-  );
+    if (response?.ok) {
+      cb(response);
+    } else {
+      cb({ ok: false, error: response?.error || 'no_content_extracted' });
+    }
+  });
 };
 
 /**

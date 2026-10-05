@@ -23,10 +23,22 @@ export function convertAstToTiptap(astNodes: ASTNode[]): any {
       const parts = node.value.split('\n');
       for (let i = 0; i < parts.length; i++) {
         if (parts[i]) {
-          currentParagraph.push({
+          const textNode: any = {
             type: 'text',
             text: parts[i],
-          });
+          };
+          const linkMark = node.marks?.find(mark => mark.type === 'link' && mark.href);
+          if (linkMark) {
+            textNode.marks = [
+              {
+                type: 'link',
+                attrs: {
+                  href: linkMark.href,
+                },
+              },
+            ];
+          }
+          currentParagraph.push(textNode);
         }
         if (i < parts.length - 1) {
           flushParagraph();

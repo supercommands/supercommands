@@ -14,10 +14,37 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { createNotification } from '@notifications/notifications';
-import { showInTabToast } from '@notifications/inTabToasts';
 import { db } from '../../../src/storage/indexDB/dbConfig';
 import { generateEntityId } from '../../../src/shared-components/utils/idGenerator';
+import { getNextRecurringAlarmTime } from '../../../src/allObjectFolder/src/createObject/todos/utils/recurringSchedule';
+import { completeDailyTodoOccurrence } from '../../../src/allObjectFolder/src/createObject/todos/utils/dailyOccurrences';
+import {
+  handleAlarmFired,
+  activateNotification,
+  dismissNotificationsForSource,
+  cleanupOldAndReadNotifications,
+} from '../notifications/notificationService';
+
+const getUrlFromEntry = (entry: any): string | null => {
+  const url = entry?.url || entry?.link || entry;
+  return typeof url === 'string' && url.trim() ? url.trim() : null;
+};
+
+const addRecordUrls = (record: any, urls: Set<string>) => {
+  if (Array.isArray(record?.urls)) {
+    record.urls.forEach((entry: any) => {
+      const url = getUrlFromEntry(entry);
+      if (url) urls.add(url);
+    });
+  }
+};
+
+const openDashboardCollectionReferenceUrls = async (viewId: string) => {
+const workspace = await db.workspaces.get(String(viewId || ''));
+  if (!workspace) throw new Error('This Workspace no longer exists.');
+  const urls = new Set<string>(); addRecordUrls(workspace, urls);
+  for (const url of urls) await chrome.tabs.create({url});
+};
 
 /**
  * Extract actual snippet ID - safely handles UUIDs and prefixed IDs
@@ -25,7 +52,7 @@ import { generateEntityId } from '../../../src/shared-components/utils/idGenerat
 export function extractSnippetId(id: string): string {
   if (!id) return '';
   let snippetId = id;
-  if (id.startsWith('workspace_') || id.startsWith('folder_') || id.startsWith('ws_') || id.startsWith('fld_')) {
+  if (id.startsWith('organisation_') || id.startsWith('folder_') || id.startsWith('ws_') || id.startsWith('fld_')) {
     const parts = id.split('-');
     if (parts.length > 5) snippetId = parts.slice(5).join('-');
   }
@@ -37,6 +64,7 @@ export function extractSnippetId(id: string): string {
 
 export async function backgroundSync() {
   try {
+    await db.open();
     // API logic removed
     // Also process todo maintenance (auto-done for overdue tasks)
     await processTodoMaintenance();
@@ -80,6 +108,9 @@ export async function processTodoMaintenance() {
         });
       });
     }
+
+    // Prune old read/dismissed notifications from prior calendar days
+    await cleanupOldAndReadNotifications();
   } catch (err) {
     console.error('[TodoMaintenance] Error:', err);
   }
@@ -277,7 +308,31 @@ export async function executeTodoAction(todoId: string) {
       }
     }
 
-    const configIds = config?.id;
+    const todoReferences = Array.isArray(todo.references) ? todo.references : [];
+    const configIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(config?.id) ? config.id : []),
+          ...todoReferences.map((reference: any) => reference?.id),
+        ]
+          .filter(Boolean)
+          .map(id => String(id)),
+      ),
+    );
+
+    const todoCategory = (todo.category || todo.snippet_category || '').toLowerCase();
+    const todoSelfId = todo.snippet_id || todo.id || todo.todo_id;
+    const shouldOpenTodoItself =
+      ['custom', 'todo'].includes(todoCategory) || (todoSelfId && String(todoSelfId).startsWith('todo_'));
+
+    if (shouldOpenTodoItself && todoSelfId) {
+      chrome.tabs.create({
+        url: chrome.runtime.getURL(
+          `AltS_search_newtab/index.html?open_note=true&noteid=${encodeURIComponent(todoSelfId)}`,
+        ),
+      });
+    }
+
     if (Array.isArray(configIds) && configIds.length > 0) {
       const storageResult = await new Promise<any>(resolve => {
         chrome.storage.local.get(['myCachedAllData', 'myFavouriteItems', 'local_todos', 'alts_commands'], resolve);
@@ -287,9 +342,29 @@ export async function executeTodoAction(todoId: string) {
       const favourites = storageResult.myFavouriteItems || {};
       const altsCommands = storageResult.alts_commands || [];
 
-      const findItemDetails = (itemId: string) => {
+      const findItemDetails = async (itemId: string) => {
         const cidStr = String(itemId);
         const strippedCid = cidStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
+
+        const [note, link, session, widgetView, aiPrompt, command, chatAgent, snippet] = await Promise.all([
+          db.notes.get(cidStr).catch(() => undefined),
+          db.links.get(cidStr).catch(() => undefined),
+          db.workspaceSessions.get(cidStr).catch(() => undefined),
+          db.workspaceViews.get(cidStr).catch(() => undefined),
+          db.aiPrompts.get(cidStr).catch(() => undefined),
+          db.commands.get(strippedCid).catch(() => undefined),
+          db.chatAgents.get(cidStr).catch(() => undefined),
+          db.snippets.get(cidStr).catch(() => undefined),
+        ]);
+
+        if (note) return { ...note, id: note.id, snippet_id: note.id, category: 'note', value: (note as any).body || '' };
+        if (link) return { ...link, id: link.id, snippet_id: link.id, category: 'link' };
+        if (session) return { ...session, id: session.id, snippet_id: session.id, category: 'session' };
+        if (widgetView) return { ...widgetView, id: widgetView.id, snippet_id: widgetView.id, category: 'workspace' };
+        if (aiPrompt) return { ...aiPrompt, id: aiPrompt.id, snippet_id: aiPrompt.id, category: 'ai_prompt' };
+        if (command) return { ...command, id: command.id, snippet_id: command.id, category: 'command' };
+        if (chatAgent) return { ...chatAgent, id: chatAgent.id, snippet_id: chatAgent.id, category: 'chat_agent' };
+        if (snippet) return { ...snippet, id: snippet.id, snippet_id: snippet.id, category: (snippet as any).category || 'snippet' };
 
         let matched = altsCommands.find((c: any) => {
           const cIdStr = String(c.id || '');
@@ -312,8 +387,8 @@ export async function executeTodoAction(todoId: string) {
 
         if (Array.isArray(allData)) {
           for (const team of allData) {
-            for (const workspace of team.workspaces || []) {
-              const wsSnippets = workspace.workspace_snippets || [];
+            for (const organisation of team.organisations || []) {
+              const wsSnippets = organisation.organisation_snippets || [];
               matched = wsSnippets.find((s: any) => {
                 const sIdStr = String(s.id || s.snippet_id || '');
                 const strippedSId = sIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
@@ -321,7 +396,7 @@ export async function executeTodoAction(todoId: string) {
               });
               if (matched) return matched;
 
-              const wsAutos = workspace.workspace_automations || [];
+              const wsAutos = organisation.organisation_automations || [];
               matched = wsAutos.find((a: any) => {
                 const aIdStr = String(a.id || a.automation_id || '');
                 const strippedAId = aIdStr.replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
@@ -329,7 +404,7 @@ export async function executeTodoAction(todoId: string) {
               });
               if (matched) return matched;
 
-              for (const folder of workspace.folders || []) {
+              for (const folder of organisation.folders || []) {
                 const folderSnippets = folder.snippets || [];
                 matched = folderSnippets.find((s: any) => {
                   const sIdStr = String(s.id || s.snippet_id || '');
@@ -342,11 +417,28 @@ export async function executeTodoAction(todoId: string) {
           }
         }
 
+        const savedReference = todoReferences.find((reference: any) => String(reference?.id) === cidStr);
+        if (savedReference) {
+          return {
+            id: cidStr,
+            snippet_id: cidStr,
+            category: savedReference.type || savedReference.category || 'note',
+            snippet_category: savedReference.type || savedReference.category || 'note',
+            key: savedReference.name || 'Saved item',
+            title: savedReference.name || 'Saved item',
+          };
+        }
+
         return null;
       };
 
       for (const cid of configIds) {
-        const matched = findItemDetails(cid);
+        const cidStr = String(cid);
+        if (cidStr === String(todoSelfId) || cidStr === String(todo.id) || cidStr === String(todo.todo_id)) {
+          continue;
+        }
+
+        const matched = await findItemDetails(cidStr);
         if (matched) {
           const matchedCat = (
             matched.category ||
@@ -357,18 +449,23 @@ export async function executeTodoAction(todoId: string) {
           const itemId = matched.id || matched.snippet_id;
           const triggerItemId = String(itemId).replace(/^(auto-|cmd-|mod-|agent-|prompt-|session-)/, '');
 
-          if (
-            ['link', 'tabgroup', 'Tab Session', 'links', 'quicklink', 'collection', 'agent_collection'].includes(
+          if (matchedCat === 'workspace') {
+            await openDashboardCollectionReferenceUrls(String(itemId));
+          } else if (
+            ['link', 'tabgroup', 'tab session', 'session', 'sessions', 'links', 'quicklink', 'collection', 'agent_collection'].includes(
               matchedCat,
             )
           ) {
             const urls: string[] = [];
+            if (Array.isArray(matched.urls)) {
+              matched.urls.forEach((u: any) => urls.push(u?.url || u?.link || u));
+            }
             if (typeof itemVal === 'string') {
               try {
                 if (itemVal.trim().startsWith('{') || itemVal.trim().startsWith('[')) {
                   const parsed = JSON.parse(itemVal);
                   if (parsed?.urls) {
-                    parsed.urls.forEach((u: any) => urls.push(u));
+                    parsed.urls.forEach((u: any) => urls.push(u?.url || u?.link || u));
                   }
                 } else if (itemVal.startsWith('http')) {
                   urls.push(itemVal);
@@ -455,6 +552,57 @@ export async function executeTodoAction(todoId: string) {
   }
 }
 
+export async function executeTodoNotificationAction(todoId: string) {
+  await executeTodoAction(todoId);
+  await completeTodoInBg(todoId);
+
+  const todo = await db.todos.get(todoId);
+  if (!todo) return;
+
+  if (todo.scheduleType === 'recurring' && todo.recurringType === 'daily') {
+    const nextDue = await completeDailyTodoOccurrence(todoId);
+    if (nextDue)
+      chrome.alarms.create(`todo|${todoId}`, { when: nextDue });
+  } else if (todo.scheduleType === 'recurring' && todo.recurringType) {
+    const now = Date.now();
+    let nextRunTime = Number(todo.scheduleTime) || now;
+    const minGap = 60 * 1000;
+
+    while (nextRunTime <= now + minGap) {
+      if (todo.recurringType === 'daily') nextRunTime += 24 * 60 * 60 * 1000;
+      else if (todo.recurringType === 'weekly') nextRunTime += 7 * 24 * 60 * 60 * 1000;
+      else if (todo.recurringType === 'monthly') {
+        const nextDate = new Date(nextRunTime);
+        nextDate.setMonth(nextDate.getMonth() + 1);
+        nextRunTime = nextDate.getTime();
+      } else {
+        break;
+      }
+    }
+
+    await db.todos.update(todoId, {
+      scheduleTime: nextRunTime,
+      isDone: false,
+      updatedAt: Date.now(),
+    });
+    chrome.alarms.create(`todo|${todoId}`, { when: nextRunTime });
+  } else {
+    await db.todos.update(todoId, {
+      isDone: true,
+      updatedAt: Date.now(),
+    });
+    chrome.alarms.clear(`todo|${todoId}`);
+  }
+
+  chrome.tabs.query({}, tabs => {
+    tabs.forEach(tab => {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: 'TODOS_UPDATED' }).catch(() => {});
+      }
+    });
+  });
+}
+
 /**
  * Shared logic to resolve a snippet/tabgroup/note by ID and execute it (multiple tabs, etc.)
  */
@@ -523,9 +671,9 @@ export function resolveAndExecuteSnippet(compoundId: string, sendResponse?: (res
         const allData = result?.myCachedAllData;
         if (Array.isArray(allData)) {
           for (const team of allData) {
-            if (!team?.workspaces) continue;
-            for (const workspace of team.workspaces) {
-              const wsSnippets = workspace?.workspace_snippets || [];
+            if (!team?.organisations) continue;
+            for (const organisation of team.organisations) {
+              const wsSnippets = organisation?.organisation_snippets || [];
               for (const snippet of wsSnippets) {
                 const snipId = snippet?.id || snippet?.snippet_id;
                 if (snipId === compoundId || snipId === actualSnippetId) {
@@ -535,7 +683,7 @@ export function resolveAndExecuteSnippet(compoundId: string, sendResponse?: (res
               }
               if (foundSnippet) break;
 
-              const folders = workspace?.folders || [];
+              const folders = organisation?.folders || [];
               for (const folder of folders) {
                 const folderSnippets = folder?.snippets || [];
                 for (const snippet of folderSnippets) {
@@ -590,8 +738,8 @@ export function resolveAndExecuteSnippet(compoundId: string, sendResponse?: (res
             let foundNote: any = null;
             if (Array.isArray(allData)) {
               for (const team of allData) {
-                for (const ws of team.workspaces || []) {
-                  for (const snip of ws.workspace_snippets || []) {
+                for (const ws of team.organisations || []) {
+                  for (const snip of ws.organisation_snippets || []) {
                     if ((snip.id || snip.snippet_id) === noteId) {
                       foundNote = snip;
                       break;
@@ -660,6 +808,46 @@ export function handleTodoMessage(
   sender: chrome.runtime.MessageSender,
   sendResponse: (res: any) => void,
 ): boolean | undefined {
+  if (request.action === 'activate_notification') {
+    const { id } = request;
+    if (!id) {
+      sendResponse({ success: false, error: 'missing_notification_id' });
+      return false;
+    }
+
+    (async () => {
+      try {
+        const success = await activateNotification(String(id));
+        sendResponse({ success });
+      } catch (err: any) {
+        console.error('[Background] activate_notification failed:', err);
+        sendResponse({ success: false, error: err?.message || 'Failed to activate notification' });
+      }
+    })();
+
+    return true;
+  }
+
+  if (request.action === 'execute_pending_todo_notification') {
+    const { todoId } = request;
+    if (!todoId) {
+      sendResponse({ success: false, error: 'missing_todo_id' });
+      return false;
+    }
+
+    (async () => {
+      try {
+        await executeTodoNotificationAction(String(todoId));
+        sendResponse({ success: true });
+      } catch (err: any) {
+        console.error('[Background] execute_pending_todo_notification failed:', err);
+        sendResponse({ success: false, error: err?.message || 'Failed to execute todo' });
+      }
+    })();
+
+    return true;
+  }
+
   if (request.action === 'schedule_newtodo_alarm') {
     const { todoId, scheduleTime } = request;
     if (todoId && scheduleTime) {
@@ -674,6 +862,7 @@ export function handleTodoMessage(
     const { todoId } = request;
     if (todoId) {
       chrome.alarms.clear(`todo|${todoId}`);
+      void dismissNotificationsForSource('todo', String(todoId));
     }
     sendResponse({ ok: true });
     return false;
@@ -694,49 +883,28 @@ export function handleTodoMessage(
       }
 
       if (isImmediate) {
-        // Trigger notification immediately
+        // Trigger notification immediately through handleAlarmFired
         (async () => {
+          await handleAlarmFired({
+            name: `todo|${todoId}`,
+            scheduledTime: Date.now(),
+          } as chrome.alarms.Alarm);
+
           const todo = await findTodoById(todoId);
           if (todo) {
-            const key = todo.key || todo.title || 'Task Reminder';
-            const category = (todo.category || todo.snippet_category || '').toLowerCase();
-            const value = todo.value || '';
-            const isCustom = category === 'note' || category === 'snippet' || category === '';
-
-            let displayMessage = key;
-            if (isCustom && value && value !== key) {
-              displayMessage += `\n${value}`;
-            }
-
-            const iconUrl = chrome.runtime.getURL('icon.png');
-            createNotification(`immediate-${todoId}-${Date.now()}`, {
-              type: 'basic',
-              iconUrl,
-              title: 'cmdOS Notification',
-              message: displayMessage,
-              priority: 2,
-            });
-
             // Reschedule if recurring
-            const isRecurring = !!(todo.is_recurring || todo.recurring);
-            const recurringCycle = (todo.recurring_cycle || todo.recurring_frequency || 'none').toLowerCase();
+            const isRecurring = !!(todo.is_recurring || todo.recurring || todo.scheduleType === 'recurring');
+            const recurringCycle = (todo.recurring_cycle || todo.recurring_frequency || todo.recurringType || 'none').toLowerCase();
 
             if (isRecurring && recurringCycle !== 'none') {
-              const now = new Date();
-              const nextRun = new Date();
-              if (recurringCycle === 'daily') nextRun.setDate(nextRun.getDate() + 1);
-              else if (recurringCycle === 'weekly') nextRun.setDate(nextRun.getDate() + 7);
-              else if (recurringCycle === 'monthly') nextRun.setMonth(nextRun.getMonth() + 1);
-              else nextRun.setDate(nextRun.getDate() + 1);
-              // Create future alarm
-              chrome.alarms.create(`todo|${todoId}`, { when: nextRun.getTime() });
+              const nextRunTime = getNextRecurringAlarmTime(
+                Number(todo.scheduleTime || new Date(todo.event_deadline || Date.now()).getTime()),
+                recurringCycle,
+              );
+              chrome.alarms.create(`todo|${todoId}`, { when: nextRunTime });
 
-              // Update storage via specialized Todo endpoint (ONLY if cloud-synced)
-              // API logic removed
-
-              // Update Dexie database directly
               await db.todos.update(todoId, {
-                scheduleTime: nextRun.getTime(),
+                scheduleTime: nextRunTime,
                 isDone: false,
                 updatedAt: Date.now(),
               });
@@ -748,10 +916,10 @@ export function handleTodoMessage(
       }
 
       const now = Date.now();
-      const GRACE_PERIOD = 10000; // 10 seconds
+      const GRACE_PERIOD = 2 * 60 * 1000;
 
-      if (timestamp > now || now - timestamp < GRACE_PERIOD) {
-        // If it's within the grace period (e.g., just missed it), schedule it for 1 second from now
+      if (timestamp > now || now - timestamp <= GRACE_PERIOD) {
+        // Current-minute saves can finish after :00, especially when references are attached.
         const effectiveTimestamp = Math.max(timestamp, now + 1000);
 
         chrome.alarms.getAll(alarms => {
@@ -800,7 +968,8 @@ export function handleTodoMessage(
         });
       });
 
-      // 2. Clear visible Desktop Notifications
+      // 2. Dismiss in Notifications table & clear visible Desktop Notifications
+      void dismissNotificationsForSource('todo', String(todoId));
       chrome.notifications.getAll(notifications => {
         Object.keys(notifications).forEach(notifId => {
           if (notifId.includes(`-${todoId}-`) || notifId.endsWith(`-${todoId}`)) {
@@ -836,58 +1005,15 @@ export async function handleTodoAlarm(alarm: chrome.alarms.Alarm) {
 
     if (todo.is_done) return;
 
-    const key = todo.key || todo.title || 'Task Due';
-    const category = (todo.category || todo.snippet_category || '').toLowerCase();
-    const value = todo.value || '';
-    const isCustom = category === 'note' || category === 'snippet' || category === '';
+    // Delegate creation, deduplication, and notification to NotificationService
+    await handleAlarmFired(alarm);
 
-    let displayMessage = key;
-    if (isCustom && value && value !== key) {
-      displayMessage += '\n' + value;
-    }
-
-    const iconUrl = chrome.runtime.getURL('icon.png');
-
-    createNotification(`alarm-${todoId}-${Date.now()}`, {
-      type: 'basic',
-      iconUrl,
-      title: 'cmdOS Notification',
-      message: displayMessage,
-      priority: 2,
-    });
-
-    showInTabToast('cmdOS Notification', key);
-
-    const isRecurring = !!(todo.is_recurring || todo.recurring);
-    const recurringCycle = (todo.recurring_cycle || todo.recurring_frequency || 'none').toLowerCase();
+    const isRecurring = !!(todo.is_recurring || todo.recurring || todo.scheduleType === 'recurring');
+    const recurringCycle = (todo.recurring_cycle || todo.recurring_frequency || todo.recurringType || 'none').toLowerCase();
 
     if (isRecurring && recurringCycle !== 'none') {
-      const now = Date.now();
-      let nextRunTime = alarm.scheduledTime || now;
-      const MIN_GAP = 60 * 1000;
-
-      while (nextRunTime <= now + MIN_GAP) {
-        if (recurringCycle === 'daily') nextRunTime += 24 * 60 * 60 * 1000;
-        else if (recurringCycle === 'weekly') nextRunTime += 7 * 24 * 60 * 60 * 1000;
-        else if (recurringCycle === 'monthly') {
-          const tempDate = new Date(nextRunTime);
-          tempDate.setMonth(tempDate.getMonth() + 1);
-          nextRunTime = tempDate.getTime();
-        } else {
-          nextRunTime += 24 * 60 * 60 * 1000;
-          break;
-        }
-      }
+      const nextRunTime = getNextRecurringAlarmTime(Number(todo.scheduleTime) || alarm.scheduledTime || Date.now(), recurringCycle);
       chrome.alarms.create(`todo|${todoId}`, { when: nextRunTime });
-
-      // Update Dexie database directly
-      await db.todos.update(todoId, {
-        scheduleTime: nextRunTime,
-        isDone: false,
-        updatedAt: Date.now(),
-      });
-
-      // API logic removed
     }
   } catch (err) {
     console.error('[Background] handleTodoAlarm failed:', err);

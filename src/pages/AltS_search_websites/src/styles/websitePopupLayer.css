@@ -1,0 +1,151 @@
+/*
+ * Shadow-DOM stylesheet for WebsitePopupLayer.
+ *
+ * This deliberately lives outside the React component instead of using a
+ * template-string stylesheet. The popup is injected into arbitrary websites,
+ * so this file is imported as text and appended to its Shadow Root. Tailwind's
+ * current website-popup bundle does not scan or inject styles for this popup
+ * module; adding it here keeps the visual boundary explicit and safe.
+ */
+
+:host {
+  all: initial;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  pointer-events: none;
+  isolation: isolate;
+  contain: layout style paint;
+  /* The host itself is still reachable by document-level div rules. */
+  opacity: 1 !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
+}
+
+/* Reset inherited page typography inside the protected shadow boundary. */
+[data-website-popup-layer-portal] {
+  font-family: var(--website-popup-font-family);
+  font-size: var(--website-popup-result-font-size);
+  font-weight: var(--website-popup-font-regular);
+  font-style: normal;
+  line-height: var(--website-popup-result-line-height);
+  color: var(--color-altsTextPrimary);
+  -webkit-text-fill-color: currentColor;
+  -webkit-text-stroke-width: 0;
+  text-shadow: none;
+  text-transform: none;
+  letter-spacing: normal;
+  word-spacing: normal;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+.website-popup-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  padding: clamp(
+    var(--website-popup-top-padding-min),
+    calc(50vh - var(--website-popup-top-padding-offset)),
+    var(--website-popup-top-padding-max)
+  ) var(--website-popup-viewport-inset) var(--website-popup-viewport-inset);
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 80ms ease-out;
+}
+
+.website-popup-layer[data-visible='true'] {
+  opacity: 1;
+}
+
+.website-popup-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.website-popup-surface {
+  position: relative;
+  width: min(var(--website-popup-width), calc(100vw - var(--website-popup-viewport-space)));
+  height: var(--website-popup-height);
+  max-height: 100%;
+  overflow: hidden;
+  color-scheme: inherit;
+  background: var(--color-altsPopupBg);
+  border: 0;
+  border-radius: var(--website-popup-radius);
+  box-shadow: inset 0 0 0 var(--website-popup-outline-width) var(--color-altsBorderColor);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  font-family: var(--website-popup-font-family);
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+  transform-origin: top center;
+  transition:
+    opacity 150ms ease-out,
+    transform 150ms ease-out;
+}
+
+.website-popup-surface:not([data-presentation='standalone']):has(.website-popup-frame[data-has-side-panel='true']) {
+  width: min(
+    calc(var(--website-popup-width) + var(--website-popup-create-side-panel-width)),
+    calc(100vw - var(--website-popup-viewport-space))
+  );
+  transition: width 150ms ease-out;
+}
+
+.website-popup-layer[data-visible='true'] .website-popup-surface {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.website-popup-layer[data-visible='false'] .website-popup-surface {
+  opacity: 0;
+  transform: translateY(15px) scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .website-popup-layer,
+  .website-popup-surface {
+    transition-duration: 0ms;
+  }
+}
+
+/* Standalone occupies only its form width and anchors to the viewport right. */
+.website-popup-layer[data-presentation='standalone'] {
+  justify-content: flex-end;
+  padding-top: var(--website-popup-viewport-inset);
+}
+.website-popup-surface[data-presentation='standalone'] {
+  min-width: 0;
+  max-width: calc(100vw - var(--website-popup-viewport-space));
+  width: min(
+    var(--website-popup-tab-picker-width),
+    calc(100vw - var(--website-popup-viewport-space))
+  );
+  transform-origin: top right;
+  height: calc(var(--website-popup-height) + var(--website-popup-create-composer-max-height));
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+}

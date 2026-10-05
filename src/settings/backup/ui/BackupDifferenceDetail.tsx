@@ -1,17 +1,11 @@
 import React from 'react';
 import { FiArrowRight, FiPlus } from 'react-icons/fi';
 import type { BackupFieldChange, BackupRecordDifference } from '../logic/backupComparisonTypes';
+import { backupFieldDisplay, backupTableLabel } from '../logic/backupPresentation';
 
 interface BackupDifferenceDetailProps {
   difference: BackupRecordDifference;
   onClose: () => void;
-}
-
-function displayValue(value: unknown): string {
-  if (value === undefined) return 'Not present';
-  if (typeof value === 'string') return value.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim() || 'Empty';
-  const serialized = JSON.stringify(value, null, 2);
-  return serialized === undefined ? 'Not present' : serialized;
 }
 
 function fallbackVisibleFields(difference: BackupRecordDifference): BackupFieldChange[] {
@@ -29,7 +23,7 @@ function fallbackVisibleFields(difference: BackupRecordDifference): BackupFieldC
     }));
 }
 
-const FieldValue: React.FC<{ field: BackupFieldChange; side: 'local' | 'drive' }> = ({ field, side }) => {
+const FieldValue: React.FC<{ field: BackupFieldChange; side: 'local' | 'drive'; tableName: string }> = ({ field, side, tableName }) => {
   const value = side === 'local' ? field.localValue : field.driveValue;
   if (value === undefined) {
     return (
@@ -42,7 +36,7 @@ const FieldValue: React.FC<{ field: BackupFieldChange; side: 'local' | 'drive' }
 
   return (
     <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/40 px-2.5 py-2 font-mono text-[10px] text-[var(--color-textPrimary)]">
-      {displayValue(value)}
+      {backupFieldDisplay(value, tableName)}
     </pre>
   );
 };
@@ -51,7 +45,7 @@ const SideHeader: React.FC<{ title: string }> = ({ title }) => (
   <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-textPrimary)]">{title}</span>
 );
 
-const RecordValuePanel: React.FC<{ record?: Record<string, unknown>; fields: BackupFieldChange[] }> = ({ record, fields }) => {
+const RecordValuePanel: React.FC<{ record?: Record<string, unknown>; fields: BackupFieldChange[]; tableName: string }> = ({ record, fields, tableName }) => {
   if (!record) {
     return <div className="flex min-h-24 items-center gap-2 rounded-md border border-dashed border-[var(--color-borderDefault)] px-3 py-2 text-[10px] text-[var(--color-textMuted)]"><FiPlus size={14} /> Not present in this version</div>;
   }
@@ -63,7 +57,7 @@ const RecordValuePanel: React.FC<{ record?: Record<string, unknown>; fields: Bac
         return (
           <div key={field.path} className="border-b border-[var(--color-borderDefault)]/60 py-2 last:border-b-0 last:pb-0 first:pt-0">
             <div className="text-[9px] font-semibold text-[var(--color-textMuted)]">{field.path}</div>
-            <div className="mt-0.5 break-words text-[10px] text-[var(--color-textPrimary)]">{displayValue(value)}</div>
+            <div className="mt-0.5 break-words text-[10px] text-[var(--color-textPrimary)]">{backupFieldDisplay(value, tableName)}</div>
           </div>
         );
       })}
@@ -80,7 +74,7 @@ export const BackupDifferenceDetail: React.FC<BackupDifferenceDetailProps> = ({ 
       <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--color-modalBg)]">
         <div className="flex items-center justify-between gap-3 border-b border-[var(--color-borderDefault)] px-5 py-4">
           <div className="min-w-0 text-left">
-            <div className="text-sm font-bold text-[var(--color-textPrimary)]">{difference.tableName}</div>
+            <div className="text-sm font-bold text-[var(--color-textPrimary)]">{backupTableLabel(difference.tableName)}</div>
             <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-textMuted)]">{difference.identity}</div>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg border border-[var(--color-borderDefault)] px-3 py-1.5 text-xs font-semibold text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)]">
@@ -105,8 +99,8 @@ export const BackupDifferenceDetail: React.FC<BackupDifferenceDetailProps> = ({ 
                 <SideHeader title="Target version" />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <RecordValuePanel record={difference.localRecord} fields={visibleFields} />
-                <RecordValuePanel record={difference.driveRecord} fields={visibleFields} />
+                <RecordValuePanel record={difference.localRecord} fields={visibleFields} tableName={difference.tableName} />
+                <RecordValuePanel record={difference.driveRecord} fields={visibleFields} tableName={difference.tableName} />
               </div>
             </div>
           ) : (
@@ -119,8 +113,8 @@ export const BackupDifferenceDetail: React.FC<BackupDifferenceDetailProps> = ({ 
                 <div key={field.path || '(record)'} className="space-y-1.5">
                   <div className="text-[10px] font-semibold text-[var(--color-textMuted)]">{field.path || '(record)'}</div>
                   <div className="grid grid-cols-2 gap-3">
-                    <FieldValue field={field} side="local" />
-                    <FieldValue field={field} side="drive" />
+                    <FieldValue field={field} side="local" tableName={difference.tableName} />
+                    <FieldValue field={field} side="drive" tableName={difference.tableName} />
                   </div>
                 </div>
               ))}

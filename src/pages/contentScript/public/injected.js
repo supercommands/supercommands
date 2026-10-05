@@ -2,7 +2,7 @@
   window.addEventListener('message', event => {
     // Ensure the message is from the same window (content script -> page context)
     if (event.source !== window) return;
-    if (event.data?.type !== 'TASKLABS_INSERT_TEXT') return;
+    if (event.data?.type !== 'supercommands:insert-text' && event.data?.type !== 'cmdos:insert-text') return;
 
     const { text, html, deleteCount = 0 } = event.data;
     const target = document.activeElement || document.body;

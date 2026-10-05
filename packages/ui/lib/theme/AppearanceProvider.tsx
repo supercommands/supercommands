@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState, useMemo, useRef, useCal
 import { appearanceThemeStorage, appearanceWallpaperStorage, appearanceBrightnessStorage, appearanceWarmTintStorage, appearanceWarmTintStrengthStorage } from '@extension/storage';
 import type { ThemeProfile } from './types';
 import { getTheme, getRandomValidThemeId, isValidThemeId, assertThemeInvariants, migrateThemeId, DEFAULT_THEME_ID } from './registry';
+import { CRITICAL_THEME_TOKEN_KEYS, resolveNewTabTheme, WALLPAPER_FUNCTIONAL_THEME_ID } from './resolveNewTabTheme';
 import { normalizeBrightness, DEFAULT_APPEARANCE_BRIGHTNESS, brightnessLevelToFactor } from './brightness';
 import { normalizeWarmTintStrength, DEFAULT_WARM_TINT_STRENGTH } from './warmTint';
 
@@ -50,24 +51,16 @@ const getCurrentExtensionVersion = (): string => {
   }
 };
 const LAST_KNOWN_VERSION_KEY = 'extension_last_known_version';
-const THEME_STARTUP_HINT_KEY = 'cmdos_theme_id_startup_hint';
-const THEME_STARTUP_SNAPSHOT_KEY = 'cmdos_theme_startup_snapshot';
-const WARM_TINT_STARTUP_HINT_KEY = 'cmdos_warm_tint_startup_hint';
-const WARM_TINT_STRENGTH_STARTUP_HINT_KEY = 'cmdos_warm_tint_strength_startup_hint';
-const CRITICAL_THEME_TOKEN_KEYS = [
-  'appBg',
-  'rootBg',
-  'sidebarBg',
-  'appSidebarBg',
-  'panelBg',
-  'cardBg',
-  'textPrimary',
-  'textSecondary',
-  'textMuted',
-  'borderDefault',
-  'noteLibraryIcon',
-  'backgroundGradient',
-] as const;
+const THEME_STARTUP_HINT_KEY = 'supercommands_theme_id_startup_hint';
+const LEGACY_THEME_STARTUP_HINT_KEY = 'cmdos_theme_id_startup_hint';
+const THEME_STARTUP_SNAPSHOT_KEY = 'supercommands_theme_startup_snapshot';
+const LEGACY_THEME_STARTUP_SNAPSHOT_KEY = 'cmdos_theme_startup_snapshot';
+const WALLPAPER_STARTUP_HINT_KEY = 'supercommands_wallpaper_id_startup_hint';
+const LEGACY_WALLPAPER_STARTUP_HINT_KEY = 'cmdos_wallpaper_id_startup_hint';
+const WARM_TINT_STARTUP_HINT_KEY = 'supercommands_warm_tint_startup_hint';
+const LEGACY_WARM_TINT_STARTUP_HINT_KEY = 'cmdos_warm_tint_startup_hint';
+const WARM_TINT_STRENGTH_STARTUP_HINT_KEY = 'supercommands_warm_tint_strength_startup_hint';
+const LEGACY_WARM_TINT_STRENGTH_STARTUP_HINT_KEY = 'cmdos_warm_tint_strength_startup_hint';
 
 const resolveAndMigrateThemeId = (id: string | null | undefined): { resolvedId: string; needsMigration: boolean } => {
   if (!id) {
@@ -88,11 +81,13 @@ const resolveAndMigrateThemeId = (id: string | null | undefined): { resolvedId: 
 const readThemeStartupHint = (): string | undefined => {
   if (typeof window === 'undefined') return undefined;
 
-  const gateThemeId = document.documentElement?.dataset?.appearanceThemeId;
-  if (gateThemeId) return gateThemeId;
-
   try {
-    return window.localStorage?.getItem(THEME_STARTUP_HINT_KEY) || undefined;
+    return (
+      window.localStorage?.getItem(THEME_STARTUP_HINT_KEY) ||
+      window.localStorage?.getItem(LEGACY_THEME_STARTUP_HINT_KEY) ||
+      document.documentElement?.dataset?.appearanceThemeId ||
+      undefined
+    );
   } catch {
     return undefined;
   }
@@ -106,6 +101,59 @@ const writeThemeStartupHint = (id: string): void => {
   } catch {
     // localStorage only improves startup; chrome.storage remains canonical.
   }
+};
+
+const isPackagedWallpaperId = (id: string | null | undefined): id is string => {
+  return Boolean(id && id !== 'none' && id !== 'custom' && /^[A-Za-z0-9._-]+$/.test(id));
+};
+
+const isExtensionPage = (): boolean =>
+  typeof location !== 'undefined' &&
+  (location.protocol === 'chrome-extension:' || location.protocol === 'moz-extension:');
+
+const readWallpaperStartupHint = (): string => {
+  if (typeof window === 'undefined') return 'none';
+
+  try {
+    const hint =
+      window.localStorage?.getItem(WALLPAPER_STARTUP_HINT_KEY) ||
+      window.localStorage?.getItem(LEGACY_WALLPAPER_STARTUP_HINT_KEY) ||
+      undefined;
+    return hint === 'custom' || isPackagedWallpaperId(hint) ? hint : 'none';
+  } catch {
+    return 'none';
+  }
+};
+
+const writeWallpaperStartupHint = (id: string): void => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    if (id === 'custom' || isPackagedWallpaperId(id)) {
+      window.localStorage?.setItem(WALLPAPER_STARTUP_HINT_KEY, id);
+    } else {
+      window.localStorage?.setItem(WALLPAPER_STARTUP_HINT_KEY, 'none');
+    }
+  } catch {
+    // localStorage only improves startup; chrome.storage remains canonical.
+  }
+};
+
+const clearDocumentStartupWallpaper = (): void => {
+  if (typeof document === 'undefined') return;
+  const isContentScript =
+    typeof chrome !== 'undefined' && chrome.runtime && !isExtensionPage();
+  if (isContentScript) return;
+
+  const targets = [document.documentElement, document.body].filter(Boolean) as HTMLElement[];
+  targets.forEach(target => {
+    target.style.removeProperty('--startup-wallpaper-background');
+    target.style.removeProperty('background');
+    target.style.removeProperty('background-size');
+    target.style.removeProperty('background-position');
+    target.style.removeProperty('background-repeat');
+    target.style.removeProperty('background-attachment');
+  });
 };
 
 const writeWarmTintStartupHint = (enabled: boolean): void => {
@@ -162,7 +210,7 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     assertThemeInvariants();
   }, []);
 
-  const [wallpaperId, setWallpaperId] = useState<string>('none');
+  const [wallpaperId, setWallpaperId] = useState<string>(() => readWallpaperStartupHint());
   const [customWallpaperBase64, setCustomWallpaperBase64] = useState<string>('');
   const [brightness, setBrightnessState] = useState<number>(DEFAULT_APPEARANCE_BRIGHTNESS);
   const [warmTintEnabled, setWarmTintEnabledState] = useState<boolean>(false);
@@ -181,7 +229,9 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const { resolvedId, needsMigration } = resolveAndMigrateThemeId(id);
       setThemeId(resolvedId);
       writeThemeStartupHint(resolvedId);
-      writeCriticalThemeStartupSnapshot(getTheme(resolvedId));
+      writeCriticalThemeStartupSnapshot(
+        isContentScript ? getTheme(resolvedId) : resolveNewTabTheme(resolvedId, readWallpaperStartupHint()),
+      );
       if (needsMigration || id !== resolvedId) {
         appearanceThemeStorage.set(resolvedId);
       }
@@ -235,6 +285,11 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const newId = id || 'none';
       if (newId) {
         setWallpaperId(newId);
+        writeWallpaperStartupHint(newId);
+        clearDocumentStartupWallpaper();
+        if (!isContentScript) {
+          writeCriticalThemeStartupSnapshot(resolveNewTabTheme(resolveAndMigrateThemeId(readThemeStartupHint()).resolvedId, newId));
+        }
       }
     });
 
@@ -274,6 +329,11 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const newId = id || 'none';
         if (newId) {
           setWallpaperId(newId);
+          writeWallpaperStartupHint(newId);
+          clearDocumentStartupWallpaper();
+          if (!isContentScript) {
+            writeCriticalThemeStartupSnapshot(resolveNewTabTheme(resolveAndMigrateThemeId(readThemeStartupHint()).resolvedId, newId));
+          }
         }
       });
     });
@@ -329,11 +389,11 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   }, []);
 
-  let baseTheme = getTheme(themeId);
-  if (!baseTheme) {
-    console.warn(`[AppearanceProvider] Theme "${themeId}" not found in registry. Falling back to default.`);
-    baseTheme = getTheme(DEFAULT_THEME_ID);
-  }
+  const isContentScript = typeof location !== 'undefined' && !isExtensionPage();
+  const baseTheme = useMemo(
+    () => (isContentScript ? getTheme(themeId) : resolveNewTabTheme(themeId, wallpaperId)),
+    [isContentScript, themeId, wallpaperId],
+  );
 
   const theme = useMemo(() => {
     return {
@@ -353,7 +413,7 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     const isContentScript =
-      typeof chrome !== 'undefined' && chrome.runtime && !location.protocol.startsWith('chrome-extension:');
+      typeof chrome !== 'undefined' && chrome.runtime && !isExtensionPage();
     const root =
       (window as any).__ALTS_PORTAL_HOST__ ||
       (window as any).__ALTQ_PORTAL_HOST__ ||
@@ -364,9 +424,11 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const maxSourceLevel = theme.brightness?.maximumSourceLevel ?? (theme.isDark ? 85 : 65);
     const factor = brightnessLevelToFactor(brightness, maxSourceLevel);
     root.style.setProperty('filter', `brightness(${factor})`);
+    root.style.colorScheme = theme.isDark ? 'dark' : 'light';
 
-    // Toggle dark class on document element and portal root element so Tailwind dark:* variants accurately reflect theme light/dark state
-    if (typeof document !== 'undefined' && document.documentElement) {
+    // Toggle dark class on the app document for extension pages. Content-script popups
+    // must keep the host website document untouched and scope theme state to the portal root.
+    if (!isContentScript && typeof document !== 'undefined' && document.documentElement) {
       document.documentElement.classList.toggle('dark', Boolean(theme.isDark));
     }
     if (root && root.classList) {
@@ -388,23 +450,12 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       'widgetBg',
       'widgetToolbarBg',
     ];
-    const textTokens = ['textPrimary', 'textSecondary', 'textMuted', 'textPlaceholder', 'textDisabled', 'iconDefault'];
-    const wallpaperTextOverrides: Record<string, string> = {
-      textPrimary: '#FFFFFF',
-      textSecondary: '#E5E7EB',
-      textMuted: '#A3A3A3',
-      textPlaceholder: '#A3A3A3',
-      textDisabled: 'rgba(255, 255, 255, 0.35)',
-      iconDefault: '#E5E7EB',
-    };
 
     Object.entries(theme.tokens).forEach(([key, value]) => {
       if (value === undefined) return;
       // STRICT RULE: If wallpaper is applied, do not trigger appBg (keep it transparent)
       if (theme.wallpaper && key === 'appBg') {
         root.style.setProperty(`--color-${key}`, 'transparent');
-      } else if (theme.wallpaper && theme.isDark && textTokens.includes(key)) {
-        root.style.setProperty(`--color-${key}`, wallpaperTextOverrides[key]);
       } else if (key === 'backgroundGradient') {
         root.style.setProperty(`--color-${key}`, value);
       } else if (theme.glassOpacity !== undefined && glassPanels.includes(key)) {
@@ -421,14 +472,23 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [theme, brightness]);
 
   const setTheme = async (id: string) => {
-    setThemeId(id);
-    writeThemeStartupHint(id);
-    writeCriticalThemeStartupSnapshot(getTheme(id));
-    await appearanceThemeStorage.set(id);
+    const resolvedId = resolveAndMigrateThemeId(id).resolvedId;
+    setThemeId(resolvedId);
+    writeThemeStartupHint(resolvedId);
+    writeCriticalThemeStartupSnapshot(isContentScript ? getTheme(resolvedId) : resolveNewTabTheme(resolvedId, wallpaperId));
+    await appearanceThemeStorage.set(resolvedId);
   };
 
   const setWallpaper = async (id: string) => {
+    if (!isContentScript && (id !== 'none' || wallpaperId !== 'none')) {
+      setThemeId(WALLPAPER_FUNCTIONAL_THEME_ID);
+      writeThemeStartupHint(WALLPAPER_FUNCTIONAL_THEME_ID);
+      writeCriticalThemeStartupSnapshot(resolveNewTabTheme(WALLPAPER_FUNCTIONAL_THEME_ID, id));
+      await appearanceThemeStorage.set(WALLPAPER_FUNCTIONAL_THEME_ID);
+    }
     setWallpaperId(id);
+    writeWallpaperStartupHint(id);
+    clearDocumentStartupWallpaper();
     await appearanceWallpaperStorage.set(id);
   };
 

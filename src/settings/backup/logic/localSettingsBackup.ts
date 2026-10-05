@@ -12,10 +12,11 @@ export const LOCAL_SETTINGS_BACKUP_KEYS = [
   'custom-wallpaper-base64',
   'appearance-wallpaper',
   'todo_display_mode',
+  'todo_sheet_grouping_mode',
   'sidebar_create_section_collapsed',
   'sidebar_my_library_section_collapsed',
   'sidebar_views_section_collapsed',
-  'lastUsedWorkspaceId',
+  'lastUsedOrganisationId',
 ] as const;
 
 export type LocalSettingsBackupKey = (typeof LOCAL_SETTINGS_BACKUP_KEYS)[number];
@@ -35,7 +36,8 @@ export async function extractLocalSettingsBackup(): Promise<LocalSettingsBackup>
 }
 
 export async function restoreLocalSettingsBackup(settings: Record<string, unknown> | undefined): Promise<void> {
-  if (!settings || typeof settings !== 'object') return;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('Invalid restore preferences.');
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) throw new Error('Chrome preference storage is unavailable.');
 
   const rawSettings = settings as Record<string, unknown>;
 
@@ -48,12 +50,13 @@ export async function restoreLocalSettingsBackup(settings: Record<string, unknow
     typeof obsoleteTheme === 'string' &&
     obsoleteTheme.trim() !== ''
   ) {
-    await StorageManager.setItem('theme-id-storage-key', obsoleteTheme);
+    settings = {...settings, 'theme-id-storage-key': obsoleteTheme};
   }
 
   const allowedKeys = new Set<string>(LOCAL_SETTINGS_BACKUP_KEYS);
-  for (const [key, value] of Object.entries(settings)) {
-    if (!allowedKeys.has(key)) continue;
-    await StorageManager.setItem(key, value);
-  }
+  const replacement = Object.fromEntries(Object.entries(settings).filter(([key, value]) => allowedKeys.has(key) && value !== undefined));
+  // Ordinary preference writes swallow failures; restore must observe them for retry.
+  if (Object.keys(replacement).length) await chrome.storage.local.set(replacement);
+  const removed = LOCAL_SETTINGS_BACKUP_KEYS.filter(key => !(key in replacement));
+  if (removed.length) await chrome.storage.local.remove([...removed]);
 }

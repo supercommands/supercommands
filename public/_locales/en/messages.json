@@ -1,11 +1,11 @@
 {
   "extensionDescription": {
     "description": "Extension description",
-    "message": "Think of cmdOS as your digital brain for managing daily browser workflows — all in one place."
+    "message": "Think of SuperCommands as your digital brain for managing daily browser workflows — all in one place."
   },
   "extensionName": {
     "description": "Extension name",
-    "message": "cmdOS Workspace"
+    "message": "SuperCommands Workspace"
   },
   "toggleTheme": {
     "message": "Toggle theme"

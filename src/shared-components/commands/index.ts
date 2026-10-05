@@ -5,3 +5,5 @@ export * from './constants';
 export * from './surface';
 export * from './identity';
 export * from './utils';
+export * from './newtabCommandRuntime';
+export * from './prefixCategoryReplacements';

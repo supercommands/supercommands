@@ -5,5 +5,3 @@ export * from './createObject/aiPrompt';
 export * from './createObject/favoriteCategory';
 export * from './altcPopup';
 export * from './createObject/commands';
-
-

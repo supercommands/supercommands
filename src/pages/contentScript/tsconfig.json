@@ -3,12 +3,22 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@src/*": ["src/*"],
-      "@private-providers/*": ["../../storage/API/storage/providers/*"],
-      "@private-services/*": ["../../storage/API/services/*"]
+      "@src/*": [
+        "src/*"
+      ]
     },
-    "types": ["chrome", "node"]
+    "types": [
+      "chrome",
+      "node"
+    ]
   },
-  "include": ["src", "vite.config.mts"]
+  "include": [
+    "src",
+    "vite.config.mts",
+    "../../shared-components",
+    "../../settings",
+    "../../storage",
+    "../../allObjectFolder",
+    "../../welcomeGuide"
+  ]
 }
-

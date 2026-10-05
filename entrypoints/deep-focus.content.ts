@@ -11,7 +11,7 @@ type DeepFocusBlockResponse = {
   error?: string;
 };
 
-const OVERLAY_ID = 'tasklabs-deep-focus-blocked-overlay';
+const OVERLAY_ID = 'cmdos-deep-focus-blocked-overlay';
 let overlayGuardObserver: MutationObserver | null = null;
 let overlayStopTimer: number | null = null;
 let hasStrippedUnderlyingHead = false;
@@ -224,8 +224,8 @@ function showBlockedOverlay(
   const brand = document.createElement('div');
   brand.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;font-weight:800;font-size:18px;color:var(--color-textPrimary,#08090d);font-family:var(--font-comfortaa,Comfortaa,Inter,ui-sans-serif,system-ui,sans-serif)';
   const brandIcon = document.createElement('img');
-  brandIcon.src = chrome.runtime.getURL('content/cmdOS_logo.png');
-  brandIcon.alt = 'cmdOS';
+  brandIcon.src = chrome.runtime.getURL('content/supercommands_logo.png');
+  brandIcon.alt = 'SuperCommands';
   brandIcon.style.cssText = [
     'width:28px',
     'height:28px',
@@ -235,7 +235,7 @@ function showBlockedOverlay(
     'flex:0 0 auto',
   ].join(';');
   const brandText = document.createElement('span');
-  brandText.textContent = 'cmdOS';
+  brandText.textContent = 'SuperCommands';
   brand.append(brandIcon, brandText);
 
   const statusPill = document.createElement('div');

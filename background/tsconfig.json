@@ -3,25 +3,50 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@extension/browser": ["../packages/browser/index.ts"],
-      "@src/*": ["src/*"],
-      "@private-providers/*": ["../src/storage/API/storage/providers/*"],
-      "@private-services/*": ["../src/storage/API/services/*"],
-      "@config/*": ["../src/storage/API/core/*"],
-
-      "@automation/*": ["src/automation/*"],
-      "@todos/*": ["src/todos/*"],
-      "@sessions/*": ["src/sessions/*"],
-      "@browserWindows/*": ["src/browserWindows/*"],
-      "@notifications/*": ["src/notifications/*"],
-      "@tabs/*": ["src/tabs/*"],
-      "@browserData/*": ["src/browserData/*"],
-      "@hotkeys/*": ["src/hotkeys/*"],
-      "@_authentication/*": ["src/_private/authentication_private/*"],
-      "@chatAgents/*": ["src/chatAgents/*"],
-      "@preBuiltCommands/*": ["src/all_PreBuilt_Commands/*"]
+      "@extension/browser": [
+        "../packages/browser/index.ts"
+      ],
+      "@src/*": [
+        "src/*"
+      ],
+      "@config/*": [
+        "../src/storage/API/core/*"
+      ],
+      "@todos/*": [
+        "src/todos/*"
+      ],
+      "@sessions/*": [
+        "src/sessions/*"
+      ],
+      "@browserWindows/*": [
+        "src/browserWindows/*"
+      ],
+      "@notifications/*": [
+        "src/notifications/*"
+      ],
+      "@tabs/*": [
+        "src/tabs/*"
+      ],
+      "@browserData/*": [
+        "src/browserData/*"
+      ],
+      "@hotkeys/*": [
+        "src/hotkeys/*"
+      ],
+      "@chatAgents/*": [
+        "src/chatAgents/*"
+      ],
+      "@preBuiltCommands/*": [
+        "src/all_PreBuilt_Commands/*"
+      ]
     }
   },
-  "include": ["src", "utils", "vite.config.mts", "manifest.ts", "../node_modules/@types"]
+  "include": [
+    "src",
+    "utils",
+    "vite.config.mts",
+    "manifest.ts",
+    "../node_modules/@types",
+    "../src/shared-components"
+  ]
 }
-

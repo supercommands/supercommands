@@ -12,6 +12,7 @@ export interface ThemeTokens {
   editorBg: string;
   containerBg: string;
   sheetBg: string;
+  collectionSheetGroupBg: string;
   contextMenuBg: string;
   backdrop: string;
   popupBg: string;

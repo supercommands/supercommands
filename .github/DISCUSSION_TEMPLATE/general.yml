@@ -1,0 +1,25 @@
+title: "[Question] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask a question or share a SuperCommands workflow. Use Issues for reproducible bugs. For vulnerabilities, follow SECURITY.md without posting exploit details publicly.
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like to discuss?
+      description: Explain your goal and where you need help.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and what you tried
+      description: Include the extension version, browser and relevant steps. Remove credentials and personal data.
+  - type: checkboxes
+    id: conduct
+    attributes:
+      label: Community guidelines
+      options:
+        - label: I have read the repository's Code of Conduct.
+          required: true

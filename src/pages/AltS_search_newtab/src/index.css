@@ -34,6 +34,7 @@
 
   --color-borderDefault: rgba(120, 170, 220, 0.16);
   --color-backgroundGradient: linear-gradient(180deg, #091421 0%, #172B42 52%, #29465F 100%);
+  --startup-wallpaper-background: var(--color-backgroundGradient, var(--color-rootBg));
 }
 
 .light,
@@ -56,7 +57,11 @@
 
 html,
 body {
-  background: var(--color-backgroundGradient, var(--color-rootBg)) !important;
+  background: var(--color-rootBg) !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
   margin: 0;
   padding: 0;
   width: 100%;
@@ -78,7 +83,20 @@ body {
 
 html.dark,
 html.dark body {
-  background: var(--color-backgroundGradient, var(--color-rootBg)) !important;
+  background: var(--color-rootBg) !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+html[data-startup-wallpaper-pending='true'],
+html[data-startup-wallpaper-pending='true'] body {
+  background: var(--color-rootBg) !important;
+}
+
+html[data-startup-wallpaper-pending='true'] body {
+  visibility: hidden;
 }
 
 #app-container {
@@ -475,8 +493,7 @@ html.dark body {
   z-index: 2 !important;
 }
 
-[data-widget-grid-static='true'] .react-grid-item,
-[data-widget-grid-hydrating='true'] .react-grid-item {
+[data-widget-grid-static='true'] .react-grid-item {
   transition: none !important;
 }
 
@@ -563,68 +580,6 @@ html.dark body {
   background-color: var(--color-textPrimary) !important;
 }
 
-.widget-grid-edit-guide {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 24px;
-  right: 24px;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.62;
-  --grid-line: rgba(15, 23, 42, 0.045);
-  background-image: linear-gradient(
-      var(--grid-line) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      90deg,
-      var(--grid-line) 1px,
-      transparent 1px
-    );
-  background-size: 18px 18px;
-  background-position: 0 0;
-  mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
-}
-
-.dark .widget-grid-edit-guide {
-  opacity: 0.48;
-  --grid-line: rgba(255, 255, 255, 0.045);
-}
-
-@keyframes widgetEditModeWiggle {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-  }
-
-  25% {
-    transform: translate3d(-1px, 0.5px, 0) rotate(-0.65deg);
-  }
-
-  50% {
-    transform: translate3d(1px, -0.5px, 0) rotate(0.65deg);
-  }
-
-  75% {
-    transform: translate3d(-0.75px, -0.5px, 0) rotate(-0.45deg);
-  }
-}
-
-.widget-edit-mode-wiggle {
-  animation: widgetEditModeWiggle 1600ms ease-in-out infinite;
-  animation-delay: var(--widget-edit-wiggle-delay, 0ms);
-  transform-origin: 50% 50%;
-  will-change: transform;
-}
-
-.react-grid-item.react-draggable-dragging .widget-edit-mode-wiggle,
-.react-grid-item.react-resizable-resizing .widget-edit-mode-wiggle {
-  animation: none !important;
-  transform: none !important;
-}
-
 /* ============================================
    Animated Gradient Border for Searchbar
    Creates a "comet sweep" effect where colors
@@ -651,6 +606,12 @@ html.dark body {
   border-radius: 0.75rem 0.75rem 0 0;
   /* rounded-t-xl */
   isolation: isolate;
+}
+
+.supercommands-search-results-open [data-searchbar-input='true'],
+.cmdos-search-results-open [data-searchbar-input='true'] {
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 /* Card container with static blue border and glow */
@@ -938,26 +899,6 @@ html.is-searchbar-focused .footer-indications {
    INTERNAL WIDGET SCROLLBARS
    ========================================================= */
 
-/* Keep dashboard scrolling available without showing a hover-only vertical stripe. */
-[data-widget-main-container='true'] {
-  scrollbar-width: none !important;
-  scrollbar-color: transparent transparent !important;
-  -ms-overflow-style: none !important;
-}
-
-[data-widget-main-container='true']::-webkit-scrollbar,
-[data-widget-main-container='true']::-webkit-scrollbar-track,
-[data-widget-main-container='true']::-webkit-scrollbar-track-piece,
-[data-widget-main-container='true']::-webkit-scrollbar-thumb,
-[data-widget-main-container='true']::-webkit-scrollbar-corner {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-
 /*
  * Firefox fallback.
  * Firefox does not support WebKit scrollbar pseudo-elements and only provides
@@ -1113,25 +1054,53 @@ html.is-searchbar-focused .footer-indications {
 .widget-settings-search-toggle {
   background-color: color-mix(
     in srgb,
-    var(--color-textPrimary, #888888) 16%,
-    var(--color-inputBg, var(--color-editorBg, #1e1e1e))
+    var(--color-inputBg, var(--color-editorBg)) 72%,
+    transparent
   ) !important;
   border-color: color-mix(
     in srgb,
-    var(--color-textPrimary, #888888) 32%,
-    var(--color-borderDefault, #444444)
+    var(--color-textSecondary) 52%,
+    var(--color-borderDefault)
   ) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-textPrimary) 10%, transparent) !important;
 }
 
 .widget-settings-search-toggle[aria-checked='true'] {
-  background-color: var(--color-borderActive, var(--color-accent, #3b82f6)) !important;
-  border-color: var(--color-borderActive, var(--color-accent, #3b82f6)) !important;
+  background-color: var(--color-textPrimary) !important;
+  border-color: var(--color-textPrimary) !important;
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--color-rootBg, var(--color-appBg)) 28%, transparent) !important;
 }
 
 .widget-settings-search-toggle > span {
-  background-color: var(--color-editorBg, var(--color-cardBg, #ffffff)) !important;
-  border: 1px solid color-mix(in srgb, var(--color-textPrimary, #888888) 35%, transparent) !important;
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-textPrimary, #888888) 20%, transparent) !important;
+  background-color: var(--color-textPrimary) !important;
+  border: 1px solid color-mix(in srgb, var(--color-textSecondary) 20%, transparent) !important;
+  box-shadow: 0 1px 5px color-mix(in srgb, var(--color-rootBg, var(--color-appBg)) 45%, transparent) !important;
+}
+
+.widget-settings-search-toggle[aria-checked='true'] > span {
+  background-color: var(--color-inputBg, var(--color-editorBg)) !important;
+  border-color: color-mix(in srgb, var(--color-borderDefault) 80%, transparent) !important;
+}
+
+.light .widget-settings-search-toggle,
+:root[data-theme='light'] .widget-settings-search-toggle {
+  background-color: color-mix(in srgb, var(--color-inputBg, var(--color-editorBg)) 58%, transparent) !important;
+  border-color: color-mix(in srgb, var(--color-textPrimary) 28%, var(--color-borderDefault)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-textPrimary) 6%, transparent) !important;
+}
+
+.light .widget-settings-search-toggle > span,
+:root[data-theme='light'] .widget-settings-search-toggle > span {
+  background-color: var(--color-editorBg) !important;
+  border-color: color-mix(in srgb, var(--color-textPrimary) 16%, var(--color-borderDefault)) !important;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-textPrimary) 18%, transparent) !important;
+}
+
+.light .widget-settings-search-toggle[aria-checked='true'],
+:root[data-theme='light'] .widget-settings-search-toggle[aria-checked='true'] {
+  background-color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--color-accent) 24%, transparent) !important;
 }
 
 /* Warm Screen Tint Overlay */

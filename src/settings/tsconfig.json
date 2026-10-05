@@ -3,13 +3,21 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@src/*": ["../pages/AltS_search_newtab/src/*"],
-      "@extension/ui": ["../../packages/ui/lib/index.ts"],
-      "@extension/storage": ["../../packages/storage/lib/index.ts"],
-      "@extension/shared": ["../../packages/shared/lib/index.ts"],
-      "@private-services/*": ["../storage/API/services/*"]
+      "@src/*": [
+        "../pages/AltS_search_newtab/src/*"
+      ],
+      "@extension/ui": [
+        "../../packages/ui/lib/index.ts"
+      ],
+      "@extension/storage": [
+        "../../packages/storage/lib/index.ts"
+      ],
+      "@extension/shared": [
+        "../../packages/shared/lib/index.ts"
+      ]
     }
   },
-  "include": ["**/*"]
+  "include": [
+    "**/*"
+  ]
 }
-

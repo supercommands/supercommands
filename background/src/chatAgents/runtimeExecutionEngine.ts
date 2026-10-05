@@ -1,6 +1,6 @@
 /**
  * @file queue.ts
- * @description Manages automation for submitting prompts and data to AI platforms.
+ * @description Manages AI prompt submission queues for supported chat platforms.
  * Handles the injection of prompts, including text and images, into
  * various AI chatbot interfaces (like ChatGPT, Claude, Gemini, etc.). Manages
  * prompt queues per tab, tracking completion status, and simulating user interactions
@@ -8,8 +8,7 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { executeAgentSubmit } from '.';
-import type { AutoSubmitRequest } from '@automation/runtime_Execution_Engine/runner';
-import { executeTrustedDriveFlow } from '@automation/integrations/googleDriveSync';
+import type { AutoSubmitRequest } from './types';
 
 export interface PendingAiSession {
   id: string;
@@ -26,6 +25,7 @@ export const pendingAiSessions = new Map<string, PendingAiSession>();
 // Track prompt queues per tab to handle sequential submission
 export const tabPromptQueues = new Map<number, AutoSubmitRequest[]>();
 export const processingTabs = new Set<number>();
+export const pendingAutoSubmitTabs = new Map<number, AutoSubmitRequest>();
 
 let stateRestoredPromise: Promise<void> | null = null;
 /**
@@ -161,21 +161,11 @@ export async function processTabQueue(tabId: number) {
 
 /**
  * Executes a single auto-submit request on a specific tab.
- * Routes requests to either the Google Drive integration or the general AI agent handler.
  *
  * @param tabId The ID of the target tab.
  * @param request The auto-submit configuration (kind, prompt, images).
  */
 export async function executeAutoSubmit(tabId: number, request: AutoSubmitRequest) {
-  if (request.kind === 'drive') {
-    try {
-      await executeTrustedDriveFlow(tabId, request.images || []);
-      return;
-    } catch (err) {
-      console.error('[BG-v2] Drive TrustedDriveFlow failed:', err);
-      return;
-    }
-  }
   await executeAgentSubmit(tabId, request);
 }
 

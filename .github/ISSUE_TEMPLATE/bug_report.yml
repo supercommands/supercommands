@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem in SuperCommands.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Do not report vulnerabilities here; follow the repository's SECURITY.md. Remove credentials and personal records from logs and screenshots.
+  - type: input
+    id: version
+    attributes:
+      label: Extension version or commit
+      placeholder: Version shown in chrome://extensions, or source commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and operating system
+      placeholder: Browser name/version and OS
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Website popup
+        - New Tab workspace
+        - Toolbar popup
+        - Settings or backup
+        - Build or installation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the actions and relevant settings needed to reproduce it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Optional evidence. Remove tokens, private URLs and personal data.

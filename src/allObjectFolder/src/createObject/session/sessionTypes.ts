@@ -1,76 +1,61 @@
 /**
  * @file sessionTypes.ts
- * @description Defines TypeScript types and interfaces for saved Session entities 
+ * @description Defines TypeScript types and interfaces for saved Session entities
  * (Tab Sessions), including metadata fields, window preferences, and CRUD inputs.
- * 
+ *
  * @usage
  * ```ts
  * import type { SessionRecord, CreateSessionInput } from './sessionTypes';
  * ```
  */
-
 import { LinkItem } from '../links/linkTypes';
-
 import { SessionOpenSettings } from './sessionSettings';
-
 import type { StructuredVersionHistory } from '../../../../shared-components/versionHistory/structuredVersionHistory';
-
 export interface SessionSnapshot {
-  title: string;
-  description?: string;
-  urls: LinkItem[];
-  workspaceId: string;
-  folderId: string | null;
-  tagIds: string[];
-  sessionOpenSettings?: SessionOpenSettings;
-  windowId?: number;
-  shortcut?: string;
+    title: string;
+    description?: string;
+    urls: LinkItem[];
+    organisationId: string;
+    tagIds: string[];
+    sessionOpenSettings?: SessionOpenSettings;
+    windowId?: number;
+    shortcut?: string;
 }
-
 export interface SessionRecord {
-  id: string;
-  workspaceId: string;
-  folderId: string | null;
-
-  title: string;
-  description?: string;
-  urls: LinkItem[];
-  tagIds: string[];
-  sessionOpenSettings?: SessionOpenSettings;
-  windowId?: number;
-  shortcut?: string;
-
-  createdAt: number;
-  updatedAt: number;
-  deletedAt: number | null;
-
-  versionHistory?: StructuredVersionHistory<SessionSnapshot>;
+    id: string;
+    organisationId: string;
+    title: string;
+    description?: string;
+    urls: LinkItem[];
+    tagIds: string[];
+    sessionOpenSettings?: SessionOpenSettings;
+    windowId?: number;
+    shortcut?: string;
+    createdAt: number;
+    updatedAt: number;
+    deletedAt: number | null;
+    versionHistory?: StructuredVersionHistory<SessionSnapshot>;
 }
-
-export const SESSION_COMPARISON_FIELDS = ['id', 'workspaceId', 'folderId', 'title', 'description', 'urls', 'tagIds', 'sessionOpenSettings', 'windowId', 'shortcut', 'deletedAt'] as const satisfies readonly (keyof SessionRecord)[];
-
+export const SESSION_COMPARISON_FIELDS = ['id', 'organisationId', 'title', 'description', 'urls', 'tagIds', 'sessionOpenSettings', 'windowId', 'shortcut', 'deletedAt'] as const satisfies readonly (keyof SessionRecord)[];
 export interface CreateSessionInput {
-  id?: string;
-  workspaceId?: string;
-  folderId?: string | null;
-  title: string;
-  description?: string;
-  urls: LinkItem[];
-  tagIds?: string[];
-  sessionOpenSettings?: SessionOpenSettings;
-  windowId?: number;
-  shortcut?: string;
+    id?: string;
+    organisationId?: string;
+    title: string;
+    description?: string;
+    urls: LinkItem[];
+    tagIds?: string[];
+    sessionOpenSettings?: SessionOpenSettings;
+    windowId?: number;
+    shortcut?: string;
 }
-
 export interface UpdateSessionInput {
-  title?: string;
-  description?: string;
-  urls?: LinkItem[];
-  workspaceId?: string;
-  folderId?: string | null;
-  tagIds?: string[];
-  sessionOpenSettings?: SessionOpenSettings;
-  windowId?: number;
-  shortcut?: string;
-  expectedUpdatedAt?: number;
+    title?: string;
+    description?: string;
+    urls?: LinkItem[];
+    organisationId?: string;
+    tagIds?: string[];
+    sessionOpenSettings?: SessionOpenSettings;
+    windowId?: number;
+    shortcut?: string;
+    expectedUpdatedAt?: number;
 }

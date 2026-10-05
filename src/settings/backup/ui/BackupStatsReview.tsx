@@ -2,7 +2,9 @@ import React, { useMemo } from 'react';
 import { FiBarChart2, FiDatabase, FiHardDrive, FiRefreshCw, FiX } from 'react-icons/fi';
 import type { DriveFolder } from '../logic/driveApi';
 import { BACKUP_TABLE_NAMES } from '../logic/backupRegistry';
+import { normaliseOrganisationTableCounts } from '../logic/normaliseOrganisationBackup';
 import { formatBackupPayloadSize, type BackupData } from '../logic/extractData';
+import { backupTableLabel, collectionBackupSummary, manifestCollectionSummary } from '../logic/backupPresentation';
 
 interface BackupStatsReviewProps {
   backup: DriveFolder;
@@ -10,12 +12,6 @@ interface BackupStatsReviewProps {
   isLoading: boolean;
   error: string;
   onClose: () => void;
-}
-
-function tableLabel(tableName: string): string {
-  return tableName
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/^./, value => value.toUpperCase());
 }
 
 function backupVersionLabel(backup: DriveFolder): string {
@@ -37,13 +33,14 @@ function backupUploadedSizeLabel(backup: DriveFolder): string {
 
 export const BackupStatsReview: React.FC<BackupStatsReviewProps> = ({ backup, backupData, isLoading, error, onClose }) => {
   const tableCounts = useMemo(() => {
-    const manifestCounts = backupData?.manifest?.tableCounts || backup.manifest?.tableCounts || {};
+    const manifestCounts = normaliseOrganisationTableCounts(backupData?.manifest?.tableCounts || backup.manifest?.tableCounts || {}, backupData?.manifest?.schemaVersion || backup.manifest?.schemaVersion);
     return BACKUP_TABLE_NAMES.map(tableName => {
       const records = backupData?.tables?.[tableName];
       const count = Array.isArray(records) ? records.length : Number(manifestCounts[tableName] || 0);
       return { tableName, count: Number.isFinite(count) ? count : 0 };
     });
-  }, [backup.manifest?.tableCounts, backupData]);
+  }, [backup.manifest?.tableCounts, backup.manifest?.schemaVersion, backupData]);
+  const collectionSummary = backupData ? collectionBackupSummary(backupData.tables) : manifestCollectionSummary(backup.manifest);
 
   const totalRecords = tableCounts.reduce((sum, item) => sum + item.count, 0);
   const createdAt = new Date(backupData?.manifest?.createdAt || backup.manifest?.createdAt || backup.createdTime);
@@ -84,17 +81,21 @@ export const BackupStatsReview: React.FC<BackupStatsReviewProps> = ({ backup, ba
               <div className="grid grid-cols-2 gap-2 border-b border-[var(--color-borderDefault)] pb-4 sm:grid-cols-5">
                 <Summary label="Version" value={backupVersionLabel(backup)} />
                 <Summary label="Total records" value={totalRecords} />
-                <Summary label="Workspaces" value={tableCounts.find(item => item.tableName === 'workspaces')?.count || 0} />
+                <Summary label="Organisations" value={tableCounts.find(item => item.tableName === 'organisations')?.count || 0} />
                 <Summary label="Source size" value={sourceSizeLabel} />
                 <Summary label="Stored as" value={storageLabel} />
               </div>
+
+              <p className="mt-1 text-[10px] text-[var(--color-textMuted)]">
+                Custom properties: {collectionSummary?.propertyDefinitionCount ?? 'Unavailable'} · Populated property values: {collectionSummary?.propertyValueCount ?? 'Unavailable'}. ZIP backups include image files; Excel contains readable metadata.
+              </p>
 
               <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {tableCounts.map(item => (
                   <div key={item.tableName} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/30 px-3 py-2 text-left">
                     <span className="flex min-w-0 items-center gap-2">
                       <FiDatabase size={13} className="shrink-0 text-[var(--color-iconDefault)]" />
-                      <span className="truncate text-[11px] font-semibold text-[var(--color-textPrimary)]">{tableLabel(item.tableName)}</span>
+                      <span className="truncate text-[11px] font-semibold text-[var(--color-textPrimary)]">{backupTableLabel(item.tableName)}</span>
                     </span>
                     <span className="shrink-0 text-xs font-bold text-[var(--color-textSecondary)]">{item.count}</span>
                   </div>

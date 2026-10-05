@@ -1,0 +1,23 @@
+/* Shared custom scrollbar treatment for popup and New Tab popup lists. */
+.website-popup-custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-altsScrollbarThumb) transparent;
+}
+
+.website-popup-custom-scrollbar::-webkit-scrollbar {
+  width: var(--website-popup-scrollbar-width);
+  height: 0;
+}
+
+.website-popup-custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.website-popup-custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: var(--website-popup-row-radius);
+  background: var(--color-altsScrollbarThumb);
+}
+
+.website-popup-custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-altsScrollbarThumbHover);
+}

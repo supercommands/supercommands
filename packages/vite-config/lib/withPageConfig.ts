@@ -4,35 +4,6 @@ import { watchRebuildPlugin } from '@extension/hmr';
 import react from '@vitejs/plugin-react-swc';
 import deepmerge from 'deepmerge';
 import env, { IS_DEV, IS_PROD } from '@extension/env';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import fs from 'node:fs';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const enableSharing = process.env['VITE_ENABLE_SHARING'] !== 'false';
-
-const findWorkspaceRoot = (dir: string): string => {
-  if (fs.existsSync(path.join(dir, 'pnpm-workspace.yaml'))) {
-    return dir;
-  }
-  const parent = path.dirname(dir);
-  if (parent === dir) {
-    throw new Error('Workspace root not found');
-  }
-  return findWorkspaceRoot(parent);
-};
-
-const rootDir = findWorkspaceRoot(__dirname);
-
-const migrationProviderPath = enableSharing
-  ? path.resolve(rootDir, 'src', 'pages', 'Apis', 'storage', 'providers', 'MigrationProvider.ts')
-  : path.resolve(rootDir, 'src', 'pages', 'Apis', 'storage', 'providers', 'private-mocks', 'MigrationProvider.ts');
-
-
-
-
-
-
 
 export const watchOption = IS_DEV
   ? {
@@ -53,16 +24,6 @@ export const withPageConfig = (config: UserConfig) =>
       {
         define: {
           'process.env': env,
-        },
-        resolve: {
-          alias: {
-
-            '@private-providers/MigrationProvider': migrationProviderPath,
-
-
-
-
-          },
         },
         base: '',
         plugins: [react(), IS_DEV && watchRebuildPlugin({ refresh: true })],

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security reporting guidance
+    url: https://github.com/supercommands/supercommands/blob/main/SECURITY.md
+    about: Read the private reporting guidance before sharing vulnerability details.
+  - name: Contributor guide
+    url: https://github.com/supercommands/supercommands/blob/main/CONTRIBUTING.md
+    about: Setup, contribution scope, and pull request guidance for SuperCommands.

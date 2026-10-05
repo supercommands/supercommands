@@ -7,15 +7,22 @@ import {
   assertBackupRegistryMatchesDexie,
 } from './backupRegistry';
 import { LOCAL_SETTINGS_BACKUP_FILE, LocalSettingsBackup, extractLocalSettingsBackup } from './localSettingsBackup';
-import { assetStore } from '../../../storage/assets/assetStore';
+import { withAssetLifecycleLock } from '../../../storage/assets/assetLifecycle';
+import { captureBackupAssetBlobs, readBackupAssetBlobs } from './backupAssetPayloads';
+import { validateCurrentBackupSnapshot } from './backupSnapshotValidation';
 import { ASSET_BLOB_BACKUP_FIELD } from './assetBackupPayload';
+import { collectionBackupSummary, type CollectionBackupSummary } from './backupPresentation';
+import { normaliseStoredCollectionFields } from './normaliseCollectionBackup';
 
 export interface BackupManifest {
   source: string;
   schemaVersion: number;
+  originalSchemaVersion?: number;
+  collectionSummary?: CollectionBackupSummary;
   backupNumber: number;
   createdAt: string;
   estimatedPayloadBytes?: number;
+  assetPayloadBytes?: number;
   backupKind: typeof BACKUP_KIND;
   status: 'complete';
   parentBackupNumber?: number;
@@ -40,6 +47,8 @@ export interface BackupData {
 
 interface ExtractDatabaseOptions {
   includeAssetBlobPayloads?: boolean;
+  includeAssetBinaryPayloads?: boolean;
+  logPerf?: boolean;
 }
 
 function byteLength(content: string): number {
@@ -55,23 +64,27 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-async function attachAssetBlobPayloads(records: any[]): Promise<any[]> {
-  return Promise.all(records.map(async record => {
-    if (!record?.id) return record;
+function createExtractionPerfTrace(label: string) {
+  const started = performance.now();
+  let last = started;
+  const rows: Array<{ stage: string; durationMs: number; totalMs: number; detail?: unknown }> = [];
 
-    try {
-      const asset = await assetStore.getAsset(record.id);
-      if (!asset?.blob) return record;
-
-      return {
-        ...record,
-        [ASSET_BLOB_BACKUP_FIELD]: await blobToDataUrl(asset.blob),
-      };
-    } catch (error) {
-      console.warn(`[Backup Extraction] Could not include asset blob ${record.id}:`, error);
-      return record;
-    }
-  }));
+  return {
+    mark(stage: string, detail?: unknown) {
+      const now = performance.now();
+      rows.push({
+        stage,
+        durationMs: Math.round(now - last),
+        totalMs: Math.round(now - started),
+        detail,
+      });
+      last = now;
+    },
+    log() {
+      console.table(rows);
+      console.log(`[Backup Perf] ${label} total`, `${Math.round(performance.now() - started)} ms`);
+    },
+  };
 }
 
 export function formatBackupPayloadSize(bytes: number): string {
@@ -93,16 +106,19 @@ export function calculateBackupPayloadBytes(backupData: BackupData): number {
   return (
     tableBytes +
     byteLength(JSON.stringify(backupData.localSettings, null, 2)) +
-    byteLength(JSON.stringify(backupData.manifest, null, 2))
+    byteLength(JSON.stringify(backupData.manifest, null, 2)) +
+    (backupData.manifest.assetPayloadBytes || 0)
   );
 }
 
 export const extractDatabaseToJSON = async (
   backupNumber: number = 1,
   options: ExtractDatabaseOptions = {},
-): Promise<BackupData> => {
+): Promise<BackupData> => withAssetLifecycleLock(async () => {
   const includeAssetBlobPayloads = options.includeAssetBlobPayloads ?? true;
+  const perf = options.logPerf ? createExtractionPerfTrace('Database extraction') : null;
   assertBackupRegistryMatchesDexie();
+  perf?.mark('registry-check', { tables: BACKUP_TABLE_NAMES.length });
   const backupData: BackupData = {
     manifest: {
       source: 'cmdos',
@@ -127,49 +143,43 @@ export const extractDatabaseToJSON = async (
     tables: {},
     localSettings: await extractLocalSettingsBackup(),
   };
+  perf?.mark('local-settings');
 
-  for (const tableName of BACKUP_TABLE_NAMES) {
-    try {
-      // @ts-ignore - dynamic table access
-      const table = db[tableName];
-      if (table) {
-        const tableRecords = await table.toArray();
-        const records = tableName === 'assets' && includeAssetBlobPayloads
-          ? await attachAssetBlobPayloads(tableRecords)
-          : tableRecords;
-        backupData.tables[tableName] = records;
-        backupData.manifest.tableCounts[tableName] = records.length;
-        backupData.manifest.files.push({
-          name: `${tableName}.json`,
-          kind: 'table',
-          tableName,
-          recordCount: records.length,
-        });
-      } else {
-        console.warn(`[Backup Extraction] Table ${tableName} not found in Dexie.`);
-        backupData.tables[tableName] = [];
-        backupData.manifest.tableCounts[tableName] = 0;
-        backupData.manifest.files.push({
-          name: `${tableName}.json`,
-          kind: 'table',
-          tableName,
-          recordCount: 0,
-        });
-      }
-    } catch (err) {
-      console.error(`[Backup Extraction] Error reading table ${tableName}:`, err);
-      backupData.tables[tableName] = [];
-      backupData.manifest.tableCounts[tableName] = 0;
+  const tables = BACKUP_TABLE_NAMES.map(name => db.table(name));
+  // All table reads share one readonly transaction. No OPFS work runs inside it.
+  await db.transaction('r', tables, async () => {
+    for (const tableName of BACKUP_TABLE_NAMES) {
+      const records = await db.table(tableName).toArray();
+      backupData.tables[tableName] = records;
+      backupData.manifest.tableCounts[tableName] = records.length;
       backupData.manifest.files.push({
-        name: `${tableName}.json`,
-        kind: 'table',
-        tableName,
-        recordCount: 0,
+        name: `tables/${tableName}.json`, kind: 'table', tableName, recordCount: records.length,
       });
+      perf?.mark(`table:${tableName}`, { records: records.length });
     }
+  });
+  // Older writers/imports can leave optional columns absent even after schema upgrades.
+  // Normalize the detached snapshot only; never modify live data or mask invalid values.
+  backupData.tables = normaliseStoredCollectionFields(backupData.tables);
+  validateCurrentBackupSnapshot(backupData);
+  backupData.manifest.collectionSummary = collectionBackupSummary(backupData.tables);
+  if (includeAssetBlobPayloads || options.includeAssetBinaryPayloads) {
+    const blobs = await readBackupAssetBlobs(backupData);
+    captureBackupAssetBlobs(backupData, blobs);
+    if (!includeAssetBlobPayloads) backupData.manifest.assetPayloadBytes = Array.from(blobs.values()).reduce((total, blob) => total + blob.size, 0);
+    backupData.tables.assets = await Promise.all(backupData.tables.assets.map(async record => {
+      const {blob: _blob, ...metadata} = record;
+      return includeAssetBlobPayloads
+        ? {...metadata, [ASSET_BLOB_BACKUP_FIELD]: await blobToDataUrl(blobs.get(record.id)!)}
+        : metadata;
+    }));
+    perf?.mark('capture-images', { assets: blobs.size });
   }
 
   backupData.manifest.estimatedPayloadBytes = calculateBackupPayloadBytes(backupData);
+  perf?.mark('estimate-payload', { bytes: backupData.manifest.estimatedPayloadBytes });
+  perf?.log();
 
   return backupData;
-};
+});
+

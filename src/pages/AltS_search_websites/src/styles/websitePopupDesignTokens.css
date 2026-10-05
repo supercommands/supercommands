@@ -1,0 +1,97 @@
+/*
+ * Single source of truth for popup geometry and typography.
+ *
+ * Components consume these custom properties and must not repeat their numeric
+ * values. Color remains owned by the existing Alt+S theme registry.
+ */
+:host,
+.website-popup-token-scope {
+  --website-popup-width: 750px;
+  --website-popup-height: 435px;
+  --website-popup-tab-picker-width: 360px;
+  --website-popup-tab-picker-height: 240px;
+  --website-popup-create-side-panel-width: min(336px, var(--website-popup-trailing-viewport-width));
+  --website-popup-viewport-inset: 16px;
+  --website-popup-viewport-space: 32px;
+  --website-popup-top-padding-min: 56px;
+  --website-popup-top-padding-max: 150px;
+  --website-popup-top-padding-offset: 248px;
+
+  --website-popup-header-height: 56px;
+  --website-popup-footer-height: 40px;
+  --website-popup-row-height: 40px;
+  --website-popup-selected-row-height: 46px;
+  --website-popup-section-height: 28px;
+
+  --website-popup-radius: 18px;
+  --website-popup-row-radius: 10px;
+  --website-popup-outline-width: 1px;
+
+  --website-popup-header-padding-x: 16px;
+  --website-popup-list-gutter: 8px;
+  --website-popup-results-padding-y: 4px;
+  --website-popup-scrollbar-width: 4px;
+  --website-popup-section-padding: 8px;
+  --website-popup-row-padding-x: 8px;
+
+  --website-popup-navigation-size: 24px;
+  --website-popup-navigation-icon-size: 16px;
+  --website-popup-navigation-gap: 8px;
+  --website-popup-trailing-max-width: 240px;
+  --website-popup-trailing-viewport-width: 40vw;
+  --website-popup-icon-size: 20px;
+  --website-popup-stacked-icon-width: 32px;
+  --website-popup-icon-tile-size: 24px;
+  --website-popup-icon-glyph-size: 13px;
+  --website-popup-icon-gap: 12px;
+  --website-popup-key-height: 20px;
+  --website-popup-key-padding-x: 6px;
+  --website-popup-key-radius: 6px;
+
+  --website-popup-search-font-size: 16px;
+  --website-popup-search-line-height: 24px;
+  --website-popup-normal-search-max-rows: 3;
+  --website-popup-create-composer-max-height: 168px;
+  --website-popup-create-field-min-width: 12ch;
+  --website-popup-create-field-max-width: 100%;
+  /* Spotlight-style Create geometry; colors remain in the theme registry. */
+  --website-popup-composer-padding-x: var(--website-popup-header-padding-x);
+  --website-popup-composer-leading-size: var(--website-popup-icon-size);
+  --website-popup-composer-icon-gap: clamp(
+    var(--website-popup-navigation-gap),
+    1.2cqw,
+    var(--website-popup-icon-gap)
+  );
+  --website-popup-composer-control-height: 28px;
+  --website-popup-composer-control-min-width: var(--website-popup-create-field-min-width);
+  --website-popup-composer-single-line-min-height: var(--website-popup-composer-control-height);
+  --website-popup-composer-multiline-min-height: var(--website-popup-composer-control-height);
+  --website-popup-composer-single-select-min-height: var(--website-popup-composer-control-height);
+  --website-popup-composer-multi-select-min-height: var(--website-popup-composer-control-height);
+  --website-popup-composer-textarea-line-height: 22px;
+  --website-popup-composer-argument-group-gap: 4px;
+  --website-popup-composer-wrapped-row-gap: 4px;
+  --website-popup-composer-textarea-max-rows: 3;
+  --website-popup-composer-multi-select-max-rows: 3;
+  --website-popup-composer-field-short-basis: min(18cqw, 14ch);
+  --website-popup-composer-field-medium-basis: min(22cqw, 17ch);
+  --website-popup-composer-field-long-basis: min(40cqw, 34ch);
+  --website-popup-result-font-size: 14px;
+  --website-popup-result-line-height: 20px;
+  --website-popup-meta-font-size: 12px;
+  --website-popup-section-line-height: 1;
+  --website-popup-section-letter-spacing: 0.1px;
+
+  --website-popup-font-regular: 400;
+  --website-popup-font-medium: 500;
+  --website-popup-font-semibold: 600;
+
+  --website-popup-font-family:
+    'Website Popup Inter',
+    'Inter',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}

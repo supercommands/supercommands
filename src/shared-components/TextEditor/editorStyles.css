@@ -15,7 +15,13 @@
 .ql-editor.ql-blank::before {
   color: var(--color-textPlaceholder) !important;
   font-style: normal !important;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif !important;
   font-weight: 500 !important;
   font-size: 0.875rem !important;
   opacity: 1 !important;
@@ -32,7 +38,13 @@
 .ProseMirror p.is-editor-empty:first-child::before {
   color: var(--color-textPlaceholder) !important;
   font-style: normal !important;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif !important;
   font-weight: 500 !important;
   font-size: 0.875rem !important;
   opacity: 1 !important;
@@ -58,17 +70,11 @@
 }
 
 /* Ensure text color is visible in both light and dark modes */
-.ql-editor,
-.ql-editor p,
-.ql-editor div,
-.ql-editor span {
+.ql-editor {
   color: var(--color-textPrimary) !important;
 }
 
-.dark .ql-editor,
-.dark .ql-editor p,
-.dark .ql-editor div,
-.dark .ql-editor span {
+.dark .ql-editor {
   color: var(--color-textPrimary) !important;
 }
 
@@ -87,7 +93,6 @@
   color: inherit !important;
 }
 
-
 .ql-editor h1,
 .ql-editor h2,
 .ql-editor h3,
@@ -98,6 +103,11 @@
   background: transparent !important;
   font-weight: bold;
 }
+
+.note-rich-text .ql-editor h1 { font-size: 2.25rem; }
+.note-rich-text .ql-editor h2 { font-size: 1.875rem; }
+.note-rich-text .ql-editor h3 { font-size: 1.5rem; }
+.note-reading-size .ql-editor h4 { font-size: theme('fontSize.xl'); }
 
 .ql-container {
   position: relative;
@@ -116,6 +126,12 @@
   color: #111;
   border: 1px solid #e0e0e0;
   box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+}
+
+.ql-default-tooltip-disabled {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 /* Dark mode override */
@@ -317,6 +333,84 @@
   overflow-x: hidden !important;
 }
 
+.note-rich-text .quill-wrapper-internal .ql-editor {
+  line-height: 1.65;
+  padding: 0.15rem 0.875rem 0.875rem !important;
+  caret-color: var(--color-textPrimary);
+}
+
+/* Match the empty Notes placeholder to the editable line and its caret. */
+.note-rich-text .quill-wrapper-internal .ql-editor.ql-blank::before {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  line-height: inherit;
+  top: 0.15rem !important;
+  left: 0.875rem !important;
+  right: 0.875rem !important;
+  pointer-events: none;
+}
+
+.note-rich-text .ql-editor p,
+.note-rich-text .ql-editor ol,
+.note-rich-text .ql-editor ul {
+  margin: 0.35rem 0;
+}
+
+.note-rich-text .ql-editor p:first-child,
+.note-rich-text .ql-editor ol:first-child,
+.note-rich-text .ql-editor ul:first-child {
+  margin-top: 0;
+}
+
+.note-rich-text .ql-editor li {
+  padding-bottom: 0.18rem;
+}
+
+/* Full Notes editor: keep the compact widget's reading scale unchanged. */
+.note-reading-size .ql-editor p,
+.note-reading-size .ql-editor ol,
+.note-reading-size .ql-editor ul {
+  margin: theme('spacing.3') 0;
+}
+
+.note-reading-size .ql-container {
+  /* Pass the Notes typography through Quill's default container styles. */
+  font-size: inherit !important;
+  font-family: inherit;
+}
+
+.note-reading-size .ql-editor {
+  font-weight: theme('fontWeight.normal') !important;
+  line-height: theme('lineHeight.relaxed');
+}
+
+.note-reading-size .ql-editor strong,
+.note-reading-size .ql-editor b {
+  font-weight: theme('fontWeight.semibold');
+}
+
+.note-reading-size .ql-editor table th,
+.note-reading-size .ql-editor table td,
+.dark .note-reading-size .ql-editor table th,
+.dark .note-reading-size .ql-editor table td {
+  border: theme('borderWidth.DEFAULT') solid var(--color-borderDefault);
+  padding: theme('spacing.4') theme('spacing.3');
+  vertical-align: top;
+}
+
+.note-reading-size .ql-editor table th {
+  font-weight: theme('fontWeight.semibold');
+}
+
+.note-reading-size .ql-editor table p {
+  margin: 0;
+}
+
+.note-rich-text .ql-editor code {
+  font-size: 0.92em;
+}
+
 .quill-wrapper-internal .ql-editor img[data-local-asset-id] {
   cursor: pointer;
   max-width: 100%;
@@ -347,11 +441,127 @@
   border-color: #ef4444;
 }
 
+.ql-link-popover {
+  position: absolute;
+  z-index: 1003;
+  display: none;
+  align-items: center;
+  width: min(420px, calc(100% - 16px));
+  min-height: 46px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: #171821;
+  color: #f4f4f5;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.32);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
+}
+
+.ql-link-popover.is-visible {
+  display: flex;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ql-link-popover-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 34px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #f4f4f5;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 0 8px;
+}
+
+.ql-link-popover-input::placeholder {
+  color: #9a9a9a;
+}
+
+.ql-link-popover-divider {
+  width: 1px;
+  height: 28px;
+  margin: 0 5px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.ql-link-popover-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #a3a3a3;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.ql-link-popover-button:hover:not(:disabled),
+.ql-link-popover-button:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f5;
+  outline: none;
+}
+
+.ql-link-popover-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.ql-link-popover-remove:hover:not(:disabled) {
+  color: #ef4444;
+}
+
+.ql-link-preview {
+  position: absolute;
+  z-index: 1004;
+  display: none;
+  max-width: min(260px, calc(100% - 16px));
+  padding: 10px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #1f1f22;
+  color: #f4f4f5;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.ql-link-preview.is-visible {
+  display: block;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 /* Hide toolbar when toggle is off */
 .quill-wrapper-internal.toolbar-hidden .ql-toolbar {
   display: none !important;
 }
-
 
 /* Bottom toolbar styling */
 .quill-toolbar-bottom {
@@ -368,6 +578,415 @@
   border-bottom: none !important;
 }
 
+.note-more-formats {
+  position: relative;
+}
+
+.note-more-panel[hidden] {
+  display: none !important;
+}
+
+.note-more-panel:not([hidden]) {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: theme('spacing.64');
+  max-width: calc(100vw - 16px);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--color-borderDefault);
+  border-radius: 0.5rem;
+  background: var(--color-popupBg);
+  color: var(--color-textPrimary);
+  box-shadow: var(--color-widgetShadow);
+}
+
+.note-more-panel button {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-start !important;
+  width: 100% !important;
+  min-height: theme('spacing.9');
+  flex-shrink: 0;
+  float: none !important;
+  gap: theme('spacing.3');
+  height: auto !important;
+  padding: 4px 8px !important;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-textPrimary) !important;
+  text-align: left;
+  font-size: theme('fontSize.sm');
+  line-height: theme('lineHeight.snug');
+  cursor: pointer;
+}
+
+.note-more-panel button:hover,
+.note-more-panel button:focus-visible {
+  background: var(--color-hoverBg) !important;
+  outline: none;
+}
+
+.note-more-panel button.ql-active {
+  background: var(--color-selectedBg) !important;
+}
+
+.note-more-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.note-more-panel .note-menu-label {
+  padding: 8px 8px 4px;
+  color: var(--color-textMuted);
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.note-more-panel .ql-list::after,
+.note-more-panel .ql-blockquote::after,
+.note-more-panel .ql-code::after,
+.note-more-panel .ql-code-block::after,
+.note-more-panel .ql-link::after,
+.note-more-panel .ql-clean::after {
+  content: none;
+}
+
+.note-more-panel .ql-list svg,
+.note-more-panel .ql-blockquote svg,
+.note-more-panel .ql-code svg,
+.note-more-panel .ql-code-block svg,
+.note-more-panel .ql-link svg,
+.note-more-panel .ql-clean svg {
+  display: block !important;
+}
+
+.note-menu-icon {
+  display: inline-flex;
+  flex: 0 0 theme('spacing.4');
+  width: theme('spacing.4');
+  color: var(--color-textSecondary);
+}
+.note-menu-icon svg { width: theme('spacing.4'); height: theme('spacing.4'); }
+.note-menu-text { min-width: 0; white-space: normal; overflow-wrap: break-word; }
+.note-more-panel::-webkit-scrollbar-button { display: none; }
+
+.ql-toolbar .note-more-panel button,
+.ql-toolbar .note-more-panel button:hover,
+.ql-toolbar .note-more-panel button.ql-active {
+  color: var(--color-textPrimary) !important;
+}
+
+.ql-toolbar .note-more-panel button:hover {
+  background: var(--color-hoverBg) !important;
+}
+
+.ql-toolbar .note-more-panel button.ql-active {
+  background: var(--color-selectedBg) !important;
+}
+
+.note-footer-menu > .ql-bold,
+.note-footer-menu > .ql-italic,
+.note-footer-menu > .ql-underline,
+.note-footer-menu > .ql-strike,
+.note-footer-menu > .note-bullet-action,
+.note-footer-menu > .note-heading-option { display: none !important; }
+.note-more-panel.note-footer-popover:not([hidden]) {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+}
+.ql-toolbar button.note-footer-style-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: theme('spacing.12');
+}
+.note-footer-style-trigger svg,
+.note-footer-style-option .note-style-check svg { width: theme('spacing.4'); height: theme('spacing.4'); }
+.note-footer-style-option .note-style-check { margin-left: auto; visibility: hidden; }
+.note-footer-style-option.ql-active .note-style-check { visibility: visible; }
+.note-footer-style-panel .note-heading-one { font-size: theme('fontSize.2xl'); }
+.note-footer-style-panel .note-heading-two { font-size: theme('fontSize.xl'); }
+.note-footer-style-panel .note-heading-three { font-size: theme('fontSize.lg'); }
+.note-footer-style-panel .note-heading-four { font-size: theme('fontSize.base'); }
+.note-footer-style-panel .note-heading-option:not(.note-heading-normal) { font-weight: theme('fontWeight.semibold'); }
+
+.note-table-control {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+  background: transparent;
+  color: var(--color-textSecondary);
+}
+.note-table-control > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: theme('spacing.6');
+  height: theme('spacing.6');
+  padding: theme('spacing.1');
+  border: 1px solid var(--color-borderDefault);
+  border-radius: theme('borderRadius.DEFAULT');
+  background: var(--color-popupBg);
+  color: inherit;
+  cursor: pointer;
+}
+.note-table-control svg { width: theme('spacing.4'); height: theme('spacing.4'); }
+.note-table-menu {
+  position: absolute;
+  width: theme('spacing.64');
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: theme('spacing.1');
+  border: 1px solid var(--color-borderDefault);
+  border-radius: theme('borderRadius.lg');
+  background: var(--color-popupBg);
+  box-shadow: var(--color-widgetShadow);
+}
+.note-table-menu[hidden] { display: none; }
+.note-table-menu button {
+  display: block;
+  width: 100%;
+  min-height: theme('spacing.9');
+  padding: theme('spacing.2') theme('spacing.3');
+  border: 0;
+  background: transparent;
+  color: var(--color-textPrimary);
+  text-align: left;
+  font-size: theme('fontSize.sm');
+  font-weight: theme('fontWeight.normal');
+  cursor: pointer;
+}
+.note-table-menu button:hover,
+.note-table-menu button:focus-visible,
+.note-table-control > button:hover,
+.note-table-control > button:focus-visible { background: var(--color-hoverBg); }
+
+.note-selection-toolbar {
+  --note-toolbar-gap: theme('spacing.2');
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 2147483646;
+  display: none;
+  align-items: center;
+  flex-wrap: nowrap;
+  max-width: calc(100vw - 16px);
+  overflow: visible;
+  gap: theme('spacing.0');
+  padding: theme('spacing.1');
+  border: 1px solid var(--color-borderDefault);
+  border-radius: 0.5rem;
+  background: var(--color-popupBg);
+  color: var(--color-textSecondary);
+  box-shadow: var(--color-widgetShadow);
+}
+
+.note-selection-toolbar button,
+.note-selection-toolbar select {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.note-selection-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: theme('spacing.8');
+  min-width: 0;
+  height: theme('spacing.8');
+  padding: 0;
+}
+
+.note-selection-toolbar > .note-style-trigger {
+  width: theme('spacing.12');
+}
+
+.note-selection-toolbar > button[hidden],
+.note-selection-toolbar > .note-selection-separator[hidden] {
+  display: none;
+}
+
+.note-selection-toolbar svg {
+  pointer-events: none;
+  width: theme('spacing.4');
+  height: theme('spacing.4');
+}
+
+.note-selection-separator {
+  height: theme('spacing.4');
+  border-left: 1px solid var(--color-borderDefault);
+  margin: 0 theme('spacing.1');
+}
+
+.note-reading-size .ql-editor ::selection {
+  background: var(--color-activeBg);
+  color: var(--color-textPrimary);
+}
+
+.note-style-panel[hidden] {
+  display: none !important;
+}
+
+.note-style-panel:not([hidden]) {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 12rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--color-borderDefault);
+  border-radius: 0.5rem;
+  background: var(--color-popupBg);
+  box-shadow: var(--color-widgetShadow);
+}
+
+.note-style-panel button {
+  width: 100%;
+  height: auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  text-align: left;
+  justify-content: flex-start;
+  gap: theme('spacing.3');
+  font-weight: theme('fontWeight.semibold');
+  font-size: theme('fontSize.base');
+  line-height: theme('lineHeight.snug');
+  white-space: nowrap;
+}
+
+.note-style-panel .note-heading-one { font-size: theme('fontSize.2xl'); }
+.note-style-panel .note-heading-two { font-size: theme('fontSize.xl'); }
+.note-style-panel .note-heading-three { font-size: theme('fontSize.lg'); }
+.note-style-panel .note-heading-four { font-size: theme('fontSize.base'); }
+.note-style-panel button[aria-selected='true'] {
+  background: var(--color-selectedBg);
+  color: var(--color-textPrimary);
+}
+.note-style-check { margin-left: auto; visibility: hidden; }
+.note-style-panel button[aria-selected='true'] .note-style-check { visibility: visible; }
+
+.note-selection-toolbar .note-floating-more-panel button {
+  width: 100%;
+  height: auto;
+  min-height: theme('spacing.8');
+  justify-content: flex-start;
+  padding: theme('spacing.1') theme('spacing.2');
+}
+
+@media (max-width: theme('screens.sm')) {
+  .note-selection-toolbar > button {
+    width: theme('spacing.6');
+    height: theme('spacing.8');
+  }
+  .note-selection-toolbar > .note-style-trigger {
+    width: theme('spacing.10');
+  }
+}
+
+.note-selection-toolbar .note-floating-more-panel:not([hidden]) {
+  top: 100%;
+  bottom: auto;
+  right: 0;
+  left: auto;
+}
+
+.note-selection-toolbar button:hover,
+.note-selection-toolbar select:hover {
+  background: var(--color-hoverBg);
+}
+
+.note-selection-toolbar button.is-active {
+  background: var(--color-selectedBg);
+  color: var(--color-textPrimary);
+}
+
+.note-selection-toolbar button:focus-visible {
+  outline: theme('borderWidth.2') solid var(--color-focusRing);
+  outline-offset: 0;
+}
+
+.note-slash-menu {
+  position: fixed;
+  z-index: 2147483646;
+  display: none;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--color-borderDefault);
+  border-radius: 0.5rem;
+  background: var(--color-popupBg);
+  color: var(--color-textPrimary);
+  box-shadow: var(--color-widgetShadow);
+}
+
+.note-slash-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-textPrimary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-slash-menu button:hover,
+.note-slash-menu button.is-active {
+  background: var(--color-selectedBg);
+}
+
+.note-rich-text .ql-editor details.note-details {
+  margin: 0.35rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-borderDefault);
+  border-radius: 0.5rem;
+}
+
+.note-rich-text .ql-editor details.note-details > summary {
+  display: list-item;
+  list-style-position: inside;
+  margin: 0;
+  padding: theme('spacing.1') 0;
+  min-height: theme('spacing.8');
+  line-height: theme('lineHeight.relaxed');
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-textPrimary);
+}
+
+.note-rich-text .ql-editor details.note-details > .note-details-body {
+  margin-top: theme('spacing.2');
+  padding-left: theme('spacing.4');
+  color: var(--color-textPrimary);
+}
+
+.note-rich-text .ql-editor hr {
+  border: 0;
+  border-top: 1px solid var(--color-borderDefault);
+  margin: 0.75rem 0;
+}
+
 .ProseMirror {
   padding: 0 !important;
 }
@@ -376,7 +995,9 @@
 .ql-toolbar button {
   border-radius: 6px !important;
   color: #a3a3a3 !important;
-  transition: background-color 0.15s ease, color 0.15s ease !important;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease !important;
 }
 
 .ql-toolbar button:hover {
@@ -448,6 +1069,24 @@
   background-color: rgba(255, 255, 255, 0.02);
 }
 
+.note-rich-text .ql-editor table th,
+.note-rich-text .ql-editor table td,
+.dark .note-rich-text .ql-editor table th,
+.dark .note-rich-text .ql-editor table td {
+  border-color: var(--color-borderDefault);
+}
+
+.note-rich-text .ql-editor table th,
+.dark .note-rich-text .ql-editor table th {
+  background: var(--color-containerBg);
+  color: var(--color-textPrimary);
+}
+
+.note-rich-text .ql-editor table tr:nth-child(even),
+.dark .note-rich-text .ql-editor table tr:nth-child(even) {
+  background: transparent;
+}
+
 /* =========================================
    Rich Text Formats (Fixes for Obsidian/Notion pastes)
    ========================================= */
@@ -471,7 +1110,7 @@
 }
 
 /* Code Blocks (pre) */
-.ql-editor pre.ql-syntax, 
+.ql-editor pre.ql-syntax,
 .ql-editor pre {
   background-color: #1e1e1e !important; /* Dark theme for code blocks in both modes */
   color: #e4e4e4 !important;
@@ -504,14 +1143,12 @@
 /* Links */
 .ql-editor a {
   color: #2563eb !important; /* Tailwind blue-600 */
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  transition: text-decoration-color 0.2s;
+  text-decoration: none !important;
   cursor: pointer;
 }
 
 .ql-editor a:hover {
-  text-decoration-color: #2563eb;
+  text-decoration: none !important;
 }
 
 .dark .ql-editor a {
@@ -519,7 +1156,16 @@
 }
 
 .dark .ql-editor a:hover {
-  text-decoration-color: #60a5fa;
+  text-decoration: none !important;
+}
+
+.ql-snow .ql-editor a,
+.ql-snow .ql-editor a:hover,
+.ql-container .ql-editor a,
+.ql-container .ql-editor a:hover {
+  text-decoration: none !important;
+  text-decoration-line: none !important;
+  border-bottom: 0 !important;
 }
 
 /* Horizontal Rules */
@@ -534,17 +1180,21 @@
 }
 
 /* Task Lists (Checkboxes) Adjustments */
-.ql-editor li[data-list="checked"],
-.ql-editor li[data-list="unchecked"] {
+.ql-editor li[data-list='checked'],
+.ql-editor li[data-list='unchecked'] {
   padding-left: 1.5rem;
 }
 
 /* Adjust heading margins so they don't look squished */
-.ql-editor h1, .ql-editor h2, .ql-editor h3 {
+.ql-editor h1,
+.ql-editor h2,
+.ql-editor h3 {
   margin-top: 1.5em;
   margin-bottom: 0.5em;
 }
-.ql-editor h1:first-child, .ql-editor h2:first-child, .ql-editor h3:first-child {
+.ql-editor h1:first-child,
+.ql-editor h2:first-child,
+.ql-editor h3:first-child {
   margin-top: 0;
 }
 
@@ -562,4 +1212,216 @@
 .dark .ql-snow .ql-toolbar button:hover svg,
 .dark .ql-snow.ql-toolbar button:hover svg {
   filter: brightness(0) invert(1) !important;
+}
+
+/* Image Lightbox Overlay Styles (Linear Style) */
+.ql-image-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(10, 10, 10, 0);
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  opacity: 0;
+  transition:
+    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    backdrop-filter 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 2147483647;
+  overflow: hidden;
+  user-select: none;
+}
+
+.ql-image-lightbox-overlay.is-visible {
+  opacity: 1;
+  background-color: rgba(10, 10, 10, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.ql-image-lightbox-img {
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  max-width: calc(100vw - 80px);
+  max-height: calc(100vh - 80px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  cursor: zoom-in;
+  transform: scale(0.97) translate3d(0px, 0px, 0);
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
+.ql-image-lightbox-overlay.is-visible .ql-image-lightbox-img {
+  transform: scale(1) translate3d(0px, 0px, 0);
+}
+
+.ql-image-lightbox-img.is-actual-size {
+  max-width: none;
+  max-height: none;
+  cursor: grab;
+  transition: none;
+}
+
+.ql-image-lightbox-img.is-actual-size.is-dragging {
+  cursor: grabbing;
+}
+
+/* Image Hover Overlay Toolbar Styles (Linear Style) */
+.ql-image-hover-toolbar {
+  position: absolute;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(20, 20, 20, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 1001;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.ql-image-hover-toolbar.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.ql-image-hover-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+  box-sizing: border-box;
+}
+
+.ql-image-hover-btn:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.ql-image-hover-btn.ql-image-delete-btn:hover {
+  background-color: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+}
+
+.ql-image-hover-btn svg {
+  display: block;
+}
+
+/* Image Diagonal/Side Resize Handle Styles (Linear/Notion Style) */
+.ql-image-resize-handle {
+  position: absolute;
+  width: 6px;
+  height: 48px;
+  background-color: var(--color-accent, #3b82f6);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 9999px; /* Pill shape */
+  cursor: col-resize; /* Horizontal resize cursor */
+  z-index: 1002;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%);
+  user-select: none;
+  touch-action: none;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease;
+  will-change: opacity;
+}
+
+.ql-image-resize-handle:hover {
+  background-color: #2563eb;
+}
+
+.ql-image-resize-handle.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Prevent native browser image dragging and giant blue selection overlays */
+.quill-local-image,
+.ql-editor img,
+.ql-image-hover-toolbar,
+.ql-image-resize-handle,
+.ql-image-lightbox-overlay {
+  -webkit-user-drag: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.quill-local-image {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Clear native browser selection background overlay on image embeds */
+.ql-editor img::selection,
+.quill-local-image::selection,
+.quill-local-image *::selection,
+.ql-editor iframe::selection {
+  background: transparent !important;
+  color: inherit !important;
+}
+
+/* Elegant accent selection outline border when image is inside selection range (e.g. Ctrl+A) */
+.quill-local-image.is-selected-range,
+.ql-editor img.is-selected-range {
+  outline: 2.5px solid var(--color-accent, #3b82f6) !important;
+  outline-offset: 2px !important;
+  border-radius: 6px !important;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.25) !important;
+  transition:
+    outline 0.15s ease,
+    box-shadow 0.15s ease !important;
+}
+
+/* Notes document blocks follow the functional editor theme in every appearance mode. */
+.note-rich-text .ql-editor blockquote,
+.dark .note-rich-text .ql-editor blockquote {
+  border-left-color: var(--color-borderDefault);
+  background: var(--color-containerBg);
+  color: var(--color-textSecondary);
+}
+
+.note-rich-text .ql-editor pre.ql-syntax,
+.note-rich-text .ql-editor pre,
+.dark .note-rich-text .ql-editor pre.ql-syntax,
+.dark .note-rich-text .ql-editor pre {
+  background: var(--color-containerBg) !important;
+  color: var(--color-textPrimary) !important;
+  box-shadow: inset 0 0 0 1px var(--color-borderDefault);
+}
+
+.note-rich-text .ql-editor code,
+.dark .note-rich-text .ql-editor code {
+  background: var(--color-containerBg) !important;
+  color: var(--color-textPrimary) !important;
 }

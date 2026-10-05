@@ -1,23 +1,26 @@
 import { db } from '../../../storage/indexDB/dbConfig';
+import { BRAND } from '../../../shared-components/brandingConfig';
 
-export const BACKUP_SCHEMA_VERSION = 3;
+export const BACKUP_SCHEMA_VERSION = 9;
+export const DRIVE_BACKUP_RETENTION_LIMIT = 7;
 export const BACKUP_KIND = 'folder';
 export const NEXT_DRIVE_BACKUP_NUMBER_KEY = 'nextDriveBackupNumber';
 
 export const BACKUP_TABLE_NAMES = [
-  'workspaces',
+  'organisations',
   'commands',
   'prefixSettings',
-  'folders',
   'tags',
   'favoriteCategories',
   'notes',
   'links',
-  'automations',
   'chatAgents',
   'aiPrompts',
   'snippets',
-  'sessions',
+  'workspaces',
+  'collections',
+  'collectionItems',
+  'collectionElementSnapshots',
   'todos',
   'userHotkeys',
   'userShortcuts',
@@ -27,12 +30,18 @@ export const BACKUP_TABLE_NAMES = [
   'assets',
   'widgets',
   'widgetLayouts',
-  'widgetViews',
+  'widgetDashboards',
+  'notifications',
 ] as const;
 
-export const LEGACY_OPTIONAL_BACKUP_TABLE_NAMES = ['widgets', 'widgetLayouts', 'widgetViews'] as const;
+export const LEGACY_OPTIONAL_BACKUP_TABLE_NAMES = [
+  'widgets',
+  'widgetLayouts',
+  'automations',
+  'notifications',
+] as const;
 
-export const IGNORED_BACKUP_TABLE_NAMES = [] as const;
+export const IGNORED_BACKUP_TABLE_NAMES = ['automations', 'notificationDeliveryJobs', 'migrationMetadata'] as const;
 
 export type IgnoredBackupTableName = (typeof IGNORED_BACKUP_TABLE_NAMES)[number];
 
@@ -70,5 +79,5 @@ export function formatBackupTimestamp(date = new Date()): string {
 }
 
 export function formatDriveBackupFolderName(backupNumber: number, date = new Date()): string {
-  return `cmdOS_${formatBackupTimestamp(date)}_V${formatBackupNumber(backupNumber)}`;
+  return `${BRAND.name}_${formatBackupTimestamp(date)}_V${formatBackupNumber(backupNumber)}`;
 }

@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { FieldNodeExtension } from '../extensions/FieldNodeExtension';
 import { CursorNodeExtension } from '../extensions/CursorNodeExtension';
+import { LinkMarkExtension } from '../extensions/LinkMarkExtension';
 import { convertTiptapToAst } from '../utils/tiptapToAst';
 import { convertAstToTiptap } from '../utils/snippetAstToTiptap';
 import type { ASTNode, TextFieldConfig, DropdownFieldConfig, ToggleFieldConfig, DateFieldConfig } from '@extension/shared';
@@ -76,6 +77,7 @@ export const SnippetBuilderProvider: React.FC<ProviderProps> = ({ children, init
       }),
       FieldNodeExtension,
       CursorNodeExtension,
+      LinkMarkExtension,
     ],
     editorProps: {
       attributes: {

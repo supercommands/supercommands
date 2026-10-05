@@ -3,7 +3,7 @@
  * @description Handles creation and management of new todo items.
  */
 import { db } from '../../../src/storage/indexDB/dbConfig';
-import { createNotification } from '../notifications/notifications';
+import { handleAlarmFired } from '../notifications/notificationService';
 
 export async function handleNewTodoAlarm(alarm: chrome.alarms.Alarm) {
   const todoId = alarm.name.split('|')[1];
@@ -14,12 +14,9 @@ export async function handleNewTodoAlarm(alarm: chrome.alarms.Alarm) {
     const todo = await db.todos.get(todoId);
     if (!todo) return;
 
-    const refCount = todo.references ? todo.references.length : 0;
-
-    // Show notification using the proven wrapper
-    createNotification(`newtodo-${todoId}-${Date.now()}`, {
-      title: 'Task Reminder: ' + (todo.name || 'Untitled'),
-      message: `You have ${refCount} reference(s) attached.`,
+    await handleAlarmFired({
+      ...alarm,
+      name: `todo|${todoId}`,
     });
 
     // Reschedule if recurring

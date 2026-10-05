@@ -19,6 +19,9 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   hooks: {
     'build:manifestGenerated': (_wxt, manifest) => {
+      if (_wxt.config.browser === 'firefox') {
+        manifest.permissions = (manifest.permissions || []).filter(permission => permission !== 'system.memory');
+      }
       const isSnippetInjectorScript = (path: string) =>
         path === 'content-scripts/content.js' ||
         path === 'content/index.iife.js' ||
@@ -62,10 +65,7 @@ export default defineConfig({
     '@extension/browser': resolve('packages/browser/index.ts'),
     '@src': resolve('src'),
     '@chatAgents': resolve('background/src/chatAgents'),
-    '@private-services': resolve('src/storage/API/services'),
-    '@private-providers': resolve('src/storage/API/storage/providers'),
     '@config': resolve('src/storage/API/core'),
-    '@automation': resolve('background/src/automation'),
     '@todos': resolve('background/src/todos'),
     '@sessions': resolve('background/src/sessions'),
     '@browserWindows': resolve('background/src/browserWindows'),
@@ -73,7 +73,6 @@ export default defineConfig({
     '@tabs': resolve('background/src/tabs'),
     '@browserData': resolve('background/src/browserData'),
     '@hotkeys': resolve('background/src/hotkeys'),
-    '@_authentication': resolve('background/src/_private/authentication_private'),
     '@preBuiltCommands': resolve('background/src/all_PreBuilt_Commands'),
   },
 
@@ -81,7 +80,7 @@ export default defineConfig({
     name: '__MSG_extensionName__',
     description: '__MSG_extensionDescription__',
     default_locale: 'en',
-    version: '0.3.62',
+    version: '0.3.66',
     icons: {
       '16': 'icons/icon-16.png',
       '32': 'icons/icon-32.png',
@@ -91,8 +90,8 @@ export default defineConfig({
     browser_specific_settings: {
       gecko: {
         id: 'example@example.com',
-        strict_min_version: '109.0'
-      }
+        strict_min_version: '109.0',
+      },
     },
     permissions: [
       'storage',
@@ -102,20 +101,16 @@ export default defineConfig({
       'scripting',
       'downloads',
       'history',
-      'debugger',
-      'topSites',
-      'clipboardRead',
-      'clipboardWrite',
-      'cookies',
       'alarms',
       'contextMenus',
       'notifications',
       'unlimitedStorage',
       'identity',
+      'system.memory',
     ],
-    ...((() => {
+    ...(() => {
       const variant = process.env.WXT_ARTIFACT_VARIANT;
-      
+
       // Normal Build: Do NOT include PEM ID
       if (variant === 'chrome-standard') return {};
 
@@ -136,15 +131,24 @@ export default defineConfig({
         }
       }
 
-      // OSS Build: process.env already has env.oss loaded
-      if (variant === 'chrome-oss') {
-        const extKey = process.env.WXT_EXTENSION_PUBLIC_KEY || process.env.VITE_EXTENSION_PUBLIC_KEY;
-        return extKey ? { key: extKey } : {};
-      }
+      // OSS builds do not publish an extension key.
+     if (variant === 'chrome-oss') {
+  const fs = require('fs');
+  const ossEnv = fs.readFileSync(resolve('env.oss'), 'utf8');
+  const key = ossEnv
+    .match(/^VITE_EXTENSION_PUBLIC_KEY=(.*)$/m)?.[1]
+    ?.trim()
+    .replace(/^['"]|['"]$/g, '');
 
+  if (!key) {
+    throw new Error('Missing public extension key in env.oss.');
+  }
+
+  return { key };
+}
       return {};
-    })()),
-    ...((() => {
+    })(),
+    ...(() => {
       const variant = process.env.WXT_ARTIFACT_VARIANT;
       let clientId: string | undefined = undefined;
 
@@ -166,8 +170,13 @@ export default defineConfig({
           console.warn('Could not read env.oss for SaaS build Client ID');
         }
       } else if (variant === 'chrome-oss') {
-        // OSS Build: process.env already has env.oss loaded
-        clientId = process.env.WXT_GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID;
+        // Read only the OSS client ID; never inherit the private build's client ID.
+        const fs = require('fs');
+        const ossEnv = fs.readFileSync(resolve('env.oss'), 'utf8');
+        clientId = ossEnv.match(/^VITE_GOOGLE_CLIENT_ID=(.*)$/m)?.[1]?.trim().replace(/^['"]|['"]$/g, '');
+        if (!clientId || !/^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(clientId)) {
+          throw new Error('OSS build requires its Google OAuth client ID in env.oss.');
+        }
       }
 
       return clientId
@@ -178,7 +187,7 @@ export default defineConfig({
             },
           }
         : {};
-    })()),
+    })(),
     action: {
       default_icon: {
         '16': 'icons/icon-16.png',
@@ -198,44 +207,38 @@ export default defineConfig({
           'icon-34.png',
           'pin_new_tab.png',
           'content/injected.js',
-          'content/cmdOS_logo.png',
-          'popup/cmdOS_logo.png',
+          'content/supercommands_logo.png',
+          'popup/supercommands_logo.png',
           'popup/icon.png',
           'popup/start_writing.png',
           'AltS_search_newtab/index.html',
-          'assets/alt-s-website.css',
           'AltS_search_newtab/images/wallappear/*',
-          'AltS_search_newtab/images/Gif/*'
+          'AltS_search_newtab/images/Gif/*',
         ],
-        matches: ['*://*/*']
-      }
+        matches: ['*://*/*'],
+      },
     ],
     host_permissions: [
-      'https://www.cmdos.app/*',
       'https://chatgpt.com/*',
       'https://claude.ai/*',
       'https://gemini.google.com/*',
       'https://www.perplexity.ai/*',
-      'https://drive.google.com/*',
-      '<all_urls>',
     ],
     omnibox: {
       keyword: 'c',
     },
     commands: {
-      open_alt_q: {
-        suggested_key: {
-          default: 'Alt+S',
-          mac: 'Alt+S',
-        },
-        description: 'Main Search works on website & newtab',
+      open_alts: {
+        suggested_key: { default: 'Alt+S', mac: 'Alt+S' },
+        description: 'Alt + S Search',
       },
     },
     externally_connectable: {
-      matches: ['https://www.cmdos.app/*'],
+      matches: ['https://www.supercommands.com/*', 'https://supercommands.com/*', 'https://www.cmdos.app/*'],
     },
   },
   vite: () => ({
+    envPrefix: process.env.WXT_ARTIFACT_VARIANT === 'chrome-oss' ? ['VITE_ENABLE_GOOGLE_DRIVE_BACKUP'] : 'VITE_',
     cacheDir: resolve('.wxt/vite-cache'),
     server: {
       watch: {
@@ -243,15 +246,7 @@ export default defineConfig({
       },
     },
     optimizeDeps: {
-      include: [
-        '@vitejs/plugin-react',
-        'dexie',
-        'framer-motion',
-        'react',
-        'react-dom',
-        'react/jsx-runtime',
-        'zustand',
-      ],
+      include: ['@vitejs/plugin-react', 'dexie', 'framer-motion', 'react', 'react-dom', 'react/jsx-runtime', 'zustand'],
     },
     build: {
       // Chrome warns when eagerly preloaded chunks are not evaluated shortly
@@ -271,7 +266,7 @@ export default defineConfig({
         enforce: 'pre',
         resolveId(source, importer) {
           if (!importer) return null;
-          
+
           if (source.startsWith('@src/')) {
             const pageMatch = importer.match(/src[\\\/]pages[\\\/]([^\\\/]+)[\\\/]/);
             if (pageMatch) {
@@ -279,14 +274,11 @@ export default defineConfig({
               return resolve(`src/pages/${pageName}/src`, source.replace('@src/', ''));
             }
           }
-          
-          if (source.startsWith('@private-features')) {
-             return resolve('src/pages/AltS_search_newtab/src/components/OrganizationPanel');
-          }
-          
+
+
           return null;
-        }
-      }
-    ]
+        },
+      },
+    ],
   }),
 });

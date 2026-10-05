@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
 import { SnippetBuilderMainViewEditor } from '../../allObjectFolder/src/createObject/snippets/AdvancedSnippetEditor/SnippetBuilderMainView';
+import { CreateAnotherShortcutTooltip } from './CreateAnotherShortcutTooltip';
 
 export interface EditorContentWorkspaceProps {
   category: 'snippet' | 'link' | 'session' | 'aiPrompt' | 'todo';
@@ -38,7 +38,12 @@ export const EditorContentWorkspace: React.FC<EditorContentWorkspaceProps> = ({
             className="relative rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] shadow-sm overflow-y-auto custom-scrollbar px-3.5 py-2 cursor-text"
             style={{ minHeight: '220px', maxHeight: 'clamp(280px, 35vh, 400px)' }}
             ref={containerRef as any}
-            onBlurCapture={onBlurCapture}
+            onBlurCapture={(event) => {
+              if (event.relatedTarget instanceof Element && event.relatedTarget.closest('[data-snippet-field-action="true"]')) return;
+              const modal = (event.currentTarget.getRootNode() as Document | ShadowRoot).querySelector('[data-snippet-field-modal="true"]');
+              if (modal?.contains(event.target as Node) || (event.relatedTarget && modal?.contains(event.relatedTarget as Node))) return;
+              onBlurCapture?.();
+            }}
             onClick={(e) => {
               if (e.target === e.currentTarget) {
                 const editorDom = e.currentTarget.querySelector('.ProseMirror') as HTMLElement | null;
@@ -64,31 +69,17 @@ export const EditorContentWorkspace: React.FC<EditorContentWorkspaceProps> = ({
                 onMouseLeave={() => setShowTooltip(false)}
                 className="absolute bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 border-[var(--color-borderDefault)] bg-[var(--color-inputBg)] text-[var(--color-textPrimary)] hover:bg-[var(--color-hoverBg)] cursor-pointer select-none"
               >
-                <span>Create another</span>
+                <span>Save</span>
               </button>
             )}
           </div>
         </div>
 
-        {showTooltip && createPortal(
-          <div
-            style={{
-              position: 'absolute',
-              top: `${tooltipPos.top}px`,
-              left: `${tooltipPos.left}px`,
-            }}
-            className="bg-[var(--color-popupBg)] border border-[var(--color-borderDefault)] rounded-xl px-3 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.6)] z-[999999] flex items-center gap-3 text-[12px] font-sans text-[var(--color-textPrimary)] pointer-events-none"
-          >
-            <div className="flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">Ctrl</kbd>
-              <span className="text-[10px] text-[var(--color-textMuted)] font-bold">+</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">Shift</kbd>
-              <span className="text-[10px] text-[var(--color-textMuted)] font-bold">+</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-inputBg)] border border-[var(--color-borderDefault)] text-[10px] font-bold font-mono text-[var(--color-textPrimary)]">Enter</kbd>
-            </div>
-            <span className="text-[var(--color-textMuted)] text-left whitespace-nowrap">to save and create new</span>
-          </div>,
-          document.body
+        {showTooltip && (
+          <CreateAnotherShortcutTooltip
+            position={tooltipPos}
+            message="to save and create new"
+          />
         )}
       </div>
     );

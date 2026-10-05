@@ -1,13 +1,12 @@
 import * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { clsx } from 'clsx';
-import { CustomSearchPrefixesForOmniboxStorage, type CustomOmniboxPrefixes } from '../../../storage/localStorage/customSearchPrefixesForOmniboxStorage';
-
+import type { CommandTerminalPrefixes } from '../../../storage/commandTerminal/commandTerminalPrefixAdapter';
 const showToast = (message: string, isError = false) => {
-  const container = (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body;
-  const toast = document.createElement('div');
-  toast.textContent = message;
-  toast.style.cssText = `
+    const container = (window as any).__ALTS_PORTAL_HOST__ || (window as any).__ALTQ_PORTAL_HOST__ || document.body;
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.cssText = `
     position: fixed;
     bottom: 24px;
     right: 24px;
@@ -24,140 +23,123 @@ const showToast = (message: string, isError = false) => {
     pointer-events: none;
     transition: opacity 0.2s ease-in-out;
   `;
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    setTimeout(() => toast.remove(), 200);
-  }, 2500);
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 200);
+    }, 2500);
 };
-
-export const EditablePrefixKey = ({
-  category,
-  currentValue,
-  alwaysVisible = false,
-  variant = 'default',
-}: {
-  category: keyof CustomOmniboxPrefixes;
-  currentValue: string;
-  alwaysVisible?: boolean;
-  variant?: 'default' | 'compactPalette';
+const updatePrefixSettingThroughBackground = (category: keyof CommandTerminalPrefixes, prefix: string): Promise<void> => new Promise((resolve, reject) => {
+    const chromeAny = (globalThis as any).chrome;
+    if (!chromeAny?.runtime?.sendMessage) {
+        reject(new Error('Background prefix update is unavailable.'));
+        return;
+    }
+    chromeAny.runtime.sendMessage({
+        action: 'db_update_prefix_setting_value',
+        category,
+        prefix,
+    }, (response: any) => {
+        const runtimeError = chromeAny.runtime?.lastError;
+        if (runtimeError?.message) {
+            reject(new Error(runtimeError.message));
+            return;
+        }
+        if (!response?.success) {
+            reject(new Error(response?.error || 'Failed to save prefix'));
+            return;
+        }
+        resolve();
+    });
+});
+export const EditablePrefixKey = ({ category, currentValue, alwaysVisible = false, variant = 'default', }: {
+    category: keyof CommandTerminalPrefixes;
+    currentValue: string;
+    alwaysVisible?: boolean;
+    variant?: 'default' | 'compactPalette';
 }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editValue, setEditValue] = useState(currentValue);
-  const [isSaving, setIsSaving] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setEditValue(currentValue);
-  }, [currentValue]);
-
-  useEffect(() => {
-    if (isEditing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [isEditing]);
-
-  const handleSave = async () => {
-    if (editValue === currentValue || !editValue.trim()) {
-      setEditValue(currentValue);
-      setIsEditing(false);
-      return;
-    }
-    
-    setIsSaving(true);
-    try {
-      const prefixes = await CustomSearchPrefixesForOmniboxStorage.getPrefixes();
-      const updated = { ...prefixes, [category]: editValue.trim().toLowerCase() };
-      await CustomSearchPrefixesForOmniboxStorage.setPrefixes(updated);
-      
-      // Notify other components
-      window.dispatchEvent(new Event('omniboxPrefixesChanged'));
-      try {
-        chrome?.runtime?.sendMessage?.({ action: 'INVALIDATE_OMNIBOX_CACHE' }).catch(() => {});
-      } catch {
-        // ignore non-extension contexts
-      }
-      setIsEditing(false);
-      showToast('Shortcut updated successfully!');
-    } catch (error: any) {
-      showToast(error.message || 'Failed to save prefix', true);
-      setEditValue(currentValue);
-      // We keep isEditing true so user can fix it
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.stopPropagation();
-      e.preventDefault();
-      handleSave();
-    } else if (e.key === 'Escape') {
-      e.stopPropagation();
-      e.preventDefault();
-      setEditValue(currentValue);
-      setIsEditing(false);
-    }
-  };
-
-  return (
-    <div 
-      className={clsx(
-        variant === 'compactPalette'
-          ? "inline-flex h-5 items-center justify-center gap-1 rounded-[5px] border border-[var(--alts-shortcut-border,var(--color-borderDefault))] bg-[var(--alts-shortcut-bg,transparent)] px-1.5 text-[var(--alts-shortcut-text,var(--color-textMuted))] transition-colors duration-150 cursor-pointer hover:text-[var(--alts-text-primary,var(--color-textSecondary))]"
-          : "flex items-center justify-center gap-1 px-1.5 py-0 rounded border border-white/5 bg-white/5 hover:bg-white/10 transition-all duration-200 cursor-pointer",
-        !isEditing && !alwaysVisible && "opacity-0 group-hover/sidebar:opacity-100 focus-within:opacity-100",
-        isEditing && "ring-1 ring-blue-500 border-transparent opacity-100"
-      )}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!isEditing) setIsEditing(true);
-      }}
-      title="Click to edit prefix"
-    >
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState(currentValue);
+    const [isSaving, setIsSaving] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+    useEffect(() => {
+        setEditValue(currentValue);
+    }, [currentValue]);
+    useEffect(() => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+            inputRef.current.select();
+        }
+    }, [isEditing]);
+    const handleSave = async () => {
+        if (editValue === currentValue || !editValue.trim()) {
+            setEditValue(currentValue);
+            setIsEditing(false);
+            return;
+        }
+        setIsSaving(true);
+        try {
+            await updatePrefixSettingThroughBackground(category, editValue.trim().toLowerCase());
+            // Notify other components
+            window.dispatchEvent(new Event('commandTerminalPrefixesChanged'));
+            try {
+                chrome?.runtime?.sendMessage?.({ action: 'INVALIDATE_OMNIBOX_CACHE' }).catch(() => { });
+            }
+            catch {
+                // ignore non-extension contexts
+            }
+            setIsEditing(false);
+            showToast('Shortcut updated successfully!');
+        }
+        catch (error: any) {
+            showToast(error.message || 'Failed to save prefix', true);
+            setEditValue(currentValue);
+            // We keep isEditing true so user can fix it
+        }
+        finally {
+            setIsSaving(false);
+        }
+    };
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.stopPropagation();
+            e.preventDefault();
+            handleSave();
+        }
+        else if (e.key === 'Escape') {
+            e.stopPropagation();
+            e.preventDefault();
+            setEditValue(currentValue);
+            setIsEditing(false);
+        }
+    };
+    return (<div className={clsx(variant === 'compactPalette'
+            ? "inline-flex h-5 items-center justify-center gap-1 rounded-[6px] border border-[var(--alts-shortcut-border,var(--color-borderDefault))] bg-[var(--alts-shortcut-bg,transparent)] px-1.5 text-[var(--alts-shortcut-text,var(--color-textMuted))] transition-colors duration-150 cursor-pointer hover:text-[var(--alts-text-primary,var(--color-textSecondary))]"
+            : "flex items-center justify-center gap-1 px-1.5 py-0 rounded border border-white/5 bg-white/5 hover:bg-white/10 transition-all duration-200 cursor-pointer", !isEditing && !alwaysVisible && "opacity-0 group-hover/sidebar:opacity-100 focus-within:opacity-100", isEditing && "ring-1 ring-blue-500 border-transparent opacity-100")} onPointerDown={(e) => {
+            e.stopPropagation();
+        }} onMouseDown={(e) => {
+            e.stopPropagation();
+        }} onClick={(e) => {
+            e.stopPropagation();
+            if (!isEditing)
+                setIsEditing(true);
+        }} onDoubleClick={(e) => {
+            e.stopPropagation();
+        }} title="Click to edit prefix">
       {/* Fixed global prefix */}
-      {category !== 'command' && (
-        <span className={clsx(
-          "lowercase pointer-events-none select-none",
-          variant === 'compactPalette'
-            ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textMuted))]"
-            : "text-[13px] font-light font-mono text-[var(--color-textSecondary)] opacity-70"
-        )}>
+      {category !== 'command' && (<span className={clsx("lowercase pointer-events-none select-none", variant === 'compactPalette'
+                ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textMuted))]"
+                : "text-[13px] font-light font-mono text-[var(--color-textSecondary)] opacity-70")}>
           C
-        </span>
-      )}
+        </span>)}
       
       {/* Editable custom prefix */}
-      {isEditing ? (
-        <input
-          ref={inputRef}
-          type="text"
-          maxLength={12}
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={handleSave}
-          onKeyDown={handleKeyDown}
-          disabled={isSaving}
-          className={clsx(
-            variant === 'compactPalette'
-              ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textSecondary))] bg-transparent outline-none lowercase p-0 m-0 text-center"
-              : "text-[13px] font-light font-mono text-[var(--color-textPrimary)] bg-transparent outline-none lowercase p-0 m-0 text-center opacity-70",
-            isSaving && "opacity-50"
-          )}
-          style={{ width: `${Math.max(1, editValue.length)}ch` }}
-        />
-      ) : (
-        <span className={clsx(
-          "lowercase select-none",
-          variant === 'compactPalette'
-            ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textMuted))]"
-            : "text-[13px] font-light font-mono text-[var(--color-textPrimary)] opacity-70"
-        )}>
+      {isEditing ? (<input ref={inputRef} type="text" maxLength={12} value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={handleSave} onKeyDown={handleKeyDown} disabled={isSaving} className={clsx(variant === 'compactPalette'
+                ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textSecondary))] bg-transparent outline-none lowercase p-0 m-0 text-center"
+                : "text-[13px] font-light font-mono text-[var(--color-textPrimary)] bg-transparent outline-none lowercase p-0 m-0 text-center opacity-70", isSaving && "opacity-50")} style={{ width: `${Math.max(1, editValue.length)}ch` }}/>) : (<span className={clsx("lowercase select-none", variant === 'compactPalette'
+                ? "text-[12px] leading-4 font-semibold text-[var(--alts-shortcut-text,var(--color-textMuted))]"
+                : "text-[13px] font-light font-mono text-[var(--color-textPrimary)] opacity-70")}>
           {currentValue}
-        </span>
-      )}
-    </div>
-  );
+        </span>)}
+    </div>);
 };

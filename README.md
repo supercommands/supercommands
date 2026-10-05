@@ -1,213 +1,101 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/cmdOS-App/cmdOS/main/src/shared-components/assets/cmdOS_logo.png" alt="supercommands" width="80" height="80" />
+<img src="src/shared-components/assets/supercommands_logo.png" alt="SuperCommands logo" width="80" height="80" />
 
-# supercommands
+# SuperCommands
 
+**A keyboard-first workspace for the browser.**
 
-**A keyboard-first command terminal for the browser.**
+Find and create notes, links, tasks, and saved content; run browser actions from a command bar.
 
-Access search, browser commands, and web shortcuts — all from one command bar.
-
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D22.12.0-brightgreen)](https://nodejs.org)
-[![pnpm](https://img.shields.io/badge/pnpm-9.15.1-orange)](https://pnpm.io)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-
-[**Getting Started**](#getting-started) · [**Features**](#features) · [**Contributing**](#contributing) · [**Wiki**](https://github.com/supercommands-app/supercommands/wiki) · [**Community**](https://github.com/supercommands-app/supercommands/community) · [**Security**](https://github.com/supercommands-app/supercommands/security) · [**Code of Conduct**](CODE_OF_CONDUCT.md) · [**License**](#license)
+[Getting started](#getting-started) · [Features](#features) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [License](LICENSE)
 
 </div>
 
+## What is SuperCommands?
 
----
+SuperCommands, formerly cmdOS, is a Chrome Manifest V3 extension with a new-tab workspace and a website command interface. Press **Alt+S** to open Command Search on a supported website or New Tab. Check **Alt + S Search** at `chrome://extensions/shortcuts` if the shortcut is unavailable. Its manifest command is `open_alts`.
 
-## What is supercommands?
-
-supercommands is a Chrome extension that replaces repetitive browser actions with keyboard commands. Instead of navigating menus, bookmarks, and tabs manually, you open supercommands with `Alt + S` and run commands from one place.
-
-It is entirely **local-first** — your data stays on your machine. No account required to use the core features.
-
----
+Core records are stored locally in IndexedDB and extension storage. There is no website account login or signup. Optional Google Drive backup uses a separate Google connection. AI and other external integrations can send content to their services; local storage does not mean every feature works offline.
 
 ## Features
 
-### ⌨️ Command Palette
+- Manage notes, links, todos, text expanders, AI prompts, and chat agents.
+- Search saved content and use configured Create, Save, and Filter commands.
+- Organize Web Clips and workspace sessions.
+- Capture pages, screenshots, and extracted content where browser permissions allow it.
+- Customize the new-tab workspace with views, widgets, and appearance settings.
+- Back up local data manually or through the optional Google Drive connection.
 
-Open supercommands with `Alt + S` from any page and run commands instantly.
+Available actions depend on the active surface, configured prefixes, and permissions.
 
-```
-/notes           → Open your notes
-/link            → Create or open a saved link
-/screenshot      → Capture the current page
-/shortcuts       → Manage keyboard shortcuts
-```
-
-
-```
-
-### 🛠️ Browser Commands
-
-Built-in commands available from the command bar:
-
-- Visible-page and full-page screenshots
-- Image download from current page
-- Table extraction and CSV export
-- Print-friendly PDF generation
-
----
-
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
-|---|---|
-| UI | React 19, TypeScript |
-| Build | WXT, Vite 6, Turborepo |
-| Styling | Tailwind CSS |
-| Package manager | pnpm workspaces |
-| Local Database | Dexie.js (IndexedDB) — all data stored locally on device |
-| Storage | Chrome Extension APIs (local-first) |
-| Extension | Manifest V3 |
+| --- | --- |
+| UI | React 19 and TypeScript |
+| Build | WXT, Vite, and pnpm workspaces |
+| Styling | Tailwind CSS and the existing theme registry |
+| Local data | Dexie.js, IndexedDB, and extension storage |
+| Browser target | Chrome Manifest V3 |
 
----
+## Repository structure
 
-## Repository Structure
+| Path | Purpose |
+| --- | --- |
+| `entrypoints/` | WXT browser entry points |
+| `background/` | Browser operations, commands, sessions, and message handlers |
+| `src/pages/` | New Tab, website popup, toolbar popup, and content UI |
+| `src/allObjectFolder/` | Record features and domain operations |
+| `src/shared-components/` | Shared search, commands, branding, editors, and UI |
+| `src/settings/` | Backup, appearance, and workspace settings |
+| `src/storage/` | IndexedDB schema, migrations, and storage helpers |
+| `packages/` | Shared workspace packages |
+| `public/` | Required extension assets and starter Web Clips |
+| `scripts/` | Artifact management; the source repository also contains private publishing tools |
 
-<pre>
-supercommands/
-├── background/                  # Service worker, manifest, extension bootstrap
-├── packages/                    # Shared internal packages (monorepo)
-│   ├── ui/                      # Design system components
-│   ├── shared/                  # Utility helpers and schemas
-│   ├── storage/                 # Chrome storage helpers
-│   ├── env/                     # Environment variable schemas
-│   └── module-manager/          # Core module configuration
-├── src/
-│   ├── allObjectFolder/         # Core object types — the heart of the extension
-│   │   └── src/createObject/
-│   │       ├── links/           # Link and Tab Session objects
-│   │       ├── notes/           # Rich note objects
-│   │       ├── snippets/        # Reusable text snippets
-│   │       ├── commands/        # Command definitions and handlers
-│   │       ├── session/         # Session tracking objects
-│   │       ├── automationBeta/  # Automation workflow objects
-│   │       ├── ChatAgent/       # AI agent integration
-│   │       ├── aiPrompt/        # AI prompt objects
-│   │       ├── todos/           # Task and to-do objects
-│   │       └── tags/            # Tag management
-│   ├── settings/                # Extension settings UI and logic
-│   │   ├── authentication/      # Login and auth UI
-│   │   ├── backup/              # Data backup and restore
-│   │   ├── generalSettingsPageUi/  # General settings panel
-│   │   ├── uiPersonalization/   # Theme and appearance settings
-│   │   ├── uxLayoutCustomization/  # Layout customization options
-│   │   └── allWorkspaceManager/ # Workspace and folder management
-│   ├── storage/                 # Storage abstraction layer
-│   ├── shared-components/       # Reusable UI components and utilities
-│   ├── welcomeGuide/            # Onboarding and tutorial flows
-│   └── pages/                   # Extension entry points
-│       ├── AltS_search_newtab/  # Primary new tab workspace dashboard
-│       ├── popup/               # Browser toolbar popup
-│       ├── contentScript/       # Injected content scripts
-│       └── content-ui/          # Injected UI overlays
-├── docs/                        # Documentation and guides
-└── .env                         # Environment config (pre-configured for local dev)
-</pre>
+The current popup is in `src/pages/AltS_search_websites/`; its background bridge is in `background/src/websitePopupBridge/`. Some internal cmdOS names remain for compatibility with saved data. Changing those identifiers is separate from product branding.
 
-
----
-
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
-- **Node.js** `>= 22.12.0` — [Download](https://nodejs.org)
-- **pnpm** `>= 9.15.1` — `npm install -g pnpm`
-- Google Chrome or any Chromium-based browser
+- Node.js `>=22.12.0`
+- pnpm `9.15.1`, as declared in `package.json`
+- Google Chrome or a compatible Chromium browser
 
-### Installation
-
-**1. Clone the repository**
+### Install and run
 
 ```bash
-git clone https://github.com/supercommands-App/supercommands.git
+git clone https://github.com/supercommands/supercommands.git
 cd supercommands
-```
-
-**2. Install dependencies**
-
-```bash
 pnpm install
-```
-
-The `.env` file is already pre-configured with the OSS extension public key and Google OAuth client ID. No changes needed to run locally.
-
----
-
-### Development
-
-Start the WXT dev server with hot reload:
-
-```bash
 pnpm dev
 ```
 
-Then load the extension in Chrome:
+Open `chrome://extensions`, enable Developer mode, and load `.output/chrome-mv3/` as an unpacked extension. Reload the extension and refresh website tabs after rebuilding.
 
-1. Open `chrome://extensions/`
-2. Enable **Developer mode** (top right toggle)
-3. Click **Load unpacked**
-4. Select the `.output/chrome-mv3/` directory
+### Build and package
 
-WXT watches your files and automatically reloads the extension when you save changes. All your notes, snippets, and data are stored locally in **Dexie.js (IndexedDB)** — nothing leaves your device.
-
----
-
-### Building
-
-Build the production extension (with the shared OSS extension ID locked):
+In the public repository, use the ordinary commands:
 
 ```bash
-pnpm run wxt:build:chrome:oss
+pnpm build
+pnpm zip
 ```
 
-The built extension will be in `.output/chrome-mv3/`. Load it in Chrome:
+Unpacked output is written to `.output/chrome-mv3/`; release copies are under `extension-artifacts/releases/chrome-oss/`. Public commands select the open-source configuration automatically. In the private source repository, the existing defaults remain; use `pnpm dev:oss`, `pnpm build:oss`, or `pnpm run wxt:zip:chrome:oss` to select the public configuration explicitly.
 
-1. Open `chrome://extensions/`
-2. Enable **Developer mode**
-3. Click **Load unpacked**
-4. Select `.output/chrome-mv3/`
+The public `env.oss` contains the OSS Google OAuth client ID and a non-secret Drive enable flag, without a client secret or extension signing key. Drive authorization also depends on Google accepting the extension's identity. Do not add private credentials or personal tokens.
 
-> The `wxt:build:chrome:oss` command automatically sets the correct build variant, loads the OSS environment file, and locks the shared extension ID so Google OAuth redirect URIs match for all contributors.
-
-To create a `.zip` ready for the Chrome Web Store:
-
-```bash
-pnpm run wxt:zip:chrome:oss
-```
-
----
-
-### Type Checking
-
-```bash
-pnpm type-check
-```
-
-### Linting
-
-```bash
-pnpm lint
-pnpm prettier
-```
-
----
+The public export excludes internal documentation, test fixtures, setup screenshots, generated outputs, and private publishing scripts. Required runtime assets and starter Web Clips remain. This README and the root contribution, security, conduct, and license files are included.
 
 ## Contributing
 
-We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use [issues](https://github.com/supercommands/supercommands/issues) for reproducible bugs and feature requests. Use Discussions for questions if enabled; otherwise use a relevant issue. This documentation does not claim that Discussions or private vulnerability reporting are already enabled.
 
----
+Report suspected vulnerabilities through [SECURITY.md](SECURITY.md), without publishing exploit details. Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-Copyright © 2024–2026 RPA TASKLABS AUTOMATION SOFTWARE PRIVATE LIMITED · [Apache License 2.0](LICENSE)
+Licensed under [Apache License 2.0](LICENSE). The official public repository and product name are SuperCommands.

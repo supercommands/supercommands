@@ -1,37 +1,27 @@
+import TextExpanderIcon from '../../../shared-components/icons/TextExpanderIcon';
 import * as React from 'react';
+import { normaliseOrganisationTableCounts } from '../logic/normaliseOrganisationBackup';
+import ReactDOM from 'react-dom';
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  FiUpload, 
-  FiCheck, 
-  FiRefreshCw,
-  FiHardDrive,
-  FiX,
-  FiRotateCcw,
-  FiShield,
-  FiDownload,
-  FiMoreHorizontal,
-  FiEye,
-  FiBarChart2,
-  FiTrash2,
-  FiLogOut,
-  FiPause,
-} from 'react-icons/fi';
+import { FiUpload, FiCheck, FiRefreshCw, FiHardDrive, FiX, FiRotateCcw, FiShield, FiDownload, FiMoreHorizontal, FiEye, FiBarChart2, FiTrash2, FiLogOut, FiPause, FiFileText, FiLink, FiCheckSquare, FiMessageSquare } from 'react-icons/fi';
 import { 
   executeDriveBackup, 
   getDriveToken,
   disconnectDrive, 
   listBackupsFromDrive, 
   downloadBackupFromDrive,
-  deleteDriveBackup,
+  deleteDriveBackups,
 } from '../logic/driveApi';
 import type { DriveFolder } from '../logic/driveApi';
+import { DRIVE_BACKUP_RETENTION_LIMIT } from '../logic/backupRegistry';
 import { exportLocalExcelBackup, exportLocalZipBackup } from '../logic/zipExport';
 import { enableAutoBackup, disableAutoBackup } from '../logic/scheduler';
 import { StorageManager } from '../../../storage/localStorage/storageManager';
 import { extractDatabaseToJSON, formatBackupPayloadSize } from '../logic/extractData';
 import type { BackupData } from '../logic/extractData';
-import { restoreDatabaseFromJSON } from '../logic/restoreData';
+import { runBackupRestoreFlow } from '../logic/backupRestoreFlow';
+import { backupFailureMessage, restoreCompletionMessage } from '../logic/backupPresentation';
 import { readBackupArchive } from '../logic/backupArchive';
 import { useDbStore } from '../../../storage/store/useDbStore';
 import { useUIStore } from '../../../shared-components/uiStateManager';
@@ -42,7 +32,233 @@ import BackupVersionDeleteReview from './BackupVersionDeleteReview';
 import BackupStatsReview from './BackupStatsReview';
 import type { BackupComparisonResult, BackupDataLike, BackupMergeResult } from '../logic/backupComparisonTypes';
 
-import CreateWorkspacePanel from '../../allWorkspaceManager/workspaces/ui/CreateWorkspacePanel';
+import CreateOrganisationPanel from '../../allOrganisationManager/organisations/ui/CreateOrganisationPanel';
+
+interface DriveBackupStatsTooltipProps {
+  backup: DriveFolder;
+  countsCache: Record<string, Record<string, number>>;
+  onFetchCounts: (backup: DriveFolder) => Promise<void>;
+  loadingBackupId: string;
+  children: React.ReactNode;
+}
+
+const DriveBackupStatsTooltip: React.FC<DriveBackupStatsTooltipProps> = ({
+  backup,
+  countsCache,
+  onFetchCounts,
+  loadingBackupId,
+  children,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number; side: 'left' | 'right' }>({
+    left: 0,
+    top: 0,
+    side: 'left',
+  });
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
+
+  const cancelClose = () => {
+    if (closeTimeoutRef.current !== null) {
+      window.clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimeoutRef.current = window.setTimeout(() => {
+      setIsOpen(false);
+    }, 120);
+  };
+
+  const handleOpen = () => {
+    cancelClose();
+    setIsOpen(true);
+    void onFetchCounts(backup);
+  };
+
+  React.useLayoutEffect(() => {
+    if (!isOpen) return undefined;
+
+    const updatePosition = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportMargin = 8;
+      const tooltipRect = tooltipRef.current?.getBoundingClientRect();
+      const tooltipWidth = tooltipRect?.width || 170;
+      const tooltipHeight = tooltipRect?.height || 140;
+      const anchorGap = 8;
+
+      // Check if opening to the left has enough space
+      const canOpenLeft = rect.left - tooltipWidth - anchorGap >= viewportMargin;
+      const opensOnRight = !canOpenLeft && rect.right + anchorGap + tooltipWidth <= window.innerWidth - viewportMargin;
+
+      const left = opensOnRight
+        ? rect.right + anchorGap
+        : Math.max(viewportMargin, rect.left - tooltipWidth - anchorGap);
+
+      const top = Math.max(
+        viewportMargin,
+        Math.min(
+          rect.top + rect.height / 2 - tooltipHeight / 2,
+          window.innerHeight - tooltipHeight - viewportMargin,
+        ),
+      );
+
+      setPosition({ left, top, side: opensOnRight ? 'right' : 'left' });
+    };
+
+    updatePosition();
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' && tooltipRef.current
+        ? new ResizeObserver(updatePosition)
+        : null;
+
+    if (tooltipRef.current) {
+      resizeObserver?.observe(tooltipRef.current);
+    }
+
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [isOpen]);
+
+  useEffect(() => () => cancelClose(), []);
+
+  const counts = countsCache[backup.id] || (backup.manifest?.tableCounts && Object.keys(backup.manifest.tableCounts).length > 0 ? backup.manifest.tableCounts : null);
+  const isLoading = !counts;
+
+  return (
+    <div
+      ref={anchorRef}
+      className="inline-flex items-center"
+      onMouseEnter={handleOpen}
+      onMouseLeave={scheduleClose}
+      onFocusCapture={handleOpen}
+      onBlurCapture={scheduleClose}
+    >
+      {children}
+      {isOpen && typeof document !== 'undefined' && ReactDOM.createPortal(
+        <div
+          ref={tooltipRef}
+          role="tooltip"
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => event.stopPropagation()}
+          className="fixed z-[10040] flex flex-col gap-1.5 rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-popupBg,var(--color-cardBg))] px-3 py-2 text-[var(--color-textPrimary)] shadow-xl backdrop-blur-md min-w-[150px]"
+          style={{
+            left: position.left,
+            top: position.top,
+            width: 'max-content',
+            maxWidth: 'calc(100vw - 16px)',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            className={`absolute top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 bg-[var(--color-popupBg,var(--color-cardBg))] ${
+              position.side === 'right'
+                ? '-left-1.5 border-b border-l border-[var(--color-borderDefault)]'
+                : '-right-1.5 border-r border-t border-[var(--color-borderDefault)]'
+            }`}
+          />
+          <div className="relative z-10 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--color-borderDefault)] pb-1 text-[10px] font-semibold text-[var(--color-textMuted)]">
+              <span>Stats</span>
+              {isLoading && <FiRefreshCw size={10} className="animate-spin text-[var(--color-accent)]" />}
+            </div>
+
+            {isLoading ? (
+              <div className="flex flex-col gap-1.5 py-1 text-[11px]">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <FiFileText size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Notes
+                  </span>
+                  <div className="h-3 w-5 animate-pulse rounded bg-[var(--color-hoverBg)]" />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <FiLink size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Links
+                  </span>
+                  <div className="h-3 w-5 animate-pulse rounded bg-[var(--color-hoverBg)]" />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <FiCheckSquare size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Todo
+                  </span>
+                  <div className="h-3 w-5 animate-pulse rounded bg-[var(--color-hoverBg)]" />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <TextExpanderIcon size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Snippets
+                  </span>
+                  <div className="h-3 w-5 animate-pulse rounded bg-[var(--color-hoverBg)]" />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <FiMessageSquare size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Chats
+                  </span>
+                  <div className="h-3 w-5 animate-pulse rounded bg-[var(--color-hoverBg)]" />
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1 text-[11px]">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <FiFileText size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Notes
+                  </span>
+                  <span className="font-bold text-[var(--color-textPrimary)]">
+                    {counts?.notes ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <FiLink size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Links
+                  </span>
+                  <span className="font-bold text-[var(--color-textPrimary)]">
+                    {counts?.links ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <FiCheckSquare size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Todo
+                  </span>
+                  <span className="font-bold text-[var(--color-textPrimary)]">
+                    {counts?.todos ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <TextExpanderIcon size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Snippets
+                  </span>
+                  <span className="font-bold text-[var(--color-textPrimary)]">
+                    {counts?.snippets ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="flex items-center gap-1.5 text-[var(--color-textSecondary)]">
+                    <FiMessageSquare size={12} className="shrink-0 text-[var(--color-iconDefault)]" /> Chats
+                  </span>
+                  <span className="font-bold text-[var(--color-textPrimary)]">
+                    {(Number(counts?.chatAgents || 0)) + (Number(counts?.aiPrompts || 0))}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+};
 
 const GoogleDriveIcon: React.FC = () => (
   <svg className="w-12 h-12 shrink-0" viewBox="0 0 24 24" fill="none">
@@ -54,18 +270,43 @@ const GoogleDriveIcon: React.FC = () => (
 
 interface BackupSettingsProps {
   onClose?: () => void;
+  initialStatsBackupId?: string;
 }
 
-export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
-  const workspaces = useDbStore(state => state.workspaces);
-  const selectedWorkspaceId = useUIStore(state => state.selectedWorkspaceId);
-  const setSelectedWorkspaceId = useUIStore(state => state.setSelectedWorkspaceId);
+function createBackupUiPerfTrace(label: string) {
+  const started = performance.now();
+  let last = started;
+  const rows: Array<{ stage: string; durationMs: number; totalMs: number; detail?: unknown }> = [];
+
+  return {
+    mark(stage: string, detail?: unknown) {
+      const now = performance.now();
+      rows.push({
+        stage,
+        durationMs: Math.round(now - last),
+        totalMs: Math.round(now - started),
+        detail,
+      });
+      last = now;
+    },
+    log() {
+      console.table(rows);
+      console.log(`[Backup UI Perf] ${label} total`, `${Math.round(performance.now() - started)} ms`);
+    },
+  };
+}
+
+export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose, initialStatsBackupId }) => {
+  const organisations = useDbStore(state => state.organisations);
+  const selectedOrganisationId = useUIStore(state => state.selectedOrganisationId);
+  const setSelectedOrganisationId = useUIStore(state => state.setSelectedOrganisationId);
 
   const [backupMode, setBackupMode] = useState<'drive' | 'local'>('local');
   const [userEmail, setUserEmail] = useState<string>('');
   const [isConnected, setIsConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const restoreInProgressRef = useRef(false);
   const [showCreateOrg, setShowCreateOrg] = useState(false);
   const [version, setVersion] = useState(1);
   const [backups, setBackups] = useState<DriveFolder[]>([]);
@@ -83,10 +324,40 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
   const [showDeleteVersionReview, setShowDeleteVersionReview] = useState(false);
   const [initialDeleteBackupIds, setInitialDeleteBackupIds] = useState<string[]>([]);
   const [isDeletingVersions, setIsDeletingVersions] = useState(false);
+  const [tooltipCountsCache, setTooltipCountsCache] = useState<Record<string, Record<string, number>>>({});
+  const [loadingTooltipBackupId, setLoadingTooltipBackupId] = useState<string>('');
+
+  const handleFetchTooltipCounts = React.useCallback(async (backup: DriveFolder) => {
+    if (tooltipCountsCache[backup.id]) return;
+    if (backup.manifest?.tableCounts && Object.keys(backup.manifest.tableCounts).length > 0) {
+      setTooltipCountsCache(prev => ({ ...prev, [backup.id]: normaliseOrganisationTableCounts(backup.manifest!.tableCounts, backup.manifest!.schemaVersion) }));
+      return;
+    }
+
+    try {
+      setLoadingTooltipBackupId(backup.id);
+      const backupData = await downloadBackupFromDrive(backup.id, { hydrateAssets: false });
+      const counts: Record<string, number> = {};
+      if (backupData.manifest?.tableCounts) {
+        Object.assign(counts, backupData.manifest.tableCounts);
+      } else if (backupData.tables) {
+        for (const [table, items] of Object.entries(backupData.tables)) {
+          counts[table] = Array.isArray(items) ? items.length : 0;
+        }
+      }
+      setTooltipCountsCache(prev => ({ ...prev, [backup.id]: counts }));
+    } catch (err) {
+      console.warn('[Backup] Failed to fetch table counts for tooltip preview:', err);
+    } finally {
+      setLoadingTooltipBackupId(prev => (prev === backup.id ? '' : prev));
+    }
+  }, [tooltipCountsCache]);
+
   const [statsReviewBackup, setStatsReviewBackup] = useState<DriveFolder | null>(null);
   const [statsReviewData, setStatsReviewData] = useState<BackupData | null>(null);
   const [isLoadingStatsReview, setIsLoadingStatsReview] = useState(false);
   const [statsReviewError, setStatsReviewError] = useState('');
+  const handledInitialStatsBackupIdRef = useRef<string>('');
   const [differenceReview, setDifferenceReview] = useState<{
     backup: BackupComparisonSource;
     leftBackup: BackupComparisonSource;
@@ -113,6 +384,12 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
       .then(backupData => {
         if (!isMounted) return;
         setDbSizeStr(formatBackupPayloadSize(backupData.manifest.estimatedPayloadBytes || 0));
+        if (backupData.manifest?.tableCounts) {
+          setTooltipCountsCache(prev => ({
+            ...prev,
+            'local-current': backupData.manifest.tableCounts,
+          }));
+        }
       })
       .catch(error => {
         console.error('Failed to estimate backup payload size', error);
@@ -128,7 +405,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
 
 
   // Default to first workspace if none selected
-  const activeWorkspace = workspaces.find(w => w.id === selectedWorkspaceId) || workspaces[0];
+  const activeOrganisation = organisations.find(w => w.id === selectedOrganisationId) || organisations[0];
 
   // Load configuration and check auth on mount
   useEffect(() => {
@@ -166,9 +443,9 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
 
   // Sync mode key when active workspace changes
   useEffect(() => {
-    if (!activeWorkspace?.id) return;
-    const modeKey = `backupMode_${activeWorkspace.id}`;
-    const syncTimeKey = `lastSyncedAt_${activeWorkspace.id}`;
+    if (!activeOrganisation?.id) return;
+    const modeKey = `backupMode_${activeOrganisation.id}`;
+    const syncTimeKey = `lastSyncedAt_${activeOrganisation.id}`;
     StorageManager.getItem([modeKey, syncTimeKey]).then((res) => {
       const nextMode = res[modeKey] || 'local';
       setBackupMode(nextMode);
@@ -178,7 +455,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
         setLastSyncedAt(null);
       }
     });
-  }, [activeWorkspace?.id]);
+  }, [activeOrganisation?.id]);
 
   // Reconstruct the first-connection status from Drive when local extension storage has no history.
   useEffect(() => {
@@ -193,12 +470,12 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
   }, [backups, isConnected, lastBackupStatus, lastSyncedAt]);
 
 
-  const handleConnect = async (workspaceId = activeWorkspace?.id) => {
+  const handleConnect = async (organisationId = activeOrganisation?.id) => {
     try {
       await getDriveToken(); // triggers interactive OAuth
       setIsConnected(true);
-      if (workspaceId) {
-        const modeKey = `backupMode_${workspaceId}`;
+      if (organisationId) {
+        const modeKey = `backupMode_${organisationId}`;
         setBackupMode('drive');
         await StorageManager.setItem(modeKey, 'drive');
       }
@@ -227,11 +504,11 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
     }
   };
 
-  const handleSwitchMode = (mode: 'drive' | 'local', workspaceId = activeWorkspace?.id) => {
-    if (!workspaceId) return;
-    const modeKey = `backupMode_${workspaceId}`;
+  const handleSwitchMode = (mode: 'drive' | 'local', organisationId = activeOrganisation?.id) => {
+    if (!organisationId) return;
+    const modeKey = `backupMode_${organisationId}`;
     if (mode === 'drive' && !isConnected) {
-      handleConnect(workspaceId);
+      handleConnect(organisationId);
     } else {
       setBackupMode(mode);
       StorageManager.setItem(modeKey, mode);
@@ -239,9 +516,12 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
   };
 
   const loadBackups = async (preferredBackupId?: string) => {
+    const perf = createBackupUiPerfTrace('Load Drive backups');
     setIsLoadingBackups(true);
+    perf.mark('set-loading');
     try {
       const list = await listBackupsFromDrive();
+      perf.mark('list-drive-backups', { count: list.length });
       setBackups(list);
       setHasLoadedBackups(true);
       setSelectedDriveBackupId(currentId => {
@@ -249,11 +529,15 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
         if (currentId && list.some(backup => backup.id === currentId)) return currentId;
         return list[0]?.id || '';
       });
+      perf.mark('update-state', { preferredBackupId });
     } catch (err) {
       console.error('Failed to load backups', err);
       setHasLoadedBackups(true);
+      perf.mark('failed', { error: err instanceof Error ? err.message : String(err) });
     } finally {
       setIsLoadingBackups(false);
+      perf.mark('clear-loading');
+      perf.log();
     }
   };
 
@@ -269,46 +553,66 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
   };
 
   const handleBackupNow = async () => {
+    const perf = createBackupUiPerfTrace(backupMode === 'drive' ? 'Manual Drive backup' : 'Manual local backup');
+    let completionMessage = '';
+    let failureMessage = '';
     setIsSyncing(true);
+    perf.mark('set-syncing');
     try {
       const now = new Date();
       if (backupMode === 'drive') {
-        const driveBackup = await executeDriveBackup({ interactive: true, mode: 'manual', downloadArchive: true });
-        setBackups(current => [driveBackup, ...current.filter(backup => backup.id !== driveBackup.id)].slice(0, 20));
+        const driveBackup = await executeDriveBackup({
+          interactive: true,
+          mode: 'manual',
+          downloadArchive: true,
+          existingBackups: hasLoadedBackups ? backups : undefined,
+        });
+        perf.mark('execute-drive-backup', { id: driveBackup.id, size: driveBackup.size });
+        setBackups(current => [driveBackup, ...current.filter(backup => backup.id !== driveBackup.id)].slice(0, DRIVE_BACKUP_RETENTION_LIMIT));
         setSelectedDriveBackupId(driveBackup.id);
         setHasLoadedBackups(true);
         void refreshEstimatedBackupSize();
+        perf.mark('update-drive-state');
         setLastBackupStatus('success');
         setLastBackupError('');
         
         setLastSyncedAt(now);
-        if (activeWorkspace?.id) {
-          StorageManager.setItem(`lastSyncedAt_${activeWorkspace.id}`, now.toISOString());
+        if (activeOrganisation?.id) {
+          StorageManager.setItem(`lastSyncedAt_${activeOrganisation.id}`, now.toISOString());
         }
+        perf.mark('persist-status', { organisationId: activeOrganisation?.id });
 
-        alert('Backup completed successfully! Uploaded to Google Drive and downloaded a ZIP copy.');
+        completionMessage = 'Backup completed successfully! Uploaded to Google Drive and downloaded a ZIP copy.';
       } else {
         await exportLocalZipBackup(version);
+        perf.mark('export-local-zip', { version });
         setVersion(v => v + 1);
         await refreshEstimatedBackupSize();
+        perf.mark('refresh-estimated-size');
         setLastBackupStatus('success');
         setLastBackupError('');
         
         setLastSyncedAt(now);
-        if (activeWorkspace?.id) {
-          StorageManager.setItem(`lastSyncedAt_${activeWorkspace.id}`, now.toISOString());
+        if (activeOrganisation?.id) {
+          StorageManager.setItem(`lastSyncedAt_${activeOrganisation.id}`, now.toISOString());
         }
+        perf.mark('persist-status', { organisationId: activeOrganisation?.id });
         
-        alert('Backup completed successfully! Local ZIP file downloaded.');
+        completionMessage = 'Backup completed successfully! Local ZIP file downloaded.';
       }
     } catch (err) {
       console.error(err);
       setLastBackupStatus('failed');
       setLastBackupError(err instanceof Error ? err.message : String(err));
-      alert('Backup failed. Check console for details.');
+      perf.mark('failed', { error: err instanceof Error ? err.message : String(err) });
+      failureMessage = 'Backup failed. Check console for details.';
     } finally {
       setIsSyncing(false);
+      perf.mark('clear-syncing');
+      perf.log();
     }
+    if (completionMessage) window.setTimeout(() => alert(completionMessage), 0);
+    if (failureMessage) window.setTimeout(() => alert(failureMessage), 0);
   };
 
   const handleDownloadBackup = async () => {
@@ -436,32 +740,59 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
       setStatsReviewData(backupData);
     } catch (err) {
       console.error('Failed to load backup stats', err);
-      setStatsReviewError('Could not load stats for this backup. Check your Drive connection.');
+      setStatsReviewError(`Could not load backup stats: ${backupFailureMessage(err)}`);
     } finally {
       setIsLoadingStatsReview(false);
     }
   };
 
+  useEffect(() => {
+    if (!initialStatsBackupId) return;
+    if (handledInitialStatsBackupIdRef.current === initialStatsBackupId) return;
+    handledInitialStatsBackupIdRef.current = initialStatsBackupId;
+    void handleReviewStats(initialStatsBackupId);
+  }, [initialStatsBackupId]);
+
+  const openBackupStatsTab = (driveBackupId: string) => {
+    const chromeAny = (window as any).chrome;
+    const statsUrl = chromeAny?.runtime?.getURL
+      ? chromeAny.runtime.getURL(`AltS_search_newtab/index.html?backup_stats=true&backup_id=${encodeURIComponent(driveBackupId)}`)
+      : `/AltS_search_newtab/index.html?backup_stats=true&backup_id=${encodeURIComponent(driveBackupId)}`;
+
+    if (chromeAny?.tabs?.create) {
+      chromeAny.tabs.create({ url: statsUrl });
+      return;
+    }
+
+    window.open(statsUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const handleRestoreFromDrive = async (driveBackupId?: string) => {
+    if (restoreInProgressRef.current) return;
     if (backups.length === 0) {
       alert('No backups found in Google Drive to restore from.');
       return;
     }
 
     const selectedBackup = backups.find(backup => backup.id === driveBackupId) || backups.find(backup => backup.id === selectedDriveBackupId) || backups[0];
-    const confirmed = window.confirm(`WARNING: This will completely erase your current local data and replace it with the selected backup: "${selectedBackup.name}". Are you sure you want to proceed?`);
-    if (!confirmed) return;
-
+    restoreInProgressRef.current = true;
     setIsRestoring(true);
     try {
-      const backupData = await downloadBackupFromDrive(selectedBackup.id);
-      await restoreDatabaseFromJSON(backupData);
-      alert('Database successfully restored! Reloading application...');
-      window.location.reload();
+      const result = await runBackupRestoreFlow({
+        name: selectedBackup.name,
+        loadBackup: () => downloadBackupFromDrive(selectedBackup.id, { hydrateAssets: true }),
+        loadCurrent: () => extractDatabaseToJSON(0, { includeAssetBlobPayloads: false }),
+        confirm: message => window.confirm(message),
+      });
+      if (result) {
+        alert(restoreCompletionMessage(result));
+        window.location.reload();
+      }
     } catch (err) {
       console.error('Failed to restore database', err);
-      alert('Restoration failed. Check console.');
+      alert(`Restoration failed: ${backupFailureMessage(err)}`);
     } finally {
+      restoreInProgressRef.current = false;
       setIsRestoring(false);
     }
   };
@@ -476,20 +807,39 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
     const confirmed = window.confirm(`Delete ${selectedBackups.length} complete Drive backup version${selectedBackups.length === 1 ? '' : 's'}?\n\n${names}\n\nLocal workspace data will not be deleted.`);
     if (!confirmed) return;
 
+    const perf = createBackupUiPerfTrace('Delete Drive backups');
+    const deletedIds = new Set(selectedBackups.map(backup => backup.id));
+    const remainingBackups = backups.filter(backup => !deletedIds.has(backup.id));
+    let completionMessage = '';
+    let failureMessage = '';
     setIsDeletingVersions(true);
+    perf.mark('set-deleting', { count: selectedBackups.length });
     try {
-      for (const backup of selectedBackups) {
-        await deleteDriveBackup(backup.id, backup.name);
-      }
-      await loadBackups();
+      await deleteDriveBackups(selectedBackups, {
+        refreshAfterDelete: false,
+        knownRemainingCount: remainingBackups.length,
+      });
+      perf.mark('delete-drive-files', { remainingCount: remainingBackups.length });
+      setBackups(remainingBackups);
+      setHasLoadedBackups(true);
+      setSelectedDriveBackupId(currentId => {
+        if (currentId && remainingBackups.some(backup => backup.id === currentId)) return currentId;
+        return remainingBackups[0]?.id || '';
+      });
+      perf.mark('update-state');
       setShowDeleteVersionReview(false);
-      alert(`${selectedBackups.length} Drive backup version${selectedBackups.length === 1 ? '' : 's'} deleted.`);
+      completionMessage = `${selectedBackups.length} Drive backup version${selectedBackups.length === 1 ? '' : 's'} deleted.`;
     } catch (err) {
       console.error('Failed to delete Drive backup versions', err);
-      alert('Could not delete one or more Drive backup versions. Check your Drive connection.');
+      perf.mark('failed', { error: err instanceof Error ? err.message : String(err) });
+      failureMessage = 'Could not delete one or more Drive backup versions. Check your Drive connection.';
     } finally {
       setIsDeletingVersions(false);
+      perf.mark('clear-deleting');
+      perf.log();
     }
+    if (completionMessage) window.setTimeout(() => alert(completionMessage), 0);
+    if (failureMessage) window.setTimeout(() => alert(failureMessage), 0);
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -502,25 +852,31 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
       fileInputRef.current.value = '';
     }
 
-    const confirmed = window.confirm("WARNING: This will completely erase your current local data and replace it with this local ZIP backup. Are you sure you want to proceed?");
-    if (!confirmed) return;
-
+    if (restoreInProgressRef.current) return;
+    restoreInProgressRef.current = true;
     setIsRestoring(true);
     try {
-      const backupData = await readBackupArchive(file, { hydrateAssets: true });
-      await restoreDatabaseFromJSON(backupData);
-      alert('Local Database successfully restored! Reloading application...');
-      window.location.reload();
+      const result = await runBackupRestoreFlow({
+        name: file.name,
+        loadBackup: () => readBackupArchive(file, { hydrateAssets: true }),
+        loadCurrent: () => extractDatabaseToJSON(0, { includeAssetBlobPayloads: false }),
+        confirm: message => window.confirm(message),
+      });
+      if (result) {
+        alert(restoreCompletionMessage(result));
+        window.location.reload();
+      }
     } catch (err) {
       console.error('Failed to restore from local ZIP', err);
-      alert('Local restoration failed. Please ensure you uploaded a valid backup ZIP.');
+      alert(`Local restoration failed: ${backupFailureMessage(err)}`);
     } finally {
+      restoreInProgressRef.current = false;
       setIsRestoring(false);
     }
   };
 
-  const navigateToAllWorkspaces = () => {
-    useUIStore.getState().setView({ type: 'settings', section: 'allWorkspaces' });
+  const navigateToAllOrganisations = () => {
+    useUIStore.getState().setView({ type: 'settings', section: 'allOrganisations' });
   };
 
   const handleSwitchModeWithConfirmation = (mode: 'drive' | 'local') => {
@@ -595,26 +951,27 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
     ? `Last updated ${driveBackupTimestampDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}, ${driveBackupTimestampDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     : 'No Drive backup has been created yet.';
 
-  const activeWorkspaceSlug = activeWorkspace?.workspaceName
-    ? activeWorkspace.workspaceName.toLowerCase().replace(/\s+/g, '-')
-    : 'workspace';
-  const activeWorkspacePath = `/local/${activeWorkspaceSlug}`;
+  const activeOrganisationSlug = activeOrganisation?.organisationName
+    ? activeOrganisation.organisationName.toLowerCase().replace(/\s+/g, '-')
+    : 'organisation';
+  const activeOrganisationPath = `/local/${activeOrganisationSlug}`;
 
   return (
     <div className="flex h-full w-full bg-transparent text-[var(--color-textPrimary)] select-none">
       {/* ── COLUMN 2: WORKSPACE LIST SIDEBAR ── */}
-      <div className="w-[145px] shrink-0 border-r border-[var(--color-borderDefault)] flex flex-col justify-between p-2 bg-transparent">
+      {/* Organization switching is hidden until organization creation is available. */}
+      <div className="hidden" aria-hidden="true">
         <div className="space-y-3">
           <div className="px-1.5 text-[10px] font-bold tracking-wider text-[var(--color-textMuted)] uppercase select-none opacity-80 text-left">
-            Workspaces
+            Organisations
           </div>
           <div className="space-y-1 overflow-y-auto max-h-[400px] custom-scrollbar pr-0.5">
-            {workspaces.map(ws => {
-              const isActive = activeWorkspace?.id === ws.id;
+            {organisations.map(ws => {
+              const isActive = activeOrganisation?.id === ws.id;
               return (
                 <div
                   key={ws.id}
-                  onClick={() => setSelectedWorkspaceId(ws.id)}
+                  onClick={() => setSelectedOrganisationId(ws.id)}
                   className={`w-full rounded-lg px-1.5 py-1.5 text-left text-xs font-semibold transition-all cursor-pointer ${
                     isActive
                       ? 'bg-[var(--color-selectedBg)] text-[var(--color-textPrimary)] shadow-sm'
@@ -622,10 +979,10 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
-                    <div className={`flex h-5 w-5 items-center justify-center rounded-md text-[9px] font-bold text-white shadow-sm shrink-0 ${getAvatarColor(ws.workspaceName)}`}>
-                      {getSingleInitial(ws.workspaceName)}
+                    <div className={`flex h-5 w-5 items-center justify-center rounded-md text-[9px] font-bold text-white shadow-sm shrink-0 ${getAvatarColor(ws.organisationName)}`}>
+                      {getSingleInitial(ws.organisationName)}
                     </div>
-                    <span className="min-w-0 flex-1 truncate">{ws.workspaceName}</span>
+                    <span className="min-w-0 flex-1 truncate">{ws.organisationName}</span>
                   </div>
                 </div>
               );
@@ -776,7 +1133,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                   </div>
                   <div className="flex items-center justify-between border-b border-[var(--color-borderDefault)] pb-2">
                     <span className="text-[var(--color-textMuted)]">Backup location</span>
-                    <span className="text-[var(--color-textPrimary)] font-mono text-[10px]">{activeWorkspacePath}</span>
+                    <span className="text-[var(--color-textPrimary)] font-mono text-[10px]">{activeOrganisationPath}</span>
                   </div>
                   <div className="flex items-center justify-between border-b border-[var(--color-borderDefault)] pb-2">
                     <span className="text-[var(--color-textMuted)]">Estimated source size</span>
@@ -888,7 +1245,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
 
               {isConnected && (
                 <div className="flex w-full flex-wrap items-stretch gap-3">
-                  <div className="flex w-[310px] shrink-0 rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/20 px-3 py-3 text-left shadow-sm">
+                  <div className="flex min-w-[250px] flex-[1_1_280px] rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/20 px-3 py-3 text-left shadow-sm">
                     <div className="flex min-w-0 items-start gap-3">
                           <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 bg-transparent shadow-sm ${
                             driveBackupStatusTone === 'failed'
@@ -929,7 +1286,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                     </div>
                   </div>
 
-                  <div className="flex w-[300px] shrink-0 flex-col rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/20 px-2.5 py-3 text-left shadow-sm">
+                  <div className="flex min-w-[260px] flex-[1_1_280px] flex-col rounded-xl border border-[var(--color-borderDefault)] bg-[var(--color-cardBg)]/20 px-2.5 py-3 text-left shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-start gap-3">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-borderDefault)] text-[var(--color-iconDefault)]">
@@ -938,7 +1295,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                         <div className="min-w-0">
                           <div className="truncate text-xs font-semibold text-[var(--color-textPrimary)]">Automatic Drive backup</div>
                           <div className="mt-1 truncate text-[11px] text-[var(--color-textMuted)]">
-                            {isAutoBackupEnabled ? 'Every 8 hours' : 'Automatic backup is off'}
+                            {isAutoBackupEnabled ? 'Every 24 hours' : 'Automatic backup is off'}
                           </div>
                           <div className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--color-textMuted)]">
                             <span>Source data before ZIP</span>
@@ -957,32 +1314,32 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                       </label>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-2 gap-1.5">
+                    <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5">
                       <button
                         type="button"
                         onClick={handleBackupNow}
                         disabled={isSyncing || isRestoring}
-                        className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-hoverBg)] px-2 py-1.5 text-[10px] font-semibold text-[var(--color-textPrimary)] transition-colors hover:border-[var(--color-borderActive)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex min-w-0 items-center justify-center gap-1 rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-hoverBg)] px-1.5 py-1.5 text-[9px] font-semibold text-[var(--color-textPrimary)] transition-colors hover:border-[var(--color-borderActive)] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {isSyncing ? (
-                          <FiRefreshCw className="animate-spin" size={13} />
+                          <FiRefreshCw className="shrink-0 animate-spin" size={12} />
                         ) : (
-                          <svg className="h-4 w-4 shrink-0" viewBox="-1 -1 26 26" fill="none">
+                          <svg className="h-3.5 w-3.5 shrink-0" viewBox="-1 -1 26 26" fill="none">
                             <path d="M19.3496 14.6504L13.9996 4.3999L9.99961 4.3999L15.3496 14.6504H19.3496Z" fill="#FFC107" />
                             <path d="M9.99961 4.3999L4.64961 14.6504L6.64961 18.1504L11.9996 7.8999L9.99961 4.3999Z" fill="#00E676" />
                             <path d="M15.3496 14.6504L11.9996 18.1504L6.64961 18.1504L9.99961 14.6504L15.3496 14.6504Z" fill="#2196F3" />
                           </svg>
                         )}
-                        <span>{isSyncing ? 'Backing up...' : 'Backup to Drive now'}</span>
+                        <span className="min-w-0 truncate whitespace-nowrap">{isSyncing ? 'Backing up...' : 'Backup to Drive now'}</span>
                       </button>
                       <button
                         type="button"
                         onClick={handleDownloadExcelBackup}
                         disabled={isSyncing || isRestoring}
-                        className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--color-borderDefault)] bg-transparent px-2 py-1.5 text-[10px] font-semibold text-[var(--color-textPrimary)] transition-colors hover:bg-[var(--color-hoverBg)] hover:border-[var(--color-borderActive)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex min-w-0 items-center justify-center gap-1 rounded-lg border border-[var(--color-borderDefault)] bg-transparent px-1.5 py-1.5 text-[9px] font-semibold text-[var(--color-textPrimary)] transition-colors hover:bg-[var(--color-hoverBg)] hover:border-[var(--color-borderActive)] disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <FiDownload size={13} />
-                        <span>Export as Excel</span>
+                        <FiDownload className="shrink-0" size={12} />
+                        <span className="min-w-0 truncate whitespace-nowrap">Export as Excel</span>
                       </button>
                     </div>
                   </div>
@@ -1014,6 +1371,24 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                         <div className="text-xs font-semibold text-[var(--color-textPrimary)]">Backup history</div>
                         <div className="truncate text-[10px] font-medium text-[var(--color-textSecondary)]">New backups are added automatically</div>
                       </div>
+                      <style>
+                        {`
+                          .cmdos-backup-row-popup {
+                            display: none;
+                          }
+                          @container (max-width: 559px) {
+                            .cmdos-backup-row-inline-actions {
+                              display: none;
+                            }
+                            .cmdos-backup-row-more {
+                              margin-left: auto;
+                            }
+                            .cmdos-backup-row-popup {
+                              display: flex;
+                            }
+                          }
+                        `}
+                      </style>
 
                       <div className="space-y-0">
                         {driveBackupHistory.map((group, groupIndex) => (
@@ -1029,17 +1404,103 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                             <div className="space-y-1 pb-3">
                               {group.backups.map((backup, backupIndex) => {
                                 const selectedBackup = selectedDriveBackupId === backup.id || (!selectedDriveBackupId && groupIndex === 0 && backupIndex === 0);
-                                const flatIndex = backups.findIndex(item => item.id === backup.id);
-                                const createdAt = new Date(backup.createdTime);
-                                const sizeLabel = getDriveBackupSizeLabel(backup) || dbSizeStr;
+                const flatIndex = backups.findIndex(item => item.id === backup.id);
+                const createdAt = new Date(backup.createdTime);
+                const sizeLabel = getDriveBackupSizeLabel(backup) || dbSizeStr;
+                const actionButtonClass =
+                  'flex h-6 items-center gap-1 rounded-md px-1.5 text-[10px] font-medium transition-colors hover:bg-[var(--color-hoverBg)] disabled:cursor-not-allowed disabled:opacity-50';
+                const renderBackupActions = (stacked = false) => (
+                  <>
+                    <DriveBackupStatsTooltip
+                      backup={backup}
+                      countsCache={tooltipCountsCache}
+                      onFetchCounts={handleFetchTooltipCounts}
+                      loadingBackupId={loadingTooltipBackupId}
+                    >
+                      <button
+                        type="button"
+                        title="Stats"
+                        aria-label="View backup stats"
+                        disabled={isSyncing || isRestoring || isLoadingStatsReview || isLoadingBackups}
+                        onClick={event => {
+                          event.stopPropagation();
+                          setSelectedDriveBackupId(backup.id);
+                          setOpenDriveBackupActionsId('');
+                          openBackupStatsTab(backup.id);
+                        }}
+                        className={`${actionButtonClass} ${
+                          stacked ? 'w-full justify-start' : 'justify-center'
+                        } text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]`}
+                      >
+                        <FiBarChart2 size={13} />
+                        <span>Stats</span>
+                      </button>
+                    </DriveBackupStatsTooltip>
+                    <button
+                      type="button"
+                      title="Review"
+                      aria-label="Review backup"
+                      disabled={isSyncing || isRestoring || isComparing || isLoadingComparisonSources || isLoadingBackups}
+                      onClick={event => {
+                        event.stopPropagation();
+                        setSelectedDriveBackupId(backup.id);
+                        setOpenDriveBackupActionsId('');
+                        handleReviewDifferences(backup.id);
+                      }}
+                      className={`${actionButtonClass} ${
+                        stacked ? 'w-full justify-start' : 'justify-center'
+                      } text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]`}
+                    >
+                      <FiEye size={13} />
+                      <span>Review</span>
+                    </button>
+                    <button
+                      type="button"
+                      title="Restore"
+                      aria-label="Restore backup"
+                      disabled={isSyncing || isRestoring || isLoadingBackups}
+                      onClick={event => {
+                        event.stopPropagation();
+                        setSelectedDriveBackupId(backup.id);
+                        setOpenDriveBackupActionsId('');
+                        handleRestoreFromDrive(backup.id);
+                      }}
+                      className={`${actionButtonClass} ${
+                        stacked ? 'w-full justify-start' : 'justify-center'
+                      } text-[var(--color-iconDefault)] hover:text-[var(--color-textPrimary)]`}
+                    >
+                      <FiRotateCcw size={13} />
+                      <span>Restore</span>
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete"
+                      aria-label="Delete backup"
+                      disabled={isSyncing || isRestoring || isLoadingBackups}
+                      onClick={event => {
+                        event.stopPropagation();
+                        setSelectedDriveBackupId(backup.id);
+                        setOpenDriveBackupActionsId('');
+                        handleDeleteDriveBackup(backup.id);
+                      }}
+                      className={`${actionButtonClass} ${
+                        stacked ? 'w-full justify-start' : 'justify-center'
+                      } text-[var(--color-danger)]`}
+                    >
+                      <FiTrash2 size={13} />
+                      <span>Delete</span>
+                    </button>
+                  </>
+                );
 
-                                return (
-                                  <div
-                                    key={backup.id}
-                                    onClick={() => setSelectedDriveBackupId(backup.id)}
-                                    role="button"
-                                    tabIndex={0}
-                                    className={`group flex min-h-[46px] w-full cursor-pointer items-center gap-4 rounded-lg border px-3 py-2 text-left transition-colors ${
+                return (
+                  <div
+                    key={backup.id}
+                    onClick={() => setSelectedDriveBackupId(backup.id)}
+                    role="button"
+                    tabIndex={0}
+                    style={{ containerType: 'inline-size' }}
+                    className={`cmdos-backup-history-row group relative flex min-h-[46px] w-full cursor-pointer items-center gap-3 overflow-visible rounded-lg border px-3 py-2 text-left transition-colors ${
                                       selectedBackup
                                         ? 'border-[var(--color-borderActive)] bg-[var(--color-selectedBg)]'
                                         : 'border-transparent bg-[var(--color-hoverBg)]/40 hover:border-[var(--color-borderDefault)]'
@@ -1050,83 +1511,24 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                                     }`}>
                                       {selectedBackup && <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />}
                                     </span>
-                                    <span className="w-16 shrink-0 text-[11px] font-medium leading-none text-[var(--color-textSecondary)]">
+                                    <span className="w-14 shrink-0 text-[11px] font-medium leading-none text-[var(--color-textSecondary)]">
                                       {createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                                     </span>
                                     <span className="w-8 shrink-0 text-[11px] font-bold leading-none text-[var(--color-textPrimary)]">
                                       {getDriveBackupVersionLabel(backup, flatIndex)}
                                     </span>
-                                    <span className="w-20 shrink-0 text-[10px] font-bold leading-none text-[var(--color-accent)]">
+                                    <span className="min-w-[52px] flex-1 text-[10px] font-bold leading-none text-[var(--color-accent)]">
                                       {selectedBackup ? 'Current' : ''}
                                     </span>
                                     {sizeLabel && (
-                                      <span className="w-20 shrink-0 text-[11px] font-semibold leading-none text-[var(--color-textSecondary)]">
+                                      <span className="w-16 shrink-0 text-[11px] font-semibold leading-none text-[var(--color-textSecondary)]">
                                         {sizeLabel}
                                         {backup.storageKind === 'zip' ? ' ZIP' : ''}
                                       </span>
                                     )}
                                     {openDriveBackupActionsId === backup.id && (
-                                      <span className="ml-auto flex shrink-0 items-center gap-1">
-                                        <button
-                                          type="button"
-                                          title="Stats"
-                                          aria-label="View backup stats"
-                                          disabled={isSyncing || isRestoring || isLoadingStatsReview || isLoadingBackups}
-                                          onClick={event => {
-                                            event.stopPropagation();
-                                            setSelectedDriveBackupId(backup.id);
-                                            handleReviewStats(backup.id);
-                                          }}
-                                          className="flex h-6 items-center justify-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-[var(--color-iconDefault)] transition-colors hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)] disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                          <FiBarChart2 size={13} />
-                                          <span>Stats</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          title="Review"
-                                          aria-label="Review backup"
-                                          disabled={isSyncing || isRestoring || isComparing || isLoadingComparisonSources || isLoadingBackups}
-                                          onClick={event => {
-                                            event.stopPropagation();
-                                            setSelectedDriveBackupId(backup.id);
-                                            handleReviewDifferences(backup.id);
-                                          }}
-                                          className="flex h-6 items-center justify-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-[var(--color-iconDefault)] transition-colors hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)] disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                          <FiEye size={13} />
-                                          <span>Review</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          title="Restore"
-                                          aria-label="Restore backup"
-                                          disabled={isSyncing || isRestoring || isLoadingBackups}
-                                          onClick={event => {
-                                            event.stopPropagation();
-                                            setSelectedDriveBackupId(backup.id);
-                                            handleRestoreFromDrive(backup.id);
-                                          }}
-                                          className="flex h-6 items-center justify-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-[var(--color-iconDefault)] transition-colors hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)] disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                          <FiRotateCcw size={13} />
-                                          <span>Restore</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          title="Delete"
-                                          aria-label="Delete backup"
-                                          disabled={isSyncing || isRestoring || isLoadingBackups}
-                                          onClick={event => {
-                                            event.stopPropagation();
-                                            setSelectedDriveBackupId(backup.id);
-                                            handleDeleteDriveBackup(backup.id);
-                                          }}
-                                          className="flex h-6 items-center justify-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-[var(--color-danger)] transition-colors hover:bg-[var(--color-hoverBg)] disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                          <FiTrash2 size={13} />
-                                          <span>Delete</span>
-                                        </button>
+                                      <span className="cmdos-backup-row-inline-actions ml-auto flex shrink-0 items-center gap-1">
+                                        {renderBackupActions()}
                                       </span>
                                     )}
                                     <button
@@ -1138,12 +1540,19 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
                                         setSelectedDriveBackupId(backup.id);
                                         setOpenDriveBackupActionsId(current => current === backup.id ? '' : backup.id);
                                       }}
-                                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-iconDefault)] transition-opacity hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)] ${
+                                      className={`cmdos-backup-row-more flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-iconDefault)] transition-opacity hover:bg-[var(--color-hoverBg)] hover:text-[var(--color-textPrimary)] ${
                                         selectedBackup ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                                      } ${openDriveBackupActionsId === backup.id ? 'ml-0' : 'ml-auto'}`}
+                                      }`}
                                     >
                                       <FiMoreHorizontal size={14} />
                                     </button>
+                                    {openDriveBackupActionsId === backup.id && (
+                                      <span
+                                        onClick={event => event.stopPropagation()}
+                                        className="cmdos-backup-row-popup absolute right-2 top-9 z-30 hidden w-32 flex-col gap-1 rounded-lg border border-[var(--color-borderDefault)] bg-[var(--color-modalBg)]/95 p-1 text-left shadow-xl backdrop-blur-md">
+                                        {renderBackupActions(true)}
+                                      </span>
+                                    )}
                                   </div>
                                 );
                               })}
@@ -1238,7 +1647,7 @@ export const BackupSettings: React.FC<BackupSettingsProps> = ({ onClose }) => {
               onClick={e => e.stopPropagation()}
               className="w-[480px] h-[320px] flex flex-col bg-[var(--color-modalBg)] border border-[var(--color-borderDefault)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 relative"
             >
-              <CreateWorkspacePanel
+              <CreateOrganisationPanel
                 onClose={() => setShowCreateOrg(false)}
                 onSuccess={() => setShowCreateOrg(false)}
               />

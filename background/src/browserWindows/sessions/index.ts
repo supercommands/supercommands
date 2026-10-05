@@ -6,32 +6,28 @@
 import { nowUtc } from '../../../../src/shared-components/utils';
 import { generateEntityId } from '../../../../src/shared-components/utils/idGenerator';
 import { db } from '../../../../src/storage/indexDB/dbConfig';
+import {
+  LAST_DASHBOARD_VIEW_BY_WINDOW_KEY,
+} from '../../../../src/storage/localStorage/widgetDashboardWindowViewStorage';
 import type { LinkItem } from '../../../../src/allObjectFolder/src/createObject/links/linkTypes';
 import {
   DEFAULT_SESSION_SETTINGS,
   normalizeSessionOpenSettings,
 } from '../../../../src/allObjectFolder/src/createObject/session/sessionSettings';
+import type { SessionOpenSettings } from '../../../../src/allObjectFolder/src/createObject/session/sessionSettings';
+import { ConflictError, updateSession } from '../../../../src/allObjectFolder/src/createObject/session/sessionData';
 import { tabPromptQueues } from '@chatAgents/runtimeExecutionEngine';
-
-export interface SessionOpenSettings {
-  openMode: 'same_window' | 'new_window';
-  openInNewTab?: boolean;
-  autoSaveMode: 'auto_save' | 'dont_save';
-  focusWindow?: boolean;
-  pinSessionTab?: boolean;
-  deepFocusMode?: boolean;
-  deepFocusAllowedDomains?: string[];
-  deepFocusBlockedDomains?: string[];
-}
+import { launchFocusItems, mergeFocusItemsWithSaved, type FocusLaunchItem } from './focusLaunch';
+import { getDelayBeforeSessionTabCreate, getSessionLaunchPacing } from './sessionLaunchPacing';
 
 export interface ActiveSessionEntry {
   sessionId: string;
   sessionName: string;
   windowId: number;
   pinnedTabId: number;
-  workspaceId: string;
-  folderId: string | null;
-  teamId?: string;
+  organisationId: string;
+  
+  
   storageMode?: 'local' | 'cloud';
   capturedUrls: string[];
   capturedNames: string[];
@@ -40,6 +36,10 @@ export interface ActiveSessionEntry {
   createdAt: string;
   initialTabUrls?: Record<number, string>;
   openSettings?: SessionOpenSettings;
+  focusItems?: FocusLaunchItem[];
+  focusLaunchGeneration?: string;
+  focusLaunchSettled?: boolean;
+  focusRemovedItemIds?: string[];
   launchSource?:
     | 'session_editor'
     | 'dashboard_view'
@@ -56,12 +56,170 @@ export interface ActiveSessionEntry {
 }
 
 export const activeSessions = new Map<number, ActiveSessionEntry>();
+
+const buildFocusItems = async (sessionId: string, urls: string[], names: string[]): Promise<FocusLaunchItem[]> => {
+  const saved = await db.workspaceSessions.get(sessionId).catch(() => undefined);
+  const used = new Set<number>();
+  return urls.map((url, index) => {
+    const savedIndex = (saved?.urls || []).findIndex((item, candidateIndex) =>
+      !used.has(candidateIndex) && item.url === url,
+    );
+    if (savedIndex >= 0) used.add(savedIndex);
+    const savedItem = savedIndex >= 0 ? saved?.urls[savedIndex] : undefined;
+    return {
+      id: savedItem?.id || `session-item-${index}`,
+      url,
+      savedUrl: url,
+      legacyIndex: savedIndex >= 0 && !savedItem?.id ? savedIndex : undefined,
+      title: names[index] || savedItem?.title || savedItem?.name || url,
+      favIconUrl: savedItem?.favIconUrl,
+      tier: 'cold' as const,
+    };
+  });
+};
+
+async function ensureFocusItemsForWindow(windowId: number, session: ActiveSessionEntry): Promise<void> {
+  if (session.focusItems) return;
+  const items = await buildFocusItems(session.sessionId, session.capturedUrls, session.capturedNames);
+  const tabs = await chrome.tabs.query({ windowId }).catch(() => []);
+  const usedTabIds = new Set<number>();
+  items.forEach(item => {
+    const tab = tabs.find(candidate => typeof candidate.id === 'number' && candidate.id !== session.pinnedTabId &&
+      !usedTabIds.has(candidate.id) && (candidate.pendingUrl || candidate.url) === item.url);
+    if (!tab?.id) return;
+    usedTabIds.add(tab.id);
+    item.tabId = tab.id;
+    item.tier = tab.discarded ? 'warm' : 'hot';
+  });
+  activeSessions.set(windowId, {
+    ...activeSessions.get(windowId)!,
+    focusItems: items,
+    focusLaunchSettled: true,
+    focusLaunchGeneration: generateEntityId('sessionLaunch'),
+  });
+}
 const deepFocusOverlayOperationByTab = new Map<number, Promise<boolean>>();
 const ENABLE_SESSION_FLOW_LOGS = false;
 const sessionLaunchTrace = (...args: any[]) => console.log('[SessionLaunchTrace]', ...args);
 const SESSION_REFERENCE_TYPES = new Set(['note', 'link', 'snippet', 'agent']);
 const pendingSessionReferenceHandoffs = new Map<number, any>();
 const sessionControlPorts = new Map<number, chrome.runtime.Port>();
+
+const getExtensionOrigin = (): string => {
+  try {
+    return new URL(chrome.runtime.getURL('')).origin;
+  } catch {
+    return '';
+  }
+};
+
+const getNoteSnippetReuseKey = (url?: string): string | null => {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== getExtensionOrigin()) return null;
+
+    const referenceType = parsed.searchParams.get('type');
+    const referenceId =
+      parsed.searchParams.get('id') ||
+      parsed.searchParams.get('entityId') ||
+      parsed.searchParams.get('noteid') ||
+      parsed.searchParams.get('snippetid');
+
+    if ((referenceType === 'note' || referenceType === 'snippet') && referenceId) {
+      return `${referenceType}:${referenceId}`;
+    }
+
+    const legacyNoteId = parsed.searchParams.get('noteid');
+    if (parsed.searchParams.get('open_note') === 'true' && legacyNoteId) {
+      return `note:${legacyNoteId}`;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+export async function openOrReuseNoteSnippetTabInWindow(
+  url: string,
+  {
+    windowId,
+    active = true,
+    createIfMissing = true,
+    createProperties = {},
+  }: {
+    windowId?: number;
+    active?: boolean;
+    createIfMissing?: boolean;
+    createProperties?: Omit<chrome.tabs.CreateProperties, 'url' | 'windowId' | 'active'>;
+  } = {},
+): Promise<{ ok: boolean; reused: boolean; tab?: chrome.tabs.Tab; error?: string }> {
+  const reuseKey = getNoteSnippetReuseKey(url);
+  if (!reuseKey && !createIfMissing) {
+    return { ok: false, reused: false, error: 'not_reusable_note_snippet_url' };
+  }
+  if (!reuseKey || typeof windowId !== 'number') {
+    if (!createIfMissing) {
+      return { ok: false, reused: false, error: 'missing_reusable_window' };
+    }
+    return new Promise(resolve => {
+      chrome.tabs.create({ ...createProperties, url, ...(typeof windowId === 'number' ? { windowId } : {}), active }, tab => {
+        if (chrome.runtime.lastError || !tab) {
+          resolve({ ok: false, reused: false, error: chrome.runtime.lastError?.message || 'tab_create_failed' });
+          return;
+        }
+        resolve({ ok: true, reused: false, tab });
+      });
+    });
+  }
+
+  const reusableTab = await new Promise<chrome.tabs.Tab | null>(resolve => {
+    chrome.tabs.query({ windowId }, tabs => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      resolve(
+        tabs.find(tab => {
+          if (typeof tab.id !== 'number') return false;
+          const pendingKey = getNoteSnippetReuseKey(tab.pendingUrl);
+          const currentKey = getNoteSnippetReuseKey(tab.url);
+          return pendingKey === reuseKey || currentKey === reuseKey;
+        }) || null,
+      );
+    });
+  });
+
+  if (reusableTab?.id) {
+    return new Promise(resolve => {
+      if (!active) {
+        resolve({ ok: true, reused: true, tab: reusableTab });
+        return;
+      }
+      chrome.windows.update(windowId, { focused: true }, () => {
+        chrome.tabs.update(reusableTab.id!, { active: true }, updatedTab => {
+          resolve({ ok: true, reused: true, tab: updatedTab || reusableTab });
+        });
+      });
+    });
+  }
+
+  if (!createIfMissing) {
+    return { ok: false, reused: false, error: 'no_reusable_note_snippet_tab' };
+  }
+
+  return new Promise(resolve => {
+    chrome.tabs.create({ ...createProperties, url, windowId, active }, tab => {
+      if (chrome.runtime.lastError || !tab) {
+        resolve({ ok: false, reused: false, error: chrome.runtime.lastError?.message || 'tab_create_failed' });
+        return;
+      }
+      resolve({ ok: true, reused: false, tab });
+    });
+  });
+}
 
 export function registerSessionControlPort(tabId: number, port: chrome.runtime.Port): void {
   sessionLaunchTrace('control port connected', { tabId, portName: port.name });
@@ -77,7 +235,13 @@ export function registerSessionControlPort(tabId: number, port: chrome.runtime.P
     port.postMessage(pendingMessage);
   }
   port.onDisconnect.addListener(() => {
-    sessionLaunchTrace('control port disconnected', { tabId });
+    const owner = Array.from(activeSessions.values()).find(entry => entry.pinnedTabId === tabId);
+    sessionLaunchTrace('control port disconnected', {
+      tabId,
+      sessionId: owner?.sessionId ?? null,
+      windowId: owner?.windowId ?? null,
+      sessionStillActive: Boolean(owner),
+    });
     if (sessionControlPorts.get(tabId) === port) sessionControlPorts.delete(tabId);
   });
 }
@@ -134,11 +298,38 @@ function createTabsInOrder(
 ) {
   let index = 0;
   let completed = false;
+  const pacing = getSessionLaunchPacing(urls.length);
 
   const completeOnce = () => {
     if (completed) return;
     completed = true;
     onComplete();
+  };
+
+  const findReusableNoteSnippetTab = (url: string, callback: (tab: chrome.tabs.Tab | null) => void) => {
+    const windowId = baseCreateProperties.windowId;
+    const reuseKey = getNoteSnippetReuseKey(url);
+    if (!reuseKey || typeof windowId !== 'number') {
+      callback(null);
+      return;
+    }
+
+    chrome.tabs.query({ windowId }, tabs => {
+      if (chrome.runtime.lastError || !shouldContinue()) {
+        callback(null);
+        return;
+      }
+
+      const reusableTab =
+        tabs.find(tab => {
+          if (typeof tab.id !== 'number') return false;
+          const pendingKey = getNoteSnippetReuseKey(tab.pendingUrl);
+          const currentKey = getNoteSnippetReuseKey(tab.url);
+          return pendingKey === reuseKey || currentKey === reuseKey;
+        }) || null;
+
+      callback(reusableTab);
+    });
   };
 
   const createNext = () => {
@@ -148,28 +339,76 @@ function createTabsInOrder(
     }
 
     const url = urls[index];
-    sessionLaunchTrace('creating session tab', { index, url, windowId: baseCreateProperties.windowId });
-    chrome.tabs.create({ ...baseCreateProperties, url }, createdTab => {
+    const delayMs = getDelayBeforeSessionTabCreate(index, pacing);
+    const createCurrent = () => {
       if (!shouldContinue()) {
-        if (typeof createdTab?.id === 'number') {
-          chrome.tabs.remove(createdTab.id).catch(() => {});
-        }
         completeOnce();
         return;
       }
-      if (createdTab) {
-        sessionLaunchTrace('session tab created', {
+
+      findReusableNoteSnippetTab(url, reusableTab => {
+        if (!shouldContinue()) {
+          completeOnce();
+          return;
+        }
+
+        if (reusableTab?.id) {
+          sessionLaunchTrace('reusing existing note/snippet session tab', {
+            index,
+            tabId: reusableTab.id,
+            windowId: reusableTab.windowId,
+            url,
+            existingUrl: reusableTab.pendingUrl || reusableTab.url,
+          });
+          onCreated(reusableTab, url, index);
+          index += 1;
+          createNext();
+          return;
+        }
+
+        sessionLaunchTrace('creating session tab', {
           index,
-          tabId: createdTab.id,
-          windowId: createdTab.windowId,
           url,
-          pinned: createdTab.pinned,
+          windowId: baseCreateProperties.windowId,
+          totalUrls: urls.length,
+          pacing,
         });
-        onCreated(createdTab, url, index);
-      }
-      index += 1;
-      createNext();
-    });
+        chrome.tabs.create({ ...baseCreateProperties, url }, createdTab => {
+          if (!shouldContinue()) {
+            if (typeof createdTab?.id === 'number') {
+              chrome.tabs.remove(createdTab.id).catch(() => {});
+            }
+            completeOnce();
+            return;
+          }
+          if (createdTab) {
+            sessionLaunchTrace('session tab created', {
+              index,
+              tabId: createdTab.id,
+              windowId: createdTab.windowId,
+              url,
+              pinned: createdTab.pinned,
+            });
+            onCreated(createdTab, url, index);
+          }
+          index += 1;
+          createNext();
+        });
+      });
+    };
+
+    if (delayMs > 0) {
+      sessionLaunchTrace('delaying session tab batch', {
+        nextIndex: index,
+        totalUrls: urls.length,
+        delayMs,
+        windowId: baseCreateProperties.windowId,
+      });
+      setTimeout(createCurrent, delayMs);
+      return;
+    }
+
+    createCurrent();
   };
 
   createNext();
@@ -266,7 +505,7 @@ function isDeepFocusCapturedUrlAllowed(session: ActiveSessionEntry, url: string,
 export function isTabAllowedByActiveDeepFocus(windowId: number, url?: string): boolean {
   if (!url) return false;
   const windowSession = activeSessions.get(windowId);
-  if (windowSession?.openSettings?.deepFocusMode !== true) return true;
+  if (normalizeSessionOpenSettings(windowSession?.openSettings).focusMode !== true) return true;
 
   const hostname = getUrlHostname(url);
   return Boolean(hostname) && isDeepFocusCapturedUrlAllowed(windowSession, url, hostname);
@@ -335,7 +574,7 @@ async function restoreConfiguredUrlsIntoActiveSession(
   const session = await getValidatedActiveSessionForWindow(windowId, validationOptions);
   if (!session) return;
 
-  const sessionRecord = await db.sessions.get(session.sessionId).catch(() => undefined);
+  const sessionRecord = await db.workspaceSessions.get(session.sessionId).catch(() => undefined);
   if (!sessionRecord) return;
   const currentSession = await getValidatedActiveSessionForWindow(windowId, validationOptions);
   if (!currentSession || currentSession.sessionId !== session.sessionId) return;
@@ -361,8 +600,9 @@ function normalizeSessionLaunchUrl(url: string): string {
 async function openMissingConfiguredSessionTabs(windowId: number): Promise<number> {
   const session = await getValidatedActiveSessionForWindow(windowId);
   if (!session) return 0;
+  if (normalizeSessionOpenSettings(session.openSettings).focusMode) return 0;
 
-  const sessionRecord = await db.sessions.get(session.sessionId).catch(() => undefined);
+  const sessionRecord = await db.workspaceSessions.get(session.sessionId).catch(() => undefined);
   if (!sessionRecord) return 0;
 
   const tabs = await chrome.tabs.query({ windowId }).catch(() => []);
@@ -447,6 +687,21 @@ function getDeepFocusBlockedUrl(session: ActiveSessionEntry, blockedUrl: string,
   return chrome.runtime.getURL(`AltS_search_newtab/index.html?${params.toString()}`);
 }
 
+export function isSessionControlTabUrl(url?: string): boolean {
+  if (!url) return false;
+  if (url.startsWith('chrome://newtab') || url.startsWith('chrome://new-tab-page')) return true;
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== getExtensionOrigin()) return false;
+
+    const normalizedPath = parsed.pathname.replace(/^\/+/, '');
+    return normalizedPath === 'newtab.html' || normalizedPath === 'AltS_search_newtab/index.html';
+  } catch {
+    return false;
+  }
+}
+
 function canShowDeepFocusOverlayInPage(url?: string): boolean {
   if (!url) return false;
   try {
@@ -458,14 +713,14 @@ function canShowDeepFocusOverlayInPage(url?: string): boolean {
 }
 
 function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
-  const overlayId = 'tasklabs-deep-focus-blocked-overlay';
+  const overlayId = 'cmdos-deep-focus-blocked-overlay';
   const windowWithGuard = window as typeof window & {
-    __tasklabsDeepFocusGuardObserver?: MutationObserver | null;
-    __tasklabsDeepFocusStopTimer?: number | null;
-    __tasklabsDeepFocusOverlayGeneration?: number;
+    __cmdosDeepFocusGuardObserver?: MutationObserver | null;
+    __cmdosDeepFocusStopTimer?: number | null;
+    __cmdosDeepFocusOverlayGeneration?: number;
   };
-  const overlayGeneration = (windowWithGuard.__tasklabsDeepFocusOverlayGeneration ?? 0) + 1;
-  windowWithGuard.__tasklabsDeepFocusOverlayGeneration = overlayGeneration;
+  const overlayGeneration = (windowWithGuard.__cmdosDeepFocusOverlayGeneration ?? 0) + 1;
+  windowWithGuard.__cmdosDeepFocusOverlayGeneration = overlayGeneration;
   let blockerPrepared = false;
   const ensureBlockerBody = () => {
     if (!document.body) {
@@ -488,13 +743,13 @@ function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
   };
 
   const prepareBlockedPage = () => {
-    if (blockerPrepared || windowWithGuard.__tasklabsDeepFocusOverlayGeneration !== overlayGeneration) return;
-    windowWithGuard.__tasklabsDeepFocusGuardObserver?.disconnect();
+    if (blockerPrepared || windowWithGuard.__cmdosDeepFocusOverlayGeneration !== overlayGeneration) return;
+    windowWithGuard.__cmdosDeepFocusGuardObserver?.disconnect();
     if (
-      windowWithGuard.__tasklabsDeepFocusStopTimer !== null &&
-      windowWithGuard.__tasklabsDeepFocusStopTimer !== undefined
+      windowWithGuard.__cmdosDeepFocusStopTimer !== null &&
+      windowWithGuard.__cmdosDeepFocusStopTimer !== undefined
     ) {
-      window.clearInterval(windowWithGuard.__tasklabsDeepFocusStopTimer);
+      window.clearInterval(windowWithGuard.__cmdosDeepFocusStopTimer);
     }
     document.getElementById(overlayId)?.remove();
     document.documentElement.style.overflow = 'hidden';
@@ -515,7 +770,7 @@ function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
   const guardBlockedPage = (overlayElement: HTMLDivElement) => {
     let guardRunning = false;
     const runGuard = () => {
-      if (windowWithGuard.__tasklabsDeepFocusOverlayGeneration !== overlayGeneration) {
+      if (windowWithGuard.__cmdosDeepFocusOverlayGeneration !== overlayGeneration) {
         observer.disconnect();
         return;
       }
@@ -530,19 +785,19 @@ function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
     const observer = new MutationObserver(runGuard);
     observer.observe(document.documentElement, { childList: true });
     if (document.body) observer.observe(document.body, { childList: true, subtree: false });
-    windowWithGuard.__tasklabsDeepFocusGuardObserver = observer;
+    windowWithGuard.__cmdosDeepFocusGuardObserver = observer;
     const stopTimer = window.setInterval(() => {
-      if (windowWithGuard.__tasklabsDeepFocusOverlayGeneration !== overlayGeneration) {
+      if (windowWithGuard.__cmdosDeepFocusOverlayGeneration !== overlayGeneration) {
         window.clearInterval(stopTimer);
         return;
       }
       pausePageMedia();
     }, 300);
-    windowWithGuard.__tasklabsDeepFocusStopTimer = stopTimer;
+    windowWithGuard.__cmdosDeepFocusStopTimer = stopTimer;
     window.setTimeout(() => {
-      if (windowWithGuard.__tasklabsDeepFocusStopTimer === stopTimer) {
+      if (windowWithGuard.__cmdosDeepFocusStopTimer === stopTimer) {
         window.clearInterval(stopTimer);
-        windowWithGuard.__tasklabsDeepFocusStopTimer = null;
+        windowWithGuard.__cmdosDeepFocusStopTimer = null;
       }
     }, 8000);
   };
@@ -595,8 +850,8 @@ function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
     fontFamily: 'var(--font-comfortaa, Comfortaa, Inter, ui-sans-serif, system-ui, sans-serif)',
   });
   const brandIcon = document.createElement('img');
-  brandIcon.src = chrome.runtime.getURL('content/cmdOS_logo.png');
-  brandIcon.alt = 'cmdOS';
+  brandIcon.src = chrome.runtime.getURL('content/supercommands_logo.png');
+  brandIcon.alt = 'SuperCommands';
   Object.assign(brandIcon.style, {
     width: '28px',
     height: '28px',
@@ -606,7 +861,7 @@ function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
     flex: '0 0 auto',
   });
   const brandText = document.createElement('span');
-  brandText.textContent = 'cmdOS';
+  brandText.textContent = 'SuperCommands';
   brand.append(brandIcon, brandText);
 
   const headerPill = document.createElement('div');
@@ -843,7 +1098,7 @@ function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
   card.append(header, label, title, description, details, actions, status, footer);
   overlay.appendChild(card);
   const mountOverlay = () => {
-    if (windowWithGuard.__tasklabsDeepFocusOverlayGeneration !== overlayGeneration) return;
+    if (windowWithGuard.__cmdosDeepFocusOverlayGeneration !== overlayGeneration) return;
     prepareBlockedPage();
     const existingOverlay = document.getElementById(overlayId);
     if (existingOverlay === overlay && document.body?.contains(overlay)) return;
@@ -862,7 +1117,7 @@ function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
   let mountAttempts = 0;
   const retryMount = window.setInterval(() => {
     mountAttempts++;
-    if (windowWithGuard.__tasklabsDeepFocusOverlayGeneration !== overlayGeneration) {
+    if (windowWithGuard.__cmdosDeepFocusOverlayGeneration !== overlayGeneration) {
       window.clearInterval(retryMount);
       return;
     }
@@ -877,21 +1132,21 @@ function injectDeepFocusBlockedOverlay(payload: DeepFocusBlockPayload) {
 
 function removeDeepFocusBlockedOverlay() {
   const guardedWindow = window as typeof window & {
-    __tasklabsDeepFocusGuardObserver?: MutationObserver | null;
-    __tasklabsDeepFocusStopTimer?: number | null;
-    __tasklabsDeepFocusOverlayGeneration?: number;
+    __cmdosDeepFocusGuardObserver?: MutationObserver | null;
+    __cmdosDeepFocusStopTimer?: number | null;
+    __cmdosDeepFocusOverlayGeneration?: number;
   };
-  guardedWindow.__tasklabsDeepFocusOverlayGeneration = (guardedWindow.__tasklabsDeepFocusOverlayGeneration ?? 0) + 1;
-  guardedWindow.__tasklabsDeepFocusGuardObserver?.disconnect();
-  guardedWindow.__tasklabsDeepFocusGuardObserver = null;
+  guardedWindow.__cmdosDeepFocusOverlayGeneration = (guardedWindow.__cmdosDeepFocusOverlayGeneration ?? 0) + 1;
+  guardedWindow.__cmdosDeepFocusGuardObserver?.disconnect();
+  guardedWindow.__cmdosDeepFocusGuardObserver = null;
   if (
-    guardedWindow.__tasklabsDeepFocusStopTimer !== null &&
-    guardedWindow.__tasklabsDeepFocusStopTimer !== undefined
+    guardedWindow.__cmdosDeepFocusStopTimer !== null &&
+    guardedWindow.__cmdosDeepFocusStopTimer !== undefined
   ) {
-    window.clearInterval(guardedWindow.__tasklabsDeepFocusStopTimer);
-    guardedWindow.__tasklabsDeepFocusStopTimer = null;
+    window.clearInterval(guardedWindow.__cmdosDeepFocusStopTimer);
+    guardedWindow.__cmdosDeepFocusStopTimer = null;
   }
-  document.getElementById('tasklabs-deep-focus-blocked-overlay')?.remove();
+  document.getElementById('cmdos-deep-focus-blocked-overlay')?.remove();
   document.documentElement.style.removeProperty('overflow');
   document.documentElement.style.removeProperty('background');
   document.body?.style.removeProperty('margin');
@@ -908,16 +1163,9 @@ async function showDeepFocusOverlayInPage(tabId: number, payload: DeepFocusBlock
     .then(
       () =>
         new Promise<boolean>(resolve => {
-          chrome.scripting.executeScript(
-            {
-              target: { tabId },
-              func: injectDeepFocusBlockedOverlay,
-              args: [payload],
-            },
-            () => {
-              resolve(!chrome.runtime.lastError);
-            },
-          );
+          chrome.tabs.sendMessage(tabId, { type: 'SHOW_DEEP_FOCUS_BLOCKED_OVERLAY', ...payload }, response => {
+            resolve(!chrome.runtime.lastError && response?.ok === true);
+          });
         }),
     );
   deepFocusOverlayOperationByTab.set(tabId, currentInjection);
@@ -936,10 +1184,7 @@ async function hideDeepFocusOverlayInPage(tabId: number): Promise<void> {
   const currentInjection = previousInjection
     .catch(() => false)
     .then(async () => {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: removeDeepFocusBlockedOverlay,
-      }).catch(() => {});
+      await chrome.tabs.sendMessage(tabId, { type: 'HIDE_DEEP_FOCUS_BLOCKED_OVERLAY' }).catch(() => {});
       return false;
     });
   deepFocusOverlayOperationByTab.set(tabId, currentInjection);
@@ -955,7 +1200,7 @@ async function hideDeepFocusOverlayInPage(tabId: number): Promise<void> {
 
 async function getTabsForDeepFocusRefresh(previousSessionId?: string | null): Promise<chrome.tabs.Tab[]> {
   const hasActiveDeepFocus = Array.from(activeSessions.values()).some(
-    session => session.openSettings?.deepFocusMode === true,
+    session => normalizeSessionOpenSettings(session.openSettings).focusMode === true,
   );
   if (hasActiveDeepFocus || previousSessionId) {
     return chrome.tabs.query({}).catch(() => []);
@@ -1063,10 +1308,51 @@ async function resolveActiveSessionForWindow(windowId: number): Promise<ActiveSe
 export async function stopActiveSessionRuntimeForWindow(
   windowId: number,
   reason: string,
-  options: { refreshFocus?: boolean } = {},
+  options: { refreshFocus?: boolean; fallbackDashboardViewId?: string | null } = {},
 ): Promise<ActiveSessionEntry | null> {
   const session = activeSessions.get(windowId);
   if (!session) return null;
+  sessionLaunchTrace('stopping active session', {
+    sessionId: session.sessionId,
+    windowId,
+    pinnedTabId: session.pinnedTabId,
+    reason,
+    focusLaunchSettled: session.focusLaunchSettled ?? null,
+  });
+
+  const dashboardEntry = activeDashboardViewSessionsByWindow.get(windowId);
+  const fallbackDashboardViewId =
+    typeof options.fallbackDashboardViewId === 'string' && options.fallbackDashboardViewId.trim()
+      ? options.fallbackDashboardViewId.trim()
+      : dashboardEntry?.viewId || null;
+  if (
+    dashboardEntry?.sessionId === session.sessionId &&
+    fallbackDashboardViewId &&
+    session.organisationId
+  ) {
+    try {
+      const result = await chrome.storage.local.get(LAST_DASHBOARD_VIEW_BY_WINDOW_KEY);
+      const lastViews =
+        result?.[LAST_DASHBOARD_VIEW_BY_WINDOW_KEY] &&
+        typeof result[LAST_DASHBOARD_VIEW_BY_WINDOW_KEY] === 'object' &&
+        !Array.isArray(result[LAST_DASHBOARD_VIEW_BY_WINDOW_KEY])
+          ? result[LAST_DASHBOARD_VIEW_BY_WINDOW_KEY]
+          : {};
+      lastViews[String(windowId)] = {
+        organisationId: session.organisationId,
+        viewId: fallbackDashboardViewId,
+        updatedAt: Date.now(),
+      };
+      await chrome.storage.local.set({ [LAST_DASHBOARD_VIEW_BY_WINDOW_KEY]: lastViews });
+    } catch (error) {
+      sessionFlowWarn('[SessionFlow][background] could not remember closed dashboard view', {
+        windowId,
+        sessionId: session.sessionId,
+        viewId: fallbackDashboardViewId,
+        error,
+      });
+    }
+  }
 
   activeSessions.delete(windowId);
   activeDashboardViewSessionsByWindow.delete(windowId);
@@ -1094,6 +1380,9 @@ export async function getValidatedActiveSessionForWindow(
 ): Promise<ActiveSessionEntry | null> {
   const session = await resolveActiveSessionForWindow(windowId);
   if (!session) return null;
+  if (!await db.workspaces.get(session.sessionId)) {
+    await stopActiveSessionRuntimeForWindow(windowId, 'workspace_deleted', options); return null;
+  }
 
   const controlTab = session.pinnedTabId > 0
     ? await chrome.tabs.get(session.pinnedTabId).catch(() => null)
@@ -1113,11 +1402,25 @@ export async function getValidatedActiveSessionForWindow(
   }
 
   const hasValidControlTab = Boolean(controlTab?.pinned === true);
-  if (hasValidControlTab) return session;
+  const hasValidControlTabUrl = isSessionControlTabUrl(controlTab?.url || controlTab?.pendingUrl);
+  if (hasValidControlTab && hasValidControlTabUrl) return session;
+
+  sessionLaunchTrace('active session control validation failed', {
+    sessionId: session.sessionId,
+    windowId,
+    pinnedTabId: session.pinnedTabId,
+    tabExists: Boolean(controlTab),
+    pinned: controlTab?.pinned ?? null,
+    url: controlTab?.url || controlTab?.pendingUrl || null,
+  });
 
   await stopActiveSessionRuntimeForWindow(
     windowId,
-    controlTab ? 'control_tab_unpinned' : 'control_tab_missing',
+    controlTab
+      ? hasValidControlTab
+        ? 'control_tab_navigated_away'
+        : 'control_tab_unpinned'
+      : 'control_tab_missing',
     options,
   );
   sessionFlowDebug('[SessionFlow][background] removed stale active session status', {
@@ -1126,6 +1429,7 @@ export async function getValidatedActiveSessionForWindow(
     pinnedTabId: session.pinnedTabId,
     controlTabExists: Boolean(controlTab),
     controlTabPinned: controlTab?.pinned ?? null,
+    controlTabUrl: controlTab?.url || controlTab?.pendingUrl || null,
   });
   return null;
 }
@@ -1141,7 +1445,7 @@ async function getDeepFocusBlockPayload(tabId: number, url?: string): Promise<De
   if (!hostname) return null;
 
   const windowSession = await getValidatedActiveSessionForWindow(windowId);
-  if (windowSession?.openSettings?.deepFocusMode !== true) return null;
+  if (normalizeSessionOpenSettings(windowSession?.openSettings).focusMode !== true) return null;
   if (windowSession.pinnedTabId === tabId) return null;
   if (isDeepFocusCapturedUrlAllowed(windowSession, url, hostname)) return null;
   if (getDeepFocusManualAllowedDomains(windowSession).includes(hostname)) {
@@ -1162,8 +1466,8 @@ export async function handleDeepFocusNavigation(tabId: number, url?: string): Pr
   if (!blockPayload) return false;
 
   if (canShowDeepFocusOverlayInPage(blockPayload.blockedUrl)) {
-    await showDeepFocusOverlayInPage(tabId, blockPayload);
-    return true;
+    const shownInPage = await showDeepFocusOverlayInPage(tabId, blockPayload);
+    if (shownInPage) return true;
   }
 
   const windowId = await getTabWindowId(tabId);
@@ -1209,10 +1513,16 @@ export async function handleDeepFocusWindowCreated(window: chrome.windows.Window
 }
 
 export async function restoreActiveSessions() {
+  await db.open();
   try {
     const result = await chrome.storage.local.get(['active_sessions', 'active_dashboard_view_session']);
     const stored: ActiveSessionEntry[] = result.active_sessions || [];
-    stored.forEach(s => activeSessions.set(s.windowId, s));
+    const workspaceIds = new Set((await db.workspaces.toArray()).map(row => row.id));
+    stored.filter(s => workspaceIds.has(s.sessionId)).forEach(s => activeSessions.set(s.windowId, {
+      ...s,
+      openSettings: normalizeSessionOpenSettings(s.openSettings),
+      focusLaunchSettled: Boolean(s.focusItems),
+    }));
     const activeDashboardSession = result.active_dashboard_view_session;
     const rawByWindow =
       activeDashboardSession?.byWindow &&
@@ -1237,7 +1547,7 @@ export async function restoreActiveSessions() {
       ),
     );
     const activeDeepFocusWindowIds = Array.from(activeSessions.entries())
-      .filter(([, session]) => session.openSettings?.deepFocusMode === true)
+      .filter(([, session]) => normalizeSessionOpenSettings(session.openSettings).focusMode === true)
       .map(([windowId]) => windowId);
     await Promise.all(
       activeDeepFocusWindowIds.map(windowId =>
@@ -1307,6 +1617,10 @@ async function endDashboardViewSessionForNavigation(
     Boolean(session?.sessionId && previousSessionId) &&
     previousViewId !== nextViewId &&
     String(previousSessionId) === String(session?.sessionId);
+  if (!mappedSessionMatches && !linkedSessionMatches) {
+    return { stopped: false, reason: previousViewId === nextViewId ? 'same_view' : 'session_not_linked_to_previous_view' };
+  }
+
   console.log('[DashboardViewSwitchTrace] cleanup requested', {
     windowId,
     nextViewId,
@@ -1318,9 +1632,6 @@ async function endDashboardViewSessionForNavigation(
     mappedSessionMatches,
     linkedSessionMatches,
   });
-  if (!mappedSessionMatches && !linkedSessionMatches) {
-    return { stopped: false, reason: previousViewId === nextViewId ? 'same_view' : 'session_not_linked_to_previous_view' };
-  }
 
   if (!session) return { stopped: false, reason: 'no_active_window_session' };
 
@@ -1349,7 +1660,9 @@ async function endDashboardViewSessionForNavigation(
     didUnpinControlTab = updatedTab?.pinned === false;
   }
 
-  await stopActiveSessionRuntimeForWindow(windowId, 'dashboard_view_navigated');
+  await stopActiveSessionRuntimeForWindow(windowId, 'dashboard_view_navigated', {
+    fallbackDashboardViewId: nextViewId,
+  });
 
   sessionFlowDebug('[SessionFlow][background] ended dashboard session on view navigation', {
     windowId,
@@ -1378,6 +1691,7 @@ async function updateActiveSessionOpenSettings(sessionId: string, openSettings: 
   });
   let updatedCount = 0;
   let deepFocusEnabled = false;
+  const matchingWindowIds: number[] = [];
 
   for (const windowId of Array.from(activeSessions.keys())) {
     const session = await getValidatedActiveSessionForWindow(windowId);
@@ -1389,20 +1703,23 @@ async function updateActiveSessionOpenSettings(sessionId: string, openSettings: 
       ...session,
       openSettings: nextSettings,
     });
+    if (nextSettings.focusMode) await ensureFocusItemsForWindow(windowId, session);
     if (isTurningAutoSaveOn) {
-      await syncCurrentWindowTabsIntoActiveSession(windowId);
+      if (nextSettings.focusMode) await syncFocusSessionTabs(windowId);
+      else await syncCurrentWindowTabsIntoActiveSession(windowId);
       const currentSession = await getValidatedActiveSessionForWindow(windowId);
       if (currentSession) await saveSessionToDb(currentSession);
     }
-    if (nextSettings.deepFocusMode === true) {
+    if (nextSettings.focusMode === true) {
       deepFocusEnabled = true;
     }
     updatedCount++;
+    matchingWindowIds.push(windowId);
   }
 
   if (deepFocusEnabled) {
     await Promise.all(
-      Array.from(activeSessions.keys()).map(windowId => restoreConfiguredUrlsIntoActiveSession(windowId)),
+      matchingWindowIds.map(windowId => restoreConfiguredUrlsIntoActiveSession(windowId)),
     );
   }
 
@@ -1416,21 +1733,42 @@ async function updateActiveSessionOpenSettings(sessionId: string, openSettings: 
 
 export async function saveSessionToDb(session: ActiveSessionEntry) {
   try {
-    const sessionRecord = await db.sessions.get(session.sessionId);
+    if (session.focusItems) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const latest = await db.workspaceSessions.get(session.sessionId);
+        if (!latest) return;
+        const { urls: merged, changed } = mergeFocusItemsWithSaved(
+          latest.urls, session.focusItems, session.focusRemovedItemIds || [],
+        );
+        if (!changed) return;
+        try {
+          await updateSession(session.sessionId, { urls: merged, expectedUpdatedAt: latest.updatedAt });
+          session.focusItems.forEach(item => { item.savedUrl = item.url; });
+          session.focusRemovedItemIds = [];
+          persistActiveSessions();
+          return;
+        } catch (error) {
+          if (!(error instanceof ConflictError) || attempt === 2) throw error;
+        }
+      }
+      return;
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+    const sessionRecord = await db.workspaceSessions.get(session.sessionId);
     if (!sessionRecord) return;
 
-    const currentUrls = session.capturedUrls || [];
+    const currentUrls = session.focusItems?.map(item => item.url) || session.capturedUrls || [];
     const dbUrls = (sessionRecord.urls || []).map(u => u.url);
-    const hasChanged = currentUrls.length !== dbUrls.length || currentUrls.some((url, i) => url !== dbUrls[i]);
+    const hasChanged = currentUrls.length !== dbUrls.length || currentUrls.some((url, i) => url !== dbUrls[i] || (session.capturedNames[i] && session.capturedNames[i] !== (sessionRecord.urls[i]?.title || sessionRecord.urls[i]?.name)));
 
     if (!hasChanged) {
       return; // Skip saving if nothing actually changed
     }
 
     const usedExistingIds = new Set<string>();
-    const urlsAsLinkItems = session.capturedUrls.map((url, i) => {
+    const urlsAsLinkItems = currentUrls.map((url, i) => {
       const existing = sessionRecord.urls?.find(u => u.url === url && !usedExistingIds.has(u.id));
-      const tabId = session.capturedTabIds?.[i];
+      const tabId = session.focusItems?.[i]?.tabId ?? session.capturedTabIds?.[i];
       const mappedSnapshot = typeof tabId === 'number' ? session.snapshotItemsByTabId?.[tabId] : undefined;
       const mappedExisting = mappedSnapshot
         ? sessionRecord.urls?.find(item => item.id === mappedSnapshot.id && !usedExistingIds.has(item.id))
@@ -1442,7 +1780,7 @@ export async function saveSessionToDb(session: ActiveSessionEntry) {
           })
         : undefined);
       if (snapshotExisting) usedExistingIds.add(snapshotExisting.id);
-      const title = session.capturedNames[i] || snapshotExisting?.title || snapshotExisting?.name || url;
+      const title = session.focusItems?.[i]?.title || session.capturedNames[i] || snapshotExisting?.title || snapshotExisting?.name || url;
       if (snapshotExisting) {
         return {
           ...snapshotExisting,
@@ -1460,22 +1798,72 @@ export async function saveSessionToDb(session: ActiveSessionEntry) {
       };
     });
 
-    await db.sessions.update(session.sessionId, {
-      urls: urlsAsLinkItems,
-      updatedAt: Date.now(),
-    });
+    try {
+      await updateSession(session.sessionId, {urls: urlsAsLinkItems, expectedUpdatedAt: sessionRecord.updatedAt});
+      return;
+    } catch (error) {if (!(error instanceof ConflictError) || attempt === 2) throw error;}
+    }
   } catch (err) {
     console.error('[SessionFlow][background] Failed to save session to DB:', err);
   }
+}
+
+export async function syncFocusSessionTabs(windowId: number, closedTabId?: number): Promise<ActiveSessionEntry | null> {
+  const session = await getValidatedActiveSessionForWindow(windowId);
+  if (!session?.focusItems || !session.focusLaunchSettled) return null;
+  const tabs = await chrome.tabs.query({ windowId }).catch(() => []);
+  const current = await getValidatedActiveSessionForWindow(windowId);
+  if (!current?.focusItems || current.sessionId !== session.sessionId) return null;
+  const visibleTabIds = new Set(tabs.map(tab => tab.id).filter((id): id is number => typeof id === 'number'));
+  const shouldRemoveClosed = current.openSettings?.autoSaveMode === 'auto_save';
+  const nextItems = current.focusItems.flatMap(item => {
+    if (typeof item.tabId === 'number' && !visibleTabIds.has(item.tabId)) {
+      if (shouldRemoveClosed && item.tabId === closedTabId) {
+        current.focusRemovedItemIds = [...(current.focusRemovedItemIds || []), item.id];
+      }
+      return shouldRemoveClosed && item.tabId === closedTabId
+        ? []
+        : [{ ...item, tabId: undefined, tier: 'cold' as const }];
+    }
+    const tab = tabs.find(candidate => candidate.id === item.tabId);
+    if (!tab) return [item];
+    const url = tab.pendingUrl || tab.url || '';
+    if (!isTrackableSessionAutosaveUrl(windowId, url)) return [item];
+    return [{ ...item, url, title: tab.title || item.title,
+      tier: tab.discarded ? 'warm' as const : 'hot' as const,
+      loadStatus: tab.discarded ? 'idle' as const : tab.status === 'complete' ? 'ready' as const : 'loading' as const }];
+  });
+  for (const tab of tabs) {
+      if (tab.id === current.pinnedTabId || !tab.id || nextItems.some(item => item.tabId === tab.id)) continue;
+      const url = getTrackableSessionAutosaveTabUrl(windowId, tab);
+      if (!url) continue;
+      const deferred = nextItems.find(item => !item.tabId && item.url === url);
+      if (deferred) {
+        deferred.tabId = tab.id;
+        deferred.tier = tab.discarded ? 'warm' : 'hot';
+        deferred.title = tab.title || deferred.title;
+        continue;
+      }
+      if (shouldRemoveClosed) nextItems.push({ id: generateEntityId('link'), url, title: tab.title || url, tabId: tab.id,
+        tier: tab.discarded ? 'warm' : 'hot' });
+  }
+  current.focusItems = nextItems;
+  current.capturedUrls = nextItems.map(item => item.url);
+  current.capturedNames = nextItems.map(item => item.title);
+  current.capturedTabIds = nextItems.map(item => item.tabId ?? -1);
+  activeSessions.set(windowId, current);
+  persistActiveSessions();
+  if (shouldRemoveClosed) await saveSessionToDb(current);
+  return current;
 }
 
 async function activateAutoSaveSessionTracking(request: any, sender: chrome.runtime.MessageSender) {
   const {
     sessionId,
     sessionName,
-    workspaceId,
-    folderId,
-    teamId,
+    organisationId,
+    
+    
     storageMode,
     initialUrls = [],
     initialNames = [],
@@ -1509,7 +1897,6 @@ async function activateAutoSaveSessionTracking(request: any, sender: chrome.runt
   }
 
   const settings = normalizeSessionOpenSettings({
-    ...DEFAULT_SESSION_SETTINGS,
     ...(openSettings || {}),
     autoSaveMode: 'auto_save',
     pinSessionTab: true,
@@ -1519,13 +1906,18 @@ async function activateAutoSaveSessionTracking(request: any, sender: chrome.runt
     activeSessions.set(targetWindowId, {
       ...existingSession,
       sessionName: sessionName || existingSession.sessionName,
-      workspaceId: workspaceId || existingSession.workspaceId,
-      folderId: folderId ?? existingSession.folderId,
-      teamId: teamId || existingSession.teamId,
+      organisationId: organisationId || existingSession.organisationId,
+      
+      
       storageMode: storageMode || existingSession.storageMode || 'local',
       openSettings: settings,
     });
-    await syncCurrentWindowTabsIntoActiveSession(targetWindowId);
+    if (settings.focusMode) {
+      await ensureFocusItemsForWindow(targetWindowId, existingSession);
+      await syncFocusSessionTabs(targetWindowId);
+    } else {
+      await syncCurrentWindowTabsIntoActiveSession(targetWindowId);
+    }
     const currentSession = await getValidatedActiveSessionForWindow(targetWindowId);
     if (currentSession) await saveSessionToDb(currentSession);
     persistActiveSessions();
@@ -1554,9 +1946,9 @@ async function activateAutoSaveSessionTracking(request: any, sender: chrome.runt
     sessionName: sessionName || existingSession?.sessionName || 'Untitled Tab Session',
     windowId: targetWindowId,
     pinnedTabId,
-    workspaceId: workspaceId || existingSession?.workspaceId || '',
-    folderId: folderId || existingSession?.folderId || null,
-    teamId,
+    organisationId: organisationId || existingSession?.organisationId || '',
+    
+    
     storageMode: storageMode || existingSession?.storageMode || 'local',
     capturedUrls: Array.isArray(initialUrls) ? [...initialUrls] : [],
     capturedNames: Array.isArray(initialNames) ? [...initialNames] : [],
@@ -1567,8 +1959,11 @@ async function activateAutoSaveSessionTracking(request: any, sender: chrome.runt
   };
 
   activeSessions.set(targetWindowId, session);
-  await openMissingConfiguredSessionTabs(targetWindowId);
-  const didCaptureWindowTabs = await syncCurrentWindowTabsIntoActiveSession(targetWindowId);
+  if (settings.focusMode) await ensureFocusItemsForWindow(targetWindowId, session);
+  else await openMissingConfiguredSessionTabs(targetWindowId);
+  const didCaptureWindowTabs = settings.focusMode
+    ? Boolean(await syncFocusSessionTabs(targetWindowId))
+    : await syncCurrentWindowTabsIntoActiveSession(targetWindowId);
   const currentSession = await getValidatedActiveSessionForWindow(targetWindowId);
   if (!currentSession) {
     return { ok: false, error: 'control_tab_not_pinned' };
@@ -1629,6 +2024,12 @@ export function handleSessionMessage(
   sender: chrome.runtime.MessageSender,
   sendResponse: (res: any) => void,
 ): boolean | undefined {
+  // Public Workspace messages resolve to the reusable transient session runtime.
+  const actions: Record<string, string> = {start_workspace: 'start_session', update_workspace_settings: 'update_session_settings',
+    update_active_workspace_urls: 'update_active_session_urls', update_active_workspace_settings: 'update_active_session_settings',
+    stop_workspace: 'stop_session', open_tab_in_workspace: 'open_tab_in_session'};
+  if (actions[request.action]) request = {...request, action: actions[request.action], sessionId: request.workspaceId,
+    workspaceId: request.launchWorkspaceId ?? request.workspaceId};
   if (request.action === 'activate_session_autosave_tracking') {
     activateAutoSaveSessionTracking(request, sender)
       .then(sendResponse)
@@ -1649,12 +2050,77 @@ export function handleSessionMessage(
     return true;
   }
 
+  if (request.action === 'activate_focus_item') {
+    const sessionId = String(request.sessionId || '');
+    const itemId = String(request.itemId || '');
+    const requestedUrl = String(request.url || '');
+    void (async () => {
+      let owner: ActiveSessionEntry | null = null;
+      for (const windowId of activeSessions.keys()) {
+        const candidate = await getValidatedActiveSessionForWindow(windowId);
+        if (candidate?.sessionId === sessionId && candidate.focusItems) {
+          owner = candidate;
+          break;
+        }
+      }
+      const item = owner?.focusItems?.find(candidate => candidate.id === itemId) ||
+        owner?.focusItems?.find(candidate => !candidate.tabId && candidate.url === requestedUrl);
+      if (!owner || !item) {
+        sendResponse({ ok: false, error: 'focus_item_not_running' });
+        return;
+      }
+      if (!item.tabId && item.loadStatus === 'loading') {
+        sendResponse({ ok: true, pending: true });
+        return;
+      }
+      if (!item.tabId) {
+        item.loadStatus = 'loading';
+        persistActiveSessions();
+      }
+      await chrome.windows.update(owner.windowId, { focused: true }).catch(() => {});
+      if (typeof item.tabId === 'number') {
+        const tab = await chrome.tabs.get(item.tabId).catch(() => null);
+        if (tab?.windowId === owner.windowId) {
+          await chrome.tabs.update(tab.id!, { active: true });
+          sendResponse({ ok: true, tabId: tab.id, reused: true });
+          return;
+        }
+        item.tabId = undefined;
+        item.tier = 'cold';
+        item.loadStatus = 'loading';
+        persistActiveSessions();
+      }
+      if (!item.url.startsWith('http') && !item.url.startsWith(chrome.runtime.getURL(''))) {
+        item.loadStatus = 'error';
+        persistActiveSessions();
+        sendResponse({ ok: false, error: 'focus_item_url_not_openable' });
+        return;
+      }
+      const tab = await chrome.tabs.create({ windowId: owner.windowId, url: item.url, active: true }).catch(() => null);
+      if (!tab?.id) {
+        item.loadStatus = 'error';
+        persistActiveSessions();
+        sendResponse({ ok: false, error: 'focus_item_open_failed' });
+        return;
+      }
+      item.tabId = tab.id;
+      item.tier = 'hot';
+      item.loadStatus = 'loading';
+      persistActiveSessions();
+      sendResponse({ ok: true, tabId: tab.id });
+    })().catch(error => {
+      console.error('[Session] Could not activate Focus item:', error);
+      sendResponse({ ok: false, error: 'focus_item_open_failed' });
+    });
+    return true;
+  }
+
   if (request.action === 'start_session') {
     const {
       sessionName,
-      workspaceId,
-      folderId,
-      teamId,
+      organisationId,
+      
+      
       storageMode,
       sessionId: reqSessionId,
       initialUrls = [],
@@ -1665,11 +2131,14 @@ export function handleSessionMessage(
       currentWindowId,
       currentPageUrl,
       sessionLaunchSource,
-      dashboardViewId,
+      workspaceId,
       smartLaunch,
       sessionReferenceItems: requestedSessionReferenceItems = [],
     } = request;
-    const sessionId = reqSessionId || generateEntityId('session');
+    const sessionId = reqSessionId;
+    if (!sessionId || !String(sessionId).startsWith('workspace_')) {
+      sendResponse({ok: false, error: 'retired_workspace_identity'}); return true;
+    }
     const urlsForOpening = Array.isArray(openUrls) ? openUrls : initialUrls;
     const suppliedSessionReferenceItems = Array.isArray(requestedSessionReferenceItems)
       ? requestedSessionReferenceItems
@@ -1721,6 +2190,7 @@ export function handleSessionMessage(
       tabId: number | undefined,
       openedTabs: Array<{ tabId: number; url: string }> = [],
     ) => {
+      if (normalizeSessionOpenSettings(openSettings).focusMode) return;
       if (!tabId || !Array.isArray(sessionReferenceItems) || sessionReferenceItems.length === 0) return;
 
       const availableTabsByUrl = new Map<string, number[]>();
@@ -1775,8 +2245,8 @@ export function handleSessionMessage(
         {
           sessionId,
           sessionName,
-          workspaceId,
-          folderId,
+          organisationId,
+          
           initialUrlCount: initialUrls.length,
           pinnedTabUrl,
           dashboardTabUrl,
@@ -1792,11 +2262,13 @@ export function handleSessionMessage(
       .remove(`unsaved_session_backup_${sessionId}`)
       .catch(() => {})
       .then(async () => {
+        const workspace = await db.workspaces.get(sessionId);
+        if (!workspace) {sendResponse({ok: false, error: 'workspace_not_found'}); return;}
         await Promise.all(
           Array.from(activeSessions.keys()).map(windowId => getValidatedActiveSessionForWindow(windowId)),
         );
         const activeEntries = [...activeSessions.values()];
-        const settings: SessionOpenSettings = { ...DEFAULT_SESSION_SETTINGS, ...(openSettings || {}) };
+        const settings: SessionOpenSettings = normalizeSessionOpenSettings({...workspace.workspaceOpenSettings, ...openSettings});
         settings.pinSessionTab = true;
 
         // Normalize incompatible settings combinations
@@ -1805,7 +2277,7 @@ export function handleSessionMessage(
         }
         if (settings.openInNewTab === true) {
           settings.openMode = 'same_window';
-          settings.focusWindow = false;
+          // Opening in a fresh tab leaves the other tabs in place.
         }
 
         if (smartLaunch === true) {
@@ -1813,9 +2285,84 @@ export function handleSessionMessage(
           settings.openInNewTab = false;
         }
 
+        sessionLaunchTrace('resolved launch policy', {
+          sessionId,
+          launchSource,
+          requestedOpenMode: openSettings?.openMode ?? null,
+          effectiveOpenMode: settings.openMode,
+          focusMode: settings.focusMode === true,
+          autoSaveMode: settings.autoSaveMode,
+          smartLaunch: smartLaunch === true,
+          activeSessionCount: activeEntries.length,
+          activeSameSessionWindows: activeEntries
+            .filter(entry => entry.sessionId === sessionId)
+            .map(entry => entry.windowId),
+        });
+
         const useSameWindow = settings.openMode === 'same_window';
         const forceNewSessionTab = useSameWindow && settings.openInNewTab === true;
-        const shouldFocusWindow = useSameWindow && !forceNewSessionTab && settings.focusWindow === true;
+        const shouldFocusWindow = useSameWindow && !forceNewSessionTab && settings.focusMode === true;
+        const focusItems = settings.focusMode ? await buildFocusItems(sessionId, initialUrls, initialNames) : undefined;
+        const focusLaunchGeneration = focusItems ? generateEntityId('sessionLaunch') : undefined;
+        const getReclaimCandidates = () => Array.from(activeSessions.values())
+          .filter(entry => normalizeSessionOpenSettings(entry.openSettings).focusMode)
+          .flatMap(entry => entry.focusItems || []);
+        const openSessionTabs = (
+          session: ActiveSessionEntry,
+          validUrls: string[],
+          onCreated: (tab: chrome.tabs.Tab, url: string, index: number) => void,
+          onComplete: () => void,
+        ) => {
+          const stillActive = () => activeSessions.get(session.windowId)?.focusLaunchGeneration === focusLaunchGeneration &&
+            activeSessions.get(session.windowId)?.sessionId === sessionId &&
+            normalizeSessionOpenSettings(activeSessions.get(session.windowId)?.openSettings).focusMode;
+          if (!focusItems) {
+            createTabsInOrder(validUrls, { windowId: session.windowId, active: false }, onCreated, onComplete,
+              () => activeSessions.get(session.windowId)?.sessionId === sessionId);
+            return;
+          }
+          const launchableItems = focusItems.filter(item => isOpenableSessionTabUrl(item.url));
+          void launchFocusItems({
+            session,
+            items: launchableItems,
+            shouldContinue: stillActive,
+            onTabCreated: (tab, item) => {
+              if (item.tier === 'hot') onCreated(tab, item.url, focusItems.indexOf(item));
+            },
+            onChange: persistActiveSessions,
+            onTrace: (event, details) => sessionLaunchTrace(`focus ${event}`, {
+              sessionId,
+              windowId: session.windowId,
+              ...details,
+            }),
+            getReclaimCandidates,
+            matchesExistingTab: (url, tab) => {
+              const reuseKey = getNoteSnippetReuseKey(url);
+              return reuseKey
+                ? getNoteSnippetReuseKey(tab.pendingUrl) === reuseKey || getNoteSnippetReuseKey(tab.url) === reuseKey
+                : (tab.pendingUrl || tab.url) === url;
+            },
+          }).then(() => {
+            const current = activeSessions.get(session.windowId);
+            if (current?.focusLaunchGeneration === focusLaunchGeneration) {
+              current.focusLaunchSettled = true;
+              persistActiveSessions();
+              if (current.openSettings?.autoSaveMode === 'auto_save') {
+                void syncFocusSessionTabs(session.windowId).catch(error =>
+                  console.error('[Session] Focus autosave reconciliation failed:', error));
+              }
+            }
+            onComplete();
+          }).catch(error => {
+            console.error('[Session] Focus launch failed:', error);
+            const current = activeSessions.get(session.windowId);
+            if (current?.focusLaunchGeneration === focusLaunchGeneration) {
+              current.focusLaunchSettled = true;
+              persistActiveSessions();
+            }
+            onComplete();
+          });
+        };
         sessionFlowDebug(
           '[SessionFlow][background] resolved launch settings',
           JSON.stringify(
@@ -1940,21 +2487,23 @@ export function handleSessionMessage(
                   sessionName,
                   windowId: newWindow.id!,
                   pinnedTabId,
-                  workspaceId,
-                  folderId: folderId || null,
-                  teamId,
+                  organisationId,
+                  
+                  
                   storageMode: storageMode || 'cloud',
                   capturedUrls: [...initialUrls],
                   capturedNames: [...initialNames],
                   createdAt: nowUtc(),
                   initialTabUrls,
                   openSettings: settings,
+                  focusItems,
+                  focusLaunchGeneration,
                   launchSource,
                 };
 
                 activeSessions.set(newWindow.id!, session);
                 if (launchSource === 'dashboard_view') {
-                  setActiveDashboardViewSession(newWindow.id!, dashboardViewId || null, sessionId);
+                  setActiveDashboardViewSession(newWindow.id!, workspaceId || null, sessionId);
                 } else {
                   persistActiveSessions();
                 }
@@ -2015,9 +2564,9 @@ export function handleSessionMessage(
                   return;
                 }
 
-                createTabsInOrder(
+                openSessionTabs(
+                  session,
                   validInitialUrls,
-                  { windowId: newWindow.id!, active: false },
                   (createdTab, url) => {
                     if (createdTab?.id) {
                       initialTabUrls[createdTab.id] = url;
@@ -2032,7 +2581,6 @@ export function handleSessionMessage(
                     persistActiveSessions();
                     finishResponse();
                   },
-                  () => activeSessions.get(newWindow.id!)?.sessionId === session.sessionId,
                 );
               });
             };
@@ -2128,21 +2676,23 @@ export function handleSessionMessage(
                 sessionName,
                 windowId,
                 pinnedTabId,
-                workspaceId,
-                folderId: folderId || null,
-                teamId,
+                organisationId,
+                
+                
                 storageMode: storageMode || 'local',
                 capturedUrls: [...initialUrls],
                 capturedNames: [...initialNames],
                 createdAt: nowUtc(),
                 initialTabUrls,
                 openSettings: settings,
+                focusItems,
+                focusLaunchGeneration,
                 launchSource,
               };
 
               activeSessions.set(windowId, session);
               if (launchSource === 'dashboard_view') {
-                setActiveDashboardViewSession(windowId, dashboardViewId || null, sessionId);
+                setActiveDashboardViewSession(windowId, workspaceId || null, sessionId);
               } else {
                 persistActiveSessions();
               }
@@ -2178,7 +2728,7 @@ export function handleSessionMessage(
 
                   activeSessions.set(windowId, session);
                   if (launchSource === 'dashboard_view') {
-                    setActiveDashboardViewSession(windowId, dashboardViewId || null, sessionId);
+                    setActiveDashboardViewSession(windowId, workspaceId || null, sessionId);
                   } else {
                     persistActiveSessions();
                   }
@@ -2218,9 +2768,9 @@ export function handleSessionMessage(
                 return;
               }
 
-              createTabsInOrder(
+              openSessionTabs(
+                session,
                 validInitialUrls,
-                { windowId, active: false },
                 (newTab, url) => {
                   if (newTab?.id) {
                     initialTabUrls[newTab.id] = url;
@@ -2228,7 +2778,6 @@ export function handleSessionMessage(
                   }
                 },
                 onAllTabsOpened,
-                () => activeSessions.get(windowId)?.sessionId === sessionId,
               );
             };
 
@@ -2647,43 +3196,20 @@ export function handleSessionMessage(
 
       await Promise.all(activeEntries.map(async ([windowId, session]) => {
         const oldMode = session.openSettings?.autoSaveMode;
-        const oldFocus = session.openSettings?.focusWindow;
-        const isSameWindow = nextSettings.openMode === 'same_window';
-        const focusTurnedOn = !oldFocus && nextSettings.focusWindow === true;
 
         activeSessions.set(windowId, {
           ...session,
           openSettings: nextSettings,
         });
+        if (nextSettings.focusMode) await ensureFocusItemsForWindow(windowId, session);
 
-        if (nextSettings.deepFocusMode === true) {
+        if (nextSettings.focusMode === true) {
           await restoreConfiguredUrlsIntoActiveSession(windowId);
         }
 
-        if (
-          oldMode === 'dont_save' &&
-          nextSettings.autoSaveMode === 'auto_save' &&
-          nextSettings.deepFocusMode !== true
-        ) {
-          await syncCurrentWindowTabsIntoActiveSession(windowId);
-        }
-
-        if (isSameWindow && focusTurnedOn) {
-          const currentSession = await getValidatedActiveSessionForWindow(windowId);
-          if (!currentSession) return;
-          const tabs = await chrome.tabs.query({ windowId }).catch(() => []);
-
-          const tabsToClose = tabs.filter(
-            t =>
-              t.id &&
-              t.id !== currentSession.pinnedTabId &&
-              !t.url?.startsWith('chrome-extension://') &&
-              !currentSession.capturedUrls.includes(t.url || ''),
-          );
-          const tabIdsToClose = tabsToClose.map(t => t.id as number);
-          if (tabIdsToClose.length > 0) {
-            chrome.tabs.remove(tabIdsToClose, () => {});
-          }
+        if (oldMode === 'dont_save' && nextSettings.autoSaveMode === 'auto_save') {
+          if (nextSettings.focusMode) await syncFocusSessionTabs(windowId);
+          else await syncCurrentWindowTabsIntoActiveSession(windowId);
         }
 
         if (oldMode === 'dont_save' && nextSettings.autoSaveMode === 'auto_save') {
@@ -2753,6 +3279,20 @@ export function handleSessionMessage(
 
       matchingSession.capturedUrls = [...urls];
       matchingSession.capturedNames = [...names];
+      if (matchingSession.focusItems) {
+        const nextItems = await buildFocusItems(sessionId, urls, names);
+        const usedTabIds = new Set<number>();
+        nextItems.forEach(item => {
+          const existing = matchingSession.focusItems?.find(candidate =>
+            candidate.id === item.id && typeof candidate.tabId === 'number' && !usedTabIds.has(candidate.tabId),
+          );
+          if (!existing?.tabId) return;
+          usedTabIds.add(existing.tabId);
+          item.tabId = existing.tabId;
+          item.tier = existing.tier;
+        });
+        matchingSession.focusItems = nextItems;
+      }
       activeSessions.set(fallbackWindowId, matchingSession);
       persistActiveSessions();
       await refreshDeepFocusForRelevantTabs(sessionId);
@@ -2817,8 +3357,7 @@ export function handleSessionMessage(
         if (session?.sessionId === sessionId) {
           session.openSettings = {
             ...session.openSettings,
-            deepFocusMode: false,
-            focusWindow: false,
+            focusMode: false,
             pinSessionTab: true,
           } as SessionOpenSettings;
           activeSessions.set(windowId, session);
@@ -2826,14 +3365,13 @@ export function handleSessionMessage(
       }
       persistActiveSessions();
       await refreshDeepFocusForRelevantTabs(sessionId);
-      const existing = await db.sessions.get(sessionId);
+      const existing = await db.workspaceSessions.get(sessionId);
       if (existing) {
-        await db.sessions.update(sessionId, {
+        await db.workspaceSessions.update(sessionId, {
           sessionOpenSettings: {
             ...DEFAULT_SESSION_SETTINGS,
             ...(existing.sessionOpenSettings || {}),
-            deepFocusMode: false,
-            focusWindow: false,
+            focusMode: false,
           },
           updatedAt: Date.now(),
         });
@@ -2876,7 +3414,7 @@ export function handleSessionMessage(
       }
       persistActiveSessions();
       await refreshDeepFocusForRelevantTabs(sessionId);
-      const existing = await db.sessions.get(sessionId);
+      const existing = await db.workspaceSessions.get(sessionId);
       if (!existing) {
         sendResponse({ ok: true, domain: normalizedDomain });
         return;
@@ -2887,7 +3425,7 @@ export function handleSessionMessage(
       const nextBlockedDomains = (existing.sessionOpenSettings?.deepFocusBlockedDomains || []).filter(
         domain => normalizeDeepFocusDomain(domain) !== normalizedDomain,
       );
-      await db.sessions.update(sessionId, {
+      await db.workspaceSessions.update(sessionId, {
         sessionOpenSettings: {
           ...DEFAULT_SESSION_SETTINGS,
           ...(existing.sessionOpenSettings || {}),
@@ -3031,7 +3569,7 @@ export function handleSessionMessage(
                 windowId: session.windowId,
                 pinnedTabId: session.pinnedTabId,
                 launchSource: session.launchSource,
-                deepFocusMode: session.openSettings?.deepFocusMode === true,
+                focusMode: normalizeSessionOpenSettings(session.openSettings).focusMode === true,
               }
             : null,
         });

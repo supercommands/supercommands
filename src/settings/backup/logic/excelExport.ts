@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { BackupData } from './extractData';
 import { ASSET_BLOB_BACKUP_FIELD, ASSET_FILE_BACKUP_FIELD } from './assetBackupPayload';
+import { validateCurrentBackupSnapshot } from './backupSnapshotValidation';
 
 // Helper to strip HTML tags from a string
 const stripHtml = (html: string | null | undefined): string => {
@@ -27,6 +28,7 @@ const getColumnWidths = (headers: string[], dataRows: any[][]) => {
 };
 
 export const generateExcelBackup = async (dbData: BackupData): Promise<Blob> => {
+  validateCurrentBackupSnapshot(dbData);
   const wb = XLSX.utils.book_new();
 
   for (const tableName of Object.keys(dbData.tables)) {
@@ -47,7 +49,7 @@ export const generateExcelBackup = async (dbData: BackupData): Promise<Blob> => 
         Object.keys(record).forEach(k => headerSet.add(k));
       }
     });
-    const headers = Array.from(headerSet).filter(header => header !== ASSET_BLOB_BACKUP_FIELD && header !== ASSET_FILE_BACKUP_FIELD);
+    const headers = Array.from(headerSet).filter(header => header !== ASSET_BLOB_BACKUP_FIELD && header !== ASSET_FILE_BACKUP_FIELD && header !== 'blob');
 
     // Build data rows
     const dataRows = tableRecords.map((record: any) => {
@@ -64,6 +66,9 @@ export const generateExcelBackup = async (dbData: BackupData): Promise<Blob> => 
           val = stripHtml(val);
         }
 
+        if (typeof val === 'string' && val.length > 32767) {
+          throw new Error(`Excel export: ${tableName} ${record.id}, field ${header} exceeds the Excel cell limit. Use the ZIP backup to preserve this content.`);
+        }
         return val;
       });
     });

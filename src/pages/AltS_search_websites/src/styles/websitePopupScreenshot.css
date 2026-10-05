@@ -1,0 +1,76 @@
+/* Capture geometry is viewport-based; appearance reuses existing popup tokens. */
+.website-popup-screenshot-selection {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+  font-family: var(--website-popup-font-family);
+  font-size: var(--website-popup-result-font-size);
+  font-weight: var(--website-popup-font-regular);
+  line-height: var(--website-popup-result-line-height);
+  color: var(--color-altsTextPrimary);
+  background: var(--color-altsPopupBg);
+}
+.website-popup-screenshot-selection__image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.website-popup-screenshot-selection__rect {
+  position: absolute;
+  pointer-events: none;
+  outline: calc(var(--website-popup-outline-width) + var(--website-popup-outline-width)) solid var(--color-altsTextPrimary);
+  box-shadow: inset 0 0 0 calc(var(--website-popup-outline-width) + var(--website-popup-outline-width)) var(--color-altsPopupBg);
+}
+.website-popup-screenshot-selection__toolbar {
+  position: absolute;
+  bottom: var(--website-popup-viewport-inset);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - var(--website-popup-viewport-space));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--website-popup-list-gutter);
+  padding: var(--website-popup-header-padding-x);
+  border: var(--website-popup-outline-width) solid var(--color-altsBorderColor);
+  border-radius: var(--website-popup-radius);
+  background: var(--color-altsPopupBg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  cursor: default;
+}
+.website-popup-screenshot-selection__toolbar > span {
+  color: var(--color-altsTextSecondary);
+}
+.website-popup-screenshot-selection__toolbar button:focus-visible {
+  outline: var(--website-popup-outline-width) solid var(--color-altsFocusColor);
+}
+
+/* Live DOM hit testing passes through the overlay; only shared controls receive hits. */
+.website-popup-element-selection {
+  background: transparent;
+  pointer-events: none;
+}
+.website-popup-element-selection .website-popup-screenshot-selection__toolbar {
+  pointer-events: auto;
+}
+
+.website-popup-screenshot-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.website-popup-screenshot-preview > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: var(--website-popup-row-radius);
+}

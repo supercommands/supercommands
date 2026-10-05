@@ -2,15 +2,18 @@ import { extractDatabaseToJSON, BackupData } from './extractData';
 import { StorageManager } from '../../../storage/localStorage/storageManager';
 import {
   BACKUP_KIND,
+  DRIVE_BACKUP_RETENTION_LIMIT,
   NEXT_DRIVE_BACKUP_NUMBER_KEY,
   formatDriveBackupFolderName,
 } from './backupRegistry';
 import { LOCAL_SETTINGS_BACKUP_FILE } from './localSettingsBackup';
 import { BACKUP_ARCHIVE_MIME_TYPE, buildBackupArchive, readBackupArchive } from './backupArchive';
+import { BRAND } from '../../../shared-components/brandingConfig';
+import { normaliseOrganisationBackup } from './normaliseOrganisationBackup';
 
 const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
-const MAX_BACKUPS = 20;
-const BACKUP_APP_PROPERTY_TYPE = 'cmdos-backup';
+const BACKUP_APP_PROPERTY_TYPE = `${BRAND.exports.backupZipPrefix}`;
+const LEGACY_BACKUP_APP_PROPERTY_TYPE = 'cmdos-backup';
 
 type BackupStatus = 'success' | 'failed';
 
@@ -19,6 +22,7 @@ interface ExecuteDriveBackupOptions {
   mode?: 'manual' | 'scheduled';
   waitForMaintenance?: boolean;
   downloadArchive?: boolean;
+  existingBackups?: DriveFolder[];
 }
 
 export interface DriveFolder {
@@ -218,9 +222,7 @@ export async function disconnectDrive(): Promise<void> {
   });
 }
 
-async function findOrCreateMainFolder(_token: string): Promise<string> {
-  return 'appDataFolder';
-}
+const DRIVE_APP_DATA_PARENT = 'appDataFolder';
 
 async function deleteDriveFile(token: string, fileId: string, context = 'Delete Drive file'): Promise<void> {
   await checkedFetch(
@@ -233,14 +235,70 @@ async function deleteDriveFile(token: string, fileId: string, context = 'Delete 
   );
 }
 
-export async function deleteDriveBackup(folderId: string, folderName: string): Promise<void> {
-  const token = await getDriveToken({ interactive: true });
+interface DeleteDriveBackupOptions {
+  existingToken?: string;
+  resetCounterWhenEmpty?: boolean;
+}
+
+export async function deleteDriveBackup(
+  folderId: string,
+  folderName: string,
+  options: DeleteDriveBackupOptions = {},
+): Promise<void> {
+  const token = options.existingToken || (await getDriveToken({ interactive: true }));
   await deleteDriveFile(token, folderId, `Delete Drive backup folder ${folderName}`);
+
+  if (options.resetCounterWhenEmpty === false) return;
 
   const remainingBackups = await listBackupsFromDrive(token);
   if (remainingBackups.length === 0) {
     await setStorageValues({ [NEXT_DRIVE_BACKUP_NUMBER_KEY]: 1 });
   }
+}
+
+interface DeleteDriveBackupsOptions {
+  knownRemainingCount?: number;
+  refreshAfterDelete?: boolean;
+}
+
+export async function deleteDriveBackups(
+  backupsToDelete: Pick<DriveFolder, 'id' | 'name'>[],
+  options: DeleteDriveBackupsOptions = {},
+): Promise<DriveFolder[] | null> {
+  const perf = createBackupPerfTrace('Drive backup delete');
+  const token = await getDriveToken({ interactive: true });
+  perf.mark('auth', { count: backupsToDelete.length });
+
+  await Promise.all(
+    backupsToDelete.map(backup =>
+      deleteDriveBackup(backup.id, backup.name, {
+        existingToken: token,
+        resetCounterWhenEmpty: false,
+      }),
+    ),
+  );
+  perf.mark('delete-files', { count: backupsToDelete.length });
+
+  if (options.refreshAfterDelete === false) {
+    if (options.knownRemainingCount === 0) {
+      await setStorageValues({ [NEXT_DRIVE_BACKUP_NUMBER_KEY]: 1 });
+      perf.mark('reset-version-counter');
+    }
+    perf.mark('skip-list-remaining', { knownRemainingCount: options.knownRemainingCount });
+    perf.log();
+    return null;
+  }
+
+  const remainingBackups = await listBackupsFromDrive(token);
+  perf.mark('list-remaining', { count: remainingBackups.length });
+
+  if (remainingBackups.length === 0) {
+    await setStorageValues({ [NEXT_DRIVE_BACKUP_NUMBER_KEY]: 1 });
+    perf.mark('reset-version-counter');
+  }
+
+  perf.log();
+  return remainingBackups;
 }
 
 const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 4 * 1024 * 1024;
@@ -333,7 +391,14 @@ async function listBackupFolderCandidates(token: string, mainFolderId: string): 
   );
   return (data.files || []).filter(folder => {
     const folderName = folder.name.toLowerCase();
-    return folderName.startsWith('cmdos_') || folderName.startsWith('cmdos-backup-');
+    const currentPrefix = BRAND.name.toLowerCase();
+    const currentZipPrefix = BRAND.exports.backupZipPrefix.toLowerCase();
+    return (
+      folderName.startsWith(`${currentPrefix}_`) ||
+      folderName.startsWith(`${currentZipPrefix}-`) ||
+      folderName.startsWith('cmdos_') ||
+      folderName.startsWith('cmdos-backup-')
+    );
   }).map(folder => ({
     ...folder,
     storageKind: 'folder' as const,
@@ -351,8 +416,17 @@ async function listBackupArchiveFileCandidates(token: string, mainFolderId: stri
   );
   return (data.files || []).filter(file => {
     const fileName = file.name.toLowerCase();
-    return file.appProperties?.type === BACKUP_APP_PROPERTY_TYPE
-      || ((fileName.startsWith('cmdos_') || fileName.startsWith('cmdos-backup-')) && fileName.endsWith('.zip'));
+    const currentPrefix = BRAND.name.toLowerCase();
+    const currentZipPrefix = BRAND.exports.backupZipPrefix.toLowerCase();
+    return (
+      file.appProperties?.type === BACKUP_APP_PROPERTY_TYPE ||
+      file.appProperties?.type === LEGACY_BACKUP_APP_PROPERTY_TYPE ||
+      (((fileName.startsWith(`${currentPrefix}_`) ||
+        fileName.startsWith(`${currentZipPrefix}-`) ||
+        fileName.startsWith('cmdos_') ||
+        fileName.startsWith('cmdos-backup-')) &&
+        fileName.endsWith('.zip')))
+    );
   }).map(file => {
     const manifest = manifestFromAppProperties(file);
     return {
@@ -410,8 +484,8 @@ async function enforceRotationLimitForBackups(token: string, completedFolders: D
     return new Date(a.createdTime).getTime() - new Date(b.createdTime).getTime();
   });
 
-  if (oldestFirst.length > MAX_BACKUPS) {
-    const overflowCount = oldestFirst.length - MAX_BACKUPS;
+  if (oldestFirst.length > DRIVE_BACKUP_RETENTION_LIMIT) {
+    const overflowCount = oldestFirst.length - DRIVE_BACKUP_RETENTION_LIMIT;
     for (let i = 0; i < overflowCount; i++) {
       const folderToDelete = oldestFirst[i];
       console.log(`[Backup] Deleting oldest completed backup to maintain limit: ${folderToDelete.name}`);
@@ -435,14 +509,17 @@ export const executeDriveBackup = async (
   try {
     const token = await getDriveToken({ interactive });
     perf.mark('auth');
-    const mainFolderId = await findOrCreateMainFolder(token);
+    const mainFolderId = DRIVE_APP_DATA_PARENT;
     perf.mark('drive-root', { mainFolderId });
-    const existingBackups = await listBackupsFromDrive(token);
-    perf.mark('list-backups', { count: existingBackups.length });
+    const existingBackups = options.existingBackups || await listBackupsFromDrive(token);
+    perf.mark('list-backups', {
+      count: existingBackups.length,
+      source: options.existingBackups ? 'caller-cache' : 'drive',
+    });
     const parentBackup = existingBackups[0];
     const backupNumber = await getNextDriveBackupNumberFromBackups(existingBackups);
     perf.mark('version', { backupNumber });
-    const backupData = await extractDatabaseToJSON(backupNumber, { includeAssetBlobPayloads: false });
+    const backupData = await extractDatabaseToJSON(backupNumber, { includeAssetBlobPayloads: false, includeAssetBinaryPayloads: true, logPerf: true });
     perf.mark('extract', { tables: Object.keys(backupData.tables).length });
     if (parentBackup?.backupNumber !== undefined) {
       backupData.manifest.parentBackupNumber = parentBackup.backupNumber;
@@ -451,6 +528,7 @@ export const executeDriveBackup = async (
     const backupArchiveName = `${formatDriveBackupFolderName(backupNumber)}.zip`;
     const archiveBlob = await buildBackupArchive(backupData);
     perf.mark('build-zip', { bytes: archiveBlob.size });
+    perf.mark('upload-start', { name: backupArchiveName, bytes: archiveBlob.size });
     const uploaded = await uploadBlobFile(token, mainFolderId, backupArchiveName, archiveBlob, {
       type: BACKUP_APP_PROPERTY_TYPE,
       schemaVersion: String(backupData.manifest.schemaVersion),
@@ -465,7 +543,7 @@ export const executeDriveBackup = async (
     perf.mark('upload', { id: backupFileId, bytes: uploaded.size || archiveBlob.size });
     if (shouldDownloadArchive) {
       downloadArchiveBlob(archiveBlob, backupArchiveName);
-      perf.mark('download-zip');
+      perf.mark('download-zip', { name: backupArchiveName });
     }
     await markBackupNumberConsumed(backupNumber);
     perf.mark('mark-version');
@@ -526,16 +604,32 @@ export const executeDriveBackup = async (
 // ----- RESTORE LOGIC -----
 
 export const listBackupsFromDrive = async (existingToken?: string): Promise<DriveFolder[]> => {
+  const perf = createBackupPerfTrace('Drive backup list');
   const token = existingToken || (await getDriveToken());
-  const mainFolderId = await findOrCreateMainFolder(token);
-  const archiveBackups = (await listBackupArchiveFileCandidates(token, mainFolderId)).filter(file => {
+  perf.mark('auth', { reusedToken: Boolean(existingToken) });
+  const mainFolderId = DRIVE_APP_DATA_PARENT;
+  perf.mark('drive-root', { mainFolderId });
+
+  const [archiveCandidates, legacyFolderBackups] = await Promise.all([
+    listBackupArchiveFileCandidates(token, mainFolderId),
+    listBackupFolderCandidates(token, mainFolderId),
+  ]);
+  perf.mark('list-drive-candidates', {
+    zipCandidates: archiveCandidates.length,
+    legacyCount: legacyFolderBackups.length,
+  });
+
+  const archiveBackups = archiveCandidates.filter(file => {
     return file.manifest ? isCompletedBackupManifest(file.manifest) : true;
   });
-  const legacyFolderBackups = await listBackupFolderCandidates(token, mainFolderId);
+  perf.mark('filter-zip-backups', { count: archiveBackups.length });
 
-  return [...archiveBackups, ...legacyFolderBackups].sort((a, b) => {
+  const sorted = [...archiveBackups, ...legacyFolderBackups].sort((a, b) => {
     return getDriveBackupSortNumber(b) - getDriveBackupSortNumber(a);
   });
+  perf.mark('sort', { count: sorted.length });
+  perf.log();
+  return sorted;
 };
 
 export const downloadBackupFromDrive = async (
@@ -596,5 +690,5 @@ export const downloadBackupFromDrive = async (
     throw new Error('Manifest file not found in the backup folder.');
   }
 
-  return backupData;
+  return normaliseOrganisationBackup(backupData);
 };

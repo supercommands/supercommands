@@ -9,15 +9,17 @@
  */
 import { extractSnippetId as extractEntityId } from '@todos/todos';
 
-import { createNotification } from '@notifications/notifications';
 import { db } from '../../../src/storage/indexDB/dbConfig';
 import { resolveEntityById } from '../../../src/shared-components/utils/entityResolver';
-import { handleSessionMessage } from '@browserWindows/sessions';
+import { handleSessionMessage, openOrReuseNoteSnippetTabInWindow } from '@browserWindows/sessions';
 import { recordAssignedTriggerUsage } from '../../../src/shared-components/triggers';
+import { openWebCollection } from '../collections/openWebCollection';
 
 let cachedHotkeysMap: Record<string, { id: string; type: string }> | null = null;
+let hotkeysCacheRevision = 0;
 
 export const invalidateHotkeysCache = () => {
+  hotkeysCacheRevision++;
   cachedHotkeysMap = null;
 
   chrome.tabs.query({}, tabs => {
@@ -90,6 +92,12 @@ const extractSessionLaunchPayload = (sessionRecord: any) => {
   return { initialUrls, initialNames };
 };
 
+const getPreferredWindowId = (request: any, sender: chrome.runtime.MessageSender): number | undefined => {
+  if (typeof request?.currentWindowId === 'number') return request.currentWindowId;
+  if (typeof sender?.tab?.windowId === 'number') return sender.tab.windowId;
+  return undefined;
+};
+
 /**
  * Message handler for executing hotkeys. Supports triggering UI-bound commands
  * as well as background snippet resolutions (extracting URLs from snippets and opening them).
@@ -110,9 +118,14 @@ export function handleHotkeyMessage(
       return false; // synchronous
     }
 
+    const loadRevision = hotkeysCacheRevision;
     db.userHotkeys
       .toArray()
       .then(hotkeys => {
+        if (loadRevision !== hotkeysCacheRevision) {
+          handleHotkeyMessage(request, sender, sendResponse);
+          return;
+        }
         const hotkeysMap: Record<string, { id: string; type: string }> = {};
 
         hotkeys.forEach(hk => {
@@ -140,7 +153,9 @@ export function handleHotkeyMessage(
     // Broadcast to all tabs to reload their local shortcuts map if they are listening
     chrome.tabs.query({}, tabs => {
       tabs.forEach(tab => {
-        if (tab.id) chrome.tabs.sendMessage(tab.id, { action: 'RELOAD_SHORTCUTS' }).catch(() => {});
+        if (tab.id !== undefined) {
+          chrome.tabs.sendMessage(tab.id, { action: 'RELOAD_SHORTCUTS' }).catch(() => {});
+        }
       });
     });
 
@@ -150,6 +165,16 @@ export function handleHotkeyMessage(
 
   if (request.action === 'trigger_hotkey') {
     const { type, id } = request;
+    if (type === 'webCollection') {
+      void openWebCollection(id).then(() => {
+        recordHotkeyUsage(request, true);
+        sendResponse({ ok: true });
+      }).catch((error: unknown) => {
+        recordHotkeyUsage(request, false, 'collection_launch_failed');
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+      return true;
+    }
     const senderTabId = sender.tab?.id;
     // For UI-bound targets, open the AltS_search_newtab page with trigger params.
     if (['command', 'module', 'automation', 'agent', 'chat_agent', 'collection', 'collections', 'collection_view'].includes(type)) {
@@ -182,7 +207,7 @@ export function handleHotkeyMessage(
     }
 
     // Fetch the entity data natively from the central entity resolver (checks all Dexie stores)
-    resolveEntityById(compoundId).then(resolved => {
+    resolveEntityById(compoundId).then(async resolved => {
       try {
         if (!resolved) {
           console.warn('[Background] trigger_hotkey: Entity not found in Dexie:', { compoundId });
@@ -196,24 +221,14 @@ export function handleHotkeyMessage(
         const type = resolved.type;
 
         if (type === 'session') {
-          if (foundEntity.sessionOpenSettings?.autoSaveMode !== 'auto_save') {
-            recordHotkeyUsage(request, false, 'auto_save_off', {
-              referenceId: actualEntityId,
-              referenceType: type,
-              targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
-            });
-            sendResponse({ ok: true, skipped: true, reason: 'auto_save_off', sessionId: actualEntityId });
-            return;
-          }
-
           const { initialUrls, initialNames } = extractSessionLaunchPayload(foundEntity);
           const sessionRequest = {
-            action: 'start_session',
-            sessionId: actualEntityId,
+            action: 'start_workspace',
+            workspaceId: actualEntityId,
             sessionName: foundEntity.title || foundEntity.key || foundEntity.name || 'Untitled Tab Session',
-            workspaceId: foundEntity.workspaceId || foundEntity.workspace_id || null,
-            folderId: foundEntity.folderId || foundEntity.folder_id || null,
-            teamId: 'local',
+            organisationId: foundEntity.organisationId || foundEntity.organisation_id || null,
+            
+            
             storageMode: 'local',
             initialUrls,
             initialNames,
@@ -308,18 +323,19 @@ export function handleHotkeyMessage(
 
         // Always open in new tabs to avoid disturbing current activity (back to original behavior)
         if (resolvedUrls.length > 0) {
-          resolvedUrls.forEach((url, index) => {
-            chrome.tabs.create({ url, active: index === 0 }, () => {
-              if (index === resolvedUrls.length - 1) {
-                recordHotkeyUsage(request, true, undefined, {
-                  referenceId: actualEntityId,
-                  referenceType: type,
-                  targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
-                });
-                sendResponse({ ok: true, openedUrls: resolvedUrls.length });
-              }
+          const windowId = getPreferredWindowId(request, sender);
+          for (let index = 0; index < resolvedUrls.length; index += 1) {
+            await openOrReuseNoteSnippetTabInWindow(resolvedUrls[index], {
+              windowId,
+              active: index === 0,
             });
+          }
+          recordHotkeyUsage(request, true, undefined, {
+            referenceId: actualEntityId,
+            referenceType: type,
+            targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
           });
+          sendResponse({ ok: true, openedUrls: resolvedUrls.length });
         }
       } catch (err) {
         console.error('[Background] trigger_hotkey error:', err);
@@ -340,7 +356,7 @@ export function handleHotkeyMessage(
       return false;
     }
 
-    resolveEntityById(compoundId).then(resolved => {
+    resolveEntityById(compoundId).then(async resolved => {
       try {
         if (!resolved) {
           console.warn('[Background] execute_global_hotkey: Entity not found in Dexie:', { compoundId });
@@ -354,24 +370,14 @@ export function handleHotkeyMessage(
         const type = resolved.type;
 
         if (type === 'session') {
-          if (foundEntity.sessionOpenSettings?.autoSaveMode !== 'auto_save') {
-            recordHotkeyUsage(request, false, 'auto_save_off', {
-              referenceId: actualEntityId,
-              referenceType: type,
-              targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
-            });
-            sendResponse({ ok: true, skipped: true, reason: 'auto_save_off', sessionId: actualEntityId });
-            return;
-          }
-
           const { initialUrls, initialNames } = extractSessionLaunchPayload(foundEntity);
           const sessionRequest = {
-            action: 'start_session',
-            sessionId: actualEntityId,
+            action: 'start_workspace',
+            workspaceId: actualEntityId,
             sessionName: foundEntity.title || foundEntity.key || foundEntity.name || 'Untitled Tab Session',
-            workspaceId: foundEntity.workspaceId || foundEntity.workspace_id || null,
-            folderId: foundEntity.folderId || foundEntity.folder_id || null,
-            teamId: 'local',
+            organisationId: foundEntity.organisationId || foundEntity.organisation_id || null,
+            
+            
             storageMode: 'local',
             initialUrls,
             initialNames,
@@ -452,6 +458,7 @@ export function handleHotkeyMessage(
 
         chrome.tabs.query({ active: true, currentWindow: true }, async tabs => {
           const currentTab = tabs?.[0];
+          const windowId = getPreferredWindowId(request, sender) || currentTab?.windowId;
           const resolvedUrls: string[] = [];
 
           for (const url of urls) {
@@ -465,6 +472,21 @@ export function handleHotkeyMessage(
           }
 
           if (resolvedUrls.length === 1) {
+            const reuseResult = await openOrReuseNoteSnippetTabInWindow(resolvedUrls[0], {
+              windowId,
+              active: true,
+              createIfMissing: false,
+            });
+            if (reuseResult.reused) {
+              recordHotkeyUsage(request, true, undefined, {
+                referenceId: actualEntityId,
+                referenceType: type,
+                targetLabelSnapshot: foundEntity.title || foundEntity.key || foundEntity.name,
+              });
+              sendResponse({ ok: true, openedUrls: resolvedUrls.length, reused: true });
+              return;
+            }
+
             if (currentTab?.id) {
               chrome.tabs.update(currentTab.id, { url: resolvedUrls[0] }, () => {
                 recordHotkeyUsage(request, true, undefined, {
@@ -487,10 +509,13 @@ export function handleHotkeyMessage(
           } else if (resolvedUrls.length > 1) {
             const [firstUrl, ...restUrls] = resolvedUrls;
 
-            const openRest = () => {
-              restUrls.forEach(url => {
-                chrome.tabs.create({ url, active: false });
-              });
+            const openRest = async () => {
+              for (const url of restUrls) {
+                await openOrReuseNoteSnippetTabInWindow(url, {
+                  windowId,
+                  active: false,
+                });
+              }
               recordHotkeyUsage(request, true, undefined, {
                 referenceId: actualEntityId,
                 referenceType: type,
@@ -499,13 +524,23 @@ export function handleHotkeyMessage(
               sendResponse({ ok: true, openedUrls: resolvedUrls.length });
             };
 
+            const reuseResult = await openOrReuseNoteSnippetTabInWindow(firstUrl, {
+              windowId,
+              active: true,
+              createIfMissing: false,
+            });
+            if (reuseResult.reused) {
+              void openRest();
+              return;
+            }
+
             if (currentTab?.id) {
               chrome.tabs.update(currentTab.id, { url: firstUrl }, () => {
-                openRest();
+                void openRest();
               });
             } else {
               chrome.tabs.create({ url: firstUrl }, () => {
-                openRest();
+                void openRest();
               });
             }
           }

@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose a focused improvement to SuperCommands.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. For exploratory ideas, use Discussions if enabled. A request does not guarantee implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Explain the workflow and what is difficult today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the desired outcome and how it fits the existing extension.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include sanitized examples if useful.

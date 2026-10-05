@@ -1,14 +1,12 @@
+import { WORKSPACE_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/session/workspaceTypes';
 import { BACKUP_TABLE_NAMES, type BackupTableName } from './backupRegistry';
 import { db } from '../../../storage/indexDB/dbConfig';
-import { WORKSPACE_COMPARISON_FIELDS } from '../../../settings/allWorkspaceManager/workspaces/workspaceTypes';
-import { FOLDER_COMPARISON_FIELDS } from '../../../settings/allWorkspaceManager/folders/folderTypes';
+import { ORGANISATION_COMPARISON_FIELDS } from '../../../settings/allOrganisationManager/organisations/organisationTypes';
 import { NOTE_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/notes/noteTypes';
 import { LINK_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/links/linkTypes';
-import { SESSION_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/session/sessionTypes';
 import { SNIPPET_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/snippets/snippetTypes';
 import { TODO_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/todos/todoTypes';
 import { AI_PROMPT_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/aiPrompt/aiPromptTypes';
-import { AUTOMATION_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/automationBeta/automationTypes';
 import { CHAT_AGENT_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/ChatAgent/chatAgentTypes';
 import { TAG_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/tags/tagTypes';
 import { FAVORITE_CATEGORY_COMPARISON_FIELDS } from '../../../allObjectFolder/src/createObject/favoriteCategory/favoriteCategoryTypes';
@@ -41,14 +39,16 @@ export const BACKUP_COMPARISON_EXCLUDED_TABLE_NAMES: BackupTableName[] = [
 ];
 
 const DESCRIPTORS: Partial<Record<BackupTableName, Omit<BackupSchemaDescriptor, 'tableName'>>> = {
-  workspaces: { primaryKey: 'id', comparisonFields: WORKSPACE_COMPARISON_FIELDS, textFields: ['workspaceName'], ignoredFields: COMMON_IGNORED_FIELDS },
-  folders: { primaryKey: 'id', comparisonFields: FOLDER_COMPARISON_FIELDS, textFields: ['folderName'], ignoredFields: COMMON_IGNORED_FIELDS },
+  widgetDashboards: { primaryKey: 'id', textFields: ['dashboardName'], ignoredFields: COMMON_IGNORED_FIELDS },
+  organisations: { primaryKey: 'id', comparisonFields: ORGANISATION_COMPARISON_FIELDS, textFields: ['organisationName'], ignoredFields: COMMON_IGNORED_FIELDS },
   notes: { primaryKey: 'id', comparisonFields: NOTE_COMPARISON_FIELDS, textFields: ['title', 'body'], ignoredFields: COMMON_IGNORED_FIELDS, deletionField: 'deletedAt' },
   links: { primaryKey: 'id', comparisonFields: LINK_COMPARISON_FIELDS, textFields: ['title'], unorderedArrayFields: ['urls', 'tagIds'], ignoredFields: COMMON_IGNORED_FIELDS, deletionField: 'deletedAt' },
   snippets: { primaryKey: 'id', comparisonFields: SNIPPET_COMPARISON_FIELDS, textFields: ['title'], unorderedArrayFields: ['tagIds'], ignoredFields: COMMON_IGNORED_FIELDS, deletionField: 'deletedAt' },
   todos: { primaryKey: 'id', comparisonFields: TODO_COMPARISON_FIELDS, textFields: ['name', 'description'], unorderedArrayFields: ['tagIds'], ignoredFields: COMMON_IGNORED_FIELDS },
-  sessions: { primaryKey: 'id', comparisonFields: SESSION_COMPARISON_FIELDS, textFields: ['title', 'description'], unorderedArrayFields: ['urls'], ignoredFields: COMMON_IGNORED_FIELDS, deletionField: 'deletedAt' },
-  automations: { primaryKey: 'id', comparisonFields: AUTOMATION_COMPARISON_FIELDS, textFields: ['name'], unorderedArrayFields: ['tagIds'], ignoredFields: COMMON_IGNORED_FIELDS, deletionField: 'deletedAt' },
+  workspaces: { primaryKey: 'id', comparisonFields: WORKSPACE_COMPARISON_FIELDS, textFields: ['workspaceName'], ignoredFields: COMMON_IGNORED_FIELDS },
+  collections: { primaryKey: 'id', comparisonFields: ['id', 'organisationId', 'name', 'propertyDefinitions'], textFields: ['name'], ignoredFields: COMMON_IGNORED_FIELDS },
+  collectionItems: { primaryKey: 'id', comparisonFields: ['id', 'organisationId', 'collectionId', 'title', 'note', 'tagIds', 'propertyValues', 'url', 'type', 'data'], textFields: ['title', 'note'], unorderedArrayFields: ['tagIds'], ignoredFields: COMMON_IGNORED_FIELDS },
+  collectionElementSnapshots: { primaryKey: 'id', comparisonFields: ['id', 'captureId', 'organisationId', 'collectionId', 'sourceUrl', 'version', 'capturedAt', 'viewport', 'root', 'nodes', 'styles', 'resources', 'unsupportedFeatures'], ignoredFields: COMMON_IGNORED_FIELDS },
   chatAgents: { primaryKey: 'id', comparisonFields: CHAT_AGENT_COMPARISON_FIELDS, textFields: ['title'], unorderedArrayFields: ['urls', 'tagIds'], ignoredFields: COMMON_IGNORED_FIELDS, deletionField: 'deletedAt' },
   aiPrompts: { primaryKey: 'id', comparisonFields: AI_PROMPT_COMPARISON_FIELDS, textFields: ['title', 'prompt', 'rules'], unorderedArrayFields: ['tagIds', 'enabledModelIds'], ignoredFields: COMMON_IGNORED_FIELDS, deletionField: 'deletedAt' },
   tags: { primaryKey: 'id', comparisonFields: TAG_COMPARISON_FIELDS, textFields: ['name'], ignoredFields: COMMON_IGNORED_FIELDS },
@@ -57,7 +57,7 @@ const DESCRIPTORS: Partial<Record<BackupTableName, Omit<BackupSchemaDescriptor, 
   userHotkeys: { primaryKey: 'id', comparisonFields: HOTKEY_COMPARISON_FIELDS, textFields: ['combination', 'referenceId'], ignoredFields: COMMON_IGNORED_FIELDS },
   userShortcuts: { primaryKey: 'id', comparisonFields: SHORTCUT_COMPARISON_FIELDS, textFields: ['trigger', 'referenceId'], ignoredFields: COMMON_IGNORED_FIELDS },
   favorites: { primaryKey: 'id', comparisonFields: FAVORITE_COMPARISON_FIELDS, textFields: ['label', 'referenceId'], ignoredFields: COMMON_IGNORED_FIELDS },
-  assets: { primaryKey: 'id', comparisonFields: ASSET_COMPARISON_FIELDS, ignoredFields: [...COMMON_IGNORED_FIELDS, 'blob', ASSET_BLOB_BACKUP_FIELD, ASSET_FILE_BACKUP_FIELD] },
+  assets: { primaryKey: 'id', comparisonFields: ASSET_COMPARISON_FIELDS, ignoredFields: [...COMMON_IGNORED_FIELDS, 'storageDriver', 'storagePath', 'pendingDeletionAt', 'blob', ASSET_BLOB_BACKUP_FIELD, ASSET_FILE_BACKUP_FIELD] },
 };
 
 export const BACKUP_SCHEMA_DESCRIPTORS: Record<BackupTableName, BackupSchemaDescriptor> = Object.fromEntries(
