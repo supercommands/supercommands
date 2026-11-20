@@ -3,7 +3,7 @@ import type { CommandRecord } from '../../../allObjectFolder/src/createObject/co
 import { SHARED_ALL_COMMANDS, AI_GROUP, DEFAULT_SELECTED_AIS, isRetiredCreateCommandId } from '../../../shared-components/commands';
 import { normalizePrefix } from '../../../shared-components/commands/utils';
 import { resolveCommandPrefixFromSettings } from '../../../allObjectFolder/src/createObject/prefixSettings/prefixSettingDefaults';
-export type CommandId = 'agent' | 'ai' | 'gpt' | 'claude' | 'gemini' | 'perplexity' | 'store' | 'calendar' | 'showallnotes' | 'showalllinks' | 'todo' | 'createnotes' | 'createsnippet' | 'createlinks' | 'createprompt' | 'capture_screenshot' | 'capture_clip_screenshot' | 'capture_element_screenshot' | 'capture_full_screenshot' | 'history' | 'extensions' | 'downloads' | 'passwords' | 'flags' | 'inspect' | 'version' | 'gpu' | 'dino' | 'about';
+export type CommandId = 'agent' | 'ai' | 'gpt' | 'claude' | 'gemini' | 'perplexity' | 'store' | 'calendar' | 'showallnotes' | 'showalllinks' | 'todo' | 'createnotes' | 'createsnippet' | 'createlinks' | 'createprompt' | 'capture_screenshot' | 'capture_clip_screenshot' | 'capture_element_screenshot' | 'capture_full_screenshot' | 'history' | 'extensions' | 'downloads' | 'passwords' | 'flags' | 'inspect' | 'version' | 'gpu' | 'dino' | 'about' | 'timer' | 'stopwatch';
 export type AutoSubmitKind = 'chatgpt' | 'claude' | 'gemini' | 'perplexity' | 'calendar';
 export interface CommandDefinition {
     id: CommandId;

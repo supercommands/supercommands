@@ -1,5 +1,5 @@
 import type { IconType } from 'react-icons';
-import { LuClock3, LuCloudSun, LuFileText, LuQuote, LuStar } from 'react-icons/lu';
+import { LuClock3, LuCloudSun, LuFileText, LuQuote, LuStar, LuTimer } from 'react-icons/lu';
 import { FiCheckSquare, FiGlobe } from 'react-icons/fi';
 import { createPresetLayout } from './engine/widgetDashboardData';
 import type { WidgetGridPosition, WidgetSizePreset, WidgetType } from './widgetDashboard.types';
@@ -73,6 +73,15 @@ export const WIDGET_CATALOG_CATEGORIES: WidgetCatalogCategory[] = [
                 icon: LuClock3,
                 sizePreset: 'small',
                 layout: createPresetLayout('small'),
+                renderMode: 'lazy',
+            },
+            {
+                id: 'widget-timer',
+                title: 'Timer & Stopwatch',
+                type: 'timer',
+                icon: LuTimer,
+                sizePreset: 'medium',
+                layout: createPresetLayout('medium'),
                 renderMode: 'lazy',
             }
         ],

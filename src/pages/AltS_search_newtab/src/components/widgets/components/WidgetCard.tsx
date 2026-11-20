@@ -24,6 +24,7 @@ import AiPromptLibraryWidgetContent from '../items/AiPromptLibraryWidget';
 import SnippetLibraryWidgetContent from '../items/SnippetLibraryWidget';
 import NoteLibraryWidgetContent from '../items/NoteLibraryWidget';
 import YearProgressWidgetContent from '../items/YearProgressWidget';
+import TimerWidgetContent from '../items/TimerWidget';
 const createInstrumentedWidget = <P extends Record<string, any>>(widgetType: string, LoadedWidget: React.ComponentType<P>) => {
     const InstrumentedWidget: React.FC<P> = props => {
         const widget = props.widget as WidgetInstance | undefined;
@@ -50,6 +51,7 @@ const AiPromptLibraryWidget = createInstrumentedWidget('ai-prompt-library', AiPr
 const SnippetLibraryWidget = createInstrumentedWidget('snippet-library', SnippetLibraryWidgetContent);
 const NoteLibraryWidget = createInstrumentedWidget('note-library', NoteLibraryWidgetContent);
 const YearProgressWidget = createInstrumentedWidget('year-progress', YearProgressWidgetContent);
+const TimerWidget = createInstrumentedWidget('timer', TimerWidgetContent);
 interface WidgetCardProps {
     widget: WidgetInstance;
     gridPos?: {
@@ -180,6 +182,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, gridPos, isEditMode = f
             widget.type !== 'snippet-library' &&
             widget.type !== 'todo-list' &&
             widget.type !== 'time' &&
+            widget.type !== 'timer' &&
             widget.type !== 'news' &&
             widget.type !== 'html' &&
             widget.type !== 'favorites' &&
@@ -198,6 +201,8 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, gridPos, isEditMode = f
                 <WeatherWidget widget={resolvedWidget} sizePreset={widget.sizePreset} layoutInfo={layoutInfo}/>
               </div>) : widget.type === 'time' ? (<div className="flex-1 min-h-0 w-full overflow-hidden">
                 <TimeWidget widget={resolvedWidget} sizePreset={widget.sizePreset} isEditMode={isEditMode} layoutInfo={layoutInfo}/>
+              </div>) : widget.type === 'timer' ? (<div className="flex-1 min-h-0 w-full overflow-hidden">
+                <TimerWidget widget={resolvedWidget} sizePreset={widget.sizePreset} isEditMode={isEditMode} layoutInfo={layoutInfo}/>
               </div>) : widget.type === 'news' ? (<div className="flex-1 min-h-0 w-full overflow-hidden">
                 <NewsWidget widget={resolvedWidget} sizePreset={widget.sizePreset} isEditMode={isEditMode} layoutInfo={layoutInfo}/>
               </div>) : widget.type === 'favorites' ? (<div className="flex-1 min-h-0 w-full overflow-hidden">
