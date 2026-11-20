@@ -258,6 +258,94 @@ export const SendToAgentCommand: CommandModule = {
     surface: 'website',
     category: 'thissite_action',
 };
+export const TimerCommand: CommandModule = {
+    id: 'timer',
+    label: 'Timer',
+    prefix: 'timer',
+    keywords: ['timer', 'countdown', 'alarm', 'pomodoro', 'clock', 'time'],
+    behavior: 'instant',
+    surface: 'both',
+    description: 'Start or control a countdown timer (e.g. /timer 25m or /timer pause)',
+    execute: async context => {
+        const rawPrompt = (context.prompt || '').trim();
+        const { parseDurationString, startTimer, pauseTimer, resumeTimer, resetTimer } = await import('../timer/timerService');
+
+        if (!rawPrompt) {
+            context.services.toast('Timer: use "/timer 25m" or manage via Timer widget', 'info');
+            return;
+        }
+
+        const lower = rawPrompt.toLowerCase();
+        if (lower === 'pause') {
+            await pauseTimer();
+            context.services.toast('Timer paused', 'info');
+            return;
+        }
+        if (lower === 'resume' || lower === 'start') {
+            await resumeTimer();
+            context.services.toast('Timer resumed', 'info');
+            return;
+        }
+        if (lower === 'stop' || lower === 'reset') {
+            await resetTimer();
+            context.services.toast('Timer reset', 'info');
+            return;
+        }
+
+        const durationMs = parseDurationString(rawPrompt);
+        if (durationMs && durationMs > 0) {
+            const parts = rawPrompt.split(/\s+/);
+            const label = parts.length > 1 ? parts.slice(1).join(' ') : undefined;
+            await startTimer(durationMs, label);
+            const mins = Math.round(durationMs / 60000);
+            context.services.toast(`Timer started: ${mins > 0 ? `${mins}m` : `${Math.round(durationMs / 1000)}s`}${label ? ` (${label})` : ''}`, 'success');
+            return;
+        }
+
+        context.services.toast('Invalid timer format. Example: /timer 25m or /timer 10s', 'error');
+    },
+};
+export const StopwatchCommand: CommandModule = {
+    id: 'stopwatch',
+    label: 'Stopwatch',
+    prefix: 'stopwatch',
+    keywords: ['stopwatch', 'lap', 'clock', 'time', 'count'],
+    behavior: 'instant',
+    surface: 'both',
+    description: 'Start or control stopwatch (e.g. /stopwatch start, /stopwatch pause)',
+    execute: async context => {
+        const rawPrompt = (context.prompt || '').trim().toLowerCase();
+        const { startStopwatch, pauseStopwatch, resumeStopwatch, resetStopwatch, recordLap } = await import('../timer/timerService');
+
+        if (!rawPrompt || rawPrompt === 'start') {
+            await startStopwatch();
+            context.services.toast('Stopwatch started', 'success');
+            return;
+        }
+        if (rawPrompt === 'pause' || rawPrompt === 'stop') {
+            await pauseStopwatch();
+            context.services.toast('Stopwatch paused', 'info');
+            return;
+        }
+        if (rawPrompt === 'resume') {
+            await resumeStopwatch();
+            context.services.toast('Stopwatch resumed', 'info');
+            return;
+        }
+        if (rawPrompt === 'reset') {
+            await resetStopwatch();
+            context.services.toast('Stopwatch reset', 'info');
+            return;
+        }
+        if (rawPrompt === 'lap') {
+            const lapTime = await recordLap();
+            context.services.toast(lapTime !== null ? 'Lap recorded' : 'Stopwatch not running', 'info');
+            return;
+        }
+
+        context.services.toast('Stopwatch commands: start, pause, resume, reset, lap', 'info');
+    },
+};
 export const INSTANT_COMMANDS: CommandModule[] = [
     SearchCommand,
     // CreateWorkspaceCommand,
@@ -283,7 +371,9 @@ export const INSTANT_COMMANDS: CommandModule[] = [
     SaveChatAgentCommand,
     AddToExistingWorkspaceCommand,
     AddToExistingWorkspaceSessionCommand,
-    SendToAgentCommand
+    SendToAgentCommand,
+    TimerCommand,
+    StopwatchCommand,
 ];
 export const ENTITY_COMMANDS: CommandModule[] = [];
 export const LOCKED_COMMANDS: CommandModule[] = [];

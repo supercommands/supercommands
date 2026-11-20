@@ -1,6 +1,6 @@
 import TextExpanderIcon from '../../../../../../shared-components/icons/TextExpanderIcon';
 import React from 'react';
-import { LuClock3, LuCloudSun, LuQuote, LuLayers, LuFileText, LuSparkles, LuStar } from 'react-icons/lu';
+import { LuClock3, LuCloudSun, LuQuote, LuLayers, LuFileText, LuSparkles, LuStar, LuTimer } from 'react-icons/lu';
 import { FiGlobe, FiClock, FiCode } from 'react-icons/fi';
 import type { WidgetType } from '../widgetDashboard.types';
 export function getWidgetHeaderIcon(widgetType: WidgetType | string | undefined): React.ReactNode {
@@ -10,6 +10,8 @@ export function getWidgetHeaderIcon(widgetType: WidgetType | string | undefined)
         case 'time':
         case 'year-progress':
             return <LuClock3 size={14} className="shrink-0 text-[var(--color-iconDefault)]"/>;
+        case 'timer':
+            return <LuTimer size={14} className="shrink-0 text-[var(--color-iconDefault)]"/>;
         case 'news':
             return <FiGlobe size={14} className="shrink-0 text-[var(--color-iconDefault)]"/>;
         case 'weather':

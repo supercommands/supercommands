@@ -4,7 +4,7 @@ export type CollectionOpenBehavior = 'same_window' | 'focus_mode' | 'new_window'
 export interface CollectionLaunchSettings {
     openBehavior: CollectionOpenBehavior;
 }
-export type WidgetType = 'default-commands' | 'note-item' | 'note-library' | 'session-item' | 'link-item' | 'link-library' | 'ai-prompt-library' | 'snippet-library' | 'time' | 'news' | 'weather' | 'favorites' | 'todo-list' | 'quote-of-the-day' | 'daily-quote' | 'year-progress' | 'html' | 'editor-item' | 'generic';
+export type WidgetType = 'default-commands' | 'note-item' | 'note-library' | 'session-item' | 'link-item' | 'link-library' | 'ai-prompt-library' | 'snippet-library' | 'time' | 'timer' | 'news' | 'weather' | 'favorites' | 'todo-list' | 'quote-of-the-day' | 'daily-quote' | 'year-progress' | 'html' | 'editor-item' | 'generic';
 export interface LinkLibraryWidgetSettings {
     sourceMode: 'manual' | 'all' | 'tags';
     selectedCollectionIds: string[];

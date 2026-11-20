@@ -79,6 +79,7 @@ const isKnownWidgetType = (value: unknown): value is WidgetType => value === 'de
     value === 'ai-prompt-library' ||
     value === 'snippet-library' ||
     value === 'time' ||
+    value === 'timer' ||
     value === 'news' ||
     value === 'weather' ||
     value === 'favorites' ||

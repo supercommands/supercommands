@@ -1,4 +1,5 @@
 import { handleCollectionMessage } from './collections/collectionBridgeHandler';
+import { handleTimerAlarm, TIMER_ALARM_NAME, scheduleTimerAlarm, clearTimerAlarm } from './timer/backgroundTimer';
 import { handleTagImageMessage } from './tags/tagImageBridgeHandler';
 import { handleCollectionScreenshotCapture } from './collections/collectionScreenshotCaptureHandler';
 import { NEW_TAB_SCREENSHOT_SHORTCUT_RETRY } from '../../src/shared-components/websitePopup/contracts/websitePopupScreenshotBridgeContract';
@@ -2102,11 +2103,25 @@ export function startBackground() {
       }
     }
 
+    if (request.action === 'SCHEDULE_TIMER_ALARM') {
+      scheduleTimerAlarm(request.durationMs).then(() => sendResponse({ ok: true }));
+      return true;
+    }
+
+    if (request.action === 'CLEAR_TIMER_ALARM') {
+      clearTimerAlarm().then(() => sendResponse({ ok: true }));
+      return true;
+    }
+
     return true;
   });
 
   // --- ALARM LISTENER ---
   chrome.alarms.onAlarm.addListener(async alarm => {
+    if (alarm.name.startsWith(TIMER_ALARM_NAME)) {
+      handleTimerAlarm(alarm);
+      return;
+    }
     if (alarm.name === BRAND.alarms.periodicSync || alarm.name === BRAND.legacyAlarms.periodicSync) {
       console.log('[BackgroundSync] Periodic sync alarm fired');
       await backgroundSync();
